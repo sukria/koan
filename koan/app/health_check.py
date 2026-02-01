@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from notify import send_telegram
+from app.notify import send_telegram
 
 
 HEARTBEAT_FILENAME = ".koan-heartbeat"

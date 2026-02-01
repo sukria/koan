@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from mission_summary import extract_latest_section, get_mission_summary, summarize_section
+from app.mission_summary import extract_latest_section, get_mission_summary, summarize_section
 
 
 class TestExtractLatestSection:

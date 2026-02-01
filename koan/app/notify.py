@@ -9,7 +9,7 @@ Usage from shell:
     python3 notify.py "Mission completed: security audit"
 
 Usage from Python:
-    from notify import send_telegram
+    from app.notify import send_telegram
     send_telegram("Mission completed: security audit")
 """
 
@@ -18,21 +18,21 @@ import sys
 
 import requests
 
-from utils import load_dotenv
-
-load_dotenv()
-
-BOT_TOKEN = os.environ.get("KOAN_TELEGRAM_TOKEN", "")
-CHAT_ID = os.environ.get("KOAN_TELEGRAM_CHAT_ID", "")
-TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+from app.utils import load_dotenv
 
 
 def send_telegram(text: str) -> bool:
     """Send a message to the configured Telegram chat. Returns True on success."""
+    load_dotenv()
+
+    BOT_TOKEN = os.environ.get("KOAN_TELEGRAM_TOKEN", "")
+    CHAT_ID = os.environ.get("KOAN_TELEGRAM_CHAT_ID", "")
+
     if not BOT_TOKEN or not CHAT_ID:
         print("[notify] KOAN_TELEGRAM_TOKEN or KOAN_TELEGRAM_CHAT_ID not set.", file=sys.stderr)
         return False
 
+    TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
     ok = True
     for chunk in [text[i:i + 4000] for i in range(0, len(text), 4000)]:
         try:

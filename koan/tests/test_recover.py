@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from recover import recover_missions
+from app.recover import recover_missions
 
 
 def _missions(pending="", in_progress="", done=""):
@@ -203,16 +203,16 @@ class TestRecoverMissions:
 class TestRecoverCLI:
     """Test the __main__ CLI behavior."""
 
-    @patch("recover.send_telegram")
+    @patch("app.recover.send_telegram")
     def test_cli_with_recovery(self, mock_send, instance_dir, capsys):
         """CLI prints count and sends Telegram when missions recovered."""
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Stale task"))
 
-        import recover
+        from app import recover
         import sys
 
-        with patch.object(sys, "argv", ["recover.py", str(instance_dir)]):
+        with patch.object(sys, "argv", ["app.recover.py", str(instance_dir)]):
             # Can't easily test sys.exit, so just call the main block logic
             count = recover_missions(str(instance_dir))
             if count > 0:

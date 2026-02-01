@@ -1,7 +1,7 @@
 """Tests for missions.py — centralized missions.md parser."""
 
 import pytest
-from missions import (
+from app.missions import (
     classify_section,
     parse_sections,
     insert_mission,

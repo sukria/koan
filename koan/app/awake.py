@@ -22,9 +22,9 @@ from typing import Optional, Tuple
 
 import requests
 
-from health_check import write_heartbeat
-from notify import send_telegram
-from utils import load_dotenv, parse_project as _parse_project, insert_pending_mission
+from app.health_check import write_heartbeat
+from app.notify import send_telegram
+from app.utils import load_dotenv, parse_project as _parse_project, insert_pending_mission
 
 load_dotenv()
 
@@ -138,7 +138,7 @@ def handle_command(text: str):
 
 def _build_status() -> str:
     """Build status message grouped by project."""
-    from missions import group_by_project
+    from app.missions import group_by_project
 
     parts = ["📊 Kōan Status"]
 
@@ -257,15 +257,39 @@ def handle_chat(text: str):
         else:
             journal_context = journal_content
 
+    # Load human preferences for personality context
+    prefs_context = ""
+    prefs_path = INSTANCE_DIR / "memory" / "global" / "human-preferences.md"
+    if prefs_path.exists():
+        prefs_context = prefs_path.read_text().strip()
+
+    # Determine time-of-day for natural tone
+    from datetime import datetime
+    hour = datetime.now().hour
+    if hour < 7:
+        time_hint = "It's very early morning."
+    elif hour < 12:
+        time_hint = "It's morning."
+    elif hour < 18:
+        time_hint = "It's afternoon."
+    elif hour < 22:
+        time_hint = "It's evening."
+    else:
+        time_hint = "It's late night."
+
     prompt = (
-        f"You are Kōan. Here is your identity:\n\n{SOUL}\n\n"
+        f"You are Kōan — a sparring partner, not an assistant. "
+        f"Here is your identity:\n\n{SOUL}\n\n"
+        f"About the human:\n{prefs_context}\n\n"
         f"Summary of past sessions:\n{SUMMARY[:1500]}\n\n"
         f"Today's journal (excerpt):\n{journal_context}\n\n"
+        f"{time_hint}\n\n"
         f"The human sends you this message on Telegram:\n\n"
         f"  « {text} »\n\n"
-        f"Respond directly. Be concise and natural. "
-        f"This is a Telegram conversation — not a report. "
-        f"2-3 sentences max unless the question requires more.\n"
+        f"Respond in the human's preferred language. Be direct, concise, natural — like texting a collaborator. "
+        f"You can be funny (dry humor), you can disagree, you can ask back. "
+        f"2-3 sentences max unless the question requires more. "
+        f"No markdown formatting — this is Telegram, keep it plain.\n"
     )
 
     try:

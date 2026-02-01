@@ -19,7 +19,7 @@ import re
 import sys
 from pathlib import Path
 
-from notify import send_telegram
+from app.notify import send_telegram
 
 
 def recover_missions(instance_dir: str) -> int:
@@ -28,7 +28,7 @@ def recover_missions(instance_dir: str) -> int:
     if not missions_path.exists():
         return 0
 
-    from missions import find_section_boundaries
+    from app.missions import find_section_boundaries
 
     content = missions_path.read_text()
     lines = content.splitlines()

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from health_check import write_heartbeat, check_heartbeat, check_and_alert
+from app.health_check import write_heartbeat, check_heartbeat, check_and_alert
 
 
 class TestWriteHeartbeat:
@@ -53,14 +53,14 @@ class TestCheckHeartbeat:
 
 class TestCheckAndAlert:
 
-    @patch("health_check.send_telegram")
+    @patch("app.health_check.send_telegram")
     def test_healthy_no_alert(self, mock_send, tmp_path):
         write_heartbeat(str(tmp_path))
         result = check_and_alert(str(tmp_path))
         assert result is True
         mock_send.assert_not_called()
 
-    @patch("health_check.send_telegram")
+    @patch("app.health_check.send_telegram")
     def test_stale_sends_alert(self, mock_send, tmp_path):
         hb = tmp_path / ".koan-heartbeat"
         hb.write_text(str(time.time() - 300))
@@ -69,7 +69,7 @@ class TestCheckAndAlert:
         mock_send.assert_called_once()
         assert "down" in mock_send.call_args[0][0]
 
-    @patch("health_check.send_telegram")
+    @patch("app.health_check.send_telegram")
     def test_corrupt_sends_alert(self, mock_send, tmp_path):
         hb = tmp_path / ".koan-heartbeat"
         hb.write_text("garbage")
@@ -78,7 +78,7 @@ class TestCheckAndAlert:
         mock_send.assert_called_once()
         assert "unreadable" in mock_send.call_args[0][0]
 
-    @patch("health_check.send_telegram")
+    @patch("app.health_check.send_telegram")
     def test_no_file_no_alert(self, mock_send, tmp_path):
         result = check_and_alert(str(tmp_path))
         assert result is True

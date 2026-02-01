@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
-from utils import parse_project, insert_pending_mission
+from app.utils import parse_project, insert_pending_mission
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -37,7 +37,7 @@ SOUL_FILE = INSTANCE_DIR / "soul.md"
 SUMMARY_FILE = INSTANCE_DIR / "memory" / "summary.md"
 JOURNAL_DIR = INSTANCE_DIR / "journal"
 
-app = Flask(__name__, template_folder=str(KOAN_ROOT / "koan" / "templates"))
+app = Flask(__name__, template_folder=str(KOAN_ROOT / "templates"))
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ def get_signal_status() -> dict:
 
 def parse_missions() -> dict:
     """Parse missions.md into structured sections."""
-    from missions import parse_sections
+    from app.missions import parse_sections
 
     content = read_file(MISSIONS_FILE)
     if not content:

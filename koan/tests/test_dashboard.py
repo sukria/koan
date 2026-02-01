@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-import dashboard
+from app import dashboard
 
 
 @pytest.fixture

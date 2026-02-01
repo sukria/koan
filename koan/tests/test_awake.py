@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from awake import (
+from app.awake import (
     is_mission,
     is_command,
     parse_project,
@@ -126,9 +126,9 @@ class TestParseProject:
 # ---------------------------------------------------------------------------
 
 class TestHandleMission:
-    @patch("awake.send_telegram")
-    @patch("awake.MISSIONS_FILE")
-    @patch("awake.INSTANCE_DIR")
+    @patch("app.awake.send_telegram")
+    @patch("app.awake.MISSIONS_FILE")
+    @patch("app.awake.INSTANCE_DIR")
     def test_mission_appended_to_pending(self, mock_inst, mock_file, mock_send, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
@@ -136,20 +136,20 @@ class TestHandleMission:
         )
         mock_file.__class__ = type(missions_file)
         # Directly test the file manipulation logic
-        with patch("awake.MISSIONS_FILE", missions_file):
+        with patch("app.awake.MISSIONS_FILE", missions_file):
             handle_mission("mission: audit security")
 
         content = missions_file.read_text()
         assert "- audit security" in content
         mock_send.assert_called_once()
 
-    @patch("awake.send_telegram")
+    @patch("app.awake.send_telegram")
     def test_mission_with_project_tag(self, mock_send, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## En attente\n\n(aucune)\n\n## En cours\n\n"
         )
-        with patch("awake.MISSIONS_FILE", missions_file):
+        with patch("app.awake.MISSIONS_FILE", missions_file):
             handle_mission("[project:koan] add tests")
 
         content = missions_file.read_text()
@@ -161,7 +161,7 @@ class TestHandleMission:
 # ---------------------------------------------------------------------------
 
 class TestBuildStatus:
-    @patch("awake.MISSIONS_FILE")
+    @patch("app.awake.MISSIONS_FILE")
     def test_status_with_french_sections(self, mock_file, tmp_path):
         """_build_status handles French section names from missions.md."""
         missions_file = tmp_path / "missions.md"
@@ -173,8 +173,8 @@ class TestBuildStatus:
             "## En cours\n\n"
             "- [project:koan] doing stuff\n\n"
         )
-        with patch("awake.MISSIONS_FILE", missions_file), \
-             patch("awake.KOAN_ROOT", tmp_path):
+        with patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.KOAN_ROOT", tmp_path):
             status = _build_status()
 
         assert "Kōan Status" in status
@@ -183,12 +183,12 @@ class TestBuildStatus:
         assert "**default**" in status
         assert "In progress: 1" in status
 
-    @patch("awake.MISSIONS_FILE")
+    @patch("app.awake.MISSIONS_FILE")
     def test_status_empty(self, mock_file, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
-        with patch("awake.MISSIONS_FILE", missions_file), \
-             patch("awake.KOAN_ROOT", tmp_path):
+        with patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.KOAN_ROOT", tmp_path):
             status = _build_status()
 
         assert "Kōan Status" in status

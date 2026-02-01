@@ -15,12 +15,12 @@ def clean_env(monkeypatch):
 
 class TestLoadDotenv:
     def test_loads_env_file(self, tmp_path, monkeypatch):
-        from utils import load_dotenv, KOAN_ROOT
+        from app.utils import load_dotenv, KOAN_ROOT
 
         env_file = tmp_path / ".env"
         env_file.write_text('FOO_TEST=bar\nBAZ_TEST="quoted"\n')
 
-        import utils
+        from app import utils
         monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
 
         load_dotenv()
@@ -31,10 +31,10 @@ class TestLoadDotenv:
         env_file = tmp_path / ".env"
         env_file.write_text('# comment\n\nKEY_TEST=val\n')
 
-        import utils
+        from app import utils
         monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
 
-        from utils import load_dotenv
+        from app.utils import load_dotenv
         load_dotenv()
         assert os.environ.get("KEY_TEST") == "val"
 
@@ -43,42 +43,42 @@ class TestLoadDotenv:
         env_file = tmp_path / ".env"
         env_file.write_text("EXISTING_TEST=overwritten\n")
 
-        import utils
+        from app import utils
         monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
 
-        from utils import load_dotenv
+        from app.utils import load_dotenv
         load_dotenv()
         assert os.environ["EXISTING_TEST"] == "original"
 
     def test_missing_env_file(self, tmp_path, monkeypatch):
-        import utils
+        from app import utils
         monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         # Should not raise
-        from utils import load_dotenv
+        from app.utils import load_dotenv
         load_dotenv()
 
 
 class TestParseProject:
     def test_extracts_project_tag(self):
-        from utils import parse_project
+        from app.utils import parse_project
         project, text = parse_project("[project:koan] Fix bug")
         assert project == "koan"
         assert text == "Fix bug"
 
     def test_extracts_projet_tag(self):
-        from utils import parse_project
+        from app.utils import parse_project
         project, text = parse_project("[projet:anantys] Audit code")
         assert project == "anantys"
         assert text == "Audit code"
 
     def test_no_tag(self):
-        from utils import parse_project
+        from app.utils import parse_project
         project, text = parse_project("Just a message")
         assert project is None
         assert text == "Just a message"
 
     def test_tag_in_middle(self):
-        from utils import parse_project
+        from app.utils import parse_project
         project, text = parse_project("Fix [project:koan] bug")
         assert project == "koan"
         assert text == "Fix bug"
@@ -86,7 +86,7 @@ class TestParseProject:
 
 class TestInsertPendingMission:
     def test_inserts_into_existing_file(self, tmp_path):
-        from utils import insert_pending_mission
+        from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
         missions.write_text("# Missions\n\n## En attente\n\n## En cours\n")
 
@@ -96,7 +96,7 @@ class TestInsertPendingMission:
         assert content.index("- New task") < content.index("## En cours")
 
     def test_creates_file_if_missing(self, tmp_path):
-        from utils import insert_pending_mission
+        from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
 
         insert_pending_mission(missions, "- First task")
@@ -106,7 +106,7 @@ class TestInsertPendingMission:
         assert "## En attente" in content
 
     def test_handles_english_sections(self, tmp_path):
-        from utils import insert_pending_mission
+        from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
         missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n")
 
@@ -115,7 +115,7 @@ class TestInsertPendingMission:
         assert "- English task" in content
 
     def test_handles_no_pending_section(self, tmp_path):
-        from utils import insert_pending_mission
+        from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
         missions.write_text("# Missions\n\n## En cours\n")
 

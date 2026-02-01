@@ -3,8 +3,8 @@
 import pytest
 from pathlib import Path
 
-from extract_mission import extract_next_mission
-from memory_manager import (
+from app.extract_mission import extract_next_mission
+from app.memory_manager import (
     parse_summary_sessions,
     scoped_summary,
     compact_summary,

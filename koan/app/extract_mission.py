@@ -20,7 +20,7 @@ from pathlib import Path
 
 def extract_next_mission(missions_path: str, project_name: str = "") -> str:
     """Return the first pending mission line, or empty string if none."""
-    from missions import extract_next_pending
+    from app.missions import extract_next_pending
 
     path = Path(missions_path)
     if not path.exists():

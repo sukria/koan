@@ -7,10 +7,13 @@ set -euo pipefail
 
 KOAN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INSTANCE="$KOAN_ROOT/instance"
-NOTIFY="$(dirname "$0")/notify.py"
-DAILY_REPORT="$(dirname "$0")/daily_report.py"
-MISSION_SUMMARY="$(dirname "$0")/mission_summary.py"
-HEALTH_CHECK="$(dirname "$0")/health_check.py"
+APP_DIR="$(dirname "$0")/app"
+NOTIFY="$APP_DIR/notify.py"
+DAILY_REPORT="$APP_DIR/daily_report.py"
+MISSION_SUMMARY="$APP_DIR/mission_summary.py"
+GIT_SYNC="$APP_DIR/git_sync.py"
+GIT_SYNC_INTERVAL=${KOAN_GIT_SYNC_INTERVAL:-5}
+HEALTH_CHECK="$APP_DIR/health_check.py"
 
 if [ ! -d "$INSTANCE" ]; then
   echo "[koan] No instance/ directory found. Run: cp -r instance.example instance"
@@ -80,12 +83,12 @@ trap cleanup INT TERM
 count=0
 
 # Crash recovery: move stale in-progress missions back to pending
-RECOVER="$(dirname "$0")/recover.py"
+RECOVER="$APP_DIR/recover.py"
 echo "[koan] Checking for interrupted missions..."
 "$PYTHON" "$RECOVER" "$INSTANCE" || true
 
 # Memory cleanup: compact summary, dedup learnings
-MEMORY_MGR="$(dirname "$0")/memory_manager.py"
+MEMORY_MGR="$APP_DIR/memory_manager.py"
 echo "[koan] Running memory cleanup..."
 "$PYTHON" "$MEMORY_MGR" "$INSTANCE" cleanup 15 2>/dev/null || true
 
@@ -95,6 +98,12 @@ echo "[koan] Checking Telegram bridge health..."
 
 echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
 notify "Koan starting — $MAX_RUNS max runs, ${INTERVAL}s interval"
+
+# Git sync: check what changed since last run (branches merged, new commits)
+echo "[koan] Running git sync..."
+for i in "${!PROJECT_NAMES[@]}"; do
+  "$PYTHON" "$GIT_SYNC" "$INSTANCE" "${PROJECT_NAMES[$i]}" "${PROJECT_PATHS[$i]}" 2>/dev/null || true
+done
 
 # Daily report check (morning recap or evening summary)
 "$PYTHON" "$DAILY_REPORT" 2>/dev/null || true
@@ -112,7 +121,7 @@ while [ $count -lt $MAX_RUNS ]; do
   echo "[koan] Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S')"
 
   # Extract next pending mission line (section-aware, scoped to "En attente")
-  EXTRACT_MISSION="$(dirname "$0")/extract_mission.py"
+  EXTRACT_MISSION="$APP_DIR/extract_mission.py"
   MISSION_LINE=$("$PYTHON" "$EXTRACT_MISSION" "$INSTANCE/missions.md" 2>/dev/null || echo "")
 
   # Extract mission title (strip "- ", project tag, and leading/trailing whitespace)
@@ -254,6 +263,14 @@ with open('$INSTANCE/outbox.md', 'a') as f:
     git push origin main 2>/dev/null || true
 
   count=$((count + 1))
+
+  # Periodic git sync (every GIT_SYNC_INTERVAL runs)
+  if [ $((count % GIT_SYNC_INTERVAL)) -eq 0 ] && [ $count -lt $MAX_RUNS ]; then
+    echo "[koan] Periodic git sync (run $count)..."
+    for i in "${!PROJECT_NAMES[@]}"; do
+      "$PYTHON" "$GIT_SYNC" "$INSTANCE" "${PROJECT_NAMES[$i]}" "${PROJECT_PATHS[$i]}" 2>/dev/null || true
+    done
+  fi
 
   if [ $count -lt $MAX_RUNS ]; then
     echo "[koan] Sleeping ${INTERVAL}s..."

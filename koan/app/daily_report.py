@@ -9,7 +9,7 @@ Usage from shell:
     python3 daily_report.py [--yesterday]
 
 Usage from Python:
-    from daily_report import generate_report, should_send_report
+    from app.daily_report import generate_report, should_send_report
 """
 
 import os
@@ -19,10 +19,10 @@ from datetime import date, timedelta, datetime
 from pathlib import Path
 from typing import List, Optional
 
-from notify import send_telegram
+from app.notify import send_telegram
 
 
-from utils import load_dotenv
+from app.utils import load_dotenv
 
 load_dotenv()
 
@@ -88,7 +88,7 @@ def _parse_completed_missions() -> List[str]:
     if not MISSIONS_FILE.exists():
         return []
 
-    from missions import parse_sections
+    from app.missions import parse_sections
 
     content = MISSIONS_FILE.read_text()
     sections = parse_sections(content)
@@ -108,7 +108,7 @@ def _count_pending_missions() -> int:
     if not MISSIONS_FILE.exists():
         return 0
 
-    from missions import count_pending
+    from app.missions import count_pending
 
     return count_pending(MISSIONS_FILE.read_text())
 
@@ -167,7 +167,7 @@ def generate_report(report_type: str = "morning") -> str:
 
     # In-progress long-running items
     if MISSIONS_FILE.exists():
-        from missions import parse_sections
+        from app.missions import parse_sections
 
         content = MISSIONS_FILE.read_text()
         sections = parse_sections(content)

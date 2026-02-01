@@ -7,7 +7,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolate_env(tmp_path, monkeypatch):
+def isolate_env(monkeypatch):
     """Ensure tests don't touch real instance/ or send real Telegram messages."""
     monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "fake-token")
     monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123456")
