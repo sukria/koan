@@ -19,10 +19,9 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 
 
-try:
-    KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
-except KeyError:
-    sys.exit("KOAN_ROOT environment variable is not set. Run via 'make run' or export it manually.")
+if "KOAN_ROOT" not in os.environ:
+    raise SystemExit("KOAN_ROOT environment variable is not set. Run via 'make run' or 'make awake'.")
+KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 
 # Pre-compiled regex for project tag extraction (accepts both [project:X] and [projet:X])
 _PROJECT_TAG_RE = re.compile(r'\[projec?t:([a-zA-Z0-9_-]+)\]')

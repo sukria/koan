@@ -349,13 +349,13 @@ def flush_outbox():
                 if send_telegram(content):
                     f.seek(0)
                     f.truncate()
+                    # Show preview of sent message (first 150 chars)
+                    preview = content[:150].replace("\n", " ")
+                    if len(content) > 150:
+                        preview += "..."
+                    print(f"[awake] Outbox flushed: {preview}")
                 else:
                     print("[awake] Outbox send failed — keeping messages for retry")
-                # Show preview of sent message (first 150 chars)
-                preview = content[:150].replace("\n", " ")
-                if len(content) > 150:
-                    preview += "..."
-                print(f"[awake] Outbox flushed: {preview}")
             fcntl.flock(f, fcntl.LOCK_UN)
     except BlockingIOError:
         # Another process holds the lock — skip this cycle

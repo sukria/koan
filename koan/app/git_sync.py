@@ -14,6 +14,7 @@ Usage:
     python3 git_sync.py <instance_dir> <project_name> <project_path>
 """
 
+import fcntl
 import subprocess
 import sys
 from datetime import date, datetime
@@ -129,7 +130,9 @@ def write_sync_to_journal(instance_dir: str, project_name: str, report: str):
     entry = f"\n## Git Sync — {datetime.now().strftime('%H:%M')}\n\n{report}\n"
 
     with open(journal_file, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
         f.write(entry)
+        fcntl.flock(f, fcntl.LOCK_UN)
 
 
 if __name__ == "__main__":
