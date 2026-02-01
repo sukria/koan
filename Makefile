@@ -16,8 +16,8 @@ $(VENV)/bin/activate: koan/requirements.txt
 awake: setup
 	$(PYTHON) koan/awake.py
 
-run:
-	./koan/run.sh
+run: setup
+	$(PYTHON) koan/run.py
 
 say:
 	@test -n "$(m)" || (echo "Usage: make say m=\"your message\"" && exit 1)
