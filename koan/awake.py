@@ -22,6 +22,7 @@ from typing import Optional, Tuple
 
 import requests
 
+from health_check import write_heartbeat
 from notify import send_telegram
 
 
@@ -377,6 +378,7 @@ def main():
                 handle_message(text)
 
         flush_outbox()
+        write_heartbeat(str(KOAN_ROOT))
         time.sleep(POLL_INTERVAL)
 
 
