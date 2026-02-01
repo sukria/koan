@@ -1,8 +1,9 @@
 """Tests for daily_report.py — report generation, mission parsing, time logic."""
 
+import runpy
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -12,6 +13,8 @@ from app.daily_report import (
     _parse_completed_missions,
     _count_pending_missions,
     generate_report,
+    send_daily_report,
+    mark_report_sent,
 )
 
 
@@ -170,3 +173,165 @@ class TestGenerateReport:
 
         assert "Bilan de la journée" in report
         assert "-- Koan" in report
+
+    def test_journal_activities_extracted(self, tmp_path):
+        """Journal ## headers should appear as activities in the report."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        journal_dir = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        journal_dir.mkdir(parents=True)
+        (journal_dir / "koan.md").write_text(
+            "## Session 75 — Run 7/20\n\n"
+            "### Mode autonome — Coverage boost\n\nDid stuff.\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path):
+            report = generate_report("evening")
+        assert "Activite:" in report
+        assert "Session 75" in report
+
+    def test_journal_timestamps_stripped(self, tmp_path):
+        """Timestamps like '-- 15:30' should be stripped from activity lines."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        journal_dir = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        journal_dir.mkdir(parents=True)
+        (journal_dir / "koan.md").write_text("## Git Sync — 15:30\n\nStuff.\n")
+        with patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path):
+            report = generate_report("evening")
+        # The "— 15:30" part should be stripped
+        assert "15:30" not in report
+        assert "Git Sync" in report
+
+    def test_no_missions_file(self, tmp_path):
+        """Report should work even if missions.md doesn't exist."""
+        missing_file = tmp_path / "nonexistent.md"
+        with patch("app.daily_report.MISSIONS_FILE", missing_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path):
+            report = generate_report("morning")
+        assert "Rapport du" in report
+        assert "-- Koan" in report
+
+
+# ---------------------------------------------------------------------------
+# mark_report_sent
+# ---------------------------------------------------------------------------
+
+class TestMarkReportSent:
+    def test_creates_marker(self, tmp_path):
+        marker = tmp_path / ".marker"
+        with patch("app.daily_report.REPORT_MARKER", marker):
+            mark_report_sent()
+        assert marker.exists()
+        assert marker.read_text() == date.today().strftime("%Y-%m-%d")
+
+
+# ---------------------------------------------------------------------------
+# send_daily_report
+# ---------------------------------------------------------------------------
+
+class TestSendDailyReport:
+    def test_send_success(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        marker = tmp_path / ".marker"
+        with patch("app.daily_report.format_and_send", return_value=True) as mock_send, \
+             patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
+             patch("app.daily_report.REPORT_MARKER", marker):
+            result = send_daily_report("morning")
+        assert result is True
+        mock_send.assert_called_once()
+        assert marker.exists()
+
+    def test_send_failure(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        marker = tmp_path / ".marker"
+        with patch("app.daily_report.format_and_send", return_value=False), \
+             patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
+             patch("app.daily_report.REPORT_MARKER", marker):
+            result = send_daily_report("morning")
+        assert result is False
+        assert not marker.exists()
+
+    def test_auto_detect_none(self, tmp_path):
+        """When no report_type given and should_send_report returns None, don't send."""
+        with patch("app.daily_report.should_send_report", return_value=None):
+            result = send_daily_report()
+        assert result is False
+
+    def test_auto_detect_morning(self, tmp_path):
+        """Auto-detect morning report."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        marker = tmp_path / ".marker"
+        with patch("app.daily_report.should_send_report", return_value="morning"), \
+             patch("app.daily_report.format_and_send", return_value=True), \
+             patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
+             patch("app.daily_report.REPORT_MARKER", marker):
+            result = send_daily_report()
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# CLI __main__
+# ---------------------------------------------------------------------------
+
+class TestDailyReportCLI:
+    def test_cli_morning_flag(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        marker = tmp_path / ".marker"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ok": True}
+        with patch("sys.argv", ["daily_report.py", "--morning"]), \
+             patch("requests.post", return_value=mock_resp), \
+             patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
+             patch("app.daily_report.REPORT_MARKER", marker), \
+             pytest.raises(SystemExit) as exc_info:
+            runpy.run_module("app.daily_report", run_name="__main__")
+        assert exc_info.value.code == 0
+
+    def test_cli_evening_flag(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        marker = tmp_path / ".marker"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ok": True}
+        with patch("sys.argv", ["daily_report.py", "--evening"]), \
+             patch("requests.post", return_value=mock_resp), \
+             patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
+             patch("app.daily_report.REPORT_MARKER", marker), \
+             pytest.raises(SystemExit) as exc_info:
+            runpy.run_module("app.daily_report", run_name="__main__")
+        assert exc_info.value.code == 0
+
+    def test_cli_no_flag_auto_detect(self, tmp_path):
+        """No flag → uses send_daily_report() auto-detect."""
+        with patch("sys.argv", ["daily_report.py"]), \
+             patch("app.daily_report.should_send_report", return_value=None), \
+             pytest.raises(SystemExit) as exc_info:
+            runpy.run_module("app.daily_report", run_name="__main__")
+        assert exc_info.value.code == 1
+
+    def test_cli_send_failure_exits_1(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.json.return_value = {"ok": False, "description": "Bad Request"}
+        with patch("sys.argv", ["daily_report.py", "--morning"]), \
+             patch("requests.post", return_value=mock_resp), \
+             patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
+             pytest.raises(SystemExit) as exc_info:
+            runpy.run_module("app.daily_report", run_name="__main__")
+        assert exc_info.value.code == 1

@@ -344,9 +344,9 @@ def handle_chat(text: str):
     save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
 
     prompt = _build_chat_prompt(text)
+    allowed_tools = get_allowed_tools()
 
     try:
-        allowed_tools = get_allowed_tools()
         result = subprocess.run(
             ["claude", "-p", prompt, "--allowedTools", allowed_tools, "--max-turns", "1"],
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,

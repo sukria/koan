@@ -137,7 +137,7 @@ def generate_report(report_type: str = "morning") -> str:
             if line.startswith("## ") and not line.startswith("## Quota"):
                 activity = line[3:].strip()
                 # Remove timestamps
-                activity = re.sub(r"\s*--\s*\d{2}:\d{2}(:\d{2})?", "", activity)
+                activity = re.sub(r"\s*[—–-]{1,2}\s*\d{2}:\d{2}(:\d{2})?", "", activity)
                 if activity:
                     activities.append(activity)
 
