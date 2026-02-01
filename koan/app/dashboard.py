@@ -29,6 +29,8 @@ from app.utils import (
     save_telegram_message,
     load_recent_telegram_history,
     format_conversation_history,
+    get_allowed_tools,
+    get_tools_description,
 )
 
 # ---------------------------------------------------------------------------
@@ -234,9 +236,13 @@ def chat_send():
         if journal_content:
             journal_context = journal_content[-2000:] if len(journal_content) > 2000 else journal_content
 
+        # Load tools description
+        tools_desc = get_tools_description()
+
         # Build prompt with conversation history
         prompt_parts = [
             f"You are Kōan. Here is your identity:\n\n{soul}\n",
+            f"{tools_desc}\n" if tools_desc else "",
             f"Summary of past sessions:\n{summary}\n" if summary else "",
             f"Today's journal (excerpt):\n{journal_context}\n" if journal_context else "",
             f"{history_context}\n" if history_context else "",
@@ -248,8 +254,9 @@ def chat_send():
 
         try:
             project_path = os.environ.get("KOAN_PROJECT_PATH", str(KOAN_ROOT))
+            allowed_tools = get_allowed_tools()
             result = subprocess.run(
-                ["claude", "-p", prompt, "--allowedTools", "Read,Glob,Grep"],
+                ["claude", "-p", prompt, "--allowedTools", allowed_tools],
                 capture_output=True, text=True, timeout=120,
                 cwd=project_path,
             )

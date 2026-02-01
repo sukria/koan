@@ -17,3 +17,13 @@ telegram:
 budget:
   warn_at_percent: 70   # Send warning via Telegram
   stop_at_percent: 85   # Stop running
+
+# Claude tools configuration
+# These tools will be available when Claude is invoked for chat responses
+tools:
+  allowed: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
+  description: |
+    Available capabilities:
+    - File operations: Read, Edit, Write files in the project
+    - Search: Glob (find files), Grep (search content)
+    - Shell: Bash (run git, gh, make, and other commands)

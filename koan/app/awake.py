@@ -32,6 +32,8 @@ from app.utils import (
     save_telegram_message,
     load_recent_telegram_history,
     format_conversation_history,
+    get_allowed_tools,
+    get_tools_description,
 )
 
 load_dotenv()
@@ -292,10 +294,14 @@ def handle_chat(text: str):
     else:
         time_hint = "It's late night."
 
+    # Load tools description
+    tools_desc = get_tools_description()
+
     # Build prompt with conversation history
     prompt_parts = [
         f"You are Kōan — a sparring partner, not an assistant.",
         f"Here is your identity:\n\n{SOUL}\n",
+        f"{tools_desc}\n" if tools_desc else "",
         f"About the human:\n{prefs_context}\n" if prefs_context else "",
         f"Summary of past sessions:\n{SUMMARY[:1500]}\n" if SUMMARY else "",
         f"Today's journal (excerpt):\n{journal_context}\n" if journal_context else "",
@@ -310,8 +316,9 @@ def handle_chat(text: str):
     prompt = "\n".join([p for p in prompt_parts if p])
 
     try:
+        allowed_tools = get_allowed_tools()
         result = subprocess.run(
-            ["claude", "-p", prompt, "--allowedTools", "Read,Glob,Grep"],
+            ["claude", "-p", prompt, "--allowedTools", allowed_tools],
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )

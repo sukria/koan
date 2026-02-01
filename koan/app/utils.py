@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import threading
+import yaml
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
@@ -45,6 +46,38 @@ def load_dotenv():
             continue
         key, _, value = line.partition("=")
         os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+def load_config() -> dict:
+    """Load configuration from instance/config.yaml.
+
+    Returns the full config dict, or empty dict if file doesn't exist.
+    """
+    config_path = KOAN_ROOT / "instance" / "config.yaml"
+    if not config_path.exists():
+        return {}
+    try:
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"[utils] Error loading config: {e}")
+        return {}
+
+
+def get_allowed_tools() -> str:
+    """Get comma-separated list of allowed tools from config.
+
+    Returns default tools if config doesn't specify.
+    """
+    config = load_config()
+    tools = config.get("tools", {}).get("allowed", ["Read", "Glob", "Grep", "Edit", "Write"])
+    return ",".join(tools)
+
+
+def get_tools_description() -> str:
+    """Get tools description from config for inclusion in prompts."""
+    config = load_config()
+    return config.get("tools", {}).get("description", "")
 
 
 def parse_project(text: str) -> Tuple[Optional[str], str]:
