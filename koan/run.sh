@@ -77,6 +77,11 @@ trap cleanup INT TERM
 
 count=0
 
+# Crash recovery: move stale in-progress missions back to pending
+RECOVER="$(dirname "$0")/recover.py"
+echo "[koan] Checking for interrupted missions..."
+"$PYTHON" "$RECOVER" "$INSTANCE" || true
+
 echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
 notify "Koan starting — $MAX_RUNS max runs, ${INTERVAL}s interval"
 

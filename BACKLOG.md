@@ -89,9 +89,9 @@ Progress tracking via user stories. Updated between sessions.
 - **As a** system
 - **I want** Kōan to resume cleanly after a crash or reboot
 - **So that** I don't lose in-progress missions
-- [ ] Detect "In Progress" missions without active worker on startup
-- [ ] Automatically move them back to "Pending"
-- [ ] Notify on Telegram "Restart — X missions resumed"
+- [x] Detect "In Progress" missions without active worker on startup
+- [x] Automatically move them back to "Pending"
+- [x] Notify on Telegram "Restart — X missions resumed"
 
 ---
 
