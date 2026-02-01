@@ -28,29 +28,18 @@ def recover_missions(instance_dir: str) -> int:
     if not missions_path.exists():
         return 0
 
+    from missions import find_section_boundaries
+
     content = missions_path.read_text()
     lines = content.splitlines()
 
     # Find section boundaries
-    pending_start = None
-    in_progress_start = None
-    in_progress_end = None
-
-    for i, line in enumerate(lines):
-        stripped = line.strip().lower()
-        if stripped in ("## en attente", "## pending"):
-            pending_start = i
-        elif stripped in ("## en cours", "## in progress"):
-            in_progress_start = i
-        elif in_progress_start is not None and line.startswith("## "):
-            in_progress_end = i
-            break
-
-    if in_progress_start is None or pending_start is None:
+    boundaries = find_section_boundaries(lines)
+    if "pending" not in boundaries or "in_progress" not in boundaries:
         return 0
 
-    if in_progress_end is None:
-        in_progress_end = len(lines)
+    pending_start = boundaries["pending"][0]
+    in_progress_start, in_progress_end = boundaries["in_progress"]
 
     # Extract simple mission items from in-progress section
     # Simple = starts with "- " and is NOT a strikethrough-only line (already done)
@@ -101,26 +90,31 @@ def recover_missions(instance_dir: str) -> int:
         else:
             break
 
-    # Remove "(aucune)" from pending section if we're adding missions
+    # Rebuild file with recovered missions moved to pending
     new_lines = []
     for i, line in enumerate(lines):
-        if i == pending_start + 1:
-            # After pending header: insert recovered missions
+        # Skip (aucune)/(none) placeholders in the pending section
+        if pending_start < i < in_progress_start:
+            if line.strip() in ("(aucune)", "(none)"):
+                continue
+
+        # Skip in-progress body lines (will be replaced)
+        if in_progress_start < i < in_progress_end:
+            continue
+
+        # Append the current line (headers, other content)
+        new_lines.append(line)
+
+        # After the pending header: insert recovered missions
+        if i == pending_start:
             new_lines.append("")
             for m in recovered:
                 new_lines.append(m)
-        if pending_start < i < (in_progress_start or len(lines)):
-            if line.strip() in ("(aucune)", "(none)"):
-                continue  # Remove placeholder
-        if in_progress_start < i < in_progress_end:
-            continue  # Will be replaced
-        new_lines.append(line)
 
+        # After the in-progress header: re-add remaining items
         if i == in_progress_start:
-            # Re-add remaining in-progress items
             for m in remaining_in_progress:
                 new_lines.append(m)
-            # If nothing remains, add placeholder
             if not any(m.strip() for m in remaining_in_progress):
                 new_lines.append("")
 

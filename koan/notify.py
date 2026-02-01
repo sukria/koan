@@ -15,24 +15,12 @@ Usage from Python:
 
 import os
 import sys
-from pathlib import Path
 
 import requests
 
+from utils import load_dotenv
 
-def _load_dotenv():
-    env_path = Path(__file__).parent.parent / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
-
-
-_load_dotenv()
+load_dotenv()
 
 BOT_TOKEN = os.environ.get("KOAN_TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("KOAN_TELEGRAM_CHAT_ID", "")
@@ -53,10 +41,11 @@ def send_telegram(text: str) -> bool:
                 json={"chat_id": CHAT_ID, "text": chunk},
                 timeout=10,
             )
-            if not resp.json().get("ok"):
+            data = resp.json()
+            if not data.get("ok"):
                 print(f"[notify] Telegram API error: {resp.text[:200]}", file=sys.stderr)
                 ok = False
-        except Exception as e:
+        except (requests.RequestException, ValueError) as e:
             print(f"[notify] Send error: {e}", file=sys.stderr)
             ok = False
     return ok
