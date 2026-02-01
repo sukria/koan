@@ -14,6 +14,7 @@ Usage from Python:
 """
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -88,7 +89,7 @@ def format_and_send(raw_message: str, instance_dir: str = None,
         memory = load_memory_context(instance_path, project_name)
         formatted = format_for_telegram(raw_message, soul, prefs, memory)
         return send_telegram(formatted)
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
         print(f"[notify] Format error, sending fallback: {e}", file=sys.stderr)
         return send_telegram(fallback_format(raw_message))
 

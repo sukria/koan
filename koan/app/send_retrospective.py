@@ -73,7 +73,7 @@ def append_to_outbox(instance_dir: Path, message: str):
             fcntl.flock(f, fcntl.LOCK_EX)
             f.write(message + "\n")
             fcntl.flock(f, fcntl.LOCK_UN)
-    except Exception as e:
+    except OSError as e:
         print(f"[send_retrospective] Error writing to outbox: {e}", file=sys.stderr)
 
 

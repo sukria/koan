@@ -98,7 +98,7 @@ class TestFormatAndSend:
     @patch("app.notify.send_telegram", return_value=True)
     def test_fallback_on_format_error(self, mock_send, instance_dir):
         """If formatting raises, fallback to basic cleanup."""
-        with patch("app.format_outbox.load_soul", side_effect=Exception("boom")), \
+        with patch("app.format_outbox.load_soul", side_effect=OSError("boom")), \
              patch("app.format_outbox.fallback_format", return_value="clean msg") as mock_fb:
             result = format_and_send("raw", instance_dir=str(instance_dir))
 

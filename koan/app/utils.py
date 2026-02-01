@@ -148,7 +148,7 @@ def load_config() -> dict:
     try:
         with open(config_path, "r") as f:
             return yaml.safe_load(f) or {}
-    except Exception as e:
+    except (yaml.YAMLError, OSError) as e:
         print(f"[utils] Error loading config: {e}")
         return {}
 
@@ -290,7 +290,7 @@ def save_telegram_message(history_file: Path, role: str, text: str):
             fcntl.flock(f, fcntl.LOCK_EX)
             f.write(json.dumps(message, ensure_ascii=False) + "\n")
             fcntl.flock(f, fcntl.LOCK_UN)
-    except Exception as e:
+    except OSError as e:
         print(f"[utils] Error saving message to history: {e}")
 
 
@@ -325,7 +325,7 @@ def load_recent_telegram_history(history_file: Path, max_messages: int = 10) -> 
 
         # Return last N messages
         return messages[-max_messages:] if len(messages) > max_messages else messages
-    except Exception as e:
+    except OSError as e:
         print(f"[utils] Error loading history: {e}")
         return []
 
