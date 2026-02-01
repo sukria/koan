@@ -260,23 +260,28 @@ def handle_mission(text: str):
     else:
         mission_entry = f"- {mission_text}"
 
-    # Append to missions.md under "## Pending"
+    # Append to missions.md under pending section
     if MISSIONS_FILE.exists():
         content = MISSIONS_FILE.read_text()
     else:
-        content = "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
+        content = "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
 
-    # Insert under "## Pending"
-    marker = "## Pending"
-    if marker in content:
+    # Find the pending section (French or English)
+    marker = None
+    for candidate in ("## En attente", "## Pending"):
+        if candidate in content:
+            marker = candidate
+            break
+
+    if marker:
         idx = content.index(marker) + len(marker)
-        # Find the end of the "Pending" line (skip newlines)
+        # Find the end of the header line (skip newlines)
         while idx < len(content) and content[idx] == "\n":
             idx += 1
         new_entry = f"\n{mission_entry}\n"
         content = content[:idx] + new_entry + content[idx:]
     else:
-        content += f"\n## Pending\n\n{mission_entry}\n"
+        content += f"\n## En attente\n\n{mission_entry}\n"
 
     MISSIONS_FILE.write_text(content)
 
