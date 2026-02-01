@@ -70,10 +70,11 @@ Progress tracking via user stories. Updated between sessions.
 - **As a** Telegram user
 - **I want** to receive a notification at each stage of a mission
 - **So that** I can track in real-time without opening the repo (message written via Claude to stay in personality)
-- [ ] Notification "Mission taken: <title>"
-- [ ] Notification "Mission completed: <title>" + 2-3 line summary
-- [ ] Notification "Mission failed: <title>" + reason
-- [ ] Notification "No pending mission — autonomous mode" (optional)
+- [x] Notification "Mission taken: <title>"
+- [x] Notification "Mission completed: <title>"
+- [x] Notification "Mission failed: <title>"
+- [x] Notification "No pending mission — autonomous mode"
+- [ ] Include 2-3 line summary on mission completion (requires outbox integration)
 
 ### US 3.2 — Daily report
 - **As a** human
@@ -109,11 +110,12 @@ Progress tracking via user stories. Updated between sessions.
   - Type safety with type hints
   - Dict-based project lookups (cleaner than parallel arrays)
   - Consistency with awake.py and notify.py
-- [ ] Rewrite run.sh logic in Python (run.py)
-- [ ] Keep same env var interface (KOAN_PROJECTS, KOAN_PROJECT_PATH, etc.)
-- [ ] Preserve all existing features (project parsing, validation, mission extraction, quota detection)
-- [ ] Update Makefile to use `$(PYTHON) koan/run.py` instead of `./koan/run.sh`
+- [x] Rewrite run.sh logic in Python (run.py) — branch `koan/run-py`
+- [x] Keep same env var interface (KOAN_PROJECTS, KOAN_PROJECT_PATH, etc.)
+- [x] Preserve all existing features (project parsing, validation, mission extraction, quota detection)
+- [x] Update Makefile to use `$(PYTHON) koan/run.py` instead of `./koan/run.sh`
 - [ ] Test backward compatibility with single-project setups
+- **Note**: Branch `koan/run-py` pushed, awaiting merge
 
 ---
 
