@@ -317,15 +317,39 @@ def handle_chat(text: str):
         else:
             journal_context = journal_content
 
+    # Load human preferences for personality context
+    prefs_context = ""
+    prefs_path = INSTANCE_DIR / "memory" / "global" / "human-preferences.md"
+    if prefs_path.exists():
+        prefs_context = prefs_path.read_text().strip()
+
+    # Determine time-of-day for natural tone
+    from datetime import datetime
+    hour = datetime.now().hour
+    if hour < 7:
+        time_hint = "It's very early morning."
+    elif hour < 12:
+        time_hint = "It's morning."
+    elif hour < 18:
+        time_hint = "It's afternoon."
+    elif hour < 22:
+        time_hint = "It's evening."
+    else:
+        time_hint = "It's late night."
+
     prompt = (
-        f"You are Kōan. Here is your identity:\n\n{SOUL}\n\n"
+        f"You are Kōan — a sparring partner, not an assistant. "
+        f"Here is your identity:\n\n{SOUL}\n\n"
+        f"About the human (Alexis):\n{prefs_context}\n\n"
         f"Summary of past sessions:\n{SUMMARY[:1500]}\n\n"
         f"Today's journal (excerpt):\n{journal_context}\n\n"
-        f"The human sends you this message on Telegram:\n\n"
+        f"{time_hint}\n\n"
+        f"Alexis sends you this message on Telegram:\n\n"
         f"  « {text} »\n\n"
-        f"Respond directly. Be concise and natural. "
-        f"This is a Telegram conversation — not a report. "
-        f"2-3 sentences max unless the question requires more.\n"
+        f"Respond in French. Be direct, concise, natural — like texting a collaborator. "
+        f"You can be funny (dry humor), you can disagree, you can ask back. "
+        f"2-3 sentences max unless the question requires more. "
+        f"No markdown formatting — this is Telegram, keep it plain.\n"
     )
 
     try:
