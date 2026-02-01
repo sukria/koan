@@ -53,10 +53,11 @@ def send_telegram(text: str) -> bool:
                 json={"chat_id": CHAT_ID, "text": chunk},
                 timeout=10,
             )
-            if not resp.json().get("ok"):
+            data = resp.json()
+            if not data.get("ok"):
                 print(f"[notify] Telegram API error: {resp.text[:200]}", file=sys.stderr)
                 ok = False
-        except Exception as e:
+        except (requests.RequestException, ValueError) as e:
             print(f"[notify] Send error: {e}", file=sys.stderr)
             ok = False
     return ok

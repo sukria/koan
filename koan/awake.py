@@ -80,8 +80,9 @@ def get_updates(offset=None):
         params["offset"] = offset
     try:
         resp = requests.get(f"{TELEGRAM_API}/getUpdates", params=params, timeout=35)
-        return resp.json().get("result", [])
-    except Exception as e:
+        data = resp.json()
+        return data.get("result", [])
+    except (requests.RequestException, ValueError) as e:
         print(f"[awake] Telegram error: {e}")
         return []
 
@@ -359,9 +360,11 @@ def flush_outbox():
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             content = f.read().strip()
             if content:
-                send_telegram(content)
-                f.seek(0)
-                f.truncate()
+                if send_telegram(content):
+                    f.seek(0)
+                    f.truncate()
+                else:
+                    print("[awake] Outbox send failed — keeping messages for retry")
                 # Show preview of sent message (first 150 chars)
                 preview = content[:150].replace("\n", " ")
                 if len(content) > 150:

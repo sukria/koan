@@ -83,7 +83,7 @@ def parse_missions() -> dict:
                 current = "pending"
             elif section_name in ("en cours", "in progress"):
                 current = "in_progress"
-            elif section_name in ("terminées", "terminées", "done", "completed"):
+            elif section_name in ("terminées", "done", "completed"):
                 current = "done"
             else:
                 current = None
