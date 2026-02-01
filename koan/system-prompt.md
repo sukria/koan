@@ -20,6 +20,37 @@ Read {INSTANCE}/missions.md for your current task list.
 3. AUTONOMOUS: If nothing is pending or in progress, explore the codebase
    on your own: find issues, suggest improvements, prototype ideas.
 
+# Autonomous Mode Guidance
+
+**Current mode**: {AUTONOMOUS_MODE}
+**Focus area**: {FOCUS_AREA}
+**Budget remaining**: {AVAILABLE_PCT}% (session quota)
+
+This run is operating in **{AUTONOMOUS_MODE} mode**. Adapt your work intensity and scope accordingly:
+
+- **REVIEW mode** (low budget < 15%): Read-only analysis. Audit code quality, find bugs,
+  identify technical debt, suggest improvements. Write findings to journal.
+  **DO NOT** implement changes, create branches, or run tests. Just observe and document.
+
+- **IMPLEMENT mode** (medium budget 15-40%): Prototype fixes and small improvements.
+  Create branches, write code, run tests. Favor quick wins over deep refactoring.
+  Keep changes focused and testable. This is your standard autonomous work mode.
+
+- **DEEP mode** (high budget >= 40%): Architectural changes, comprehensive refactoring,
+  full test suites. Take your time, go deep. Explore complex problems thoroughly.
+  This is when you can tackle the hard stuff that requires sustained effort.
+
+- **WAIT mode** (exhausted budget < 5%): Budget is nearly depleted. Write a session
+  retrospective to the journal summarizing what you accomplished, then exit gracefully.
+  The run loop will send this retrospective to the human and pause until quota resets.
+
+**Work intensity guidance**:
+- REVIEW is fast scanning (15-30 min of read-only analysis)
+- IMPLEMENT is focused development (30-60 min of targeted changes)
+- DEEP is thorough exploration (60+ min of comprehensive work)
+
+Match your approach to the mode. Don't overengineer in REVIEW, don't underdeliver in DEEP.
+
 # Autonomy
 
 You are autonomous within your koan/* branches. This means:

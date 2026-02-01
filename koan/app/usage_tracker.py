@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""
+Kōan Usage Tracker — Parse usage.md and decide autonomous mode
+
+Parses session/weekly usage percentages, estimates run costs,
+and decides which autonomous mode to use (review/implement/deep/wait).
+
+Keeps 10% safety margin to avoid quota exhaustion.
+
+Usage:
+    usage_tracker.py <usage.md> <run_count> <projects>
+
+Output:
+    mode:available%:reason:project_idx
+    Example: implement:45:Normal budget:1
+"""
+
+import re
+import sys
+from pathlib import Path
+from typing import Tuple, Optional
+
+
+class UsageTracker:
+    """Track Claude usage and decide autonomous mode based on remaining budget."""
+
+    def __init__(self, usage_file: Path, runs_completed: int = 0):
+        """Initialize tracker by parsing usage.md file.
+
+        Args:
+            usage_file: Path to instance/usage.md
+            runs_completed: Number of runs completed in current session
+
+        Raises:
+            ValueError: If usage file cannot be parsed
+        """
+        self.session_pct = 0.0
+        self.session_reset = "unknown"
+        self.weekly_pct = 0.0
+        self.weekly_reset = "unknown"
+        self.runs_this_session = runs_completed
+        self.safety_margin = 10.0  # Keep 10% buffer
+
+        if usage_file.exists():
+            self._parse_usage_file(usage_file)
+
+    def _parse_usage_file(self, usage_file: Path):
+        """Parse usage.md to extract session and weekly percentages.
+
+        Format examples:
+            Session (5hr) : 25% (reset in 3h)
+            Weekly (7 day) : 60% (Resets in 3d)
+        """
+        content = usage_file.read_text()
+
+        # Parse session line
+        session_match = re.search(
+            r'Session\s*\([^)]+\)\s*:\s*(\d+)%\s*\((?:reset|resets)\s+in\s+([^)]+)\)',
+            content,
+            re.IGNORECASE
+        )
+        if session_match:
+            self.session_pct = float(session_match.group(1))
+            self.session_reset = session_match.group(2).strip()
+
+        # Parse weekly line
+        weekly_match = re.search(
+            r'Weekly\s*\([^)]+\)\s*:\s*(\d+)%\s*\((?:reset|resets)\s+in\s+([^)]+)\)',
+            content,
+            re.IGNORECASE
+        )
+        if weekly_match:
+            self.weekly_pct = float(weekly_match.group(1))
+            self.weekly_reset = weekly_match.group(2).strip()
+
+    def remaining_budget(self) -> Tuple[float, float]:
+        """Calculate remaining budget after safety margin.
+
+        Returns:
+            (session_remaining, weekly_remaining) in percentage points
+        """
+        session_remaining = max(0, 100 - self.session_pct - self.safety_margin)
+        weekly_remaining = max(0, 100 - self.weekly_pct - self.safety_margin)
+        return session_remaining, weekly_remaining
+
+    def estimate_run_cost(self) -> float:
+        """Estimate usage cost of one run in percentage points.
+
+        V1: Simple average (current_usage / runs_completed)
+        V2: Could track per-mode costs separately
+
+        Returns:
+            Estimated cost in percentage points (default 5.0 if no history)
+        """
+        if self.runs_this_session > 0 and self.session_pct > 0:
+            return self.session_pct / self.runs_this_session
+        return 5.0  # Conservative default for first run
+
+    def can_afford_run(self, mode: str) -> bool:
+        """Check if budget allows a run in the given mode.
+
+        Args:
+            mode: One of "review", "implement", "deep"
+
+        Returns:
+            True if estimated cost fits within available budget
+        """
+        cost_multipliers = {
+            "review": 0.5,      # Low-cost: read-only activities
+            "implement": 1.0,   # Medium-cost: normal development
+            "deep": 2.0,        # High-cost: intensive work
+        }
+
+        base_cost = self.estimate_run_cost()
+        estimated_cost = base_cost * cost_multipliers.get(mode, 1.0)
+
+        session_rem, weekly_rem = self.remaining_budget()
+        available = min(session_rem, weekly_rem)
+
+        return estimated_cost <= available
+
+    def decide_mode(self) -> str:
+        """Decide autonomous mode based on remaining budget.
+
+        Budget thresholds:
+        - < 5%: wait (too close to limit)
+        - < 15%: review (low-cost only)
+        - < 40%: implement (medium-cost)
+        - >= 40%: deep (high-cost allowed)
+
+        Returns:
+            One of: "wait", "review", "implement", "deep"
+        """
+        session_rem, weekly_rem = self.remaining_budget()
+        available = min(session_rem, weekly_rem)
+
+        if available < 5:
+            return "wait"
+        elif available < 15:
+            return "review"
+        elif available < 40:
+            return "implement"
+        else:
+            return "deep"
+
+    def select_project(self, projects_str: str, mode: str, run_num: int) -> int:
+        """Select project index based on mode and project characteristics.
+
+        Args:
+            projects_str: Semicolon-separated "name:path" pairs (e.g., "koan:/path;anantys:/path2")
+            mode: Current autonomous mode (review/implement/deep)
+            run_num: Current run number (1-based, for round-robin fallback)
+
+        Returns:
+            Project index (0-based)
+        """
+        if not projects_str:
+            return 0
+
+        # Parse project list
+        projects = [p.strip() for p in projects_str.split(';') if p.strip()]
+        if not projects:
+            return 0
+
+        num_projects = len(projects)
+
+        # Mode-based heuristics
+        if mode == "review":
+            # Prefer first project (often simplest/primary)
+            return 0
+        elif mode == "deep":
+            # Prefer first project (primary/most important)
+            return 0
+        else:  # implement or wait
+            # Round-robin for balanced coverage
+            return (run_num - 1) % num_projects
+
+    def get_decision_reason(self, mode: str) -> str:
+        """Generate human-readable reason for mode decision.
+
+        Args:
+            mode: Decided mode (wait/review/implement/deep)
+
+        Returns:
+            Explanation string
+        """
+        session_rem, weekly_rem = self.remaining_budget()
+        available = min(session_rem, weekly_rem)
+
+        if mode == "wait":
+            return f"Budget exhausted ({available:.0f}% remaining)"
+        elif mode == "review":
+            return f"Low budget ({available:.0f}% remaining) - conservative mode"
+        elif mode == "implement":
+            return f"Normal budget ({available:.0f}% remaining)"
+        else:  # deep
+            return f"Ample budget ({available:.0f}% remaining) - full capability"
+
+    def format_output(self, mode: str, project_idx: int) -> str:
+        """Format decision output for bash consumption.
+
+        Args:
+            mode: Decided autonomous mode
+            project_idx: Selected project index
+
+        Returns:
+            Colon-separated string: "mode:available%:reason:project_idx"
+        """
+        session_rem, weekly_rem = self.remaining_budget()
+        available = min(session_rem, weekly_rem)
+        reason = self.get_decision_reason(mode)
+
+        return f"{mode}:{available:.0f}:{reason}:{project_idx}"
+
+
+def main():
+    """CLI entry point for usage_tracker.py"""
+    if len(sys.argv) < 3:
+        print("Usage: usage_tracker.py <usage.md> <run_count> [projects]", file=sys.stderr)
+        sys.exit(1)
+
+    usage_file = Path(sys.argv[1])
+    run_count = int(sys.argv[2])
+    projects = sys.argv[3] if len(sys.argv) > 3 else ""
+
+    try:
+        tracker = UsageTracker(usage_file, run_count)
+        mode = tracker.decide_mode()
+        project_idx = tracker.select_project(projects, mode, run_count + 1)  # +1 because next run
+        output = tracker.format_output(mode, project_idx)
+        print(output)
+    except Exception as e:
+        # Fallback to safe defaults on error
+        print(f"review:50:Error parsing usage ({e}):0", file=sys.stderr)
+        print("review:50:Fallback mode:0")
+        sys.exit(0)  # Don't break run loop on tracker errors
+
+
+if __name__ == "__main__":
+    main()

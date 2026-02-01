@@ -15,6 +15,7 @@ MISSION_SUMMARY="$APP_DIR/mission_summary.py"
 GIT_SYNC="$APP_DIR/git_sync.py"
 GIT_SYNC_INTERVAL=${KOAN_GIT_SYNC_INTERVAL:-5}
 HEALTH_CHECK="$APP_DIR/health_check.py"
+USAGE_TRACKER="$APP_DIR/usage_tracker.py"
 
 if [ ! -d "$INSTANCE" ]; then
   echo "[koan] No instance/ directory found. Run: cp -r instance.example instance"
@@ -122,7 +123,26 @@ while [ $count -lt $MAX_RUNS ]; do
   fi
 
   RUN_NUM=$((count + 1))
-  echo "[koan] Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S')"
+  echo ""
+  echo "=== Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S') ==="
+
+  # Parse usage.md and decide autonomous mode
+  USAGE_DECISION=$("$PYTHON" "$USAGE_TRACKER" "$INSTANCE/usage.md" "$count" "$KOAN_PROJECTS" 2>/dev/null || echo "implement:50:Tracker error:0")
+  IFS=':' read -r AUTONOMOUS_MODE AVAILABLE_PCT DECISION_REASON RECOMMENDED_PROJECT_IDX <<< "$USAGE_DECISION"
+
+  # Display usage status (verbose logging)
+  echo "Usage Status:"
+  if [ -f "$INSTANCE/usage.md" ]; then
+    # Extract and display session/weekly lines
+    SESSION_LINE=$(grep -i "Session" "$INSTANCE/usage.md" | head -1 || echo "Session: unknown")
+    WEEKLY_LINE=$(grep -i "Weekly" "$INSTANCE/usage.md" | head -1 || echo "Weekly: unknown")
+    echo "  $SESSION_LINE"
+    echo "  $WEEKLY_LINE"
+  else
+    echo "  [No usage.md file - using fallback mode]"
+  fi
+  echo "  Safety margin: 10% → Available: ${AVAILABLE_PCT}%"
+  echo ""
 
   # Extract next pending mission line (section-aware, scoped to "En attente")
   EXTRACT_MISSION="$APP_DIR/extract_mission.py"
@@ -153,10 +173,10 @@ while [ $count -lt $MAX_RUNS ]; do
       exit 1
     fi
   else
-    # No project tag: rotate through projects in autonomous mode
+    # No project tag: use smart selection or default
     if [ -z "$MISSION_LINE" ]; then
-      # Autonomous mode: round-robin across projects
-      PROJECT_IDX=$(( (RUN_NUM - 1) % ${#PROJECT_NAMES[@]} ))
+      # Autonomous mode: use usage tracker recommendation
+      PROJECT_IDX=$RECOMMENDED_PROJECT_IDX
     else
       # Untagged mission: default to first project
       PROJECT_IDX=0
@@ -165,15 +185,55 @@ while [ $count -lt $MAX_RUNS ]; do
     PROJECT_PATH="${PROJECT_PATHS[$PROJECT_IDX]}"
   fi
 
-  echo "[koan] Project: $PROJECT_NAME ($PROJECT_PATH)"
+  # Define focus area based on autonomous mode
+  if [ -z "$MISSION_LINE" ]; then
+    case "$AUTONOMOUS_MODE" in
+      wait)
+        echo "Decision: WAIT mode (budget exhausted)"
+        echo "  Reason: $DECISION_REASON"
+        echo "  Action: Sending retrospective and exiting"
+        echo ""
+        # Send retrospective and exit gracefully
+        "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
+        notify "⏸️ Koan paused: budget exhausted after $count runs. Use /resume when quota resets."
+        break
+        ;;
+      review)
+        FOCUS_AREA="Low-cost review: audit code, find issues, suggest improvements (READ-ONLY)"
+        ;;
+      implement)
+        FOCUS_AREA="Medium-cost implementation: prototype fixes, small improvements"
+        ;;
+      deep)
+        FOCUS_AREA="High-cost deep work: refactoring, architectural changes"
+        ;;
+      *)
+        FOCUS_AREA="General autonomous work"
+        ;;
+    esac
+  else
+    FOCUS_AREA="Execute assigned mission"
+  fi
+
+  echo "Project: $PROJECT_NAME"
+  echo "  Path: $PROJECT_PATH"
+  echo ""
 
   # Mission lifecycle notification: taken or autonomous
   if [ -n "$MISSION_TITLE" ]; then
-    echo "[koan] Mission: $MISSION_TITLE"
+    echo "Decision: MISSION mode (assigned)"
+    echo "  Mission: $MISSION_TITLE"
+    echo "  Project: $PROJECT_NAME"
+    echo ""
     notify "Run $RUN_NUM/$MAX_RUNS — Mission taken: $MISSION_TITLE"
   else
-    echo "[koan] No pending mission — autonomous mode ($PROJECT_NAME)"
-    notify "Run $RUN_NUM/$MAX_RUNS — No pending mission, autonomous mode on $PROJECT_NAME"
+    ESTIMATED_COST=$("$PYTHON" -c "print(f'{5 if $count == 0 else ${AUTONOMOUS_MODE:+5}:.1f}')" 2>/dev/null || echo "5.0")
+    echo "Decision: ${AUTONOMOUS_MODE^^} mode (estimated cost: ${ESTIMATED_COST}% session)"
+    echo "  Reason: $DECISION_REASON"
+    echo "  Project: $PROJECT_NAME"
+    echo "  Focus: $FOCUS_AREA"
+    echo ""
+    notify "Run $RUN_NUM/$MAX_RUNS — Autonomous: ${AUTONOMOUS_MODE} mode on $PROJECT_NAME"
   fi
 
   # Build prompt from template, replacing placeholders
@@ -183,6 +243,9 @@ while [ $count -lt $MAX_RUNS ]; do
     -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
     -e "s|{RUN_NUM}|$RUN_NUM|g" \
     -e "s|{MAX_RUNS}|$MAX_RUNS|g" \
+    -e "s|{AUTONOMOUS_MODE}|${AUTONOMOUS_MODE:-implement}|g" \
+    -e "s|{FOCUS_AREA}|${FOCUS_AREA:-General autonomous work}|g" \
+    -e "s|{AVAILABLE_PCT}|${AVAILABLE_PCT:-50}|g" \
     "$KOAN_ROOT/koan/system-prompt.md")
 
   # Execute next mission, capture output to detect quota errors
@@ -240,16 +303,21 @@ Koan paused after $count runs. Send /resume via Telegram when quota resets to ch
       notify "Run $RUN_NUM/$MAX_RUNS — Autonomous run completed"
     fi
 
-    # Extract journal summary and send via outbox (locked append to avoid race with awake.py)
+    # Extract journal summary, format via Claude, and send via outbox
     SUMMARY_TEXT=$("$PYTHON" "$MISSION_SUMMARY" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || echo "")
     if [ -n "$SUMMARY_TEXT" ]; then
+      # Format through Claude for conversational, French, plain text output
+      FORMAT_OUTBOX="$APP_DIR/format_outbox.py"
+      FORMATTED_TEXT=$(echo "$SUMMARY_TEXT" | "$PYTHON" "$FORMAT_OUTBOX" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || echo "$SUMMARY_TEXT")
+
+      # Locked append to outbox (avoid race with awake.py)
       "$PYTHON" -c "
 import fcntl, sys
 with open('$INSTANCE/outbox.md', 'a') as f:
     fcntl.flock(f, fcntl.LOCK_EX)
     f.write(sys.stdin.read())
     fcntl.flock(f, fcntl.LOCK_UN)
-" <<< "$SUMMARY_TEXT"
+" <<< "$FORMATTED_TEXT"
     fi
   else
     if [ -n "$MISSION_TITLE" ]; then
