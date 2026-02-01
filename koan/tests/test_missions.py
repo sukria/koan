@@ -218,3 +218,112 @@ class TestFindSectionBoundaries:
         result = find_section_boundaries(lines)
         assert "pending" in result
         assert "in_progress" not in result
+
+
+# --- parse_sections edge cases (complex blocks) ---
+
+class TestParseSectionsComplexBlocks:
+    """Tests for ### block flushing at section boundaries, sequential blocks, and EOF."""
+
+    def test_complex_block_flushed_at_section_boundary(self):
+        """### block in one section should be flushed when next ## section starts (lines 53-55)."""
+        content = (
+            "## En cours\n\n"
+            "### Big project\n"
+            "- Step 1\n"
+            "- Step 2\n"
+            "## Terminées\n\n"
+            "- Done task\n"
+        )
+        result = parse_sections(content)
+        assert len(result["in_progress"]) == 1
+        assert "### Big project" in result["in_progress"][0]
+        assert "- Step 2" in result["in_progress"][0]
+        assert len(result["done"]) == 1
+        assert "- Done task" in result["done"][0]
+
+    def test_sequential_complex_blocks_same_section(self):
+        """Two ### blocks in the same section should be separate entries (lines 65-66)."""
+        content = (
+            "## En cours\n\n"
+            "### Block A\n"
+            "- Detail A\n"
+            "### Block B\n"
+            "- Detail B\n\n"
+            "## Terminées\n"
+        )
+        result = parse_sections(content)
+        assert len(result["in_progress"]) == 2
+        assert "### Block A" in result["in_progress"][0]
+        assert "### Block B" in result["in_progress"][1]
+
+    def test_complex_block_at_eof_no_trailing_newline(self):
+        """### block at end of file with no trailing blank line (lines 82-83)."""
+        content = (
+            "## En cours\n\n"
+            "### Final block\n"
+            "- Last item"
+        )
+        result = parse_sections(content)
+        assert len(result["in_progress"]) == 1
+        assert "### Final block" in result["in_progress"][0]
+        assert "- Last item" in result["in_progress"][0]
+
+    def test_mixed_simple_and_complex_same_section(self):
+        """Simple - items followed by ### block in same section."""
+        content = (
+            "## En attente\n\n"
+            "- Simple task\n"
+            "### Complex task\n"
+            "- Sub-detail\n\n"
+            "## En cours\n"
+        )
+        result = parse_sections(content)
+        assert len(result["pending"]) == 2
+        assert result["pending"][0] == "- Simple task"
+        assert "### Complex task" in result["pending"][1]
+
+    def test_complex_block_with_strikethrough(self):
+        """Real-world pattern: ### block with ~~done~~ items (from actual missions.md)."""
+        content = (
+            "## En cours\n\n"
+            "### project:anantys Admin Dashboard\n"
+            "- ~~Explorer l'admin~~ done\n"
+            "- ~~Cartographier les données~~ done\n"
+            "- Reste à faire : V2\n\n"
+            "## Terminées\n"
+        )
+        result = parse_sections(content)
+        assert len(result["in_progress"]) == 1
+        block = result["in_progress"][0]
+        assert "~~Explorer" in block
+        assert "Reste à faire" in block
+
+    def test_empty_complex_block(self):
+        """### header with no content lines before next ### or section."""
+        content = (
+            "## En cours\n\n"
+            "### Empty block\n"
+            "### Second block\n"
+            "- Content\n\n"
+            "## Terminées\n"
+        )
+        result = parse_sections(content)
+        assert len(result["in_progress"]) == 2
+
+    def test_unrecognized_section_header(self):
+        """Content under unrecognized ## header should be ignored."""
+        content = (
+            "## En attente\n\n"
+            "- Task\n\n"
+            "## Random section\n\n"
+            "- Should be ignored\n\n"
+            "## En cours\n"
+        )
+        result = parse_sections(content)
+        assert len(result["pending"]) == 1
+        assert result["pending"][0] == "- Task"
+        # "Should be ignored" must not appear in any section
+        for key in result:
+            for item in result[key]:
+                assert "Should be ignored" not in item

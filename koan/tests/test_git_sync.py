@@ -150,3 +150,66 @@ class TestWriteSyncToJournal:
         content = journal_file.read_text()
         assert "Previous Entry" in content
         assert "New sync" in content
+
+
+class TestGitSyncCLI:
+    """Tests for git_sync.py __main__ block (lines 131-143)."""
+
+    def test_cli_usage_error(self):
+        """Exit 1 with usage message when called with too few args."""
+        import runpy
+        import sys
+        with patch.object(sys, "argv", ["git_sync.py"]):
+            with pytest.raises(SystemExit) as exc:
+                runpy.run_module("app.git_sync", run_name="__main__")
+            assert exc.value.code == 1
+
+    def test_cli_runs_sync(self, tmp_path):
+        """Full CLI run: builds report, writes to journal, prints output."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        (instance / "journal").mkdir()
+
+        import runpy
+        import sys
+        with patch.object(sys, "argv", [
+            "git_sync.py", str(instance), "koan", "/fake/path"
+        ]):
+            with patch("app.git_sync.run_git", return_value=""):
+                with patch("builtins.print") as mock_print:
+                    runpy.run_module("app.git_sync", run_name="__main__")
+                    mock_print.assert_called_once()
+
+    def test_cli_with_branches(self, tmp_path):
+        """CLI prints the sync report to stdout."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        (instance / "journal").mkdir()
+
+        def subprocess_side_effect(cmd, **kwargs):
+            args_str = " ".join(cmd)
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stderr = ""
+            if "fetch" in args_str:
+                mock_result.stdout = ""
+            elif "--merged" in args_str:
+                mock_result.stdout = "  remotes/origin/koan/done\n"
+            elif "--no-merged" in args_str:
+                mock_result.stdout = ""
+            elif "log" in args_str:
+                mock_result.stdout = "abc1234 fix something\n"
+            else:
+                mock_result.stdout = ""
+            return mock_result
+
+        import runpy
+        import sys
+        with patch.object(sys, "argv", [
+            "git_sync.py", str(instance), "koan", "/fake/path"
+        ]):
+            with patch("subprocess.run", side_effect=subprocess_side_effect):
+                with patch("builtins.print") as mock_print:
+                    runpy.run_module("app.git_sync", run_name="__main__")
+                    output = mock_print.call_args[0][0]
+                    assert "koan/done" in output
