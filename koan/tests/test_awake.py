@@ -265,7 +265,7 @@ class TestHandleResume:
     def test_no_quota_file(self, mock_send, tmp_path):
         with patch("app.awake.KOAN_ROOT", tmp_path):
             handle_resume()
-        assert "No quota pause" in mock_send.call_args[0][0]
+        assert "No pause or quota hold" in mock_send.call_args[0][0]
 
     @patch("app.awake.format_and_send")
     def test_likely_reset(self, mock_send, tmp_path):

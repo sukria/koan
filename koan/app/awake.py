@@ -135,6 +135,15 @@ def handle_command(text: str):
         format_and_send("Stop requested. Current mission will complete, then Kōan will stop.")
         return
 
+    if cmd == "/pause":
+        pause_file = KOAN_ROOT / ".koan-pause"
+        if pause_file.exists():
+            format_and_send("Kōan is already paused. Use /resume to unpause.")
+        else:
+            pause_file.write_text("PAUSE")
+            format_and_send("Kōan paused. The run loop stays active but no missions will be executed. Use /resume to unpause.")
+        return
+
     if cmd == "/status":
         status = _build_status()
         format_and_send(status)
@@ -177,6 +186,10 @@ def _build_status() -> str:
                         parts.append(f"  Pending: {len(pending)}")
 
     # Run loop status
+    pause_file = KOAN_ROOT / ".koan-pause"
+    if pause_file.exists():
+        parts.append("\n⏸️ Paused (use /resume to unpause)")
+
     stop_file = KOAN_ROOT / ".koan-stop"
     if stop_file.exists():
         parts.append("\n⛔ Stop requested")
@@ -189,11 +202,17 @@ def _build_status() -> str:
 
 
 def handle_resume():
-    """Check if quota has reset and offer to resume the run loop."""
+    """Resume from pause or quota exhaustion."""
+    pause_file = KOAN_ROOT / ".koan-pause"
     quota_file = KOAN_ROOT / ".koan-quota-reset"
 
+    if pause_file.exists():
+        pause_file.unlink()
+        format_and_send("Kōan unpaused. Missions will resume on the next loop iteration.")
+        return
+
     if not quota_file.exists():
-        format_and_send("No quota pause detected. Kōan is either running or was stopped normally. Use /status to check current state.")
+        format_and_send("No pause or quota hold detected. Kōan is either running or was stopped normally. Use /status to check current state.")
         return
 
     try:

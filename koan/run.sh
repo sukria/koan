@@ -122,6 +122,32 @@ while [ $count -lt $MAX_RUNS ]; do
     break
   fi
 
+  # Check for pause — contemplative mode
+  if [ -f "$KOAN_ROOT/.koan-pause" ]; then
+    echo "[koan] Paused. Contemplative mode. ($(date '+%H:%M'))"
+
+    # ~30% chance of a contemplative session (imprévisible)
+    ROLL=$((RANDOM % 100))
+    if [ $ROLL -lt 30 ]; then
+      echo "[koan] A thought stirs..."
+      PROJECT_NAME="${PROJECT_NAMES[0]}"
+      PROJECT_PATH="${PROJECT_PATHS[0]}"
+
+      CONTEMPLATE_PROMPT=$(sed \
+        -e "s|{INSTANCE}|$INSTANCE|g" \
+        -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
+        "$KOAN_ROOT/koan/contemplative-prompt.md")
+
+      cd "$INSTANCE"
+      set +e
+      claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 3 2>/dev/null
+      set -e
+    fi
+
+    sleep 300
+    continue
+  fi
+
   RUN_NUM=$((count + 1))
   echo ""
   echo "=== Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S') ==="
