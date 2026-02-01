@@ -135,9 +135,16 @@ while [ $count -lt $MAX_RUNS ]; do
       exit 1
     fi
   else
-    # No project tag: default to first project
-    PROJECT_NAME="${PROJECT_NAMES[0]}"
-    PROJECT_PATH="${PROJECT_PATHS[0]}"
+    # No project tag: rotate through projects in autonomous mode
+    if [ -z "$MISSION_LINE" ]; then
+      # Autonomous mode: round-robin across projects
+      PROJECT_IDX=$(( (RUN_NUM - 1) % ${#PROJECT_NAMES[@]} ))
+    else
+      # Untagged mission: default to first project
+      PROJECT_IDX=0
+    fi
+    PROJECT_NAME="${PROJECT_NAMES[$PROJECT_IDX]}"
+    PROJECT_PATH="${PROJECT_PATHS[$PROJECT_IDX]}"
   fi
 
   echo "[koan] Project: $PROJECT_NAME ($PROJECT_PATH)"
@@ -147,8 +154,8 @@ while [ $count -lt $MAX_RUNS ]; do
     echo "[koan] Mission: $MISSION_TITLE"
     notify "Run $RUN_NUM/$MAX_RUNS — Mission taken: $MISSION_TITLE"
   else
-    echo "[koan] No pending mission — autonomous mode"
-    notify "Run $RUN_NUM/$MAX_RUNS — No pending mission, entering autonomous mode"
+    echo "[koan] No pending mission — autonomous mode ($PROJECT_NAME)"
+    notify "Run $RUN_NUM/$MAX_RUNS — No pending mission, autonomous mode on $PROJECT_NAME"
   fi
 
   # Build prompt from template, replacing placeholders
