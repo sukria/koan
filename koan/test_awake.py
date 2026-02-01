@@ -110,6 +110,16 @@ class TestParseProject:
         assert project == "koan"
         assert text == "fix the bug"
 
+    def test_french_projet_tag(self):
+        project, text = parse_project("[projet:anantys] fix the login")
+        assert project == "anantys"
+        assert text == "fix the login"
+
+    def test_french_projet_tag_in_middle(self):
+        project, text = parse_project("fix [projet:koan] the bug")
+        assert project == "koan"
+        assert text == "fix the bug"
+
 
 # ---------------------------------------------------------------------------
 # handle_mission (integration with filesystem)

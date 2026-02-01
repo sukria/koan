@@ -3,6 +3,7 @@
 from unittest.mock import patch, MagicMock
 
 import pytest
+import requests
 
 from notify import send_telegram
 
@@ -31,7 +32,7 @@ class TestSendTelegram:
         )
         assert send_telegram("test") is False
 
-    @patch("notify.requests.post", side_effect=Exception("network error"))
+    @patch("notify.requests.post", side_effect=requests.RequestException("network error"))
     def test_network_error(self, mock_post):
         assert send_telegram("test") is False
 

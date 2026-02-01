@@ -12,6 +12,7 @@ DAILY_REPORT="$(dirname "$0")/daily_report.py"
 MISSION_SUMMARY="$(dirname "$0")/mission_summary.py"
 GIT_SYNC="$(dirname "$0")/git_sync.py"
 GIT_SYNC_INTERVAL=${KOAN_GIT_SYNC_INTERVAL:-5}
+HEALTH_CHECK="$(dirname "$0")/health_check.py"
 
 if [ ! -d "$INSTANCE" ]; then
   echo "[koan] No instance/ directory found. Run: cp -r instance.example instance"
@@ -90,6 +91,10 @@ MEMORY_MGR="$(dirname "$0")/memory_manager.py"
 echo "[koan] Running memory cleanup..."
 "$PYTHON" "$MEMORY_MGR" "$INSTANCE" cleanup 15 2>/dev/null || true
 
+# Health check: warn if Telegram bridge is not running
+echo "[koan] Checking Telegram bridge health..."
+"$PYTHON" "$HEALTH_CHECK" "$KOAN_ROOT" --max-age 120 || true
+
 echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
 notify "Koan starting — $MAX_RUNS max runs, ${INTERVAL}s interval"
 
@@ -121,9 +126,9 @@ while [ $count -lt $MAX_RUNS ]; do
   # Extract mission title (strip "- ", project tag, and leading/trailing whitespace)
   MISSION_TITLE=""
   if [ -n "$MISSION_LINE" ]; then
-    MISSION_TITLE=$(echo "$MISSION_LINE" | sed 's/^- //' | sed 's/\[project:[a-zA-Z0-9_-]*\] *//' | sed 's/^ *//;s/ *$//')
+    MISSION_TITLE=$(echo "$MISSION_LINE" | sed 's/^- //' | sed 's/\[projec\{0,1\}t:[a-zA-Z0-9_-]*\] *//' | sed 's/^ *//;s/ *$//')
   fi
-  if [[ "$MISSION_LINE" =~ \[project:([a-zA-Z0-9_-]+)\] ]]; then
+  if [[ "$MISSION_LINE" =~ \[projec?t:([a-zA-Z0-9_-]+)\] ]]; then
     PROJECT_NAME="${BASH_REMATCH[1]}"
 
     # Find project index
@@ -143,9 +148,16 @@ while [ $count -lt $MAX_RUNS ]; do
       exit 1
     fi
   else
-    # No project tag: default to first project
-    PROJECT_NAME="${PROJECT_NAMES[0]}"
-    PROJECT_PATH="${PROJECT_PATHS[0]}"
+    # No project tag: rotate through projects in autonomous mode
+    if [ -z "$MISSION_LINE" ]; then
+      # Autonomous mode: round-robin across projects
+      PROJECT_IDX=$(( (RUN_NUM - 1) % ${#PROJECT_NAMES[@]} ))
+    else
+      # Untagged mission: default to first project
+      PROJECT_IDX=0
+    fi
+    PROJECT_NAME="${PROJECT_NAMES[$PROJECT_IDX]}"
+    PROJECT_PATH="${PROJECT_PATHS[$PROJECT_IDX]}"
   fi
 
   echo "[koan] Project: $PROJECT_NAME ($PROJECT_PATH)"
@@ -155,8 +167,8 @@ while [ $count -lt $MAX_RUNS ]; do
     echo "[koan] Mission: $MISSION_TITLE"
     notify "Run $RUN_NUM/$MAX_RUNS — Mission taken: $MISSION_TITLE"
   else
-    echo "[koan] No pending mission — autonomous mode"
-    notify "Run $RUN_NUM/$MAX_RUNS — No pending mission, entering autonomous mode"
+    echo "[koan] No pending mission — autonomous mode ($PROJECT_NAME)"
+    notify "Run $RUN_NUM/$MAX_RUNS — No pending mission, autonomous mode on $PROJECT_NAME"
   fi
 
   # Build prompt from template, replacing placeholders
@@ -223,10 +235,16 @@ Koan paused after $count runs. Send /resume via Telegram when quota resets to ch
       notify "Run $RUN_NUM/$MAX_RUNS — Autonomous run completed"
     fi
 
-    # Extract journal summary and send via outbox
+    # Extract journal summary and send via outbox (locked append to avoid race with awake.py)
     SUMMARY_TEXT=$("$PYTHON" "$MISSION_SUMMARY" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || echo "")
     if [ -n "$SUMMARY_TEXT" ]; then
-      echo "$SUMMARY_TEXT" >> "$INSTANCE/outbox.md"
+      "$PYTHON" -c "
+import fcntl, sys
+with open('$INSTANCE/outbox.md', 'a') as f:
+    fcntl.flock(f, fcntl.LOCK_EX)
+    f.write(sys.stdin.read())
+    fcntl.flock(f, fcntl.LOCK_UN)
+" <<< "$SUMMARY_TEXT"
     fi
   else
     if [ -n "$MISSION_TITLE" ]; then
