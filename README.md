@@ -1,5 +1,10 @@
 # Kōan
 
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)
+![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+![Status](https://img.shields.io/badge/status-alpha-orange.svg)
+![Claude Code](https://img.shields.io/badge/Claude-Code%20CLI-blueviolet.svg)
+
 An autonomous background agent that uses idle Claude Max quota to work on your projects.
 
 Kōan runs as a loop on your local machine: it pulls missions from a shared repo, executes them via Claude Code CLI, writes reports, and communicates with you via Telegram.
@@ -10,7 +15,7 @@ Kōan runs as a loop on your local machine: it pulls missions from a shared repo
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────────┐
-│  Telegram    │◄───►│  bridge.py   │◄───►│ instance/        │
+│  Telegram    │◄───►│  awake.py    │◄───►│ instance/        │
 │  (Human)     │     │              │     │   missions.md    │
 └─────────────┘     └──────────────┘     │   outbox.md      │
                                          └────────┬─────────┘
@@ -31,11 +36,16 @@ Kōan runs as a loop on your local machine: it pulls missions from a shared repo
 
 ```
 koan/
-  run.sh                    # App — main loop launcher
-  bridge.py                 # App — Telegram bridge
   README.md
   INSTALL.md
   LICENSE
+  Makefile                  # Build & run targets
+  koan/                     # Application code
+    run.sh                  #   Main loop launcher
+    awake.py                #   Telegram bridge
+    notify.py               #   Telegram notification helper
+    system-prompt.md        #   Claude prompt template
+    requirements.txt        #   Python dependencies
   instance.example/         # Template — copy to instance/ to start
     soul.md                 #   Agent personality
     config.yaml             #   Budget, paths, Telegram config
@@ -48,7 +58,7 @@ koan/
   instance/                 # Your data (gitignored)
 ```
 
-**Design principle:** App code (`run.sh`, `bridge.py`) is generic and open source. Instance data (`instance/`) is private to each user. Fork the repo, write your own soul.
+**Design principle:** App code (`koan/`) is generic and open source. Instance data (`instance/`) is private to each user. Fork the repo, write your own soul.
 
 See [INSTALL.md](INSTALL.md) for setup instructions.
 

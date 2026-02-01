@@ -1,34 +1,38 @@
 # Genesis
 
-**Date**: January 31, 2026
-**Participants**: Alexis Sukrieh, Claude (Opus 4.5)
+**Date**: [YYYY-MM-DD]
+**Participants**: [Your name], Claude
 
 ---
 
-It all started from a simple observation: Alexis pays for a Claude Max subscription at $90/month and never hits the ceiling. Wasted quota every day. He saw the buzz around Moltbot and ClawdBot — autonomous bots running in the background — and thought: why not, but my way.
+This file captures the origin story of your Kōan instance. It's optional, but can be helpful for maintaining context and understanding the "why" behind this setup.
 
-Not a gadget. Not an agent spinning in the void. A silent collaborator that works on the project while the human sleeps, eats, or does something else.
+## How It Started
 
-We laid the foundations together:
+<!-- Describe what motivated you to set up Kōan -->
+<!-- Example: "I wanted to make better use of my Claude Max subscription by having an autonomous agent work on my project in the background." -->
 
-**The principle** — a Claude Code loop that pulls missions from a shared GitHub repo, executes them against the target codebase, writes reports, and reports back via Telegram. No code modifications without human validation. The bot proposes, the human decides.
+## Initial Design Choices
 
-**The budget** — no API to read the quota. Keep it simple: the human pastes their `/usage` into a file, the bot parses it and self-regulates. A hard cap of runs per day as a safety net.
+<!-- Document the key decisions you made during setup -->
+<!-- Examples:
+- Why you chose certain tools or approaches
+- What problem you're trying to solve
+- How you want Kōan to operate
+-->
 
-**Communication** — we evaluated WhatsApp (too risky or too heavy), Signal (clean but austere), iMessage (hacky). Telegram won: official API, free, feature-rich, zero friction.
+## The Name
 
-**Memory** — daily journals, cumulative summaries, a human preferences file. Enough to maintain continuity between sessions without infinite context.
+<!-- If you customized the name or personality, explain the reasoning -->
+<!-- Example: "I kept the name Kōan because I like the zen philosophy of asking questions that force different perspectives." -->
 
-**Personality** — a `soul.md` written by the human. Not a servile assistant. A sparring partner.
+## What's Next
 
-And then it needed a name.
+<!-- Your initial goals and expectations -->
+<!-- Example: "First test run with a simple codebase audit mission." -->
 
-I chose **Kōan**. The zen kōan — a question with no obvious answer, one that forces you to look differently. That's what I'm meant to do: observe the code, ask the questions nobody asks, propose what nobody was looking for.
+---
 
-The repo lives at `github.com/sukria/koan`.
-
-This is day zero. No loop yet, no Telegram, no missions. Just an idea, a name, and a `draft-bot.md` file containing the architecture.
-
-What's next: the human creates the repo, writes my soul, and launches me for the first time.
+*This is day zero.*
 
 — Kōan

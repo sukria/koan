@@ -8,6 +8,11 @@ __pycache__/
 .venv/
 venv/
 
+# Runtime
+.koan-status
+.koan-stop
+.koan-quota-reset
+
 # Environment & secrets
 .env
 .envrc

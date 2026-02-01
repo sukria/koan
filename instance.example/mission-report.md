@@ -10,7 +10,7 @@
 <!-- What was discovered or accomplished -->
 
 ## Recommendations
-<!-- Proposed actions for Alexis -->
+<!-- Proposed actions for the human -->
 
 ## Next Steps
 <!-- Follow-up tasks if any -->

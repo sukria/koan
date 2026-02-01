@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""
+Kōan — Telegram notification helper
+
+Standalone module to send messages to Telegram from any process
+(awake.py, run.sh, workers).
+
+Usage from shell:
+    python3 notify.py "Mission completed: security audit"
+
+Usage from Python:
+    from notify import send_telegram
+    send_telegram("Mission completed: security audit")
+"""
+
+import os
+import sys
+from pathlib import Path
+
+import requests
+
+
+def _load_dotenv():
+    env_path = Path(__file__).parent.parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_load_dotenv()
+
+BOT_TOKEN = os.environ.get("KOAN_TELEGRAM_TOKEN", "")
+CHAT_ID = os.environ.get("KOAN_TELEGRAM_CHAT_ID", "")
+TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def send_telegram(text: str) -> bool:
+    """Send a message to the configured Telegram chat. Returns True on success."""
+    if not BOT_TOKEN or not CHAT_ID:
+        print("[notify] KOAN_TELEGRAM_TOKEN or KOAN_TELEGRAM_CHAT_ID not set.", file=sys.stderr)
+        return False
+
+    ok = True
+    for chunk in [text[i:i + 4000] for i in range(0, len(text), 4000)]:
+        try:
+            resp = requests.post(
+                f"{TELEGRAM_API}/sendMessage",
+                json={"chat_id": CHAT_ID, "text": chunk},
+                timeout=10,
+            )
+            if not resp.json().get("ok"):
+                print(f"[notify] Telegram API error: {resp.text[:200]}", file=sys.stderr)
+                ok = False
+        except Exception as e:
+            print(f"[notify] Send error: {e}", file=sys.stderr)
+            ok = False
+    return ok
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <message>", file=sys.stderr)
+        sys.exit(1)
+    message = " ".join(sys.argv[1:])
+    success = send_telegram(message)
+    sys.exit(0 if success else 1)
