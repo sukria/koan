@@ -1,5 +1,6 @@
 # Kōan instance data (private to each user)
 instance/
+.koan*
 
 # Python
 __pycache__/
