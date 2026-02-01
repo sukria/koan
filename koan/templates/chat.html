@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Koan — Chat{% endblock %}
+{% block content %}
+<h1>Chat</h1>
+
+<div class="chat-container">
+    <div class="chat-messages" id="messages">
+        <div class="chat-msg koan">
+            <div class="sender">Koan</div>
+            <div>Salut. Envoie un message ou une mission.</div>
+        </div>
+    </div>
+
+    <div class="chat-input">
+        <textarea id="input" placeholder="Écris ici..." onkeydown="handleKey(event)"></textarea>
+        <div class="actions">
+            <button onclick="send('chat')">Envoyer</button>
+            <button class="btn-secondary" onclick="send('mission')">Mission</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const messages = document.getElementById('messages');
+const input = document.getElementById('input');
+
+function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send('chat');
+    }
+    if (e.key === 'Enter' && e.ctrlKey) {
+        e.preventDefault();
+        send('mission');
+    }
+}
+
+function addMessage(sender, text, cls) {
+    const div = document.createElement('div');
+    div.className = `chat-msg ${cls}`;
+    div.innerHTML = `<div class="sender">${sender}</div><div>${escapeHtml(text)}</div>`;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function send(mode) {
+    const text = input.value.trim();
+    if (!text) return;
+
+    addMessage('Vous', text, 'human');
+    input.value = '';
+
+    if (mode === 'mission') {
+        addMessage('Koan', 'Mission ajoutée.', 'koan');
+    }
+
+    // Show loading
+    const loadingId = 'loading-' + Date.now();
+    if (mode === 'chat') {
+        const div = document.createElement('div');
+        div.className = 'chat-msg koan loading';
+        div.id = loadingId;
+        div.innerHTML = '<div class="sender">Koan</div><div><span class="spinner"></span> Réflexion...</div>';
+        messages.appendChild(div);
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    const form = new FormData();
+    form.append('message', text);
+    form.append('mode', mode);
+
+    try {
+        const resp = await fetch('/chat/send', { method: 'POST', body: form });
+        const data = await resp.json();
+
+        // Remove loading
+        const loader = document.getElementById(loadingId);
+        if (loader) loader.remove();
+
+        if (data.ok && data.type === 'chat') {
+            addMessage('Koan', data.response, 'koan');
+        } else if (data.ok && data.type === 'mission') {
+            // Already showed confirmation
+        } else if (data.error) {
+            addMessage('Koan', `Erreur: ${data.error}`, 'koan');
+        }
+    } catch (e) {
+        const loader = document.getElementById(loadingId);
+        if (loader) loader.remove();
+        addMessage('Koan', 'Erreur de connexion.', 'koan');
+    }
+}
+</script>
+{% endblock %}

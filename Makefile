@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: setup awake run clean say migrate test
+.PHONY: setup awake run clean say migrate test dashboard
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
@@ -29,6 +29,9 @@ test: setup
 
 migrate: setup
 	$(PYTHON) koan/migrate_memory.py
+
+dashboard: setup
+	$(PYTHON) koan/dashboard.py
 
 clean:
 	rm -rf $(VENV)

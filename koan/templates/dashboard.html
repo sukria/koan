@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Koan — Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="grid">
+    <div class="card">
+        <div class="stat-label">Status</div>
+        <div class="stat-value" style="font-size:1.3rem;">
+            {% if state == 'running' %}
+                <span class="badge badge-green">{{ state_label }}</span>
+            {% elif state == 'paused' %}
+                <span class="badge badge-orange">{{ state_label }}</span>
+            {% elif state == 'stopped' %}
+                <span class="badge badge-red">{{ state_label }}</span>
+            {% else %}
+                <span class="badge badge-muted">{{ state_label }}</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card">
+        <div class="stat-label">En attente</div>
+        <div class="stat-value">{{ pending_count }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">En cours</div>
+        <div class="stat-value">{{ in_progress_count }}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Terminées</div>
+        <div class="stat-value">{{ done_count }}</div>
+    </div>
+</div>
+
+{% if missions.in_progress %}
+<h2>En cours</h2>
+{% for m in missions.in_progress %}
+<div class="card">
+    <div class="mission-item">{{ m }}</div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if missions.pending %}
+<h2>En attente</h2>
+{% for m in missions.pending %}
+<div class="card">
+    <div class="mission-item">{{ m }}</div>
+</div>
+{% endfor %}
+{% endif %}
+
+<script>
+// Auto-refresh status every 10s
+setInterval(() => {
+    fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+            // Could update DOM here; for now just check if page needs reload
+        })
+        .catch(() => {});
+}, 10000);
+</script>
+{% endblock %}

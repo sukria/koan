@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Koan — Journal{% endblock %}
+{% block content %}
+<h1>Journal</h1>
+
+{% if not entries %}
+<div class="card">
+    <p style="color: var(--text-muted);">Aucune entrée de journal trouvée.</p>
+</div>
+{% endif %}
+
+{% for day in entries %}
+<div class="journal-date">{{ day.date }}</div>
+{% for entry in day.entries %}
+<div class="card">
+    <div class="journal-project">{{ entry.project }}</div>
+    <pre>{{ entry.content }}</pre>
+</div>
+{% endfor %}
+{% endfor %}
+{% endblock %}
