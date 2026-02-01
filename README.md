@@ -115,6 +115,14 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 | `make test` | Run test suite |
 | `make say m="..."` | Send a message as if from Telegram |
 
+## Security
+
+**This project is alpha software.** It is not designed for public-facing deployment.
+
+Kōan exposes local services (dashboard, Telegram bridge) that have **no authentication or access control**. It should only be run on a trusted local network where all participants are known and authorized.
+
+Do not expose any Kōan service to the public internet. If you need remote access, use a VPN or SSH tunnel.
+
 ## License
 
 AGPL-3.0 — See [LICENSE](LICENSE).
