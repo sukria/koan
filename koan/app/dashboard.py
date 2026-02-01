@@ -29,7 +29,7 @@ from app.utils import parse_project, insert_pending_mission
 # Paths
 # ---------------------------------------------------------------------------
 
-KOAN_ROOT = Path(__file__).parent.parent
+KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 INSTANCE_DIR = KOAN_ROOT / "instance"
 MISSIONS_FILE = INSTANCE_DIR / "missions.md"
 OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
@@ -37,7 +37,7 @@ SOUL_FILE = INSTANCE_DIR / "soul.md"
 SUMMARY_FILE = INSTANCE_DIR / "memory" / "summary.md"
 JOURNAL_DIR = INSTANCE_DIR / "journal"
 
-app = Flask(__name__, template_folder=str(KOAN_ROOT / "templates"))
+app = Flask(__name__, template_folder=str(KOAN_ROOT / "koan" / "templates"))
 
 
 # ---------------------------------------------------------------------------

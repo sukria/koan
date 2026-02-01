@@ -26,7 +26,7 @@ from app.utils import load_dotenv
 
 load_dotenv()
 
-KOAN_ROOT = Path(__file__).parent.parent
+KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 INSTANCE_DIR = KOAN_ROOT / "instance"
 MISSIONS_FILE = INSTANCE_DIR / "missions.md"
 REPORT_MARKER = KOAN_ROOT / ".koan-daily-report"

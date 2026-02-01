@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 
-KOAN_ROOT = Path(__file__).parent.parent
+KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 
 # Pre-compiled regex for project tag extraction (accepts both [project:X] and [projet:X])
 _PROJECT_TAG_RE = re.compile(r'\[projec?t:([a-zA-Z0-9_-]+)\]')

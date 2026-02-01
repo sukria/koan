@@ -7,10 +7,11 @@ Usage:
     python3 koan/migrate_memory.py
 """
 
+import os
 import shutil
 from pathlib import Path
 
-KOAN_ROOT = Path(__file__).parent.parent
+KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 INSTANCE = KOAN_ROOT / "instance"
 MEMORY = INSTANCE / "memory"
 

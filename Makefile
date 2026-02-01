@@ -14,24 +14,24 @@ $(VENV)/bin/activate: koan/requirements.txt
 	@touch $(VENV)/bin/activate
 
 awake: setup
-	$(PYTHON) koan/app/awake.py
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/awake.py
 
 run:
 	./koan/run.sh
 
 say:
 	@test -n "$(m)" || (echo "Usage: make say m=\"your message\"" && exit 1)
-	@cd koan && PYTHONPATH=. $(PYTHON) -c "from app.awake import handle_message; handle_message('$(m)')"
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON) -c "from app.awake import handle_message; handle_message('$(m)')"
 
 test: setup
 	$(VENV)/bin/pip install -q pytest 2>/dev/null
-	cd koan && PYTHONPATH=. ../$(PYTHON) -m pytest tests/ -v
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m pytest tests/ -v
 
 migrate: setup
-	$(PYTHON) koan/app/migrate_memory.py
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/migrate_memory.py
 
 dashboard: setup
-	$(PYTHON) koan/app/dashboard.py
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/dashboard.py
 
 clean:
 	rm -rf $(VENV)

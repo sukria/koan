@@ -6,6 +6,7 @@
 set -euo pipefail
 
 KOAN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export KOAN_ROOT
 INSTANCE="$KOAN_ROOT/instance"
 APP_DIR="$(dirname "$0")/app"
 NOTIFY="$APP_DIR/notify.py"
@@ -63,6 +64,9 @@ done
 # Use venv python if available, else system python
 PYTHON="python3"
 [ -f "$KOAN_ROOT/.venv/bin/python3" ] && PYTHON="$KOAN_ROOT/.venv/bin/python3"
+
+# Set PYTHONPATH so Python scripts can import from app/
+export PYTHONPATH="$KOAN_ROOT/koan"
 
 notify() {
   "$PYTHON" "$NOTIFY" "$@" 2>/dev/null || true

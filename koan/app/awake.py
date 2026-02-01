@@ -33,7 +33,7 @@ CHAT_ID = os.environ.get("KOAN_TELEGRAM_CHAT_ID", "")
 POLL_INTERVAL = int(os.environ.get("KOAN_BRIDGE_INTERVAL", "3"))
 CHAT_TIMEOUT = int(os.environ.get("KOAN_CHAT_TIMEOUT", "180"))
 
-KOAN_ROOT = Path(__file__).parent.parent
+KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 INSTANCE_DIR = KOAN_ROOT / "instance"
 MISSIONS_FILE = INSTANCE_DIR / "missions.md"
 OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
