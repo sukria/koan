@@ -24,7 +24,7 @@ Progress tracking via user stories. Updated between sessions.
 - [x] Create `notify.py`: `send_telegram(message)` function reusable by all workers
 - [x] Integrate calls in `run.sh`: notification at start and end of each mission
 - [x] Handle failure cases: notification with error message
-- [ ] Send a short summary of the mission report on completion (via outbox)
+- [x] Send a short summary of the mission report on completion (via outbox) — branch `koan/mission-summary-outbox`
 
 ### US 1.3 — Continuous outbox flush
 - **As** Kōan
@@ -74,7 +74,7 @@ Progress tracking via user stories. Updated between sessions.
 - [x] Notification "Mission completed: <title>"
 - [x] Notification "Mission failed: <title>"
 - [x] Notification "No pending mission — autonomous mode"
-- [ ] Include 2-3 line summary on mission completion (requires outbox integration)
+- [x] Include 2-3 line summary on mission completion — branch `koan/mission-summary-outbox`
 
 ### US 3.2 — Daily report
 - **As a** human
