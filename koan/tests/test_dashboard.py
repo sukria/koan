@@ -1,10 +1,15 @@
 """Tests for koan/dashboard.py"""
 
+import shutil
+
 import pytest
+from jinja2 import FileSystemLoader
 from pathlib import Path
 from unittest.mock import patch
 
 from app import dashboard
+
+REAL_TEMPLATES = Path(__file__).parent.parent / "templates"
 
 
 @pytest.fixture
@@ -39,6 +44,9 @@ def instance_dir(tmp_path):
 @pytest.fixture
 def app_client(instance_dir, tmp_path):
     """Create a Flask test client with patched paths."""
+    # Copy real templates so Flask can render them
+    tpl_dest = tmp_path / "koan" / "templates"
+    shutil.copytree(REAL_TEMPLATES, tpl_dest)
     with patch.object(dashboard, "INSTANCE_DIR", instance_dir), \
          patch.object(dashboard, "MISSIONS_FILE", instance_dir / "missions.md"), \
          patch.object(dashboard, "OUTBOX_FILE", instance_dir / "outbox.md"), \
@@ -47,6 +55,7 @@ def app_client(instance_dir, tmp_path):
          patch.object(dashboard, "JOURNAL_DIR", instance_dir / "journal"), \
          patch.object(dashboard, "KOAN_ROOT", tmp_path):
         dashboard.app.config["TESTING"] = True
+        dashboard.app.jinja_loader = FileSystemLoader(str(tpl_dest))
         with dashboard.app.test_client() as client:
             yield client
 
