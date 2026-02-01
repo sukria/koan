@@ -171,16 +171,16 @@ class TestJournal:
 
 class TestParseProject:
     def test_english_tag(self):
-        project, text = dashboard._parse_project("[project:koan] fix bug")
+        project, text = dashboard.parse_project("[project:koan] fix bug")
         assert project == "koan"
         assert text == "fix bug"
 
     def test_french_tag(self):
-        project, text = dashboard._parse_project("[projet:koan] fix bug")
+        project, text = dashboard.parse_project("[projet:koan] fix bug")
         assert project == "koan"
         assert text == "fix bug"
 
     def test_no_tag(self):
-        project, text = dashboard._parse_project("fix bug")
+        project, text = dashboard.parse_project("fix bug")
         assert project is None
         assert text == "fix bug"
