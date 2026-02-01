@@ -242,11 +242,15 @@ def load_recent_telegram_history(history_file: Path, max_messages: int = 10) -> 
         return []
 
 
-def format_conversation_history(messages: List[Dict[str, str]]) -> str:
+def format_conversation_history(
+    messages: List[Dict[str, str]],
+    max_chars: int = 3000,
+) -> str:
     """Format conversation history for inclusion in the prompt.
 
     Args:
         messages: List of message dicts from load_recent_telegram_history
+        max_chars: Maximum total characters for the formatted history
 
     Returns:
         Formatted string ready to include in the prompt
@@ -255,8 +259,16 @@ def format_conversation_history(messages: List[Dict[str, str]]) -> str:
         return ""
 
     lines = ["Recent conversation:"]
+    total = len(lines[0])
     for msg in messages:
         role_label = "Human" if msg["role"] == "user" else "Kōan"
-        lines.append(f"{role_label}: {msg['text']}")
+        text = msg["text"]
+        if len(text) > 500:
+            text = text[:500] + "..."
+        line = f"{role_label}: {text}"
+        total += len(line) + 1
+        if total > max_chars:
+            break
+        lines.append(line)
 
     return "\n".join(lines)

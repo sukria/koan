@@ -247,33 +247,35 @@ def handle_mission(text: str):
     print(f"[awake] Mission queued: [{project or 'default'}] {mission_text[:60]}")
 
 
-def handle_chat(text: str):
-    """Lightweight Claude call for conversational messages — fast response."""
-    # Save user message to history
-    save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
+def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
+    """Build the prompt for a chat response.
 
+    Args:
+        text: The user's message.
+        lite: If True, strip heavy context (journal, summary) to stay under budget.
+    """
     # Load recent conversation history
     history = load_recent_telegram_history(TELEGRAM_HISTORY_FILE, max_messages=10)
     history_context = format_conversation_history(history)
 
-    # Load today's journal for recent context
-    # Try nested structure first (journal/YYYY-MM-DD/*.md), fall back to flat
     journal_context = ""
-    today = f"{date.today():%Y-%m-%d}"
-    journal_dir = INSTANCE_DIR / "journal" / today
-    if journal_dir.is_dir():
-        parts = []
-        for f in sorted(journal_dir.glob("*.md")):
-            parts.append(f.read_text())
-        journal_content = "\n---\n".join(parts)
-    else:
-        journal_path = INSTANCE_DIR / "journal" / f"{today}.md"
-        journal_content = journal_path.read_text() if journal_path.exists() else ""
-    if journal_content:
-        if len(journal_content) > 2000:
-            journal_context = "...\n" + journal_content[-2000:]
+    if not lite:
+        # Load today's journal for recent context
+        today = f"{date.today():%Y-%m-%d}"
+        journal_dir = INSTANCE_DIR / "journal" / today
+        if journal_dir.is_dir():
+            parts = []
+            for f in sorted(journal_dir.glob("*.md")):
+                parts.append(f.read_text())
+            journal_content = "\n---\n".join(parts)
         else:
-            journal_context = journal_content
+            journal_path = INSTANCE_DIR / "journal" / f"{today}.md"
+            journal_content = journal_path.read_text() if journal_path.exists() else ""
+        if journal_content:
+            if len(journal_content) > 2000:
+                journal_context = "...\n" + journal_content[-2000:]
+            else:
+                journal_context = journal_content
 
     # Load human preferences for personality context
     prefs_context = ""
@@ -297,28 +299,45 @@ def handle_chat(text: str):
     # Load tools description
     tools_desc = get_tools_description()
 
+    summary_budget = 0 if lite else 1500
+
     # Build prompt with conversation history
     prompt_parts = [
-        f"You are Kōan — a sparring partner, not an assistant.",
+        "You are Kōan — a sparring partner, not an assistant.",
         f"Here is your identity:\n\n{SOUL}\n",
         f"{tools_desc}\n" if tools_desc else "",
         f"About the human:\n{prefs_context}\n" if prefs_context else "",
-        f"Summary of past sessions:\n{SUMMARY[:1500]}\n" if SUMMARY else "",
+        f"Summary of past sessions:\n{SUMMARY[:summary_budget]}\n" if SUMMARY and summary_budget else "",
         f"Today's journal (excerpt):\n{journal_context}\n" if journal_context else "",
         f"{history_context}\n" if history_context else "",
         f"{time_hint}\n",
         f"The human sends you this message on Telegram:\n\n  « {text} »\n",
-        f"Respond in the human's preferred language. Be direct, concise, natural — like texting a collaborator. "
-        f"You can be funny (dry humor), you can disagree, you can ask back. "
-        f"2-3 sentences max unless the question requires more. "
-        f"No markdown formatting — this is Telegram, keep it plain.\n"
+        "Respond in the human's preferred language. Be direct, concise, natural — like texting a collaborator. "
+        "You can be funny (dry humor), you can disagree, you can ask back. "
+        "2-3 sentences max unless the question requires more. "
+        "No markdown formatting — this is Telegram, keep it plain.\n"
     ]
     prompt = "\n".join([p for p in prompt_parts if p])
+
+    # Hard cap: if prompt exceeds 12k chars, force lite mode
+    MAX_PROMPT_CHARS = 12000
+    if len(prompt) > MAX_PROMPT_CHARS and not lite:
+        return _build_chat_prompt(text, lite=True)
+
+    return prompt
+
+
+def handle_chat(text: str):
+    """Lightweight Claude call for conversational messages — fast response."""
+    # Save user message to history
+    save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
+
+    prompt = _build_chat_prompt(text)
 
     try:
         allowed_tools = get_allowed_tools()
         result = subprocess.run(
-            ["claude", "-p", prompt, "--allowedTools", allowed_tools],
+            ["claude", "-p", prompt, "--allowedTools", allowed_tools, "--max-turns", "1"],
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )
@@ -336,10 +355,28 @@ def handle_chat(text: str):
         else:
             print("[awake] Empty response from Claude.")
     except subprocess.TimeoutExpired:
-        print(f"[awake] Claude timed out ({CHAT_TIMEOUT}s).")
-        timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks."
-        format_and_send(timeout_msg)
-        save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
+        print(f"[awake] Claude timed out ({CHAT_TIMEOUT}s). Retrying with lite context...")
+        # Retry with reduced context
+        lite_prompt = _build_chat_prompt(text, lite=True)
+        try:
+            result = subprocess.run(
+                ["claude", "-p", lite_prompt, "--allowedTools", allowed_tools, "--max-turns", "1"],
+                capture_output=True, text=True, timeout=CHAT_TIMEOUT,
+                cwd=PROJECT_PATH or str(KOAN_ROOT),
+            )
+            response = result.stdout.strip()
+            if response:
+                send_telegram(response)
+                save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
+                print(f"[awake] Chat reply (lite retry): {response[:80]}...")
+            else:
+                timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks."
+                format_and_send(timeout_msg)
+                save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
+        except (subprocess.TimeoutExpired, Exception):
+            timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks."
+            format_and_send(timeout_msg)
+            save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
     except Exception as e:
         print(f"[awake] Claude error: {e}")
 

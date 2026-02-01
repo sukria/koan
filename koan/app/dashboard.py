@@ -45,6 +45,7 @@ SOUL_FILE = INSTANCE_DIR / "soul.md"
 SUMMARY_FILE = INSTANCE_DIR / "memory" / "summary.md"
 JOURNAL_DIR = INSTANCE_DIR / "journal"
 TELEGRAM_HISTORY_FILE = INSTANCE_DIR / "telegram-history.jsonl"
+CHAT_TIMEOUT = int(os.environ.get("KOAN_CHAT_TIMEOUT", "180"))
 
 app = Flask(__name__, template_folder=str(KOAN_ROOT / "koan" / "templates"))
 
@@ -256,8 +257,8 @@ def chat_send():
             project_path = os.environ.get("KOAN_PROJECT_PATH", str(KOAN_ROOT))
             allowed_tools = get_allowed_tools()
             result = subprocess.run(
-                ["claude", "-p", prompt, "--allowedTools", allowed_tools],
-                capture_output=True, text=True, timeout=120,
+                ["claude", "-p", prompt, "--allowedTools", allowed_tools, "--max-turns", "1"],
+                capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=project_path,
             )
             response = result.stdout.strip()
