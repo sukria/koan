@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 
 # Import config utilities
-from app.utils import load_config
+from app.utils import load_config, get_auto_merge_config
 
 
 def run_git(cwd: str, *args) -> Tuple[int, str, str]:
@@ -47,30 +47,6 @@ def run_git(cwd: str, *args) -> Tuple[int, str, str]:
         return 1, "", "Git command timed out"
     except Exception as e:
         return 1, "", str(e)
-
-
-def get_auto_merge_config(config: dict, project_name: str) -> dict:
-    """Get auto-merge config with per-project override support.
-
-    Merges global defaults with project-specific overrides.
-
-    Args:
-        config: Full config dict from load_config()
-        project_name: Name of the project (e.g., "koan", "anantys-back")
-
-    Returns:
-        Merged config with keys: enabled, base_branch, strategy, rules
-    """
-    global_cfg = config.get("git_auto_merge", {})
-    project_cfg = config.get("projects", {}).get(project_name, {}).get("git_auto_merge", {})
-
-    # Deep merge: project overrides global
-    return {
-        "enabled": project_cfg.get("enabled", global_cfg.get("enabled", True)),
-        "base_branch": project_cfg.get("base_branch", global_cfg.get("base_branch", "main")),
-        "strategy": project_cfg.get("strategy", global_cfg.get("strategy", "squash")),
-        "rules": project_cfg.get("rules", global_cfg.get("rules", []))
-    }
 
 
 def find_matching_rule(branch: str, rules: List[dict]) -> Optional[dict]:

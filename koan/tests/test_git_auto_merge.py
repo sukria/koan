@@ -2,10 +2,18 @@
 
 import pytest
 from app.git_auto_merge import (
-    get_auto_merge_config,
     find_matching_rule,
     should_auto_merge,
+    run_git,
+    is_working_tree_clean,
+    is_branch_pushed,
+    perform_merge,
+    cleanup_branch,
+    auto_merge_branch,
+    write_merge_success_to_journal,
+    write_merge_failure_to_journal,
 )
+from app.utils import get_auto_merge_config
 
 
 # --- get_auto_merge_config ---
