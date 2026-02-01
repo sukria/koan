@@ -670,3 +670,109 @@ class TestMainLoop:
         with pytest.raises(StopIteration):
             main()
         mock_handle.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# /pause command
+# ---------------------------------------------------------------------------
+
+class TestPauseCommand:
+    @patch("app.awake.format_and_send")
+    def test_pause_creates_file(self, mock_send, tmp_path):
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_command("/pause")
+        assert (tmp_path / ".koan-pause").exists()
+        mock_send.assert_called_once()
+        assert "paused" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.format_and_send")
+    def test_pause_already_paused(self, mock_send, tmp_path):
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_command("/pause")
+        assert "already paused" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.format_and_send")
+    def test_resume_clears_pause(self, mock_send, tmp_path):
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_resume()
+        assert not (tmp_path / ".koan-pause").exists()
+        assert "unpaused" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.format_and_send")
+    def test_resume_pause_takes_priority_over_quota(self, mock_send, tmp_path):
+        """If both pause and quota files exist, /resume clears pause first."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-quota-reset").write_text("resets 7pm\n0")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_resume()
+        assert not (tmp_path / ".koan-pause").exists()
+        assert (tmp_path / ".koan-quota-reset").exists()
+        assert "unpaused" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.format_and_send")
+    def test_status_shows_pause(self, mock_send, tmp_path):
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        missions = instance / "missions.md"
+        missions.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n")
+        with patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.MISSIONS_FILE", missions):
+            status = _build_status()
+        assert "Paused" in status
+
+
+# ---------------------------------------------------------------------------
+# handle_chat — lite retry error distinction
+# ---------------------------------------------------------------------------
+
+class TestChatLiteRetryErrors:
+    @patch("app.awake.save_telegram_message")
+    @patch("app.awake.load_recent_telegram_history", return_value=[])
+    @patch("app.awake.format_conversation_history", return_value="")
+    @patch("app.awake.get_tools_description", return_value="")
+    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.format_and_send")
+    @patch("app.awake.subprocess.run")
+    def test_lite_retry_non_timeout_error(self, mock_run, mock_send, mock_tools,
+                                           mock_tools_desc, mock_fmt, mock_hist, mock_save, tmp_path):
+        """Non-timeout error on lite retry should say 'something went wrong', not 'timeout'."""
+        mock_run.side_effect = [
+            subprocess.TimeoutExpired("claude", 180),
+            OSError("connection refused"),
+        ]
+        with patch("app.awake.INSTANCE_DIR", tmp_path), \
+             patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.PROJECT_PATH", ""), \
+             patch("app.awake.TELEGRAM_HISTORY_FILE", tmp_path / "history.jsonl"), \
+             patch("app.awake.SOUL", ""), \
+             patch("app.awake.SUMMARY", ""), \
+             patch("app.awake.CHAT_TIMEOUT", 180):
+            handle_chat("complex question")
+        assert "went wrong" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.save_telegram_message")
+    @patch("app.awake.load_recent_telegram_history", return_value=[])
+    @patch("app.awake.format_conversation_history", return_value="")
+    @patch("app.awake.get_tools_description", return_value="")
+    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.format_and_send")
+    @patch("app.awake.subprocess.run")
+    def test_lite_retry_timeout_says_timeout(self, mock_run, mock_send, mock_tools,
+                                              mock_tools_desc, mock_fmt, mock_hist, mock_save, tmp_path):
+        """Timeout on lite retry should still say 'timeout'."""
+        mock_run.side_effect = [
+            subprocess.TimeoutExpired("claude", 180),
+            subprocess.TimeoutExpired("claude", 180),
+        ]
+        with patch("app.awake.INSTANCE_DIR", tmp_path), \
+             patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.PROJECT_PATH", ""), \
+             patch("app.awake.TELEGRAM_HISTORY_FILE", tmp_path / "history.jsonl"), \
+             patch("app.awake.SOUL", ""), \
+             patch("app.awake.SUMMARY", ""), \
+             patch("app.awake.CHAT_TIMEOUT", 180):
+            handle_chat("complex question")
+        assert "timeout" in mock_send.call_args[0][0].lower()

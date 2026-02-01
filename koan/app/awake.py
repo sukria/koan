@@ -392,10 +392,15 @@ def handle_chat(text: str):
                 timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks."
                 format_and_send(timeout_msg)
                 save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
-        except (subprocess.TimeoutExpired, Exception):
+        except subprocess.TimeoutExpired:
             timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks."
             format_and_send(timeout_msg)
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
+        except Exception as e:
+            print(f"[awake] Lite retry error: {e}")
+            error_msg = "Something went wrong — try again?"
+            format_and_send(error_msg)
+            save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", error_msg)
     except Exception as e:
         print(f"[awake] Claude error: {e}")
 
