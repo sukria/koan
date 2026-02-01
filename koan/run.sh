@@ -78,10 +78,15 @@ while [ $count -lt $MAX_RUNS ]; do
 
   RUN_NUM=$((count + 1))
   echo "[koan] Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S')"
-  notify "Run $RUN_NUM/$MAX_RUNS started"
 
-  # Extract project from next pending mission
+  # Extract next pending mission line
   MISSION_LINE=$(grep -m1 "^- " "$INSTANCE/missions.md" 2>/dev/null || echo "")
+
+  # Extract mission title (strip "- ", project tag, and leading/trailing whitespace)
+  MISSION_TITLE=""
+  if [ -n "$MISSION_LINE" ]; then
+    MISSION_TITLE=$(echo "$MISSION_LINE" | sed 's/^- //' | sed 's/\[project:[a-zA-Z0-9_-]*\] *//' | sed 's/^ *//;s/ *$//')
+  fi
   if [[ "$MISSION_LINE" =~ \[project:([a-zA-Z0-9_-]+)\] ]]; then
     PROJECT_NAME="${BASH_REMATCH[1]}"
 
@@ -108,6 +113,15 @@ while [ $count -lt $MAX_RUNS ]; do
   fi
 
   echo "[koan] Project: $PROJECT_NAME ($PROJECT_PATH)"
+
+  # Mission lifecycle notification: taken or autonomous
+  if [ -n "$MISSION_TITLE" ]; then
+    echo "[koan] Mission: $MISSION_TITLE"
+    notify "Run $RUN_NUM/$MAX_RUNS — Mission taken: $MISSION_TITLE"
+  else
+    echo "[koan] No pending mission — autonomous mode"
+    notify "Run $RUN_NUM/$MAX_RUNS — No pending mission, entering autonomous mode"
+  fi
 
   # Build prompt from template, replacing placeholders
   PROMPT=$(sed \
@@ -163,11 +177,19 @@ Koan paused after $count runs. Send /resume via Telegram when quota resets to ch
   fi
   rm -f "$CLAUDE_OUT"
 
-  # Report result
+  # Report result with mission title
   if [ $CLAUDE_EXIT -eq 0 ]; then
-    notify "Run $RUN_NUM/$MAX_RUNS completed"
+    if [ -n "$MISSION_TITLE" ]; then
+      notify "Run $RUN_NUM/$MAX_RUNS — Mission completed: $MISSION_TITLE"
+    else
+      notify "Run $RUN_NUM/$MAX_RUNS — Autonomous run completed"
+    fi
   else
-    notify "Run $RUN_NUM/$MAX_RUNS failed"
+    if [ -n "$MISSION_TITLE" ]; then
+      notify "Run $RUN_NUM/$MAX_RUNS — Mission failed: $MISSION_TITLE"
+    else
+      notify "Run $RUN_NUM/$MAX_RUNS — Run failed"
+    fi
   fi
 
   # Commit instance results
