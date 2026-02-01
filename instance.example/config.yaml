@@ -27,3 +27,23 @@ tools:
     - File operations: Read, Edit, Write files in the project
     - Search: Glob (find files), Grep (search content)
     - Shell: Bash (run git, gh, make, and other commands)
+
+# Git auto-merge configuration
+# Automatically merges koan/* branches based on rules
+git_auto_merge:
+  enabled: false                    # Global on/off switch
+  base_branch: "main"               # Default target branch for merges
+  strategy: "squash"                # merge | squash | rebase
+  rules:
+    - pattern: "koan/*"             # Branch name pattern (glob-style)
+      auto_merge: true              # Enable auto-merge for matching branches
+      delete_after_merge: true      # Clean up branch after successful merge
+
+# Per-project overrides
+# Override git_auto_merge settings for specific projects
+projects:
+  mysafeproject:
+    git_auto_merge:
+      enabled: true
+      base_branch: "main"
+      strategy: "squash"

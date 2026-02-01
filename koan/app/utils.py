@@ -80,6 +80,30 @@ def get_tools_description() -> str:
     return config.get("tools", {}).get("description", "")
 
 
+def get_auto_merge_config(config: dict, project_name: str) -> dict:
+    """Get auto-merge config with per-project override support.
+
+    Merges global defaults with project-specific overrides.
+
+    Args:
+        config: Full config dict from load_config()
+        project_name: Name of the project (e.g., "koan", "anantys-back")
+
+    Returns:
+        Merged config with keys: enabled, base_branch, strategy, rules
+    """
+    global_cfg = config.get("git_auto_merge", {})
+    project_cfg = config.get("projects", {}).get(project_name, {}).get("git_auto_merge", {})
+
+    # Deep merge: project overrides global
+    return {
+        "enabled": project_cfg.get("enabled", global_cfg.get("enabled", True)),
+        "base_branch": project_cfg.get("base_branch", global_cfg.get("base_branch", "main")),
+        "strategy": project_cfg.get("strategy", global_cfg.get("strategy", "squash")),
+        "rules": project_cfg.get("rules", global_cfg.get("rules", []))
+    }
+
+
 def parse_project(text: str) -> Tuple[Optional[str], str]:
     """Extract [project:name] or [projet:name] from text.
 

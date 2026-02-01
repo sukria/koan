@@ -250,6 +250,36 @@ while [ $count -lt $MAX_RUNS ]; do
     -e "s|{AVAILABLE_PCT}|${AVAILABLE_PCT:-50}|g" \
     "$KOAN_ROOT/koan/system-prompt.md")
 
+  # Append merge policy based on config
+  MERGE_POLICY=""
+  if "$PYTHON" -c "
+from app.utils import load_config, get_auto_merge_config
+config = load_config()
+merge_cfg = get_auto_merge_config(config, '$PROJECT_NAME')
+import sys
+sys.exit(0 if merge_cfg.get('enabled', True) and merge_cfg.get('rules') else 1)
+" 2>/dev/null; then
+    MERGE_POLICY="
+
+# Git Merge Policy (Auto-Merge Enabled)
+
+Auto-merge is ENABLED for this project. After you complete your work on a koan/* branch
+and push it, the system will automatically merge it according to configured rules.
+
+Just focus on: creating koan/* branch, implementing, committing, pushing.
+The auto-merge system handles the merge to the base branch after mission completion.
+"
+  else
+    MERGE_POLICY="
+
+# Git Merge Policy
+
+Auto-merge is NOT configured for this project. Follow standard workflow:
+create koan/* branches, commit, and push, but DO NOT merge yourself.
+"
+  fi
+  PROMPT="$PROMPT$MERGE_POLICY"
+
   # Execute next mission, capture output to detect quota errors
   cd "$PROJECT_PATH"
   CLAUDE_OUT="$(mktemp)"
@@ -320,6 +350,19 @@ with open('$INSTANCE/outbox.md', 'a') as f:
     f.write(sys.stdin.read())
     fcntl.flock(f, fcntl.LOCK_UN)
 " <<< "$FORMATTED_TEXT"
+    fi
+
+    # Auto-merge logic (if on koan/* branch)
+    cd "$PROJECT_PATH"
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [[ "$CURRENT_BRANCH" == koan/* ]]; then
+      echo "[koan] Checking auto-merge for $CURRENT_BRANCH..."
+      GIT_AUTO_MERGE="$APP_DIR/git_auto_merge.py"
+      if "$PYTHON" "$GIT_AUTO_MERGE" "$INSTANCE" "$PROJECT_NAME" "$PROJECT_PATH" "$CURRENT_BRANCH" 2>&1; then
+        echo "[koan] Auto-merge completed for $CURRENT_BRANCH"
+      else
+        echo "[koan] Auto-merge skipped or failed for $CURRENT_BRANCH (see journal)"
+      fi
     fi
   else
     if [ -n "$MISSION_TITLE" ]; then
