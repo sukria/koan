@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: setup awake run clean say
+.PHONY: setup awake run clean say migrate
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
@@ -22,6 +22,9 @@ run:
 say:
 	@test -n "$(m)" || (echo "Usage: make say m=\"your message\"" && exit 1)
 	@cd koan && $(PYTHON) -c "from awake import handle_message; handle_message('$(m)')"
+
+migrate: setup
+	$(PYTHON) koan/migrate_memory.py
 
 clean:
 	rm -rf $(VENV)

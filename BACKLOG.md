@@ -95,6 +95,28 @@ Progress tracking via user stories. Updated between sessions.
 
 ---
 
+## Epic 5 — Robustness
+
+> Goal: Improve reliability, maintainability, and cross-platform compatibility.
+
+### US 5.1 — Rewrite run.sh as run.py
+- **As a** developer
+- **I want** the main run loop to be written in Python
+- **So that** I avoid bash version compatibility issues and improve maintainability
+- **Context**: macOS uses bash 3.2 (no associative arrays), Linux typically uses bash 4.0+. Current run.sh uses workarounds (parallel arrays) that are harder to maintain. Python would provide:
+  - Consistent behavior across platforms
+  - Better error handling and logging
+  - Type safety with type hints
+  - Dict-based project lookups (cleaner than parallel arrays)
+  - Consistency with awake.py and notify.py
+- [ ] Rewrite run.sh logic in Python (run.py)
+- [ ] Keep same env var interface (KOAN_PROJECTS, KOAN_PROJECT_PATH, etc.)
+- [ ] Preserve all existing features (project parsing, validation, mission extraction, quota detection)
+- [ ] Update Makefile to use `$(PYTHON) koan/run.py` instead of `./koan/run.sh`
+- [ ] Test backward compatibility with single-project setups
+
+---
+
 ## Global Status
 
 | Epic | Status |

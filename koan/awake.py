@@ -114,6 +114,16 @@ def is_command(text: str) -> bool:
     return text.startswith("/")
 
 
+def parse_project(text: str) -> tuple[str | None, str]:
+    """Extract [project:name] from message. Returns (project_name, cleaned_text)."""
+    match = re.search(r'\[project:([a-zA-Z0-9_-]+)\]', text)
+    if match:
+        project = match.group(1)
+        cleaned = re.sub(r'\[project:[a-zA-Z0-9_-]+\]\s*', '', text).strip()
+        return project, cleaned
+    return None, text
+
+
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
@@ -141,22 +151,48 @@ def handle_command(text: str):
 
 
 def _build_status() -> str:
-    """Build a status message from current state."""
+    """Build status message grouped by project."""
     parts = ["📊 Kōan Status"]
 
-    # Current missions
+    # Parse missions by project
     if MISSIONS_FILE.exists():
+        from collections import defaultdict
         content = MISSIONS_FILE.read_text()
-        in_progress = [l.strip() for l in content.splitlines()
-                       if l.strip().startswith("### ") or l.strip().startswith("- [~]")]
-        pending = [l.strip() for l in content.splitlines()
-                   if l.strip().startswith("- [ ]") or l.strip().startswith("- **")]
-        if in_progress:
-            parts.append(f"\nIn progress: {len(in_progress)}")
-            for m in in_progress[:3]:
-                parts.append(f"  {m}")
-        if pending:
-            parts.append(f"\nPending: {len(pending)}")
+        missions_by_project = defaultdict(lambda: {"pending": [], "in_progress": []})
+
+        lines = content.splitlines()
+        current_section = None
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("## "):
+                current_section = stripped[3:].lower().replace(" ", "_")
+            elif stripped.startswith("- "):
+                # Extract project tag if present
+                match = re.search(r'\[project:([a-zA-Z0-9_-]+)\]', stripped)
+                project = match.group(1) if match else "default"
+
+                if current_section == "pending":
+                    missions_by_project[project]["pending"].append(stripped)
+                elif current_section == "in_progress":
+                    missions_by_project[project]["in_progress"].append(stripped)
+
+        # Display by project
+        if missions_by_project:
+            for project in sorted(missions_by_project.keys()):
+                missions = missions_by_project[project]
+                pending = missions["pending"]
+                in_progress = missions["in_progress"]
+
+                if pending or in_progress:
+                    parts.append(f"\n**{project}**")
+                    if in_progress:
+                        parts.append(f"  In progress: {len(in_progress)}")
+                        for m in in_progress[:2]:
+                            # Remove project tag from display
+                            display = re.sub(r'\[project:[a-zA-Z0-9_-]+\]\s*', '', m)
+                            parts.append(f"    {display}")
+                    if pending:
+                        parts.append(f"  Pending: {len(pending)}")
 
     # Run loop status
     stop_file = KOAN_ROOT / ".koan-stop"
@@ -202,13 +238,21 @@ def handle_resume():
 
 
 def handle_mission(text: str):
-    """Append to missions.md and ack immediately."""
-    # Clean up the mission text
-    mission_text = text
+    """Append to missions.md with optional project tag."""
+    # Parse project tag if present
+    project, mission_text = parse_project(text)
+
+    # Clean up the mission prefix
     if mission_text.lower().startswith("mission:"):
         mission_text = mission_text[8:].strip()
     elif mission_text.lower().startswith("mission :"):
         mission_text = mission_text[9:].strip()
+
+    # Format mission entry with project tag if specified
+    if project:
+        mission_entry = f"- [project:{project}] {mission_text}"
+    else:
+        mission_entry = f"- {mission_text}"
 
     # Append to missions.md under "## Pending"
     if MISSIONS_FILE.exists():
@@ -223,15 +267,20 @@ def handle_mission(text: str):
         # Find the end of the "Pending" line (skip newlines)
         while idx < len(content) and content[idx] == "\n":
             idx += 1
-        new_entry = f"\n- {mission_text}\n"
+        new_entry = f"\n{mission_entry}\n"
         content = content[:idx] + new_entry + content[idx:]
     else:
-        content += f"\n## Pending\n\n- {mission_text}\n"
+        content += f"\n## Pending\n\n{mission_entry}\n"
 
     MISSIONS_FILE.write_text(content)
 
-    send_telegram(f"✅ Mission received, added to queue:\n\n{mission_text[:500]}")
-    print(f"[awake] Mission queued: {mission_text[:60]}")
+    # Acknowledge with project info
+    ack_msg = f"✅ Mission received"
+    if project:
+        ack_msg += f" (project: {project})"
+    ack_msg += f":\n\n{mission_text[:500]}"
+    send_telegram(ack_msg)
+    print(f"[awake] Mission queued: [{project or 'default'}] {mission_text[:60]}")
 
 
 def handle_chat(text: str):

@@ -17,7 +17,42 @@ fi
 # Config via env vars (or defaults)
 MAX_RUNS=${KOAN_MAX_RUNS:-20}
 INTERVAL=${KOAN_INTERVAL:-5}
-PROJECT_PATH=${KOAN_PROJECT_PATH:-"/path/to/your-project"}
+
+# Parse projects configuration (bash 3.2 compatible - no associative arrays)
+PROJECT_NAMES=()
+PROJECT_PATHS=()
+
+if [ -n "$KOAN_PROJECTS" ]; then
+  # Multi-project mode: parse name:path;name:path;...
+  IFS=';' read -ra PROJECT_PAIRS <<< "$KOAN_PROJECTS"
+  for pair in "${PROJECT_PAIRS[@]}"; do
+    IFS=':' read -r name path <<< "$pair"
+    PROJECT_NAMES+=("$name")
+    PROJECT_PATHS+=("$path")
+  done
+elif [ -n "$KOAN_PROJECT_PATH" ]; then
+  # Single-project mode (backward compatible)
+  PROJECT_NAMES=("default")
+  PROJECT_PATHS=("$KOAN_PROJECT_PATH")
+else
+  echo "[koan] Error: Set KOAN_PROJECT_PATH or KOAN_PROJECTS env var."
+  exit 1
+fi
+
+# Validate project configuration
+if [ ${#PROJECT_NAMES[@]} -gt 5 ]; then
+  echo "[koan] Error: Max 5 projects allowed. You have ${#PROJECT_NAMES[@]}."
+  exit 1
+fi
+
+for i in "${!PROJECT_NAMES[@]}"; do
+  name="${PROJECT_NAMES[$i]}"
+  path="${PROJECT_PATHS[$i]}"
+  if [ ! -d "$path" ]; then
+    echo "[koan] Error: Project '$name' path does not exist: $path"
+    exit 1
+  fi
+done
 
 # Use venv python if available, else system python
 PYTHON="python3"
@@ -45,13 +80,43 @@ while [ $count -lt $MAX_RUNS ]; do
   echo "[koan] Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S')"
   notify "Run $RUN_NUM/$MAX_RUNS started"
 
+  # Extract project from next pending mission
+  MISSION_LINE=$(grep -m1 "^- " "$INSTANCE/missions.md" 2>/dev/null || echo "")
+  if [[ "$MISSION_LINE" =~ \[project:([a-zA-Z0-9_-]+)\] ]]; then
+    PROJECT_NAME="${BASH_REMATCH[1]}"
+
+    # Find project index
+    PROJECT_PATH=""
+    for i in "${!PROJECT_NAMES[@]}"; do
+      if [ "${PROJECT_NAMES[$i]}" = "$PROJECT_NAME" ]; then
+        PROJECT_PATH="${PROJECT_PATHS[$i]}"
+        break
+      fi
+    done
+
+    # Validate mission project exists
+    if [ -z "$PROJECT_PATH" ]; then
+      echo "[koan] Error: Mission references unknown project: $PROJECT_NAME"
+      echo "[koan] Known projects: ${PROJECT_NAMES[*]}"
+      notify "Mission error: Unknown project '$PROJECT_NAME'. Known projects: ${PROJECT_NAMES[*]}"
+      exit 1
+    fi
+  else
+    # No project tag: default to first project
+    PROJECT_NAME="${PROJECT_NAMES[0]}"
+    PROJECT_PATH="${PROJECT_PATHS[0]}"
+  fi
+
+  echo "[koan] Project: $PROJECT_NAME ($PROJECT_PATH)"
+
   # Build prompt from template, replacing placeholders
   PROMPT=$(sed \
     -e "s|{INSTANCE}|$INSTANCE|g" \
     -e "s|{PROJECT_PATH}|$PROJECT_PATH|g" \
+    -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
     -e "s|{RUN_NUM}|$RUN_NUM|g" \
     -e "s|{MAX_RUNS}|$MAX_RUNS|g" \
-    "$(dirname "$0")/system-prompt.md")
+    "$KOAN_ROOT/koan/system-prompt.md")
 
   # Execute next mission, capture output to detect quota errors
   cd "$PROJECT_PATH"
@@ -66,14 +131,15 @@ while [ $count -lt $MAX_RUNS ]; do
     RESET_INFO=$(grep -o "resets.*" "$CLAUDE_OUT" | head -1 || echo "")
     echo "[koan] Quota reached. $RESET_INFO"
 
-    # Write to journal
-    JOURNAL_FILE="$INSTANCE/journal/$(date +%Y-%m-%d).md"
-    mkdir -p "$(dirname "$JOURNAL_FILE")"
+    # Write to journal (per-project)
+    JOURNAL_DIR="$INSTANCE/journal/$(date +%Y-%m-%d)"
+    JOURNAL_FILE="$JOURNAL_DIR/$PROJECT_NAME.md"
+    mkdir -p "$JOURNAL_DIR"
     cat >> "$JOURNAL_FILE" <<EOF
 
 ## Quota Exhausted — $(date '+%H:%M:%S')
 
-Claude quota reached after $count runs. $RESET_INFO
+Claude quota reached after $count runs (project: $PROJECT_NAME). $RESET_INFO
 
 Koan paused. Use \`/resume\` command via Telegram when ready to restart.
 EOF
