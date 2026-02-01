@@ -11,20 +11,28 @@ Fast-response architecture:
 """
 
 import fcntl
+import json
 import os
 import re
 import subprocess
 import sys
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
 
 import requests
 
 from app.health_check import write_heartbeat
 from app.notify import send_telegram
-from app.utils import load_dotenv, parse_project as _parse_project, insert_pending_mission
+from app.utils import (
+    load_dotenv,
+    parse_project as _parse_project,
+    insert_pending_mission,
+    save_telegram_message,
+    load_recent_telegram_history,
+    format_conversation_history,
+)
 
 load_dotenv()
 
@@ -37,6 +45,7 @@ KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 INSTANCE_DIR = KOAN_ROOT / "instance"
 MISSIONS_FILE = INSTANCE_DIR / "missions.md"
 OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
+TELEGRAM_HISTORY_FILE = INSTANCE_DIR / "telegram-history.jsonl"
 PROJECT_PATH = os.environ.get("KOAN_PROJECT_PATH", "")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -238,6 +247,13 @@ def handle_mission(text: str):
 
 def handle_chat(text: str):
     """Lightweight Claude call for conversational messages — fast response."""
+    # Save user message to history
+    save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
+
+    # Load recent conversation history
+    history = load_recent_telegram_history(TELEGRAM_HISTORY_FILE, max_messages=10)
+    history_context = format_conversation_history(history)
+
     # Load today's journal for recent context
     # Try nested structure first (journal/YYYY-MM-DD/*.md), fall back to flat
     journal_context = ""
@@ -264,7 +280,6 @@ def handle_chat(text: str):
         prefs_context = prefs_path.read_text().strip()
 
     # Determine time-of-day for natural tone
-    from datetime import datetime
     hour = datetime.now().hour
     if hour < 7:
         time_hint = "It's very early morning."
@@ -277,20 +292,22 @@ def handle_chat(text: str):
     else:
         time_hint = "It's late night."
 
-    prompt = (
-        f"You are Kōan — a sparring partner, not an assistant. "
-        f"Here is your identity:\n\n{SOUL}\n\n"
-        f"About the human:\n{prefs_context}\n\n"
-        f"Summary of past sessions:\n{SUMMARY[:1500]}\n\n"
-        f"Today's journal (excerpt):\n{journal_context}\n\n"
-        f"{time_hint}\n\n"
-        f"The human sends you this message on Telegram:\n\n"
-        f"  « {text} »\n\n"
+    # Build prompt with conversation history
+    prompt_parts = [
+        f"You are Kōan — a sparring partner, not an assistant.",
+        f"Here is your identity:\n\n{SOUL}\n",
+        f"About the human:\n{prefs_context}\n" if prefs_context else "",
+        f"Summary of past sessions:\n{SUMMARY[:1500]}\n" if SUMMARY else "",
+        f"Today's journal (excerpt):\n{journal_context}\n" if journal_context else "",
+        f"{history_context}\n" if history_context else "",
+        f"{time_hint}\n",
+        f"The human sends you this message on Telegram:\n\n  « {text} »\n",
         f"Respond in the human's preferred language. Be direct, concise, natural — like texting a collaborator. "
         f"You can be funny (dry humor), you can disagree, you can ask back. "
         f"2-3 sentences max unless the question requires more. "
         f"No markdown formatting — this is Telegram, keep it plain.\n"
-    )
+    ]
+    prompt = "\n".join([p for p in prompt_parts if p])
 
     try:
         result = subprocess.run(
@@ -301,15 +318,21 @@ def handle_chat(text: str):
         response = result.stdout.strip()
         if response:
             send_telegram(response)
+            # Save assistant response to history
+            save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
             print(f"[awake] Chat reply: {response[:80]}...")
         elif result.returncode != 0:
             print(f"[awake] Claude error: {result.stderr[:200]}")
-            send_telegram("Hmm, I couldn't formulate a response. Try again?")
+            error_msg = "Hmm, I couldn't formulate a response. Try again?"
+            send_telegram(error_msg)
+            save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", error_msg)
         else:
             print("[awake] Empty response from Claude.")
     except subprocess.TimeoutExpired:
         print(f"[awake] Claude timed out ({CHAT_TIMEOUT}s).")
-        send_telegram(f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks.")
+        timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks."
+        send_telegram(timeout_msg)
+        save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
     except Exception as e:
         print(f"[awake] Claude error: {e}")
 

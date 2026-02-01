@@ -23,7 +23,13 @@ from pathlib import Path
 from typing import Optional
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
-from app.utils import parse_project, insert_pending_mission
+from app.utils import (
+    parse_project,
+    insert_pending_mission,
+    save_telegram_message,
+    load_recent_telegram_history,
+    format_conversation_history,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -36,6 +42,7 @@ OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
 SOUL_FILE = INSTANCE_DIR / "soul.md"
 SUMMARY_FILE = INSTANCE_DIR / "memory" / "summary.md"
 JOURNAL_DIR = INSTANCE_DIR / "journal"
+TELEGRAM_HISTORY_FILE = INSTANCE_DIR / "telegram-history.jsonl"
 
 app = Flask(__name__, template_folder=str(KOAN_ROOT / "koan" / "templates"))
 
@@ -202,6 +209,13 @@ def chat_send():
 
     else:
         # Direct chat — call claude CLI like awake.py does
+        # Save user message to history
+        save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
+
+        # Load recent conversation history
+        history = load_recent_telegram_history(TELEGRAM_HISTORY_FILE, max_messages=10)
+        history_context = format_conversation_history(history)
+
         soul = read_file(SOUL_FILE)
         summary = read_file(SUMMARY_FILE)[:1500]
 
@@ -220,15 +234,17 @@ def chat_send():
         if journal_content:
             journal_context = journal_content[-2000:] if len(journal_content) > 2000 else journal_content
 
-        prompt = (
-            f"You are Kōan. Here is your identity:\n\n{soul}\n\n"
-            f"Summary of past sessions:\n{summary}\n\n"
-            f"Today's journal (excerpt):\n{journal_context}\n\n"
-            f"The human sends you this message via the dashboard:\n\n"
-            f"  « {text} »\n\n"
+        # Build prompt with conversation history
+        prompt_parts = [
+            f"You are Kōan. Here is your identity:\n\n{soul}\n",
+            f"Summary of past sessions:\n{summary}\n" if summary else "",
+            f"Today's journal (excerpt):\n{journal_context}\n" if journal_context else "",
+            f"{history_context}\n" if history_context else "",
+            f"The human sends you this message via the dashboard:\n\n  « {text} »\n",
             f"Respond directly. Be concise and natural. "
             f"2-3 sentences max unless the question requires more.\n"
-        )
+        ]
+        prompt = "\n".join([p for p in prompt_parts if p])
 
         try:
             project_path = os.environ.get("KOAN_PROJECT_PATH", str(KOAN_ROOT))
@@ -240,9 +256,13 @@ def chat_send():
             response = result.stdout.strip()
             if not response:
                 response = "Je n'ai pas pu formuler de réponse. Réessaie ?"
+            # Save assistant response to history
+            save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
             return jsonify({"ok": True, "type": "chat", "response": response})
         except subprocess.TimeoutExpired:
-            return jsonify({"ok": True, "type": "chat", "response": "Timeout — je prends trop de temps. Réessaie ?"})
+            timeout_msg = "Timeout — je prends trop de temps. Réessaie ?"
+            save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
+            return jsonify({"ok": True, "type": "chat", "response": timeout_msg})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 
