@@ -67,53 +67,13 @@ def get_signal_status() -> dict:
 
 def parse_missions() -> dict:
     """Parse missions.md into structured sections."""
+    from missions import parse_sections
+
     content = read_file(MISSIONS_FILE)
     if not content:
         return {"pending": [], "in_progress": [], "done": []}
 
-    sections = {"pending": [], "in_progress": [], "done": []}
-    current = None
-    current_block = []  # for complex missions
-
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            section_name = stripped[3:].strip().lower()
-            if section_name in ("en attente", "pending"):
-                current = "pending"
-            elif section_name in ("en cours", "in progress"):
-                current = "in_progress"
-            elif section_name in ("terminées", "terminées", "done", "completed"):
-                current = "done"
-            else:
-                current = None
-            continue
-
-        if current is None:
-            continue
-
-        if stripped.startswith("### "):
-            # Complex mission header
-            current_block = [line]
-        elif current_block:
-            if stripped == "" and current_block:
-                # End of complex block
-                sections[current].append("\n".join(current_block))
-                current_block = []
-            else:
-                current_block.append(line)
-        elif stripped.startswith("- "):
-            sections[current].append(stripped)
-        elif stripped and not stripped.startswith("#"):
-            # continuation line (indented sub-items)
-            if sections[current]:
-                sections[current][-1] += "\n" + line
-
-    # Flush remaining block
-    if current_block and current:
-        sections[current].append("\n".join(current_block))
-
-    return sections
+    return parse_sections(content)
 
 
 def get_journal_entries(limit: int = 7) -> list:
@@ -210,24 +170,10 @@ def add_mission():
         entry = f"- {text}"
 
     # Append to missions.md pending section
-    content = read_file(MISSIONS_FILE)
-    if not content:
-        content = "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+    from missions import insert_mission, DEFAULT_SKELETON
 
-    marker = None
-    for candidate in ("## En attente", "## Pending"):
-        if candidate in content:
-            marker = candidate
-            break
-
-    if marker:
-        idx = content.index(marker) + len(marker)
-        while idx < len(content) and content[idx] == "\n":
-            idx += 1
-        content = content[:idx] + f"\n{entry}\n" + content[idx:]
-    else:
-        content += f"\n## En attente\n\n{entry}\n"
-
+    content = read_file(MISSIONS_FILE) or DEFAULT_SKELETON
+    content = insert_mission(content, entry)
     MISSIONS_FILE.write_text(content)
     return redirect(url_for("missions_page"))
 
@@ -255,24 +201,10 @@ def chat_send():
         else:
             entry = f"- {mission_text}"
 
-        content = read_file(MISSIONS_FILE)
-        if not content:
-            content = "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+        from missions import insert_mission, DEFAULT_SKELETON
 
-        marker = None
-        for candidate in ("## En attente", "## Pending"):
-            if candidate in content:
-                marker = candidate
-                break
-
-        if marker:
-            idx = content.index(marker) + len(marker)
-            while idx < len(content) and content[idx] == "\n":
-                idx += 1
-            content = content[:idx] + f"\n{entry}\n" + content[idx:]
-        else:
-            content += f"\n## En attente\n\n{entry}\n"
-
+        content = read_file(MISSIONS_FILE) or DEFAULT_SKELETON
+        content = insert_mission(content, entry)
         MISSIONS_FILE.write_text(content)
         return jsonify({"ok": True, "type": "mission", "text": mission_text})
 

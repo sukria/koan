@@ -98,19 +98,15 @@ def _parse_completed_missions() -> List[str]:
     if not MISSIONS_FILE.exists():
         return []
 
-    content = MISSIONS_FILE.read_text()
-    completed = []
-    in_done = False
+    from missions import parse_sections
 
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            section = stripped[3:].strip().lower()
-            in_done = section in ("terminées", "done", "completed", "terminés")
-        elif in_done and stripped.startswith("- **"):
-            # Bold entries are recent completions (convention in missions.md)
-            title = re.sub(r"[*_]", "", stripped[2:]).strip()
-            # Remove session/branch annotations
+    content = MISSIONS_FILE.read_text()
+    sections = parse_sections(content)
+    completed = []
+    for item in sections["done"]:
+        first_line = item.split("\n")[0].strip()
+        if first_line.startswith("- **"):
+            title = re.sub(r"[*_]", "", first_line[2:]).strip()
             title = re.split(r"\s*[\(\—]", title)[0].strip()
             completed.append(title)
 
@@ -122,19 +118,9 @@ def _count_pending_missions() -> int:
     if not MISSIONS_FILE.exists():
         return 0
 
-    content = MISSIONS_FILE.read_text()
-    count = 0
-    in_pending = False
+    from missions import count_pending
 
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            section = stripped[3:].strip().lower()
-            in_pending = section in ("en attente", "pending")
-        elif in_pending and stripped.startswith("- "):
-            count += 1
-
-    return count
+    return count_pending(MISSIONS_FILE.read_text())
 
 
 def generate_report(report_type: str = "morning") -> str:
@@ -191,17 +177,15 @@ def generate_report(report_type: str = "morning") -> str:
 
     # In-progress long-running items
     if MISSIONS_FILE.exists():
+        from missions import parse_sections
+
         content = MISSIONS_FILE.read_text()
-        in_progress_section = False
+        sections = parse_sections(content)
         long_running = []
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("## "):
-                section = stripped[3:].strip().lower()
-                in_progress_section = section in ("en cours", "in progress")
-            elif in_progress_section and stripped.startswith("### "):
-                title = stripped[4:].strip()
-                long_running.append(title)
+        for item in sections["in_progress"]:
+            first_line = item.split("\n")[0].strip()
+            if first_line.startswith("### "):
+                long_running.append(first_line[4:].strip())
 
         if long_running:
             lines.append("En cours (long):")

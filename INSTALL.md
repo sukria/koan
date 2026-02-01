@@ -118,4 +118,8 @@ Alternatively: **System Settings → Energy → Prevent automatic sleeping when 
 |----------|---------|-------------|
 | `KOAN_MAX_RUNS` | 20 | Maximum runs per session |
 | `KOAN_INTERVAL` | 5 | Seconds between runs |
-| `KOAN_BRIDGE_INTERVAL` | 10 | Telegram poll interval (seconds) |
+| `KOAN_BRIDGE_INTERVAL` | 3 | Telegram poll interval (seconds) |
+| `KOAN_CHAT_TIMEOUT` | 180 | Claude CLI timeout for chat responses (seconds) |
+| `KOAN_PROJECTS` | — | Multi-project config: `name:path;name2:path2` |
+| `KOAN_PROJECT_PATH` | — | Single-project path (alternative to `KOAN_PROJECTS`) |
+| `KOAN_GIT_SYNC_INTERVAL` | 5 | Runs between git sync checks |

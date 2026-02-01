@@ -20,43 +20,13 @@ from pathlib import Path
 
 def extract_next_mission(missions_path: str, project_name: str = "") -> str:
     """Return the first pending mission line, or empty string if none."""
+    from missions import extract_next_pending
+
     path = Path(missions_path)
     if not path.exists():
         return ""
 
-    lines = path.read_text().splitlines()
-
-    in_pending = False
-    for line in lines:
-        stripped = line.strip().lower()
-
-        # Detect section boundaries
-        if stripped in ("## en attente", "## pending"):
-            in_pending = True
-            continue
-        elif stripped.startswith("## "):
-            if in_pending:
-                break  # Left the pending section
-            continue
-
-        if not in_pending:
-            continue
-
-        # Only match simple mission items (- prefix)
-        if not line.strip().startswith("- "):
-            continue
-
-        # If project_name filter is set, check tag
-        if project_name:
-            tag_match = re.search(r"\[projet?:([a-zA-Z0-9_-]+)\]", line)
-            if tag_match:
-                if tag_match.group(1).lower() != project_name.lower():
-                    continue  # Mission is for a different project
-            # No tag = default project, always matches
-
-        return line.strip()
-
-    return ""
+    return extract_next_pending(path.read_text(), project_name)
 
 
 if __name__ == "__main__":
