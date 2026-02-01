@@ -150,3 +150,9 @@ class TestInsertPendingMission:
         content = missions.read_text()
         for i in range(num_threads):
             assert f"- Task {i}" in content, f"Task {i} lost during concurrent insert"
+
+    def test_preserves_utf8(self, tmp_path):
+        from app.utils import atomic_write
+        target = tmp_path / "test.md"
+        atomic_write(target, "kōan — été — 日本語\n")
+        assert target.read_text(encoding="utf-8") == "kōan — été — 日本語\n"

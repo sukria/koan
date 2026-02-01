@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import threading
 import yaml
 from datetime import datetime
@@ -116,6 +117,29 @@ def parse_project(text: str) -> Tuple[Optional[str], str]:
         cleaned = _PROJECT_TAG_STRIP_RE.sub('', text).strip()
         return project, cleaned
     return None, text
+
+
+def atomic_write(path: Path, content: str):
+    """Write content to a file atomically using write-to-temp + rename.
+
+    Prevents data loss if the process crashes mid-write. Uses an exclusive
+    lock on the temp file to serialize concurrent writers.
+    """
+    dir_path = path.parent
+    fd, tmp = tempfile.mkstemp(dir=str(dir_path), prefix=".koan-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def insert_pending_mission(missions_path: Path, entry: str):

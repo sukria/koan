@@ -123,14 +123,8 @@ def recover_missions(instance_dir: str) -> int:
             if not any(m.strip() for m in remaining_in_progress):
                 new_lines.append("")
 
-    # Write with exclusive lock to prevent races with insert_pending_mission
-    new_content = "\n".join(new_lines) + "\n"
-    with open(missions_path, "r+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.seek(0)
-        f.truncate()
-        f.write(new_content)
-        fcntl.flock(f, fcntl.LOCK_UN)
+    from app.utils import atomic_write
+    atomic_write(missions_path, "\n".join(new_lines) + "\n")
     return len(recovered)
 
 
