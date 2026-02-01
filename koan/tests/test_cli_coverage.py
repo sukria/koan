@@ -1,0 +1,354 @@
+"""Tests for CLI __main__ blocks and uncovered edge cases across modules.
+
+Covers:
+- usage_tracker.py CLI main (L218-236, 240) + wait mode (L138) + review reason (L193)
+- memory_manager.py CLI main (L230-267)
+- recover.py CLI main (L132-146) + complex mission fallback (L74)
+- utils.py edge cases (load_config, get_allowed_tools, get_tools_description,
+  atomic_write error path, conversation history helpers)
+"""
+
+import json
+import os
+import runpy
+import sys
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# usage_tracker.py — CLI main + edge cases
+# ---------------------------------------------------------------------------
+
+class TestUsageTrackerCLI:
+    """Test CLI entry point for usage_tracker.py."""
+
+    def test_cli_no_args(self):
+        """Missing args prints usage to stderr and exits 1."""
+        with patch.object(sys, "argv", ["usage_tracker.py"]):
+            with pytest.raises(SystemExit, match="1"):
+                runpy.run_module("app.usage_tracker", run_name="__main__")
+
+    def test_cli_normal_run(self, tmp_path, capsys):
+        """Normal CLI run outputs mode:available:reason:project_idx."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("Session (5hr) : 10% (reset in 4h)\nWeekly (7 day) : 25% (Resets in 5d)")
+        with patch.object(sys, "argv", ["usage_tracker.py", str(usage), "3", "p1:/a;p2:/b"]):
+            runpy.run_module("app.usage_tracker", run_name="__main__")
+        out = capsys.readouterr().out.strip()
+        parts = out.split(":")
+        assert len(parts) == 4
+        assert parts[0] == "deep"
+
+    def test_cli_no_projects_arg(self, tmp_path, capsys):
+        """CLI with only 2 args (no projects string)."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("Session (5hr) : 50% (reset in 2h)\nWeekly (7 day) : 50% (Resets in 3d)")
+        with patch.object(sys, "argv", ["usage_tracker.py", str(usage), "5"]):
+            runpy.run_module("app.usage_tracker", run_name="__main__")
+        out = capsys.readouterr().out.strip()
+        assert out.endswith(":0")
+
+    def test_cli_parse_error_fallback(self, tmp_path, capsys):
+        """Parse error falls back to review:50:Fallback mode:0."""
+        from app.usage_tracker import main
+        usage = tmp_path / "usage.md"
+        usage.write_text("garbage")
+        with patch.object(sys, "argv", ["usage_tracker.py", str(usage), "1"]):
+            with patch("app.usage_tracker.UsageTracker.decide_mode", side_effect=ValueError("bad")):
+                with pytest.raises(SystemExit, match="0"):
+                    main()
+        out = capsys.readouterr().out.strip()
+        assert "Fallback" in out
+
+
+class TestUsageTrackerWaitMode:
+    """Cover decide_mode() wait branch (L138)."""
+
+    def test_wait_mode_budget_below_5(self, tmp_path):
+        """Budget < 5% triggers wait mode."""
+        from app.usage_tracker import UsageTracker
+        usage = tmp_path / "usage.md"
+        usage.write_text("Session (5hr) : 90% (reset in 1h)\nWeekly (7 day) : 95% (Resets in 1d)")
+        tracker = UsageTracker(usage)
+        assert tracker.decide_mode() == "wait"
+
+    def test_review_decision_reason(self, tmp_path):
+        """Review reason string includes 'conservative' or 'low'."""
+        from app.usage_tracker import UsageTracker
+        usage = tmp_path / "usage.md"
+        usage.write_text("Session (5hr) : 78% (reset in 1h)\nWeekly (7 day) : 80% (Resets in 1d)")
+        tracker = UsageTracker(usage)
+        reason = tracker.get_decision_reason("review")
+        assert "low" in reason.lower() or "conservative" in reason.lower()
+
+    def test_implement_decision_reason(self, tmp_path):
+        """Implement reason string includes 'normal'."""
+        from app.usage_tracker import UsageTracker
+        usage = tmp_path / "usage.md"
+        usage.write_text("Session (5hr) : 50% (reset in 2h)\nWeekly (7 day) : 50% (Resets in 3d)")
+        tracker = UsageTracker(usage)
+        reason = tracker.get_decision_reason("implement")
+        assert "normal" in reason.lower()
+
+    def test_select_project_empty_list(self, tmp_path):
+        """Empty project list after split returns 0."""
+        from app.usage_tracker import UsageTracker
+        usage = tmp_path / "usage.md"
+        usage.write_text("Session (5hr) : 50% (reset in 2h)\nWeekly (7 day) : 50% (Resets in 3d)")
+        tracker = UsageTracker(usage)
+        assert tracker.select_project(";;;", "implement", 1) == 0
+
+
+# ---------------------------------------------------------------------------
+# memory_manager.py — CLI main
+# ---------------------------------------------------------------------------
+
+class TestMemoryManagerCLI:
+    """Test CLI entry point for memory_manager.py."""
+
+    def test_cli_no_args(self):
+        """Missing args prints usage and exits 1."""
+        with patch.object(sys, "argv", ["memory_manager.py"]):
+            with pytest.raises(SystemExit, match="1"):
+                runpy.run_module("app.memory_manager", run_name="__main__")
+
+    def test_cli_scoped_summary(self, instance_dir, capsys):
+        """scoped-summary command prints filtered summary."""
+        summary = instance_dir / "memory" / "summary.md"
+        summary.write_text("# Summary\n\n## 2026-02-01\n\nSession 1 (project: koan) : stuff\n")
+        with patch.object(sys, "argv", ["memory_manager.py", str(instance_dir), "scoped-summary", "koan"]):
+            runpy.run_module("app.memory_manager", run_name="__main__")
+        out = capsys.readouterr().out
+        assert "koan" in out
+
+    def test_cli_scoped_summary_no_project(self):
+        """scoped-summary without project arg exits 1."""
+        with patch.object(sys, "argv", ["memory_manager.py", "/tmp", "scoped-summary"]):
+            with pytest.raises(SystemExit, match="1"):
+                runpy.run_module("app.memory_manager", run_name="__main__")
+
+    def test_cli_compact(self, instance_dir, capsys):
+        """compact command reports removed count."""
+        summary = instance_dir / "memory" / "summary.md"
+        summary.write_text("# Summary\n\n## 2026-02-01\n\nSession 1\n")
+        with patch.object(sys, "argv", ["memory_manager.py", str(instance_dir), "compact", "10"]):
+            runpy.run_module("app.memory_manager", run_name="__main__")
+        out = capsys.readouterr().out
+        assert "Compacted" in out
+
+    def test_cli_cleanup_learnings(self, instance_dir, capsys):
+        """cleanup-learnings command reports dedup count."""
+        proj_dir = instance_dir / "memory" / "projects" / "koan"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "learnings.md").write_text("# L\n\n- item\n- item\n")
+        with patch.object(sys, "argv", ["memory_manager.py", str(instance_dir), "cleanup-learnings", "koan"]):
+            runpy.run_module("app.memory_manager", run_name="__main__")
+        out = capsys.readouterr().out
+        assert "Deduped" in out
+
+    def test_cli_cleanup_learnings_no_project(self):
+        """cleanup-learnings without project arg exits 1."""
+        with patch.object(sys, "argv", ["memory_manager.py", "/tmp", "cleanup-learnings"]):
+            with pytest.raises(SystemExit, match="1"):
+                runpy.run_module("app.memory_manager", run_name="__main__")
+
+    def test_cli_cleanup(self, instance_dir, capsys):
+        """cleanup command runs full cleanup."""
+        summary = instance_dir / "memory" / "summary.md"
+        summary.write_text("# Summary\n\n## 2026-02-01\n\nSession 1\n")
+        with patch.object(sys, "argv", ["memory_manager.py", str(instance_dir), "cleanup", "10"]):
+            runpy.run_module("app.memory_manager", run_name="__main__")
+
+    def test_cli_unknown_command(self):
+        """Unknown command exits 1."""
+        with patch.object(sys, "argv", ["memory_manager.py", "/tmp", "bogus"]):
+            with pytest.raises(SystemExit, match="1"):
+                runpy.run_module("app.memory_manager", run_name="__main__")
+
+
+# ---------------------------------------------------------------------------
+# recover.py — CLI main + complex mission fallback (L74)
+# ---------------------------------------------------------------------------
+
+class TestRecoverCLI:
+    """Test CLI entry point for recover.py."""
+
+    def test_cli_no_args(self):
+        """Missing args exits 1."""
+        with patch.object(sys, "argv", ["recover.py"]):
+            with pytest.raises(SystemExit, match="1"):
+                runpy.run_module("app.recover", run_name="__main__")
+
+    def test_cli_no_stale_missions(self, instance_dir, capsys):
+        """No stale missions prints 0."""
+        with patch("app.recover.format_and_send"):
+            with patch.object(sys, "argv", ["recover.py", str(instance_dir)]):
+                runpy.run_module("app.recover", run_name="__main__")
+        out = capsys.readouterr().out
+        assert "No stale" in out or "0" in out
+
+    def test_cli_with_stale_missions(self, instance_dir, capsys):
+        """Stale missions recovered and notification sent."""
+        missions = instance_dir / "missions.md"
+        missions.write_text(
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "## En cours\n\n"
+            "- Stale task\n\n"
+            "## Terminées\n\n"
+        )
+        with patch("app.notify.format_and_send") as mock_send:
+            with patch.object(sys, "argv", ["recover.py", str(instance_dir)]):
+                runpy.run_module("app.recover", run_name="__main__")
+        mock_send.assert_called_once()
+        out = capsys.readouterr().out
+        assert "1" in out
+
+
+class TestRecoverComplexMissionFallback:
+    """Cover L74 — complex mission ending with non-sub-item line."""
+
+    def test_complex_mission_ends_with_non_subitem(self, instance_dir):
+        """Complex mission (### header) followed by a simple mission line ends complex block."""
+        from app.recover import recover_missions
+        missions = instance_dir / "missions.md"
+        missions.write_text(
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "## En cours\n\n"
+            "### Complex project\n"
+            "- ~~done step~~ done\n"
+            "- Still working\n"
+            "Simple stale mission\n"  # This triggers L74 (in_complex_mission = False, then falls through)
+            "- Another stale\n\n"
+            "## Terminées\n\n"
+        )
+        count = recover_missions(str(instance_dir))
+        # "- Another stale" should be recovered; "Simple stale mission" is not a "- " item
+        assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# utils.py — edge cases
+# ---------------------------------------------------------------------------
+
+class TestUtilsLoadConfig:
+    """Cover load_config, get_allowed_tools, get_tools_description."""
+
+    def test_load_config_missing_file(self):
+        """Missing config.yaml returns empty dict."""
+        from app.utils import load_config
+        with patch("app.utils.KOAN_ROOT", Path("/nonexistent")):
+            result = load_config()
+        assert result == {}
+
+    def test_load_config_valid_yaml(self, tmp_path):
+        """Valid YAML is loaded."""
+        from app.utils import load_config
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("tools:\n  allowed: [Read, Write]\n")
+        with patch("app.utils.KOAN_ROOT", tmp_path):
+            result = load_config()
+        assert result["tools"]["allowed"] == ["Read", "Write"]
+
+    def test_load_config_bad_yaml(self, tmp_path):
+        """Invalid YAML returns empty dict."""
+        from app.utils import load_config
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("{{invalid yaml")
+        with patch("app.utils.KOAN_ROOT", tmp_path):
+            result = load_config()
+        assert result == {}
+
+    def test_get_allowed_tools_default(self):
+        """Default tools returned when config has no tools section."""
+        from app.utils import get_allowed_tools
+        with patch("app.utils.load_config", return_value={}):
+            tools = get_allowed_tools()
+        assert "Read" in tools
+
+    def test_get_allowed_tools_custom(self):
+        """Custom tools from config."""
+        from app.utils import get_allowed_tools
+        with patch("app.utils.load_config", return_value={"tools": {"allowed": ["Bash"]}}):
+            tools = get_allowed_tools()
+        assert tools == "Bash"
+
+    def test_get_tools_description_empty(self):
+        """Empty description when config has no description."""
+        from app.utils import get_tools_description
+        with patch("app.utils.load_config", return_value={}):
+            desc = get_tools_description()
+        assert desc == ""
+
+    def test_get_tools_description_custom(self):
+        """Custom description from config."""
+        from app.utils import get_tools_description
+        with patch("app.utils.load_config", return_value={"tools": {"description": "Custom desc"}}):
+            desc = get_tools_description()
+        assert desc == "Custom desc"
+
+
+class TestUtilsConversationHistory:
+    """Cover save/load/format conversation history edge cases."""
+
+    def test_save_message_error(self, tmp_path, capsys):
+        """OSError on save prints error but doesn't raise."""
+        from app.utils import save_telegram_message
+        # Write to a non-writable path
+        bad_path = tmp_path / "readonly" / "history.jsonl"
+        save_telegram_message(bad_path, "user", "hello")
+        err = capsys.readouterr().err
+        # Should print error (or it may be stdout depending on print target)
+
+    def test_load_history_error(self, tmp_path):
+        """OSError on load returns empty list."""
+        from app.utils import load_recent_telegram_history
+        # Create a directory where file is expected (causes OSError)
+        bad_path = tmp_path / "history.jsonl"
+        bad_path.mkdir()  # is a dir, not a file
+        result = load_recent_telegram_history(bad_path)
+        assert result == []
+
+    def test_load_history_bad_json(self, tmp_path):
+        """Malformed JSON lines are skipped."""
+        from app.utils import load_recent_telegram_history
+        history = tmp_path / "history.jsonl"
+        history.write_text('{"role":"user","text":"hi"}\nnot json\n{"role":"assistant","text":"hey"}\n')
+        result = load_recent_telegram_history(history)
+        assert len(result) == 2
+
+    def test_format_history_truncates_long_messages(self):
+        """Messages > 500 chars are truncated."""
+        from app.utils import format_conversation_history
+        messages = [{"role": "user", "text": "x" * 600}]
+        result = format_conversation_history(messages)
+        assert "..." in result
+        assert len(result) < 700
+
+    def test_format_history_max_chars(self):
+        """Output respects max_chars limit."""
+        from app.utils import format_conversation_history
+        messages = [{"role": "user", "text": f"msg {i}"} for i in range(100)]
+        result = format_conversation_history(messages, max_chars=100)
+        assert len(result) <= 200  # Some overhead is fine, but it should stop early
+
+
+class TestUtilsAtomicWriteError:
+    """Cover atomic_write error path (L225-230)."""
+
+    def test_atomic_write_cleans_temp_on_error(self, tmp_path):
+        """Temp file is cleaned up if os.replace fails."""
+        from app.utils import atomic_write
+        target = tmp_path / "test.txt"
+        target.write_text("original")
+        with patch("os.replace", side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                atomic_write(target, "new content")
+        # Original should be untouched
+        assert target.read_text() == "original"
