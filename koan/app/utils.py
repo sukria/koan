@@ -12,6 +12,7 @@ import fcntl
 import json
 import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
@@ -56,6 +57,29 @@ def parse_project(text: str) -> Tuple[Optional[str], str]:
     return None, text
 
 
+def atomic_write(path: Path, content: str):
+    """Write content to a file atomically using write-to-temp + rename.
+
+    Prevents data loss if the process crashes mid-write. Uses an exclusive
+    lock on the temp file to serialize concurrent writers.
+    """
+    dir_path = path.parent
+    fd, tmp = tempfile.mkstemp(dir=str(dir_path), prefix=".koan-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def insert_pending_mission(missions_path: Path, entry: str):
     """Insert a mission entry into the pending section of missions.md.
 
@@ -83,11 +107,9 @@ def insert_pending_mission(missions_path: Path, entry: str):
     else:
         content += f"\n## En attente\n\n{entry}\n"
 
-    # Write with file locking to prevent races with awake.py / dashboard.py
-    with open(missions_path, "w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.write(content)
-        fcntl.flock(f, fcntl.LOCK_UN)
+    # Atomic write: write to temp file, then rename. Prevents data loss if
+    # the process crashes mid-write (open("w") truncates before lock is acquired).
+    atomic_write(missions_path, content)
 
 
 # ---------------------------------------------------------------------------

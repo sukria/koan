@@ -118,7 +118,8 @@ def recover_missions(instance_dir: str) -> int:
             if not any(m.strip() for m in remaining_in_progress):
                 new_lines.append("")
 
-    missions_path.write_text("\n".join(new_lines) + "\n")
+    from app.utils import atomic_write
+    atomic_write(missions_path, "\n".join(new_lines) + "\n")
     return len(recovered)
 
 
