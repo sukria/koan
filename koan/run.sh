@@ -227,8 +227,10 @@ while [ $count -lt $MAX_RUNS ]; do
     echo ""
     notify "Run $RUN_NUM/$MAX_RUNS — Mission taken: $MISSION_TITLE"
   else
-    ESTIMATED_COST=$("$PYTHON" -c "print(f'{5 if $count == 0 else ${AUTONOMOUS_MODE:+5}:.1f}')" 2>/dev/null || echo "5.0")
-    echo "Decision: ${AUTONOMOUS_MODE^^} mode (estimated cost: ${ESTIMATED_COST}% session)"
+    ESTIMATED_COST="5.0"
+    # Uppercase mode for display (bash 3.2 compatible)
+    MODE_UPPER=$(echo "$AUTONOMOUS_MODE" | tr '[:lower:]' '[:upper:]')
+    echo "Decision: $MODE_UPPER mode (estimated cost: ${ESTIMATED_COST}% session)"
     echo "  Reason: $DECISION_REASON"
     echo "  Project: $PROJECT_NAME"
     echo "  Focus: $FOCUS_AREA"
