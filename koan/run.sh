@@ -10,6 +10,7 @@ INSTANCE="$KOAN_ROOT/instance"
 NOTIFY="$(dirname "$0")/notify.py"
 DAILY_REPORT="$(dirname "$0")/daily_report.py"
 MISSION_SUMMARY="$(dirname "$0")/mission_summary.py"
+HEALTH_CHECK="$(dirname "$0")/health_check.py"
 
 if [ ! -d "$INSTANCE" ]; then
   echo "[koan] No instance/ directory found. Run: cp -r instance.example instance"
@@ -87,6 +88,10 @@ echo "[koan] Checking for interrupted missions..."
 MEMORY_MGR="$(dirname "$0")/memory_manager.py"
 echo "[koan] Running memory cleanup..."
 "$PYTHON" "$MEMORY_MGR" "$INSTANCE" cleanup 15 2>/dev/null || true
+
+# Health check: warn if Telegram bridge is not running
+echo "[koan] Checking Telegram bridge health..."
+"$PYTHON" "$HEALTH_CHECK" "$KOAN_ROOT" --max-age 120 || true
 
 echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
 notify "Koan starting — $MAX_RUNS max runs, ${INTERVAL}s interval"
@@ -215,10 +220,16 @@ Koan paused after $count runs. Send /resume via Telegram when quota resets to ch
       notify "Run $RUN_NUM/$MAX_RUNS — Autonomous run completed"
     fi
 
-    # Extract journal summary and send via outbox
+    # Extract journal summary and send via outbox (locked append to avoid race with awake.py)
     SUMMARY_TEXT=$("$PYTHON" "$MISSION_SUMMARY" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || echo "")
     if [ -n "$SUMMARY_TEXT" ]; then
-      echo "$SUMMARY_TEXT" >> "$INSTANCE/outbox.md"
+      "$PYTHON" -c "
+import fcntl, sys
+with open('$INSTANCE/outbox.md', 'a') as f:
+    fcntl.flock(f, fcntl.LOCK_EX)
+    f.write(sys.stdin.read())
+    fcntl.flock(f, fcntl.LOCK_UN)
+" <<< "$SUMMARY_TEXT"
     fi
   else
     if [ -n "$MISSION_TITLE" ]; then
