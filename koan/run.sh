@@ -62,6 +62,18 @@ notify() {
   "$PYTHON" "$NOTIFY" "$@" 2>/dev/null || true
 }
 
+# Temp file for Claude output (set early so trap can clean it)
+CLAUDE_OUT=""
+
+cleanup() {
+  [ -n "$CLAUDE_OUT" ] && rm -f "$CLAUDE_OUT"
+  echo "[koan] Shutdown."
+  notify "Koan interrupted after $count runs."
+  exit 0
+}
+
+trap cleanup INT TERM
+
 count=0
 
 echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
@@ -120,7 +132,7 @@ while [ $count -lt $MAX_RUNS ]; do
 
   # Execute next mission, capture output to detect quota errors
   cd "$PROJECT_PATH"
-  CLAUDE_OUT=$(mktemp)
+  CLAUDE_OUT="$(mktemp)"
   set +e  # Don't exit on error, we need to check the output
   claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit 2>&1 | tee "$CLAUDE_OUT"
   CLAUDE_EXIT=$?
@@ -159,9 +171,11 @@ EOF
 
 Koan paused after $count runs. Send /resume via Telegram when quota resets to check if you want to restart."
     rm -f "$CLAUDE_OUT"
+    CLAUDE_OUT=""
     break
   fi
   rm -f "$CLAUDE_OUT"
+  CLAUDE_OUT=""
 
   # Report result
   if [ $CLAUDE_EXIT -eq 0 ]; then
