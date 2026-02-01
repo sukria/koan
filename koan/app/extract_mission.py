@@ -13,7 +13,6 @@ Usage:
 If project_name is given, only returns missions tagged [project:name] or untagged.
 """
 
-import re
 import sys
 from pathlib import Path
 

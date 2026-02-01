@@ -124,7 +124,7 @@ def generate_report(report_type: str = "morning") -> str:
         header = f"Rapport du {target.strftime('%d/%m/%Y')}"
     else:
         target = date.today()
-        header = f"Bilan de la journee"
+        header = f"Bilan de la journée"
 
     journal = _read_journal(target)
     completed = _parse_completed_missions()

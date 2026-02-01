@@ -168,5 +168,5 @@ class TestGenerateReport:
              patch("app.daily_report.INSTANCE_DIR", tmp_path):
             report = generate_report("evening")
 
-        assert "Bilan de la journee" in report
+        assert "Bilan de la journée" in report
         assert "-- Koan" in report
