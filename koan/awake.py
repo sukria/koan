@@ -43,6 +43,7 @@ load_dotenv()
 BOT_TOKEN = os.environ.get("KOAN_TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("KOAN_TELEGRAM_CHAT_ID", "")
 POLL_INTERVAL = int(os.environ.get("KOAN_BRIDGE_INTERVAL", "3"))
+CHAT_TIMEOUT = int(os.environ.get("KOAN_CHAT_TIMEOUT", "180"))
 
 KOAN_ROOT = Path(__file__).parent.parent
 INSTANCE_DIR = KOAN_ROOT / "instance"
@@ -330,7 +331,7 @@ def handle_chat(text: str):
     try:
         result = subprocess.run(
             ["claude", "-p", prompt, "--allowedTools", "Read,Glob,Grep"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )
         response = result.stdout.strip()
@@ -343,8 +344,8 @@ def handle_chat(text: str):
         else:
             print("[awake] Empty response from Claude.")
     except subprocess.TimeoutExpired:
-        print("[awake] Claude timed out (2min).")
-        send_telegram("Taking too long to respond — try again, or send 'mission: ...' if it's a task.")
+        print(f"[awake] Claude timed out ({CHAT_TIMEOUT}s).")
+        send_telegram(f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks.")
     except Exception as e:
         print(f"[awake] Claude error: {e}")
 
