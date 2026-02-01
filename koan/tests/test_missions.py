@@ -192,6 +192,23 @@ class TestGroupByProject:
         assert len(result["default"]["pending"]) == 1
 
 
+    def test_single_project_no_tags(self):
+        """Single-project setup: all missions untagged go to 'default'."""
+        content = (
+            "## En attente\n\n"
+            "- Fix the login bug\n"
+            "- Add dark mode\n\n"
+            "## En cours\n\n"
+            "- Write documentation\n\n"
+            "## Terminées\n\n"
+            "- Initial setup\n"
+        )
+        result = group_by_project(content)
+        assert list(result.keys()) == ["default"]
+        assert len(result["default"]["pending"]) == 2
+        assert len(result["default"]["in_progress"]) == 1
+
+
 # --- find_section_boundaries ---
 
 class TestFindSectionBoundaries:

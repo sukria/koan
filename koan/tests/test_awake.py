@@ -184,6 +184,27 @@ class TestBuildStatus:
         assert "In progress: 1" in status
 
     @patch("app.awake.MISSIONS_FILE")
+    def test_status_shows_pending_titles(self, mock_file, tmp_path):
+        """_build_status shows pending mission titles, not just count."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "- [project:koan] add tests\n"
+            "- [project:koan] fix dashboard\n\n"
+            "## En cours\n\n"
+        )
+        with patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.KOAN_ROOT", tmp_path):
+            status = _build_status()
+
+        assert "Pending: 2" in status
+        assert "add tests" in status
+        assert "fix dashboard" in status
+        # Project tags should be stripped from display
+        assert "[project:koan]" not in status
+
+    @patch("app.awake.MISSIONS_FILE")
     def test_status_empty(self, mock_file, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")

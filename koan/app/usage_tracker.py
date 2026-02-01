@@ -231,7 +231,7 @@ def main():
         print(output)
     except Exception as e:
         # Fallback to safe defaults on error
-        print(f"review:50:Error parsing usage ({e}):0", file=sys.stderr)
+        print(f"[usage_tracker] Error: {e}", file=sys.stderr)
         print("review:50:Fallback mode:0")
         sys.exit(0)  # Don't break run loop on tracker errors
 
