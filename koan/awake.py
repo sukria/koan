@@ -18,6 +18,7 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
+from typing import Optional, Tuple
 
 import requests
 
@@ -114,7 +115,7 @@ def is_command(text: str) -> bool:
     return text.startswith("/")
 
 
-def parse_project(text: str) -> tuple[str | None, str]:
+def parse_project(text: str) -> Tuple[Optional[str], str]:
     """Extract [project:name] from message. Returns (project_name, cleaned_text)."""
     match = re.search(r'\[project:([a-zA-Z0-9_-]+)\]', text)
     if match:
@@ -286,11 +287,19 @@ def handle_mission(text: str):
 def handle_chat(text: str):
     """Lightweight Claude call for conversational messages — fast response."""
     # Load today's journal for recent context
+    # Try nested structure first (journal/YYYY-MM-DD/*.md), fall back to flat
     journal_context = ""
-    journal_path = INSTANCE_DIR / "journal" / f"{date.today():%Y-%m-%d}.md"
-    if journal_path.exists():
-        journal_content = journal_path.read_text()
-        # Only last 2000 chars to keep it fast
+    today = f"{date.today():%Y-%m-%d}"
+    journal_dir = INSTANCE_DIR / "journal" / today
+    if journal_dir.is_dir():
+        parts = []
+        for f in sorted(journal_dir.glob("*.md")):
+            parts.append(f.read_text())
+        journal_content = "\n---\n".join(parts)
+    else:
+        journal_path = INSTANCE_DIR / "journal" / f"{today}.md"
+        journal_content = journal_path.read_text() if journal_path.exists() else ""
+    if journal_content:
         if len(journal_content) > 2000:
             journal_context = "...\n" + journal_content[-2000:]
         else:

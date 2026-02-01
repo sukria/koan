@@ -44,21 +44,21 @@ Progress tracking via user stories. Updated between sessions.
 - **As a** Human
 - **I want** to assign a mission to a specific project
 - **So that** Kōan works on the right codebase
-- [ ] Define the list of projects and their paths in `.env` (`KOAN_PROJECT_PATH=`)
-- [ ] Don't be tight to a single project (`KOAN_PROJECT_PATH=`) but up to 5: `KOAN_PROJECTS=`
+- [x] Define the list of projects and their paths in `.env` (`KOAN_PROJECT_PATH=`)
+- [x] Don't be tight to a single project (`KOAN_PROJECT_PATH=`) but up to 5: `KOAN_PROJECTS=`
       - format: `KOAN_PROJECTS=name:PATH;name2:PATH2;...`
-- [ ] Add a `project:<name>` field in the missions format (missions.md)
-- [ ] Parse the project in `run.sh` and pass the right `PROJECT_PATH` to Claude for the current mission
-- [ ] Feed the journal with the current project scope to avoid mixup
-- [ ] Always scope memory/* entries by project
+- [x] Add a `project:<name>` field in the missions format (missions.md)
+- [x] Parse the project in `run.sh` and pass the right `PROJECT_PATH` to Claude for the current mission
+- [x] Feed the journal with the current project scope to avoid mixup
+- [x] Always scope memory/* entries by project
 
 ### US 2.2 — Context per project
 - **As** Kōan
 - **I want** to load the right memory context according to the project
 - **So that** I don't mix learnings between projects
-- [ ] Structure `memory/` by project (e.g. `memory/anantys/learnings.md`)
-- [ ] Adapt the bootstrap prompt to load the right subfolder
-- [ ] Keep `memory/summary.md` global (cross-project)
+- [x] Structure `memory/` by project (e.g. `memory/projects/{name}/learnings.md`)
+- [x] Adapt the bootstrap prompt to load the right subfolder
+- [x] Keep `memory/summary.md` global (cross-project)
 
 ---
 
@@ -122,7 +122,7 @@ Progress tracking via user stories. Updated between sessions.
 | Epic | Status |
 |------|--------|
 | 1 — Fast Telegram | ✅ Done |
-| 2 — Multi-project | To do |
+| 2 — Multi-project | ✅ Done |
 | 3 — Parallel workers | To do |
 | 4 — Systematic notifications | To do |
 | 5 — Robustness | In progress (INSTALL.md done) |
