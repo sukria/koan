@@ -4,6 +4,8 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from app.send_retrospective import (
     get_todays_journal,
     extract_session_summary,
@@ -110,3 +112,65 @@ class TestCreateRetrospective:
         outbox = (instance_dir / "outbox.md").read_text()
         assert "Retrospective" in outbox
         assert "brief" in outbox
+
+
+class TestExtractSessionSummaryEdgeCases:
+    """Cover lines 52-53: long content with sections that still exceed max_chars after joining."""
+
+    def test_long_sections_truncated(self, tmp_path):
+        f = tmp_path / "journal.md"
+        # Create content with many sections where last 3 still exceed max_chars
+        sections = "\n\n## ".join([f"Section {i}\n\n{'x' * 200}" for i in range(10)])
+        f.write_text("## " + sections)
+        result = extract_session_summary(f, max_chars=100)
+        assert result.startswith("...")
+        assert len(result) <= 104  # "..." + 100 + small margin
+
+
+class TestAppendToOutboxError:
+    """Cover line 76-77: OSError handling."""
+
+    def test_oserror_handled_gracefully(self, tmp_path):
+        """When outbox can't be written, no exception propagates."""
+        # Make directory read-only to trigger OSError
+        import os
+        readonly_dir = tmp_path / "readonly"
+        readonly_dir.mkdir()
+        os.chmod(str(readonly_dir), 0o444)
+        try:
+            append_to_outbox(readonly_dir, "msg")  # Should not raise
+        finally:
+            os.chmod(str(readonly_dir), 0o755)
+
+
+class TestSendRetrospectiveCLI:
+    """Tests for main() CLI entry point (lines 106-123)."""
+
+    def test_cli_success(self, instance_dir, monkeypatch):
+        from datetime import date
+        today = date.today().strftime("%Y-%m-%d")
+        journal_dir = instance_dir / "journal" / today
+        journal_dir.mkdir(parents=True)
+        (journal_dir / "koan.md").write_text("## Session\n\nWork done.")
+
+        monkeypatch.setattr("sys.argv", ["send_retrospective.py", str(instance_dir), "koan"])
+        from app.send_retrospective import main
+        main()
+        outbox = (instance_dir / "outbox.md").read_text()
+        assert "Retrospective" in outbox
+
+    def test_cli_no_args(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["send_retrospective.py"])
+        from app.send_retrospective import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+    def test_cli_missing_instance_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("sys.argv", [
+            "send_retrospective.py", str(tmp_path / "nonexistent"), "koan"
+        ])
+        from app.send_retrospective import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1

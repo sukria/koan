@@ -87,3 +87,72 @@ class TestGetMissionSummary:
         (journal_dir / "proj.md").write_text("")
         result = get_mission_summary(str(tmp_path), "proj")
         assert result == ""
+
+
+class TestSummarizeSectionEdgeCases:
+    """Cover line 51 (rsplit truncation) and line 64 (no heading)."""
+
+    def test_truncation_with_rsplit(self):
+        """Long body line triggers rsplit truncation at word boundary."""
+        section = "## Title\n\n" + "word " * 100
+        result = summarize_section(section, max_chars=50)
+        assert result.endswith("...")
+
+    def test_no_heading_returns_body_only(self):
+        """Section without ## heading returns body lines only."""
+        section = "Just body text\nMore text"
+        result = summarize_section(section)
+        assert "Just body text" in result
+
+    def test_skips_separator_lines(self):
+        """--- lines are skipped."""
+        section = "## Title\n\n---\nActual content"
+        result = summarize_section(section)
+        assert "---" not in result
+        assert "Actual content" in result
+
+
+class TestMissionSummaryCLI:
+    """Tests for __main__ CLI entry point (lines 84-95)."""
+
+    def test_cli_prints_summary(self, tmp_path, monkeypatch):
+        import runpy, io, contextlib
+        today = date.today().strftime("%Y-%m-%d")
+        journal_dir = tmp_path / "journal" / today
+        journal_dir.mkdir(parents=True)
+        (journal_dir / "proj.md").write_text("## Session\n\nWork done.")
+
+        monkeypatch.setattr("sys.argv", ["mission_summary.py", str(tmp_path), "proj"])
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            runpy.run_module("app.mission_summary", run_name="__main__")
+        assert "Work done" in f.getvalue()
+
+    def test_cli_with_max_chars(self, tmp_path, monkeypatch):
+        import runpy, io, contextlib
+        today = date.today().strftime("%Y-%m-%d")
+        journal_dir = tmp_path / "journal" / today
+        journal_dir.mkdir(parents=True)
+        (journal_dir / "proj.md").write_text("## Session\n\n" + "x " * 500)
+
+        monkeypatch.setattr("sys.argv", ["mission_summary.py", str(tmp_path), "proj", "50"])
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            runpy.run_module("app.mission_summary", run_name="__main__")
+        output = f.getvalue().strip()
+        assert len(output) < 200
+
+    def test_cli_no_args(self, monkeypatch):
+        import runpy
+        monkeypatch.setattr("sys.argv", ["mission_summary.py"])
+        with pytest.raises(SystemExit) as exc_info:
+            runpy.run_module("app.mission_summary", run_name="__main__")
+        assert exc_info.value.code == 1
+
+    def test_cli_no_output_when_empty(self, tmp_path, monkeypatch):
+        import runpy, io, contextlib
+        monkeypatch.setattr("sys.argv", ["mission_summary.py", str(tmp_path), "proj"])
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            runpy.run_module("app.mission_summary", run_name="__main__")
+        assert f.getvalue().strip() == ""

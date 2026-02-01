@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from app.format_outbox import (
     load_soul,
     load_human_prefs,
@@ -182,3 +184,54 @@ class TestLoadMemoryContext:
         result = load_memory_context(instance_dir, "koan")
         assert "Session 61" in result
         assert "Important fact" in result
+
+
+class TestFormatOutboxCLI:
+    """Tests for main() CLI entry point (lines 177-210)."""
+
+    def test_cli_formats_stdin(self, instance_dir, monkeypatch):
+        import io, contextlib
+        monkeypatch.setattr("sys.argv", ["format_outbox.py", str(instance_dir)])
+        monkeypatch.setattr("sys.stdin", io.StringIO("Raw message to format"))
+        f = io.StringIO()
+        with patch("app.format_outbox.subprocess.run") as mock_run, \
+             contextlib.redirect_stdout(f):
+            mock_run.return_value = MagicMock(returncode=0, stdout="Formatted!", stderr="")
+            from app.format_outbox import main
+            main()
+        assert "Formatted!" in f.getvalue()
+
+    def test_cli_with_project_name(self, instance_dir, monkeypatch):
+        import io, contextlib
+        monkeypatch.setattr("sys.argv", ["format_outbox.py", str(instance_dir), "koan"])
+        monkeypatch.setattr("sys.stdin", io.StringIO("Raw"))
+        f = io.StringIO()
+        with patch("app.format_outbox.subprocess.run") as mock_run, \
+             contextlib.redirect_stdout(f):
+            mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
+            from app.format_outbox import main
+            main()
+        assert "OK" in f.getvalue()
+
+    def test_cli_no_args(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["format_outbox.py"])
+        from app.format_outbox import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+    def test_cli_missing_instance_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("sys.argv", ["format_outbox.py", str(tmp_path / "nonexistent")])
+        from app.format_outbox import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+    def test_cli_empty_stdin(self, instance_dir, monkeypatch):
+        import io
+        monkeypatch.setattr("sys.argv", ["format_outbox.py", str(instance_dir)])
+        monkeypatch.setattr("sys.stdin", io.StringIO(""))
+        from app.format_outbox import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1

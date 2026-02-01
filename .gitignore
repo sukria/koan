@@ -8,6 +8,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.coverage
 
 # Runtime
 .koan-status
