@@ -151,28 +151,28 @@ class TestNotifyCLI:
     """Tests for __main__ CLI entry point (lines 97-119)."""
 
     def test_cli_send_message(self, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["notify.py", "Hello", "world"])
         with patch("app.notify.requests.post") as mock_post, \
              pytest.raises(SystemExit) as exc_info:
             mock_post.return_value = MagicMock(json=lambda: {"ok": True})
-            runpy.run_module("app.notify", run_name="__main__")
+            run_module("app.notify", run_name="__main__")
         assert exc_info.value.code == 0
 
     def test_cli_format_flag(self, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["notify.py", "--format", "Raw msg"])
         with patch("app.notify.requests.post") as mock_post, \
              patch("app.format_outbox.subprocess.run") as mock_sub, \
              pytest.raises(SystemExit) as exc_info:
             mock_post.return_value = MagicMock(json=lambda: {"ok": True})
             mock_sub.return_value = MagicMock(returncode=0, stdout="Formatted", stderr="")
-            runpy.run_module("app.notify", run_name="__main__")
+            run_module("app.notify", run_name="__main__")
         assert exc_info.value.code == 0
 
     def test_cli_format_passes_project_name(self, monkeypatch):
         """CLI --format reads KOAN_CURRENT_PROJECT env var."""
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["notify.py", "--format", "Raw msg"])
         monkeypatch.setenv("KOAN_CURRENT_PROJECT", "myproject")
         with patch("app.notify.requests.post") as mock_post, \
@@ -180,29 +180,29 @@ class TestNotifyCLI:
              pytest.raises(SystemExit) as exc_info:
             mock_post.return_value = MagicMock(json=lambda: {"ok": True})
             mock_sub.return_value = MagicMock(returncode=0, stdout="Formatted", stderr="")
-            runpy.run_module("app.notify", run_name="__main__")
+            run_module("app.notify", run_name="__main__")
         assert exc_info.value.code == 0
         # Verify Claude was called (format_and_send path was used)
         mock_sub.assert_called_once()
 
     def test_cli_no_args(self, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["notify.py"])
         with pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.notify", run_name="__main__")
+            run_module("app.notify", run_name="__main__")
         assert exc_info.value.code == 1
 
     def test_cli_format_no_message(self, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["notify.py", "--format"])
         with pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.notify", run_name="__main__")
+            run_module("app.notify", run_name="__main__")
         assert exc_info.value.code == 1
 
     def test_cli_failure_exit_code(self, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["notify.py", "msg"])
         with patch("app.notify.send_telegram", return_value=False), \
              pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.notify", run_name="__main__")
+            run_module("app.notify", run_name="__main__")
         assert exc_info.value.code == 1

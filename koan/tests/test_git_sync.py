@@ -170,11 +170,11 @@ class TestGitSyncCLI:
 
     def test_cli_usage_error(self):
         """Exit 1 with usage message when called with too few args."""
-        import runpy
+        from tests._helpers import run_module
         import sys
         with patch.object(sys, "argv", ["git_sync.py"]):
             with pytest.raises(SystemExit) as exc:
-                runpy.run_module("app.git_sync", run_name="__main__")
+                run_module("app.git_sync", run_name="__main__")
             assert exc.value.code == 1
 
     def test_cli_runs_sync(self, tmp_path):
@@ -183,14 +183,14 @@ class TestGitSyncCLI:
         instance.mkdir()
         (instance / "journal").mkdir()
 
-        import runpy
+        from tests._helpers import run_module
         import sys
         with patch.object(sys, "argv", [
             "git_sync.py", str(instance), "koan", "/fake/path"
         ]):
             with patch("app.git_sync.run_git", return_value=""):
                 with patch("builtins.print") as mock_print:
-                    runpy.run_module("app.git_sync", run_name="__main__")
+                    run_module("app.git_sync", run_name="__main__")
                     mock_print.assert_called_once()
 
     def test_cli_with_branches(self, tmp_path):
@@ -216,13 +216,13 @@ class TestGitSyncCLI:
                 mock_result.stdout = ""
             return mock_result
 
-        import runpy
+        from tests._helpers import run_module
         import sys
         with patch.object(sys, "argv", [
             "git_sync.py", str(instance), "koan", "/fake/path"
         ]):
             with patch("subprocess.run", side_effect=subprocess_side_effect):
                 with patch("builtins.print") as mock_print:
-                    runpy.run_module("app.git_sync", run_name="__main__")
+                    run_module("app.git_sync", run_name="__main__")
                     output = mock_print.call_args[0][0]
                     assert "koan/done" in output

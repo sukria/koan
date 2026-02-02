@@ -126,7 +126,7 @@ class TestExtractMissionCLI:
     """Tests for __main__ CLI entry point (lines 31-39)."""
 
     def test_cli_prints_mission(self, tmp_path, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## En attente\n\n- CLI task\n\n## En cours\n\n"
@@ -136,11 +136,11 @@ class TestExtractMissionCLI:
         import io, contextlib
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
-            runpy.run_module("app.extract_mission", run_name="__main__")
+            run_module("app.extract_mission", run_name="__main__")
         assert "CLI task" in f.getvalue()
 
     def test_cli_with_project_filter(self, tmp_path, monkeypatch):
-        import runpy, io, contextlib
+        from tests._helpers import run_module; import io, contextlib
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## En attente\n\n- [project:koan] Tagged\n\n## En cours\n\n"
@@ -148,12 +148,12 @@ class TestExtractMissionCLI:
         monkeypatch.setattr("sys.argv", ["extract_mission.py", str(missions_file), "koan"])
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
-            runpy.run_module("app.extract_mission", run_name="__main__")
+            run_module("app.extract_mission", run_name="__main__")
         assert "Tagged" in f.getvalue()
 
     def test_cli_no_args_exits(self, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["extract_mission.py"])
         with pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.extract_mission", run_name="__main__")
+            run_module("app.extract_mission", run_name="__main__")
         assert exc_info.value.code == 1

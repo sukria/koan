@@ -89,7 +89,7 @@ class TestHealthCheckCLI:
     """Tests for __main__ CLI entry point (lines 73-93)."""
 
     def test_cli_healthy(self, tmp_path, monkeypatch):
-        import runpy, io, contextlib
+        from tests._helpers import run_module; import io, contextlib
         write_heartbeat(str(tmp_path))
         monkeypatch.setattr("sys.argv", ["health_check.py", str(tmp_path)])
         f = io.StringIO()
@@ -97,12 +97,12 @@ class TestHealthCheckCLI:
              patch("app.health_check.format_and_send"), \
              contextlib.redirect_stdout(f), \
              pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.health_check", run_name="__main__")
+            run_module("app.health_check", run_name="__main__")
         assert exc_info.value.code == 0
         assert "healthy" in f.getvalue()
 
     def test_cli_stale(self, tmp_path, monkeypatch):
-        import runpy, io, contextlib
+        from tests._helpers import run_module; import io, contextlib
         hb = tmp_path / ".koan-heartbeat"
         hb.write_text(str(time.time() - 300))
         monkeypatch.setattr("sys.argv", ["health_check.py", str(tmp_path), "--max-age", "60"])
@@ -111,19 +111,19 @@ class TestHealthCheckCLI:
              patch("app.health_check.format_and_send"), \
              contextlib.redirect_stdout(f), \
              pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.health_check", run_name="__main__")
+            run_module("app.health_check", run_name="__main__")
         assert exc_info.value.code == 1
 
     def test_cli_no_args(self, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["health_check.py"])
         with pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.health_check", run_name="__main__")
+            run_module("app.health_check", run_name="__main__")
         assert exc_info.value.code == 2
 
     def test_cli_invalid_max_age(self, tmp_path, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["health_check.py", str(tmp_path), "--max-age", "abc"])
         with pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.health_check", run_name="__main__")
+            run_module("app.health_check", run_name="__main__")
         assert exc_info.value.code == 2

@@ -10,7 +10,7 @@ Covers:
 
 import json
 import os
-import runpy
+from tests._helpers import run_module
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -29,14 +29,14 @@ class TestUsageTrackerCLI:
         """Missing args prints usage to stderr and exits 1."""
         with patch.object(sys, "argv", ["usage_tracker.py"]):
             with pytest.raises(SystemExit, match="1"):
-                runpy.run_module("app.usage_tracker", run_name="__main__")
+                run_module("app.usage_tracker", run_name="__main__")
 
     def test_cli_normal_run(self, tmp_path, capsys):
         """Normal CLI run outputs mode:available:reason:project_idx."""
         usage = tmp_path / "usage.md"
         usage.write_text("Session (5hr) : 10% (reset in 4h)\nWeekly (7 day) : 25% (Resets in 5d)")
         with patch.object(sys, "argv", ["usage_tracker.py", str(usage), "3", "p1:/a;p2:/b"]):
-            runpy.run_module("app.usage_tracker", run_name="__main__")
+            run_module("app.usage_tracker", run_name="__main__")
         out = capsys.readouterr().out.strip()
         parts = out.split(":")
         assert len(parts) == 4
@@ -47,7 +47,7 @@ class TestUsageTrackerCLI:
         usage = tmp_path / "usage.md"
         usage.write_text("Session (5hr) : 50% (reset in 2h)\nWeekly (7 day) : 50% (Resets in 3d)")
         with patch.object(sys, "argv", ["usage_tracker.py", str(usage), "5"]):
-            runpy.run_module("app.usage_tracker", run_name="__main__")
+            run_module("app.usage_tracker", run_name="__main__")
         out = capsys.readouterr().out.strip()
         assert out.endswith(":0")
 
@@ -113,14 +113,14 @@ class TestMemoryManagerCLI:
         """Missing args prints usage and exits 1."""
         with patch.object(sys, "argv", ["memory_manager.py"]):
             with pytest.raises(SystemExit, match="1"):
-                runpy.run_module("app.memory_manager", run_name="__main__")
+                run_module("app.memory_manager", run_name="__main__")
 
     def test_cli_scoped_summary(self, instance_dir, capsys):
         """scoped-summary command prints filtered summary."""
         summary = instance_dir / "memory" / "summary.md"
         summary.write_text("# Summary\n\n## 2026-02-01\n\nSession 1 (project: koan) : stuff\n")
         with patch.object(sys, "argv", ["memory_manager.py", str(instance_dir), "scoped-summary", "koan"]):
-            runpy.run_module("app.memory_manager", run_name="__main__")
+            run_module("app.memory_manager", run_name="__main__")
         out = capsys.readouterr().out
         assert "koan" in out
 
@@ -128,14 +128,14 @@ class TestMemoryManagerCLI:
         """scoped-summary without project arg exits 1."""
         with patch.object(sys, "argv", ["memory_manager.py", "/tmp", "scoped-summary"]):
             with pytest.raises(SystemExit, match="1"):
-                runpy.run_module("app.memory_manager", run_name="__main__")
+                run_module("app.memory_manager", run_name="__main__")
 
     def test_cli_compact(self, instance_dir, capsys):
         """compact command reports removed count."""
         summary = instance_dir / "memory" / "summary.md"
         summary.write_text("# Summary\n\n## 2026-02-01\n\nSession 1\n")
         with patch.object(sys, "argv", ["memory_manager.py", str(instance_dir), "compact", "10"]):
-            runpy.run_module("app.memory_manager", run_name="__main__")
+            run_module("app.memory_manager", run_name="__main__")
         out = capsys.readouterr().out
         assert "Compacted" in out
 
@@ -145,7 +145,7 @@ class TestMemoryManagerCLI:
         proj_dir.mkdir(parents=True)
         (proj_dir / "learnings.md").write_text("# L\n\n- item\n- item\n")
         with patch.object(sys, "argv", ["memory_manager.py", str(instance_dir), "cleanup-learnings", "koan"]):
-            runpy.run_module("app.memory_manager", run_name="__main__")
+            run_module("app.memory_manager", run_name="__main__")
         out = capsys.readouterr().out
         assert "Deduped" in out
 
@@ -153,20 +153,20 @@ class TestMemoryManagerCLI:
         """cleanup-learnings without project arg exits 1."""
         with patch.object(sys, "argv", ["memory_manager.py", "/tmp", "cleanup-learnings"]):
             with pytest.raises(SystemExit, match="1"):
-                runpy.run_module("app.memory_manager", run_name="__main__")
+                run_module("app.memory_manager", run_name="__main__")
 
     def test_cli_cleanup(self, instance_dir, capsys):
         """cleanup command runs full cleanup."""
         summary = instance_dir / "memory" / "summary.md"
         summary.write_text("# Summary\n\n## 2026-02-01\n\nSession 1\n")
         with patch.object(sys, "argv", ["memory_manager.py", str(instance_dir), "cleanup", "10"]):
-            runpy.run_module("app.memory_manager", run_name="__main__")
+            run_module("app.memory_manager", run_name="__main__")
 
     def test_cli_unknown_command(self):
         """Unknown command exits 1."""
         with patch.object(sys, "argv", ["memory_manager.py", "/tmp", "bogus"]):
             with pytest.raises(SystemExit, match="1"):
-                runpy.run_module("app.memory_manager", run_name="__main__")
+                run_module("app.memory_manager", run_name="__main__")
 
 
 # ---------------------------------------------------------------------------
@@ -180,13 +180,13 @@ class TestRecoverCLI:
         """Missing args exits 1."""
         with patch.object(sys, "argv", ["recover.py"]):
             with pytest.raises(SystemExit, match="1"):
-                runpy.run_module("app.recover", run_name="__main__")
+                run_module("app.recover", run_name="__main__")
 
     def test_cli_no_stale_missions(self, instance_dir, capsys):
         """No stale missions prints 0."""
         with patch("app.recover.format_and_send"):
             with patch.object(sys, "argv", ["recover.py", str(instance_dir)]):
-                runpy.run_module("app.recover", run_name="__main__")
+                run_module("app.recover", run_name="__main__")
         out = capsys.readouterr().out
         assert "No stale" in out or "0" in out
 
@@ -202,7 +202,7 @@ class TestRecoverCLI:
         )
         with patch("app.notify.format_and_send") as mock_send:
             with patch.object(sys, "argv", ["recover.py", str(instance_dir)]):
-                runpy.run_module("app.recover", run_name="__main__")
+                run_module("app.recover", run_name="__main__")
         mock_send.assert_called_once()
         out = capsys.readouterr().out
         assert "1" in out

@@ -116,7 +116,7 @@ class TestMissionSummaryCLI:
     """Tests for __main__ CLI entry point (lines 84-95)."""
 
     def test_cli_prints_summary(self, tmp_path, monkeypatch):
-        import runpy, io, contextlib
+        from tests._helpers import run_module; import io, contextlib
         today = date.today().strftime("%Y-%m-%d")
         journal_dir = tmp_path / "journal" / today
         journal_dir.mkdir(parents=True)
@@ -125,11 +125,11 @@ class TestMissionSummaryCLI:
         monkeypatch.setattr("sys.argv", ["mission_summary.py", str(tmp_path), "proj"])
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
-            runpy.run_module("app.mission_summary", run_name="__main__")
+            run_module("app.mission_summary", run_name="__main__")
         assert "Work done" in f.getvalue()
 
     def test_cli_with_max_chars(self, tmp_path, monkeypatch):
-        import runpy, io, contextlib
+        from tests._helpers import run_module; import io, contextlib
         today = date.today().strftime("%Y-%m-%d")
         journal_dir = tmp_path / "journal" / today
         journal_dir.mkdir(parents=True)
@@ -138,21 +138,21 @@ class TestMissionSummaryCLI:
         monkeypatch.setattr("sys.argv", ["mission_summary.py", str(tmp_path), "proj", "50"])
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
-            runpy.run_module("app.mission_summary", run_name="__main__")
+            run_module("app.mission_summary", run_name="__main__")
         output = f.getvalue().strip()
         assert len(output) < 200
 
     def test_cli_no_args(self, monkeypatch):
-        import runpy
+        from tests._helpers import run_module
         monkeypatch.setattr("sys.argv", ["mission_summary.py"])
         with pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.mission_summary", run_name="__main__")
+            run_module("app.mission_summary", run_name="__main__")
         assert exc_info.value.code == 1
 
     def test_cli_no_output_when_empty(self, tmp_path, monkeypatch):
-        import runpy, io, contextlib
+        from tests._helpers import run_module; import io, contextlib
         monkeypatch.setattr("sys.argv", ["mission_summary.py", str(tmp_path), "proj"])
         f = io.StringIO()
         with contextlib.redirect_stdout(f):
-            runpy.run_module("app.mission_summary", run_name="__main__")
+            run_module("app.mission_summary", run_name="__main__")
         assert f.getvalue().strip() == ""

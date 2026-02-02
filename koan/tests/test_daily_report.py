@@ -1,6 +1,6 @@
 """Tests for daily_report.py — report generation, mission parsing, time logic."""
 
-import runpy
+from tests._helpers import run_module
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -293,7 +293,7 @@ class TestDailyReportCLI:
              patch("app.daily_report.INSTANCE_DIR", tmp_path), \
              patch("app.daily_report.REPORT_MARKER", marker), \
              pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.daily_report", run_name="__main__")
+            run_module("app.daily_report", run_name="__main__")
         assert exc_info.value.code == 0
 
     def test_cli_evening_flag(self, tmp_path):
@@ -307,7 +307,7 @@ class TestDailyReportCLI:
              patch("app.daily_report.INSTANCE_DIR", tmp_path), \
              patch("app.daily_report.REPORT_MARKER", marker), \
              pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.daily_report", run_name="__main__")
+            run_module("app.daily_report", run_name="__main__")
         assert exc_info.value.code == 0
 
     def test_cli_no_flag_auto_detect(self, tmp_path):
@@ -315,7 +315,7 @@ class TestDailyReportCLI:
         with patch("sys.argv", ["daily_report.py"]), \
              patch("app.daily_report.should_send_report", return_value=None), \
              pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.daily_report", run_name="__main__")
+            run_module("app.daily_report", run_name="__main__")
         assert exc_info.value.code == 1
 
     def test_cli_send_failure_exits_1(self, tmp_path):
@@ -327,5 +327,5 @@ class TestDailyReportCLI:
              patch("app.daily_report.MISSIONS_FILE", missions_file), \
              patch("app.daily_report.INSTANCE_DIR", tmp_path), \
              pytest.raises(SystemExit) as exc_info:
-            runpy.run_module("app.daily_report", run_name="__main__")
+            run_module("app.daily_report", run_name="__main__")
         assert exc_info.value.code == 1
