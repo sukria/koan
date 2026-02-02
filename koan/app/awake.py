@@ -156,6 +156,21 @@ def handle_command(text: str):
         handle_resume()
         return
 
+    if cmd == "/verbose":
+        verbose_file = KOAN_ROOT / ".koan-verbose"
+        verbose_file.write_text("VERBOSE")
+        send_telegram("Verbose mode ON. Je t'envoie chaque update de progression.")
+        return
+
+    if cmd == "/silent":
+        verbose_file = KOAN_ROOT / ".koan-verbose"
+        if verbose_file.exists():
+            verbose_file.unlink()
+            send_telegram("Verbose mode OFF. Silence radio jusqu'à la conclusion.")
+        else:
+            send_telegram("Déjà en mode silent.")
+        return
+
     if cmd == "/sparring":
         _handle_sparring()
         return

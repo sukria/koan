@@ -358,6 +358,29 @@ create koan/* branches, commit, and push, but DO NOT merge yourself.
   fi
   PROMPT="$PROMPT$MERGE_POLICY"
 
+  # Verbose mode: if .koan-verbose exists, instruct agent to mirror pending.md writes to outbox
+  if [ -f "$KOAN_ROOT/.koan-verbose" ]; then
+    VERBOSE_SECTION="
+
+# Verbose Mode (ACTIVE)
+
+The human has activated verbose mode (/verbose). Every time you write a progress line
+to pending.md, you MUST ALSO write the same line to {INSTANCE}/outbox.md so the human
+gets real-time updates on Telegram. Use this pattern:
+
+\`\`\`bash
+MSG=\"\$(date +%H:%M) — description\"
+echo \"\$MSG\" >> {INSTANCE}/journal/pending.md
+echo \"\$MSG\" >> {INSTANCE}/outbox.md
+\`\`\`
+
+This replaces the single echo to pending.md. Do this for EVERY progress update.
+The conclusion message at the end of the mission is still a single write as usual.
+"
+    VERBOSE_SECTION="${VERBOSE_SECTION//\{INSTANCE\}/$INSTANCE}"
+    PROMPT="$PROMPT$VERBOSE_SECTION"
+  fi
+
   # Create pending.md — live progress journal for this run
   PENDING_FILE="$INSTANCE/journal/pending.md"
   JOURNAL_DIR="$INSTANCE/journal/$(date +%Y-%m-%d)"
