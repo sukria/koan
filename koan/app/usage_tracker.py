@@ -15,10 +15,16 @@ Output:
     Example: implement:45:Normal budget:1
 """
 
+import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Tuple, Optional
+
+# If usage.md is older than this, widen safety margin (data may be stale)
+STALENESS_THRESHOLD_SECONDS = 6 * 3600  # 6 hours
+STALE_SAFETY_MARGIN = 15.0  # vs normal 10%
 
 
 class UsageTracker:
@@ -43,6 +49,13 @@ class UsageTracker:
 
         if usage_file.exists():
             self._parse_usage_file(usage_file)
+            # Widen safety margin if data is stale
+            try:
+                age = time.time() - os.path.getmtime(usage_file)
+                if age > STALENESS_THRESHOLD_SECONDS:
+                    self.safety_margin = STALE_SAFETY_MARGIN
+            except OSError:
+                pass
 
     def _parse_usage_file(self, usage_file: Path):
         """Parse usage.md to extract session and weekly percentages.
