@@ -16,6 +16,8 @@ GIT_SYNC="$APP_DIR/git_sync.py"
 GIT_SYNC_INTERVAL=${KOAN_GIT_SYNC_INTERVAL:-5}
 HEALTH_CHECK="$APP_DIR/health_check.py"
 USAGE_TRACKER="$APP_DIR/usage_tracker.py"
+USAGE_ESTIMATOR="$APP_DIR/usage_estimator.py"
+USAGE_STATE="$INSTANCE/usage_state.json"
 
 if [ ! -d "$INSTANCE" ]; then
   echo "[koan] No instance/ directory found. Run: cp -r instance.example instance"
@@ -83,6 +85,7 @@ CLAUDE_OUT=""
 
 cleanup() {
   [ -n "$CLAUDE_OUT" ] && rm -f "$CLAUDE_OUT"
+  [ -n "${CLAUDE_ERR:-}" ] && rm -f "$CLAUDE_ERR"
   echo "[koan] Shutdown."
   CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
   notify "Koan interrupted after $count runs. Last project: $CURRENT_PROJ."
@@ -176,6 +179,12 @@ while [ $count -lt $MAX_RUNS ]; do
   echo ""
   echo "=== Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S') ==="
 
+  # Refresh usage.md from accumulated token state (handles session/weekly resets)
+  # On first run, trust existing usage.md as source of truth (don't reset counters)
+  if [ $count -gt 0 ]; then
+    "$PYTHON" "$USAGE_ESTIMATOR" refresh "$USAGE_STATE" "$INSTANCE/usage.md" 2>/dev/null || true
+  fi
+
   # Parse usage.md and decide autonomous mode
   USAGE_DECISION=$("$PYTHON" "$USAGE_TRACKER" "$INSTANCE/usage.md" "$count" "$KOAN_PROJECTS" 2>/dev/null || echo "implement:50:Tracker error:0")
   IFS=':' read -r AUTONOMOUS_MODE AVAILABLE_PCT DECISION_REASON RECOMMENDED_PROJECT_IDX <<< "$USAGE_DECISION"
@@ -194,19 +203,25 @@ while [ $count -lt $MAX_RUNS ]; do
   echo "  Safety margin: 10% → Available: ${AVAILABLE_PCT}%"
   echo ""
 
-  # Extract next pending mission line (section-aware, scoped to "En attente")
-  EXTRACT_MISSION="$APP_DIR/extract_mission.py"
-  MISSION_LINE=$("$PYTHON" "$EXTRACT_MISSION" "$INSTANCE/missions.md" 2>/dev/null || echo "")
-
-  # Extract mission title (strip "- ", project tag, and leading/trailing whitespace)
-  MISSION_TITLE=""
-  if [ -n "$MISSION_LINE" ]; then
-    MISSION_TITLE=$(echo "$MISSION_LINE" | sed 's/^- //' | sed 's/\[projec\{0,1\}t:[a-zA-Z0-9_-]*\] *//' | sed 's/^ *//;s/ *$//')
+  # Pick next mission using Claude-based intelligent picker
+  LAST_PROJECT=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "")
+  PICK_MISSION="$APP_DIR/pick_mission.py"
+  PICK_STDERR=$(mktemp)
+  PICK_RESULT=$("$PYTHON" "$PICK_MISSION" "$INSTANCE" "$KOAN_PROJECTS" "$RUN_NUM" "$AUTONOMOUS_MODE" "$LAST_PROJECT" 2>"$PICK_STDERR" || echo "")
+  if [ -s "$PICK_STDERR" ]; then
+    echo "[koan] Mission picker stderr:"
+    cat "$PICK_STDERR"
   fi
-  if [[ "$MISSION_LINE" =~ \[projec?t:([a-zA-Z0-9_-]+)\] ]]; then
-    PROJECT_NAME="${BASH_REMATCH[1]}"
+  rm -f "$PICK_STDERR"
+  echo "[koan] Picker result: '${PICK_RESULT:-<empty>}'"
 
-    # Find project index
+  # Parse picker output: "project_name:mission title" or empty
+  MISSION_TITLE=""
+  if [ -n "$PICK_RESULT" ]; then
+    PROJECT_NAME="${PICK_RESULT%%:*}"
+    MISSION_TITLE="${PICK_RESULT#*:}"
+
+    # Find project path from name
     PROJECT_PATH=""
     for i in "${!PROJECT_NAMES[@]}"; do
       if [ "${PROJECT_NAMES[$i]}" = "$PROJECT_NAME" ]; then
@@ -223,16 +238,16 @@ while [ $count -lt $MAX_RUNS ]; do
       exit 1
     fi
   else
-    # No project tag: use smart selection or default
-    if [ -z "$MISSION_LINE" ]; then
-      # Autonomous mode: use usage tracker recommendation
-      PROJECT_IDX=$RECOMMENDED_PROJECT_IDX
-    else
-      # Untagged mission: default to first project
-      PROJECT_IDX=0
-    fi
+    # No mission picked: autonomous mode
+    PROJECT_IDX=$RECOMMENDED_PROJECT_IDX
     PROJECT_NAME="${PROJECT_NAMES[$PROJECT_IDX]}"
     PROJECT_PATH="${PROJECT_PATHS[$PROJECT_IDX]}"
+  fi
+
+  # Set MISSION_LINE for downstream compatibility (empty = autonomous)
+  MISSION_LINE=""
+  if [ -n "$MISSION_TITLE" ]; then
+    MISSION_LINE="- $MISSION_TITLE"
   fi
 
   # Define focus area based on autonomous mode
@@ -292,6 +307,13 @@ while [ $count -lt $MAX_RUNS ]; do
     notify "Run $RUN_NUM/$MAX_RUNS — Autonomous: ${AUTONOMOUS_MODE} mode on $PROJECT_NAME"
   fi
 
+  # Build mission instruction for agent prompt
+  if [ -n "$MISSION_TITLE" ]; then
+    MISSION_INSTRUCTION="Your assigned mission is: **${MISSION_TITLE}** Mark it In Progress in missions.md. Execute it thoroughly. Take your time — go deep, don't rush."
+  else
+    MISSION_INSTRUCTION="No specific mission assigned. Look for pending missions for ${PROJECT_NAME} in missions.md (check [project:${PROJECT_NAME}] tags and ### project:${PROJECT_NAME} sub-headers). If none found, proceed to autonomous mode."
+  fi
+
   # Build prompt from template, replacing placeholders
   PROMPT=$(sed \
     -e "s|{INSTANCE}|$INSTANCE|g" \
@@ -303,6 +325,8 @@ while [ $count -lt $MAX_RUNS ]; do
     -e "s|{FOCUS_AREA}|${FOCUS_AREA:-General autonomous work}|g" \
     -e "s|{AVAILABLE_PCT}|${AVAILABLE_PCT:-50}|g" \
     "$KOAN_ROOT/koan/system-prompts/agent.md")
+  # Replace mission instruction separately (may contain special chars)
+  PROMPT="${PROMPT//\{MISSION_INSTRUCTION\}/$MISSION_INSTRUCTION}"
 
   # Append merge policy based on config
   MERGE_POLICY=""
@@ -360,17 +384,31 @@ Mode: $AUTONOMOUS_MODE
 EOF
   fi
 
-  # Execute next mission, capture output to detect quota errors
+  # Execute next mission, capture JSON output for token tracking
   cd "$PROJECT_PATH"
   CLAUDE_OUT="$(mktemp)"
+  CLAUDE_ERR="$(mktemp)"
   set +e  # Don't exit on error, we need to check the output
-  claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit 2>&1 | tee "$CLAUDE_OUT"
+  claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit --output-format json > "$CLAUDE_OUT" 2>"$CLAUDE_ERR"
   CLAUDE_EXIT=$?
   set -e
 
-  # Check for quota exhaustion
-  if grep -q "out of extra usage\|quota.*reached\|rate limit" "$CLAUDE_OUT"; then
-    RESET_INFO=$(grep -o "resets.*" "$CLAUDE_OUT" | head -1 || echo "")
+  # Extract text from JSON for display and quota detection
+  CLAUDE_TEXT=""
+  if command -v jq &>/dev/null && [ -s "$CLAUDE_OUT" ]; then
+    CLAUDE_TEXT=$(jq -r '.result // .content // .text // empty' "$CLAUDE_OUT" 2>/dev/null || cat "$CLAUDE_OUT")
+  else
+    CLAUDE_TEXT=$(cat "$CLAUDE_OUT")
+  fi
+  echo "$CLAUDE_TEXT"
+
+  # Update token usage state from JSON output
+  "$PYTHON" "$USAGE_ESTIMATOR" update "$CLAUDE_OUT" "$USAGE_STATE" "$INSTANCE/usage.md" 2>/dev/null || true
+
+  # Check for quota exhaustion (in both text output and stderr)
+  CLAUDE_COMBINED="$(cat "$CLAUDE_ERR" 2>/dev/null; echo "$CLAUDE_TEXT")"
+  if echo "$CLAUDE_COMBINED" | grep -q "out of extra usage\|quota.*reached\|rate limit"; then
+    RESET_INFO=$(echo "$CLAUDE_COMBINED" | grep -o "resets.*" | head -1 || echo "")
     echo "[koan] Quota reached. $RESET_INFO"
 
     # Write to journal (per-project)
@@ -400,11 +438,11 @@ EOF
     notify "⚠️ Claude quota exhausted. $RESET_INFO
 
 Koan paused after $count runs. Send /resume via Telegram when quota resets to check if you want to restart."
-    rm -f "$CLAUDE_OUT"
+    rm -f "$CLAUDE_OUT" "$CLAUDE_ERR"
     CLAUDE_OUT=""
     break
   fi
-  rm -f "$CLAUDE_OUT"
+  rm -f "$CLAUDE_OUT" "$CLAUDE_ERR"
   CLAUDE_OUT=""
 
   # If Claude didn't clean up pending.md, archive it to daily journal

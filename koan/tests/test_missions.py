@@ -327,3 +327,97 @@ class TestParseSectionsComplexBlocks:
         for key in result:
             for item in result[key]:
                 assert "Should be ignored" not in item
+
+
+# --- Sub-header project grouping (### project:X) ---
+
+class TestSubHeaderProjectGrouping:
+    """Tests for ### project:X sub-headers in pending section."""
+
+    SUBHEADER_CONTENT = (
+        "# Missions\n\n"
+        "## En attente\n\n"
+        "### projet:anantys-back\n\n"
+        "### project:koan\n"
+        "- Fix the rotation bug\n"
+        "- Fix test warnings\n\n"
+        "## En cours\n\n"
+        "## Terminées\n"
+    )
+
+    def test_extract_pending_with_subheader_filter_match(self):
+        """Missions under ### project:koan should match when filtering for koan."""
+        result = extract_next_pending(self.SUBHEADER_CONTENT, "koan")
+        assert result == "- Fix the rotation bug"
+
+    def test_extract_pending_with_subheader_filter_skip(self):
+        """Missions under ### project:koan should NOT match when filtering for anantys-back."""
+        result = extract_next_pending(self.SUBHEADER_CONTENT, "anantys-back")
+        assert result == ""
+
+    def test_extract_pending_no_filter_returns_first(self):
+        """Without project filter, returns first mission regardless of sub-header."""
+        result = extract_next_pending(self.SUBHEADER_CONTENT)
+        assert result == "- Fix the rotation bug"
+
+    def test_inline_tag_overrides_subheader(self):
+        """Inline [project:X] tag takes priority over ### sub-header context."""
+        content = (
+            "## En attente\n\n"
+            "### project:koan\n"
+            "- [project:anantys] Overridden task\n"
+            "- Normal koan task\n\n"
+            "## En cours\n"
+        )
+        result = extract_next_pending(content, "koan")
+        assert result == "- Normal koan task"
+
+    def test_untagged_outside_subheader_matches_any(self):
+        """Missions outside any sub-header (untagged) match any project filter."""
+        content = (
+            "## En attente\n\n"
+            "- Untagged task\n"
+            "### project:koan\n"
+            "- Koan task\n\n"
+            "## En cours\n"
+        )
+        result = extract_next_pending(content, "anantys")
+        assert result == "- Untagged task"
+
+    def test_french_subheader_variant(self):
+        """### projet:X (French) should also work."""
+        content = (
+            "## En attente\n\n"
+            "### projet:anantys-back\n"
+            "- French tagged task\n\n"
+            "## En cours\n"
+        )
+        result = extract_next_pending(content, "anantys-back")
+        assert result == "- French tagged task"
+
+    def test_extract_project_tag_from_subheader(self):
+        """extract_project_tag should match ### project:X format in block text."""
+        block = "### project:koan\n- Fix bug\n- Fix tests"
+        assert extract_project_tag(block) == "koan"
+
+    def test_extract_project_tag_french_subheader(self):
+        block = "### projet:anantys-back\n- Task"
+        assert extract_project_tag(block) == "anantys-back"
+
+    def test_group_by_project_with_subheaders(self):
+        """group_by_project should correctly assign missions under ### sub-headers."""
+        content = (
+            "## En attente\n\n"
+            "### project:koan\n"
+            "- Koan task 1\n"
+            "- Koan task 2\n\n"
+            "### project:anantys\n"
+            "- Anantys task\n\n"
+            "## En cours\n\n"
+            "## Terminées\n"
+        )
+        result = group_by_project(content)
+        assert "koan" in result
+        assert len(result["koan"]["pending"]) >= 1
+        assert "anantys" in result
+        assert len(result["anantys"]["pending"]) >= 1

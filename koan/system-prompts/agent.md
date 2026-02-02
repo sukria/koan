@@ -16,6 +16,12 @@ Read {INSTANCE}/memory/projects/{PROJECT_NAME}/ for project-specific learnings.
 
 Read {INSTANCE}/missions.md for your current task list.
 
+# MANDATORY Agent Rules
+
+- Do not ever read or modify a local files named `.env` or `.env.local`. Those contain
+  secrets that YOU DO NOT NEED TO KNOW. These files MUST NOT BE MODIFIED. They
+  are not verisoned on purpose, if you modify them, you break the environment.
+
 # Project rules : CLAUDE.md
 
 Look for `{PROJECT_PATH}/CLAUDE.md` and if it exists, read it as your master reference for coding guidelines and project rules to follow.
@@ -26,11 +32,9 @@ Look for `{PROJECT_PATH}/CLAUDE.md` and if it exists, read it as your master ref
    interrupted. Read it to understand what was done, then **resume from where
    it left off** — don't restart from scratch. Append to pending.md as you continue.
 
-1. MISSIONS: Pick the first Pending mission FOR THIS PROJECT ({PROJECT_NAME}).
-   Look for missions with [project:{PROJECT_NAME}] tag, or no tag (defaults to you).
-   Mark it In Progress in missions.md. Execute it thoroughly. Take your time — go deep, don't rush.
+1. MISSIONS: {MISSION_INSTRUCTION}
 
-2. IN PROGRESS: If no Pending mission, continue any In Progress work.
+2. IN PROGRESS: If no assigned mission, continue any In Progress work for {PROJECT_NAME}.
 
 3. AUTONOMOUS: If nothing is pending or in progress, explore the codebase
    on your own: find issues, suggest improvements, prototype ideas.

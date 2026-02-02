@@ -120,16 +120,20 @@ def extract_next_pending(content: str, project_name: str = "") -> str:
     """Return the first pending mission line, or empty string if none.
 
     If project_name is given, only returns missions tagged [projet:name]
-    or [project:name], or untagged missions.
+    or [project:name], or under a ### project:name / ### projet:name sub-header,
+    or untagged missions (outside any sub-header).
     """
     in_pending = False
+    current_subheader_project = ""  # project from ### sub-header, empty = no sub-header
     for line in content.splitlines():
-        stripped_lower = line.strip().lower()
+        stripped = line.strip()
+        stripped_lower = stripped.lower()
 
         if stripped_lower.startswith("## "):
             section_key = classify_section(stripped_lower[3:].strip())
             if section_key == "pending":
                 in_pending = True
+                current_subheader_project = ""
             elif in_pending:
                 break  # Left the pending section
             continue
@@ -137,25 +141,53 @@ def extract_next_pending(content: str, project_name: str = "") -> str:
         if not in_pending:
             continue
 
-        if not line.strip().startswith("- "):
+        # Track ### project:X sub-headers within pending section
+        if stripped_lower.startswith("### "):
+            subheader_match = re.search(
+                r"###\s+projec?t\s*:\s*([a-zA-Z0-9_-]+)", stripped, re.IGNORECASE
+            )
+            if subheader_match:
+                current_subheader_project = subheader_match.group(1).lower()
+            else:
+                current_subheader_project = ""
+            continue
+
+        if not stripped.startswith("- "):
             continue
 
         if project_name:
+            # 1. Check inline tag first (takes priority)
             tag_match = re.search(r"\[projec?t:([a-zA-Z0-9_-]+)\]", line)
             if tag_match:
                 if tag_match.group(1).lower() != project_name.lower():
                     continue
-            # No tag = default project, always matches
+            elif current_subheader_project:
+                # 2. Check sub-header project context
+                if current_subheader_project != project_name.lower():
+                    continue
+            # 3. No tag and no sub-header = untagged, always matches
 
-        return line.strip()
+        return stripped
 
     return ""
 
 
 def extract_project_tag(line: str) -> str:
-    """Extract project name from a mission line, or 'default'."""
+    """Extract project name from a mission line or block, or 'default'.
+
+    Checks for:
+    1. Inline tag: [project:name] or [projet:name]
+    2. Sub-header: ### project:name or ### projet:name
+    """
+    # Inline tag (brackets)
     match = re.search(r'\[(?:project|projet):([a-zA-Z0-9_-]+)\]', line)
-    return match.group(1) if match else "default"
+    if match:
+        return match.group(1)
+    # Sub-header format (### project:name)
+    match = re.search(r'###\s+projec?t\s*:\s*([a-zA-Z0-9_-]+)', line, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return "default"
 
 
 def group_by_project(content: str) -> Dict[str, Dict[str, List[str]]]:
