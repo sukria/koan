@@ -169,6 +169,21 @@ class TestNotifyCLI:
             runpy.run_module("app.notify", run_name="__main__")
         assert exc_info.value.code == 0
 
+    def test_cli_format_passes_project_name(self, monkeypatch):
+        """CLI --format reads KOAN_CURRENT_PROJECT env var."""
+        import runpy
+        monkeypatch.setattr("sys.argv", ["notify.py", "--format", "Raw msg"])
+        monkeypatch.setenv("KOAN_CURRENT_PROJECT", "myproject")
+        with patch("app.notify.requests.post") as mock_post, \
+             patch("app.format_outbox.subprocess.run") as mock_sub, \
+             pytest.raises(SystemExit) as exc_info:
+            mock_post.return_value = MagicMock(json=lambda: {"ok": True})
+            mock_sub.return_value = MagicMock(returncode=0, stdout="Formatted", stderr="")
+            runpy.run_module("app.notify", run_name="__main__")
+        assert exc_info.value.code == 0
+        # Verify Claude was called (format_and_send path was used)
+        mock_sub.assert_called_once()
+
     def test_cli_no_args(self, monkeypatch):
         import runpy
         monkeypatch.setattr("sys.argv", ["notify.py"])

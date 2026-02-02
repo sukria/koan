@@ -18,6 +18,7 @@ from app.awake import (
     handle_message,
     flush_outbox,
     _format_outbox_message,
+    _clean_chat_response,
     _build_status,
     get_updates,
     check_config,
@@ -776,3 +777,40 @@ class TestChatLiteRetryErrors:
              patch("app.awake.CHAT_TIMEOUT", 180):
             handle_chat("complex question")
         assert "timeout" in mock_send.call_args[0][0].lower()
+
+
+class TestCleanChatResponse:
+    """Test _clean_chat_response strips errors, markdown, and truncates."""
+
+    def test_strips_max_turns_error(self):
+        text = "Some reply\nError: Reached max turns (1)\nMore text"
+        assert "max turns" not in _clean_chat_response(text)
+        assert "Some reply" in _clean_chat_response(text)
+
+    def test_strips_markdown(self):
+        text = "**Bold** and ```code``` and __underline__ and ~~strike~~"
+        result = _clean_chat_response(text)
+        assert "**" not in result
+        assert "```" not in result
+        assert "__" not in result
+        assert "~~" not in result
+
+    def test_strips_headings(self):
+        text = "## Heading\nContent"
+        result = _clean_chat_response(text)
+        assert "##" not in result
+        assert "Content" in result
+
+    def test_truncates_long_messages(self):
+        text = "x" * 600
+        result = _clean_chat_response(text)
+        assert len(result) <= 500
+        assert result.endswith("...")
+
+    def test_empty_after_cleanup(self):
+        text = "Error: Reached max turns (1)"
+        assert _clean_chat_response(text) == ""
+
+    def test_preserves_normal_text(self):
+        text = "Tout va bien, j'ai fini le travail."
+        assert _clean_chat_response(text) == text

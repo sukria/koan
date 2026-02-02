@@ -45,10 +45,22 @@ class TestFallbackFormat:
     def test_removes_code_fences(self):
         assert fallback_format("```python\ncode\n```") == "python\ncode"
 
+    def test_removes_bold_and_underline(self):
+        assert fallback_format("**bold** and __underline__") == "bold and underline"
+
+    def test_removes_strikethrough(self):
+        assert fallback_format("~~deleted~~") == "deleted"
+
+    def test_removes_list_markers(self):
+        result = fallback_format("- item one\n* item two\n> quoted")
+        assert "- " not in result
+        assert "* " not in result
+        assert "> " not in result
+
     def test_truncates_long_content(self):
         long_text = "a" * 600
         result = fallback_format(long_text)
-        assert len(result) == 503  # 500 + "..."
+        assert len(result) == 500  # 497 + "..."
         assert result.endswith("...")
 
     def test_strips_whitespace(self):

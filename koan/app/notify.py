@@ -113,7 +113,8 @@ if __name__ == "__main__":
     message = " ".join(args)
 
     if use_format:
-        success = format_and_send(message)
+        project_name = os.environ.get("KOAN_CURRENT_PROJECT", "")
+        success = format_and_send(message, project_name=project_name)
     else:
         success = send_telegram(message)
     sys.exit(0 if success else 1)

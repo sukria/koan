@@ -338,6 +338,31 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
     return prompt
 
 
+def _clean_chat_response(text: str) -> str:
+    """Clean Claude CLI output for Telegram delivery.
+
+    Strips error artifacts, markdown, and truncates for smartphone reading.
+    """
+    # Remove Claude CLI error lines
+    lines = text.splitlines()
+    lines = [l for l in lines if not re.match(r'^Error:.*max turns', l, re.IGNORECASE)]
+    cleaned = "\n".join(lines).strip()
+
+    # Strip markdown artifacts
+    cleaned = cleaned.replace("```", "")
+    cleaned = cleaned.replace("**", "")
+    cleaned = cleaned.replace("__", "")
+    cleaned = cleaned.replace("~~", "")
+    # Strip heading markers
+    cleaned = re.sub(r'^#{1,6}\s+', '', cleaned, flags=re.MULTILINE)
+
+    # Truncate for smartphone
+    if len(cleaned) > 500:
+        cleaned = cleaned[:497] + "..."
+
+    return cleaned.strip()
+
+
 def handle_chat(text: str):
     """Lightweight Claude call for conversational messages — fast response."""
     # Save user message to history
@@ -352,7 +377,7 @@ def handle_chat(text: str):
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )
-        response = result.stdout.strip()
+        response = _clean_chat_response(result.stdout.strip())
         if response:
             send_telegram(response)
             # Save assistant response to history
@@ -375,7 +400,7 @@ def handle_chat(text: str):
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=PROJECT_PATH or str(KOAN_ROOT),
             )
-            response = result.stdout.strip()
+            response = _clean_chat_response(result.stdout.strip())
             if response:
                 send_telegram(response)
                 save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)

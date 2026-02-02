@@ -15,6 +15,7 @@ Reads raw content from stdin, formats it via Claude, outputs to stdout.
 """
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -112,7 +113,8 @@ RAW CONTENT TO FORMAT:
 
 Requirements:
 - Write in French (Alexis's language)
-- Plain text ONLY — absolutely NO markdown, NO code blocks, NO formatting symbols
+- Plain text ONLY — NO markdown whatsoever. Never use **, __, ##, ```, *, >, or any formatting symbols.
+- Maximum 500 characters. This message is read on a smartphone screen.
 - Conversational tone (like texting a collaborator, not a formal report)
 - 2-4 sentences max UNLESS the content is a retrospective/summary (then be thorough but concise)
 - Natural, direct — you can be funny (dry humor), you can disagree if relevant
@@ -120,7 +122,7 @@ Requirements:
 - DO NOT include metadata like "Mission ended" or generic status updates
 - Focus on WHAT was accomplished and WHY it matters, not process details
 
-Output ONLY the formatted message (no preamble, no explanation, no markdown).
+Output ONLY the formatted message. No preamble, no explanation, no markdown, no asterisks, no hashtags.
 """
 
     try:
@@ -166,11 +168,15 @@ def fallback_format(raw_content: str) -> str:
     Returns:
         Minimally cleaned message
     """
-    # Remove markdown headers, code fences
-    cleaned = raw_content.replace("#", "").replace("```", "")
-    # Truncate to reasonable length
+    # Remove markdown artifacts
+    cleaned = raw_content
+    for symbol in ["```", "**", "__", "~~", "##", "#"]:
+        cleaned = cleaned.replace(symbol, "")
+    # Strip list markers at line start
+    cleaned = re.sub(r'^[\-\*>]\s+', '', cleaned, flags=re.MULTILINE)
+    # Truncate for smartphone
     if len(cleaned) > 500:
-        cleaned = cleaned[:500] + "..."
+        cleaned = cleaned[:497] + "..."
     return cleaned.strip()
 
 
