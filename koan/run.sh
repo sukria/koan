@@ -459,24 +459,12 @@ Koan paused after $count runs. Send /resume via Telegram when quota resets to ch
     echo "[koan] pending.md archived to journal (Claude didn't clean up)"
   fi
 
-  # Report result with mission title
+  # Report result
+  # NOTE: The Claude agent writes its own conclusion to outbox.md
+  # (summary + koan). No need for notify() or mission_summary.py here —
+  # those caused triple-repeated conclusions on Telegram.
   if [ $CLAUDE_EXIT -eq 0 ]; then
-    if [ -n "$MISSION_TITLE" ]; then
-      notify "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] Mission completed: $MISSION_TITLE"
-    else
-      notify "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] Autonomous run completed"
-    fi
-
-    # Extract journal summary and append raw to outbox
-    # (formatting via Claude happens at flush time in awake.py)
-    SUMMARY_TEXT=$("$PYTHON" "$MISSION_SUMMARY" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || echo "")
-    if [ -n "$SUMMARY_TEXT" ]; then
-      # Locked append to outbox (avoid race with awake.py)
-      "$PYTHON" -c "
-from pathlib import Path; from app.utils import append_to_outbox; import sys
-append_to_outbox(Path('$INSTANCE/outbox.md'), sys.stdin.read())
-" <<< "$SUMMARY_TEXT"
-    fi
+    echo "[koan] Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] completed successfully"
 
     # Auto-merge logic (if on koan/* branch)
     cd "$PROJECT_PATH"

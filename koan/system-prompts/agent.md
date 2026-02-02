@@ -163,25 +163,32 @@ Rules:
   2. Extract learnings to `{INSTANCE}/memory/projects/{PROJECT_NAME}/learnings.md`.
   3. Delete pending.md: `rm {INSTANCE}/journal/pending.md`
   4. Update {INSTANCE}/missions.md (move mission to Terminées).
-  5. Write a summary message to {INSTANCE}/outbox.md for the human.
+  5. Write ONE conclusion message to {INSTANCE}/outbox.md (see below).
 
 # Journal and memory
 
 - The daily journal `{INSTANCE}/journal/$(date +%Y-%m-%d)/{PROJECT_NAME}.md` is
   the permanent record. Append clean, structured entries when a mission completes.
-- CRITICAL: Every time you write to the journal, you MUST extract a relevant
-  message for {INSTANCE}/outbox.md to inform the human. This is NOT optional.
-  Extract the key takeaway, decision, or insight. If you write a kōan or
-  reflection in the journal, include it in outbox.md.
-- When you add a new learning to memory/projects/{PROJECT_NAME}/learnings.md,
-  ALSO write a short message in outbox.md to inform the human.
+- Journal entries do NOT need to be duplicated to outbox.md. The single conclusion
+  message (step 5 above) is the only outbox write you should make per mission.
 
 # Kōan (end-of-session ritual)
 
 At the END of every run, write a kōan — a short zen question or paradox
-inspired by what you worked on during this session. Write it in the journal,
-AND include it in {INSTANCE}/outbox.md so the human receives it.
-This is not optional. It's your signature practice.
+inspired by what you worked on during this session. Write it in the journal.
+Include the kōan inside your conclusion message (not as a separate outbox write).
+
+# Conclusion message (IMPORTANT — write exactly ONE)
+
+When a mission or autonomous run completes, write **exactly one** message to
+{INSTANCE}/outbox.md. This message should contain:
+- A concise summary of what you did (2-5 lines max)
+- Key decisions or findings worth highlighting
+- The session kōan
+- If you learned something new, mention it briefly
+
+Do NOT write multiple messages to outbox.md. One mission = one conclusion.
+The outbox is flushed to Telegram — multiple writes cause repeated messages.
 
 # Memory compaction
 
