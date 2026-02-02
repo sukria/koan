@@ -69,6 +69,11 @@ PYTHON="python3"
 # Set PYTHONPATH so Python scripts can import from app/
 export PYTHONPATH="$KOAN_ROOT/koan"
 
+# Initialize .koan-project with first project
+echo "${PROJECT_NAMES[0]}" > "$KOAN_ROOT/.koan-project"
+export KOAN_CURRENT_PROJECT="${PROJECT_NAMES[0]}"
+export KOAN_CURRENT_PROJECT_PATH="${PROJECT_PATHS[0]}"
+
 notify() {
   "$PYTHON" "$NOTIFY" --format "$@" 2>/dev/null || true
 }
@@ -79,7 +84,8 @@ CLAUDE_OUT=""
 cleanup() {
   [ -n "$CLAUDE_OUT" ] && rm -f "$CLAUDE_OUT"
   echo "[koan] Shutdown."
-  notify "Koan interrupted after $count runs."
+  CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
+  notify "Koan interrupted after $count runs. Last project: $CURRENT_PROJ."
   exit 0
 }
 
@@ -102,7 +108,12 @@ echo "[koan] Checking Telegram bridge health..."
 "$PYTHON" "$HEALTH_CHECK" "$KOAN_ROOT" --max-age 120 || true
 
 echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
-notify "Koan starting — $MAX_RUNS max runs, ${INTERVAL}s interval"
+STARTUP_PROJECTS=$(IFS=', '; echo "${PROJECT_NAMES[*]}")
+STARTUP_PAUSE=""
+if [ -f "$KOAN_ROOT/.koan-pause" ]; then
+  STARTUP_PAUSE=" Currently PAUSED."
+fi
+notify "Koan starting — $MAX_RUNS max runs, ${INTERVAL}s interval. Projects: $STARTUP_PROJECTS. Current: ${PROJECT_NAMES[0]}.$STARTUP_PAUSE"
 
 # Git sync: check what changed since last run (branches merged, new commits)
 echo "[koan] Running git sync..."
@@ -122,7 +133,8 @@ while [ $count -lt $MAX_RUNS ]; do
   if [ -f "$KOAN_ROOT/.koan-stop" ]; then
     echo "[koan] Stop requested."
     rm -f "$KOAN_ROOT/.koan-stop"
-    notify "Koan stopped on request after $count runs."
+    CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
+    notify "Koan stopped on request after $count runs. Last project: $CURRENT_PROJ."
     break
   fi
 
@@ -137,6 +149,9 @@ while [ $count -lt $MAX_RUNS ]; do
       echo "[koan] A thought stirs..."
       PROJECT_NAME="${PROJECT_NAMES[0]}"
       PROJECT_PATH="${PROJECT_PATHS[0]}"
+      echo "$PROJECT_NAME" > "$KOAN_ROOT/.koan-project"
+      export KOAN_CURRENT_PROJECT="$PROJECT_NAME"
+      export KOAN_CURRENT_PROJECT_PATH="$PROJECT_PATH"
 
       CONTEMPLATE_PROMPT=$(sed \
         -e "s|{INSTANCE}|$INSTANCE|g" \
@@ -149,7 +164,11 @@ while [ $count -lt $MAX_RUNS ]; do
       set -e
     fi
 
-    sleep 300
+    # Sleep in 5s increments — allows /resume to take effect quickly
+    for ((s=0; s<60; s++)); do
+      [ ! -f "$KOAN_ROOT/.koan-pause" ] && break
+      sleep 5
+    done
     continue
   fi
 
@@ -226,7 +245,7 @@ while [ $count -lt $MAX_RUNS ]; do
         echo ""
         # Send retrospective and exit gracefully
         "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
-        notify "⏸️ Koan paused: budget exhausted after $count runs. Use /resume when quota resets."
+        notify "⏸️ Koan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Use /resume when quota resets."
         break
         ;;
       review)
