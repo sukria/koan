@@ -69,11 +69,22 @@ class TestGetMergedBranches:
 
 class TestGetUnmergedBranches:
     def test_parses_unmerged(self):
-        mock_output = "  koan/wip\n  remotes/origin/koan/pending-review\n"
-        with patch("app.git_sync.run_git", return_value=mock_output):
+        all_branches = "  koan/wip\n  remotes/origin/koan/pending-review\n  koan/merged-one\n"
+        merged_output = "  koan/merged-one\n"
+
+        def side_effect(cwd, *args):
+            args_str = " ".join(args)
+            if "rev-parse" in args_str:
+                return "abc123"  # branch exists
+            if "--merged" in args_str:
+                return merged_output
+            return all_branches
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
             unmerged = get_unmerged_branches("/fake")
         assert "koan/wip" in unmerged
         assert "koan/pending-review" in unmerged
+        assert "koan/merged-one" not in unmerged
 
 
 class TestGetRecentMainCommits:
@@ -92,15 +103,17 @@ class TestGetRecentMainCommits:
 class TestBuildSyncReport:
     def test_report_includes_merged_and_unmerged(self):
         with patch("app.git_sync.run_git") as mock_git:
-            # fetch returns nothing, branch commands return data
             def side_effect(cwd, *args):
                 args_str = " ".join(args)
                 if "fetch" in args_str:
                     return ""
+                if "rev-parse" in args_str:
+                    return "abc123"  # branch exists
                 if "--merged" in args_str:
                     return "  remotes/origin/koan/merged-one\n"
-                if "--no-merged" in args_str:
-                    return "  remotes/origin/koan/pending-one\n"
+                if "branch" in args_str and "--list" in args_str:
+                    # get_koan_branches: return all branches
+                    return "  remotes/origin/koan/merged-one\n  remotes/origin/koan/pending-one\n"
                 if "log" in args_str:
                     return "abc123 some commit\n"
                 return ""

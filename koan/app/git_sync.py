@@ -59,32 +59,43 @@ def get_recent_main_commits(project_path: str, since_hours: int = 12) -> List[st
     return [line for line in output.splitlines() if line.strip()]
 
 
+def _normalize_branch(line: str) -> str:
+    """Extract koan/* branch name from git branch output line."""
+    name = line.strip().lstrip("* ")
+    if "remotes/origin/" in name:
+        name = name.replace("remotes/origin/", "")
+    return name if name.startswith("koan/") else ""
+
+
+def _get_target_branches(project_path: str) -> List[str]:
+    """Return remote target branches that exist in this repo."""
+    candidates = ["origin/main", "origin/staging", "origin/develop", "origin/production"]
+    existing = []
+    for ref in candidates:
+        if run_git(project_path, "rev-parse", "--verify", ref):
+            existing.append(ref)
+    return existing or ["origin/main"]
+
+
 def get_merged_branches(project_path: str) -> List[str]:
-    """List koan/* branches that have been merged into main."""
-    output = run_git(project_path, "branch", "-a", "--merged", "origin/main",
-                     "--list", "*koan/*")
-    merged = []
-    for line in output.splitlines():
-        name = line.strip().lstrip("* ")
-        if "remotes/origin/" in name:
-            name = name.replace("remotes/origin/", "")
-        if name.startswith("koan/"):
-            merged.append(name)
-    return sorted(set(merged))
+    """List koan/* branches merged into any target branch (main, staging, etc.)."""
+    targets = _get_target_branches(project_path)
+    merged = set()
+    for target in targets:
+        output = run_git(project_path, "branch", "-a", "--merged", target,
+                         "--list", "*koan/*")
+        for line in output.splitlines():
+            name = _normalize_branch(line)
+            if name:
+                merged.add(name)
+    return sorted(merged)
 
 
 def get_unmerged_branches(project_path: str) -> List[str]:
-    """List koan/* branches NOT yet merged into main."""
-    output = run_git(project_path, "branch", "-a", "--no-merged", "origin/main",
-                     "--list", "*koan/*")
-    unmerged = []
-    for line in output.splitlines():
-        name = line.strip().lstrip("* ")
-        if "remotes/origin/" in name:
-            name = name.replace("remotes/origin/", "")
-        if name.startswith("koan/"):
-            unmerged.append(name)
-    return sorted(set(unmerged))
+    """List koan/* branches NOT merged into any target branch."""
+    all_koan = set(get_koan_branches(project_path))
+    merged = set(get_merged_branches(project_path))
+    return sorted(all_koan - merged)
 
 
 def build_sync_report(project_path: str) -> str:
