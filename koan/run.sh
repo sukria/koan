@@ -118,6 +118,13 @@ echo "[koan] Running memory cleanup..."
 echo "[koan] Checking Telegram bridge health..."
 "$PYTHON" "$HEALTH_CHECK" "$KOAN_ROOT" --max-age 120 || true
 
+# Check start_on_pause config: create .koan-pause if true (boot into pause mode)
+START_ON_PAUSE=$("$PYTHON" -c "from app.utils import get_start_on_pause; print('true' if get_start_on_pause() else 'false')" 2>/dev/null || echo "false")
+if [ "$START_ON_PAUSE" = "true" ] && [ ! -f "$KOAN_ROOT/.koan-pause" ]; then
+  echo "[koan] start_on_pause=true in config. Entering pause mode."
+  touch "$KOAN_ROOT/.koan-pause"
+fi
+
 echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
 STARTUP_PROJECTS=$(IFS=', '; echo "${PROJECT_NAMES[*]}")
 STARTUP_PAUSE=""

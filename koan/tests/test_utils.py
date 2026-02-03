@@ -433,3 +433,39 @@ class TestCompactTelegramHistory:
         data = json.loads(topics_file.read_text())
         topics = data[0]["topics_by_date"]["2026-02-01"]
         assert all(len(t) > 5 for t in topics)
+
+
+class TestGetStartOnPause:
+    def test_returns_true_when_enabled(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("start_on_pause: true\n")
+        from app.utils import get_start_on_pause
+        assert get_start_on_pause() is True
+
+    def test_returns_false_when_disabled(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("start_on_pause: false\n")
+        from app.utils import get_start_on_pause
+        assert get_start_on_pause() is False
+
+    def test_returns_false_when_missing(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("other_setting: value\n")
+        from app.utils import get_start_on_pause
+        assert get_start_on_pause() is False
+
+    def test_returns_false_when_no_config(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        # No config file at all
+        from app.utils import get_start_on_pause
+        assert get_start_on_pause() is False
