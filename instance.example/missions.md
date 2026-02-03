@@ -1,10 +1,19 @@
 # Missions
 
-## Pending
+## En attente
 
-- [project:example] Explore the codebase structure
-- [project:example] Review security best practices
+<!--
+Add missions here. Format: "- Description of the task"
+Optional: tag with [project:name] if you have multiple projects configured.
 
-## In Progress
+Example:
+- [project:myapp] Add user authentication
+- Review database schema
 
-## Done
+The project tag must match a name from your KOAN_PROJECTS environment variable.
+If you only have one project (KOAN_PROJECT_PATH), you can omit the tag.
+-->
+
+## En cours
+
+## Terminées
