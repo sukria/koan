@@ -71,6 +71,14 @@ PYTHON="python3"
 # Set PYTHONPATH so Python scripts can import from app/
 export PYTHONPATH="$KOAN_ROOT/koan"
 
+# Set git identity for koan commits (overrides local git config)
+if [ -n "${KOAN_EMAIL:-}" ]; then
+  export GIT_AUTHOR_NAME="Koan"
+  export GIT_AUTHOR_EMAIL="$KOAN_EMAIL"
+  export GIT_COMMITTER_NAME="Koan"
+  export GIT_COMMITTER_EMAIL="$KOAN_EMAIL"
+fi
+
 # Initialize .koan-project with first project
 echo "${PROJECT_NAMES[0]}" > "$KOAN_ROOT/.koan-project"
 export KOAN_CURRENT_PROJECT="${PROJECT_NAMES[0]}"
