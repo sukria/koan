@@ -436,6 +436,37 @@ class TestModelConfig:
             model = get_fast_reply_model()
         assert model == "sonnet"
 
+    def test_get_contemplative_chance_default(self):
+        """Missing contemplative_chance defaults to 10."""
+        from app.utils import get_contemplative_chance
+        with patch("app.utils.load_config", return_value={}):
+            chance = get_contemplative_chance()
+        assert chance == 10
+
+    def test_get_contemplative_chance_configured(self):
+        """contemplative_chance reads from config."""
+        from app.utils import get_contemplative_chance
+        config = {"contemplative_chance": 25}
+        with patch("app.utils.load_config", return_value=config):
+            chance = get_contemplative_chance()
+        assert chance == 25
+
+    def test_get_contemplative_chance_zero(self):
+        """contemplative_chance can be set to 0 (never)."""
+        from app.utils import get_contemplative_chance
+        config = {"contemplative_chance": 0}
+        with patch("app.utils.load_config", return_value=config):
+            chance = get_contemplative_chance()
+        assert chance == 0
+
+    def test_get_contemplative_chance_hundred(self):
+        """contemplative_chance can be set to 100 (always)."""
+        from app.utils import get_contemplative_chance
+        config = {"contemplative_chance": 100}
+        with patch("app.utils.load_config", return_value=config):
+            chance = get_contemplative_chance()
+        assert chance == 100
+
 
 class TestUtilsConversationHistory:
     """Cover save/load/format conversation history edge cases."""

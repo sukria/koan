@@ -13,6 +13,13 @@ interval_seconds: 300  # 5 minutes between runs
 # Faster response, lower cost, but simpler answers
 fast_reply: false
 
+# Contemplative mode trigger chance (0-100%)
+# When no mission is pending, this is the probability of running a reflective
+# session instead of autonomous work. Allows regular moments of introspection
+# without waiting for budget exhaustion.
+# 0 = never contemplative, 10 = ~1 in 10 runs, 20 = ~1 in 5 runs
+contemplative_chance: 10
+
 # Telegram
 telegram:
   bot_token: "YOUR_BOT_TOKEN"  # From @BotFather

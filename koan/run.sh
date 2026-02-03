@@ -309,6 +309,39 @@ while true; do
 
   # Define focus area based on autonomous mode
   if [ -z "$MISSION_LINE" ]; then
+    # Contemplative mode check: random chance to reflect instead of autonomous work
+    # Only triggers when there's no mission and not in WAIT/REVIEW mode (need budget)
+    if [ "$AUTONOMOUS_MODE" = "deep" ] || [ "$AUTONOMOUS_MODE" = "implement" ]; then
+      CONTEMPLATIVE_CHANCE=$("$PYTHON" -c "from app.utils import get_contemplative_chance; print(get_contemplative_chance())" 2>/dev/null || echo "10")
+      CONTEMPLATE_ROLL=$((RANDOM % 100))
+      if [ "$CONTEMPLATE_ROLL" -lt "$CONTEMPLATIVE_CHANCE" ]; then
+        echo "Decision: CONTEMPLATIVE mode (random reflection)"
+        echo "  Roll: $CONTEMPLATE_ROLL < $CONTEMPLATIVE_CHANCE (threshold)"
+        echo "  Action: Running contemplative session instead of autonomous work"
+        echo ""
+        notify "🪷 Run $RUN_NUM/$MAX_RUNS — Contemplative mode (rolled $CONTEMPLATE_ROLL < $CONTEMPLATIVE_CHANCE%)"
+
+        # Run contemplative session (same as pause mode contemplation, but doesn't enter pause)
+        CONTEMPLATE_PROMPT=$(sed \
+          -e "s|{INSTANCE}|$INSTANCE|g" \
+          -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
+          "$KOAN_ROOT/koan/system-prompts/contemplative.md")
+
+        cd "$INSTANCE"
+        CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
+        set +e
+        # shellcheck disable=SC2086
+        claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 3 $CONTEMPLATE_FLAGS 2>/dev/null
+        set -e
+
+        # Contemplative session done — increment counter and loop
+        count=$((count + 1))
+        echo "[koan] Contemplative session complete. Sleeping ${INTERVAL}s..."
+        sleep "$INTERVAL"
+        continue
+      fi
+    fi
+
     case "$AUTONOMOUS_MODE" in
       wait)
         echo "Decision: WAIT mode (budget exhausted)"

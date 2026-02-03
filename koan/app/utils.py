@@ -211,6 +211,20 @@ def get_fast_reply_model() -> str:
     return ""
 
 
+def get_contemplative_chance() -> int:
+    """Get probability (0-100) of triggering contemplative mode on autonomous runs.
+
+    When no mission is pending, this is the chance that koan will run a
+    contemplative session instead of autonomous work. Allows for regular
+    moments of reflection without waiting for budget exhaustion.
+
+    Returns:
+        Integer percentage (0-100). Default: 10 (one in ten autonomous runs).
+    """
+    config = load_config()
+    return int(config.get("contemplative_chance", 10))
+
+
 def build_claude_flags(
     model: str = "",
     fallback: str = "",
