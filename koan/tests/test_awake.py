@@ -761,6 +761,38 @@ class TestPauseCommand:
         assert "unpaused" in mock_send.call_args[0][0].lower()
 
     @patch("app.awake.send_telegram")
+    def test_resume_with_quota_reason(self, mock_send, tmp_path):
+        """Resume cleans up both pause and pause-reason files, reports quota reason."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("quota\n1234567890")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_resume()
+        assert not (tmp_path / ".koan-pause").exists()
+        assert not (tmp_path / ".koan-pause-reason").exists()
+        assert "quota" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.send_telegram")
+    def test_resume_with_max_runs_reason(self, mock_send, tmp_path):
+        """Resume cleans up both files and reports max_runs reason."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("max_runs\n1234567890")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_resume()
+        assert not (tmp_path / ".koan-pause").exists()
+        assert not (tmp_path / ".koan-pause-reason").exists()
+        assert "max_runs" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.send_telegram")
+    def test_resume_pause_without_reason(self, mock_send, tmp_path):
+        """Resume with pause file but no reason file (manual /pause)."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_resume()
+        assert not (tmp_path / ".koan-pause").exists()
+        # Should say "unpaused" without specific reason
+        assert "unpaused" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.send_telegram")
     def test_status_shows_pause(self, mock_send, tmp_path):
         (tmp_path / ".koan-pause").write_text("PAUSE")
         instance = tmp_path / "instance"
