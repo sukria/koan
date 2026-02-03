@@ -194,6 +194,21 @@ def get_start_on_pause() -> bool:
     """
     config = load_config()
     return bool(config.get("start_on_pause", False))
+def get_fast_reply_model() -> str:
+    """Get model to use for fast replies (command handlers like /usage, /sparring).
+
+    When config.fast_reply is True, returns the lightweight model (usually Haiku)
+    for faster, cheaper responses. When False, returns empty string (use default).
+
+    Returns:
+        Model name string (e.g., "haiku") or empty string for default model.
+    """
+    config = load_config()
+    fast_reply = config.get("fast_reply", False)
+    if fast_reply:
+        models = get_model_config()
+        return models["lightweight"]
+    return ""
 
 
 def build_claude_flags(

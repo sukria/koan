@@ -404,6 +404,38 @@ class TestModelConfig:
             flags = get_claude_flags_for_role("unknown_role")
         assert flags == ""
 
+    def test_get_fast_reply_model_enabled(self):
+        """fast_reply=true returns lightweight model."""
+        from app.utils import get_fast_reply_model
+        config = {"fast_reply": True, "models": {"lightweight": "haiku"}}
+        with patch("app.utils.load_config", return_value=config):
+            model = get_fast_reply_model()
+        assert model == "haiku"
+
+    def test_get_fast_reply_model_disabled(self):
+        """fast_reply=false returns empty string (use default)."""
+        from app.utils import get_fast_reply_model
+        config = {"fast_reply": False, "models": {"lightweight": "haiku"}}
+        with patch("app.utils.load_config", return_value=config):
+            model = get_fast_reply_model()
+        assert model == ""
+
+    def test_get_fast_reply_model_missing(self):
+        """Missing fast_reply key defaults to false."""
+        from app.utils import get_fast_reply_model
+        config = {"models": {"lightweight": "haiku"}}
+        with patch("app.utils.load_config", return_value=config):
+            model = get_fast_reply_model()
+        assert model == ""
+
+    def test_get_fast_reply_model_custom_lightweight(self):
+        """fast_reply uses custom lightweight model from config."""
+        from app.utils import get_fast_reply_model
+        config = {"fast_reply": True, "models": {"lightweight": "sonnet"}}
+        with patch("app.utils.load_config", return_value=config):
+            model = get_fast_reply_model()
+        assert model == "sonnet"
+
 
 class TestUtilsConversationHistory:
     """Cover save/load/format conversation history edge cases."""

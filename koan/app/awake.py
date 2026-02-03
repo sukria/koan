@@ -39,6 +39,7 @@ from app.utils import (
     get_tools_description,
     get_model_config,
     build_claude_flags,
+    get_fast_reply_model,
 )
 
 load_dotenv()
@@ -302,8 +303,13 @@ def _handle_usage():
     )
 
     try:
+        # Use fast_reply model (lightweight/Haiku) if configured
+        fast_model = get_fast_reply_model()
+        cmd = ["claude", "-p", prompt, "--max-turns", "1"]
+        if fast_model:
+            cmd.extend(["--model", fast_model])
         result = subprocess.run(
-            ["claude", "-p", prompt, "--max-turns", "1"],
+            cmd,
             capture_output=True, text=True, timeout=60,
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -405,8 +411,13 @@ def _handle_sparring():
     )
 
     try:
+        # Use fast_reply model (lightweight/Haiku) if configured
+        fast_model = get_fast_reply_model()
+        cmd = ["claude", "-p", prompt, "--max-turns", "1"]
+        if fast_model:
+            cmd.extend(["--model", fast_model])
         result = subprocess.run(
-            ["claude", "-p", prompt, "--max-turns", "1"],
+            cmd,
             capture_output=True, text=True, timeout=60,
         )
         if result.returncode == 0 and result.stdout.strip():
