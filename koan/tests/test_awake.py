@@ -275,6 +275,30 @@ class TestHandleCommand:
         handle_command("/resume")
         mock_resume.assert_called_once()
 
+    @patch("app.awake.send_telegram")
+    def test_verbose_creates_file(self, mock_send, tmp_path):
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_command("/verbose")
+        assert (tmp_path / ".koan-verbose").exists()
+        mock_send.assert_called_once()
+        assert "Verbose" in mock_send.call_args[0][0] or "verbose" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.send_telegram")
+    def test_silent_removes_verbose_file(self, mock_send, tmp_path):
+        verbose_file = tmp_path / ".koan-verbose"
+        verbose_file.write_text("VERBOSE")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_command("/silent")
+        assert not verbose_file.exists()
+        mock_send.assert_called_once()
+
+    @patch("app.awake.send_telegram")
+    def test_silent_when_already_silent(self, mock_send, tmp_path):
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_command("/silent")
+        mock_send.assert_called_once()
+        assert "silent" in mock_send.call_args[0][0].lower() or "Déjà" in mock_send.call_args[0][0]
+
     @patch("app.awake.handle_chat")
     def test_unknown_command_falls_to_chat(self, mock_chat):
         handle_command("/unknown")
