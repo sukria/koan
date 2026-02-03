@@ -332,13 +332,25 @@ def _handle_usage():
 def handle_resume():
     """Resume from pause or quota exhaustion."""
     pause_file = KOAN_ROOT / ".koan-pause"
-    quota_file = KOAN_ROOT / ".koan-quota-reset"
+    pause_reason_file = KOAN_ROOT / ".koan-pause-reason"
+    quota_file = KOAN_ROOT / ".koan-quota-reset"  # Legacy, kept for compat
 
     if pause_file.exists():
+        # Read pause reason for better messaging
+        reason = "manual"
+        if pause_reason_file.exists():
+            reason = pause_reason_file.read_text().strip().split("\n")[0]
         pause_file.unlink(missing_ok=True)
-        send_telegram("Unpaused. Missions resume next cycle.")
+        pause_reason_file.unlink(missing_ok=True)
+        if reason == "quota":
+            send_telegram("Unpaused (was: quota exhausted). Run loop continues.")
+        elif reason == "max_runs":
+            send_telegram("Unpaused (was: max_runs). Run counter reset, loop continues.")
+        else:
+            send_telegram("Unpaused. Missions resume next cycle.")
         return
 
+    # Legacy fallback: old .koan-quota-reset file (can be removed in future)
     if not quota_file.exists():
         send_telegram("No pause or quota hold detected. /status to check.")
         return

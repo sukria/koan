@@ -143,11 +143,11 @@ done
 "$PYTHON" "$DAILY_REPORT" 2>/dev/null || true
 
 ##
-# Kōan main loop - alive and running
+# Kōan main loop - infinite, never exits unless /stop requested
 ##
-while [ $count -lt $MAX_RUNS ]; do
-  
-  # Check for stop request - graceful shutdown
+while true; do
+
+  # Check for stop request - graceful shutdown (ONLY way to exit the loop)
   if [ -f "$KOAN_ROOT/.koan-stop" ]; then
     echo "[koan] Stop requested."
     rm -f "$KOAN_ROOT/.koan-stop"
@@ -159,6 +159,32 @@ while [ $count -lt $MAX_RUNS ]; do
   # Check for pause — contemplative mode
   if [ -f "$KOAN_ROOT/.koan-pause" ]; then
     echo "[koan] Paused. Contemplative mode. ($(date '+%H:%M'))"
+
+    # Check auto-resume: if paused due to quota and 5h have passed, resume
+    if [ -f "$KOAN_ROOT/.koan-pause-reason" ]; then
+      PAUSE_REASON=$(head -1 "$KOAN_ROOT/.koan-pause-reason")
+      PAUSE_TIMESTAMP=$(tail -1 "$KOAN_ROOT/.koan-pause-reason")
+      CURRENT_TIMESTAMP=$(date +%s)
+      TIME_ELAPSED=$((CURRENT_TIMESTAMP - PAUSE_TIMESTAMP))
+      FIVE_HOURS=$((5 * 60 * 60))
+
+      if [ $TIME_ELAPSED -ge $FIVE_HOURS ]; then
+        echo "[koan] Auto-resume: 5h have passed since pause ($PAUSE_REASON)"
+        rm -f "$KOAN_ROOT/.koan-pause" "$KOAN_ROOT/.koan-pause-reason"
+        count=0  # Reset run counter on auto-resume
+        notify "🔄 Koan auto-resumed after 5h cooldown (reason: $PAUSE_REASON)"
+        continue
+      fi
+    fi
+
+    # Check for manual /resume (pause file removed but we're still in pause block from previous iteration)
+    # This shouldn't normally happen since the continue at end of sleep loop would catch it,
+    # but if we reach here with no pause file, we've been manually resumed
+    if [ ! -f "$KOAN_ROOT/.koan-pause" ]; then
+      echo "[koan] Manual resume detected"
+      count=0  # Reset run counter on manual resume too
+      continue
+    fi
 
     # ~50% chance of a contemplative session
     STEP_IN_PROBABILITY=50
@@ -184,7 +210,7 @@ while [ $count -lt $MAX_RUNS ]; do
       set -e
     fi
 
-    # Sleep in 5s increments — allows /resume to take effect quickly
+    # Sleep in 5s increments — allows /resume or auto-resume to take effect quickly
     for ((s=0; s<60; s++)); do
       [ ! -f "$KOAN_ROOT/.koan-pause" ] && break
       sleep 5
@@ -273,12 +299,16 @@ while [ $count -lt $MAX_RUNS ]; do
       wait)
         echo "Decision: WAIT mode (budget exhausted)"
         echo "  Reason: $DECISION_REASON"
-        echo "  Action: Sending retrospective and exiting"
+        echo "  Action: Entering pause mode (will auto-resume after 5h)"
         echo ""
-        # Send retrospective and exit gracefully
+        # Send retrospective and enter pause mode
         "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
-        notify "⏸️ Koan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Use /resume when quota resets."
-        break
+        # Create pause file + reason file for auto-resume
+        touch "$KOAN_ROOT/.koan-pause"
+        echo "quota" > "$KOAN_ROOT/.koan-pause-reason"
+        echo "$(date +%s)" >> "$KOAN_ROOT/.koan-pause-reason"
+        notify "⏸️ Koan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Auto-resume in 5h or use /resume."
+        continue  # Go back to start of loop (will enter pause mode)
         ;;
       review)
         FOCUS_AREA="Low-cost review: audit code, find issues, suggest improvements (READ-ONLY)"
@@ -463,12 +493,13 @@ EOF
 
 Claude quota reached after $count runs (project: $PROJECT_NAME). $RESET_INFO
 
-Koan paused. Use \`/resume\` command via Telegram when ready to restart.
+Koan entering pause mode. Auto-resume in 5h or use \`/resume\` to restart manually.
 EOF
 
-    # Save reset time for /resume command
-    echo "$RESET_INFO" > "$KOAN_ROOT/.koan-quota-reset"
-    echo "$(date +%s)" >> "$KOAN_ROOT/.koan-quota-reset"  # Current timestamp
+    # Create pause file + reason file for auto-resume
+    touch "$KOAN_ROOT/.koan-pause"
+    echo "quota" > "$KOAN_ROOT/.koan-pause-reason"
+    echo "$(date +%s)" >> "$KOAN_ROOT/.koan-pause-reason"
 
     # Commit journal update
     cd "$INSTANCE"
@@ -479,10 +510,10 @@ EOF
 
     notify "⚠️ Claude quota exhausted. $RESET_INFO
 
-Koan paused after $count runs. Send /resume via Telegram when quota resets to check if you want to restart."
+Koan paused after $count runs. Auto-resume in 5h or use /resume to restart manually."
     rm -f "$CLAUDE_OUT" "$CLAUDE_ERR"
     CLAUDE_OUT=""
-    break
+    continue  # Go back to start of loop (will enter pause mode)
   fi
   rm -f "$CLAUDE_OUT" "$CLAUDE_ERR"
   CLAUDE_OUT=""
@@ -538,21 +569,30 @@ Koan paused after $count runs. Send /resume via Telegram when quota resets to ch
   count=$((count + 1))
 
   # Periodic git sync (every GIT_SYNC_INTERVAL runs)
-  if [ $((count % GIT_SYNC_INTERVAL)) -eq 0 ] && [ $count -lt $MAX_RUNS ]; then
+  if [ $((count % GIT_SYNC_INTERVAL)) -eq 0 ]; then
     echo "[koan] Periodic git sync (run $count)..."
     for i in "${!PROJECT_NAMES[@]}"; do
       "$PYTHON" "$GIT_SYNC" "$INSTANCE" "${PROJECT_NAMES[$i]}" "${PROJECT_PATHS[$i]}" 2>/dev/null || true
     done
   fi
 
-  if [ $count -lt $MAX_RUNS ]; then
-    echo "[koan] Sleeping ${INTERVAL}s..."
-    sleep $INTERVAL
+  # Check if max runs reached — enter pause mode instead of exiting
+  if [ $count -ge $MAX_RUNS ]; then
+    echo "[koan] Max runs ($MAX_RUNS) reached. Entering pause mode (auto-resume in 5h)."
+    touch "$KOAN_ROOT/.koan-pause"
+    echo "max_runs" > "$KOAN_ROOT/.koan-pause-reason"
+    echo "$(date +%s)" >> "$KOAN_ROOT/.koan-pause-reason"
+    notify "⏸️ Koan paused: $MAX_RUNS runs completed. Auto-resume in 5h or use /resume to restart."
+    # Don't reset count here — it gets reset on auto-resume or manual /resume
+    continue  # Go back to start of loop (will enter pause mode)
   fi
+
+  echo "[koan] Sleeping ${INTERVAL}s..."
+  sleep $INTERVAL
 done
 
-echo "[koan] Session complete. $count runs executed."
-notify "Session complete — $count runs executed"
+# This point is only reached via /stop command
+echo "[koan] Session ended. $count runs executed."
 
 # End-of-session daily report check
 "$PYTHON" "$DAILY_REPORT" 2>/dev/null || true
