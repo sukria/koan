@@ -204,6 +204,9 @@ def _build_status() -> str:
                             parts.append(f"    {display}")
                     if pending:
                         parts.append(f"  Pending: {len(pending)}")
+                        for m in pending[:3]:
+                            display = re.sub(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*', '', m)
+                            parts.append(f"    {display}")
 
     # Run loop status
     pause_file = KOAN_ROOT / ".koan-pause"
