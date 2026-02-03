@@ -143,14 +143,32 @@ def save_reflection(instance_dir: Path, observations: str):
     atomic_write(personality_file, new_content)
 
 
+def notify_outbox(instance_dir: Path, observations: str):
+    """Write a notification to the outbox with reflection summary.
+
+    Args:
+        instance_dir: Path to instance directory
+        observations: Reflection observations to share
+    """
+    outbox_file = instance_dir / "outbox.md"
+    message = f"""🪷 Moment de réflexion — session divisible par 10.
+
+{observations}
+
+(Auto-réflexion périodique, cf. personality-evolution.md)"""
+
+    atomic_write(outbox_file, message)
+
+
 def main():
     """CLI entry point."""
     if len(sys.argv) < 2:
-        print("Usage: self_reflection.py <instance_dir> [--force]", file=sys.stderr)
+        print("Usage: self_reflection.py <instance_dir> [--force] [--notify]", file=sys.stderr)
         sys.exit(1)
 
     instance_dir = Path(sys.argv[1])
     force = "--force" in sys.argv
+    notify = "--notify" in sys.argv
 
     if not instance_dir.exists():
         print(f"[self_reflection] Instance directory not found: {instance_dir}", file=sys.stderr)
@@ -167,6 +185,10 @@ def main():
         print(f"[self_reflection] Reflection saved to personality-evolution.md")
         # Also output for potential outbox use
         print(observations)
+        # Send to outbox if requested
+        if notify:
+            notify_outbox(instance_dir, observations)
+            print("[self_reflection] Notification sent to outbox")
     else:
         print("[self_reflection] No observations generated.")
 

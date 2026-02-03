@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.self_reflection import should_reflect, build_reflection_prompt, save_reflection
+from app.self_reflection import should_reflect, build_reflection_prompt, save_reflection, notify_outbox
 
 
 @pytest.fixture
@@ -101,3 +101,22 @@ class TestSaveReflection:
         save_reflection(instance_dir, "- test")
         content = personality.read_text()
         assert re.search(r"## Réflexion — \d{4}-\d{2}-\d{2}", content)
+
+
+class TestNotifyOutbox:
+    def test_writes_to_outbox(self, instance_dir):
+        notify_outbox(instance_dir, "- I notice patterns")
+        outbox = instance_dir / "outbox.md"
+        assert outbox.exists()
+        content = outbox.read_text()
+        assert "I notice patterns" in content
+        assert "🪷" in content
+        assert "personality-evolution.md" in content
+
+    def test_overwrites_existing_outbox(self, instance_dir):
+        outbox = instance_dir / "outbox.md"
+        outbox.write_text("old message")
+        notify_outbox(instance_dir, "- new reflection")
+        content = outbox.read_text()
+        assert "old message" not in content
+        assert "new reflection" in content

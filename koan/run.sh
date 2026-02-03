@@ -19,6 +19,7 @@ MISSION_SUMMARY="$APP_DIR/mission_summary.py"
 GIT_SYNC="$APP_DIR/git_sync.py"
 GIT_SYNC_INTERVAL=${KOAN_GIT_SYNC_INTERVAL:-5}
 HEALTH_CHECK="$APP_DIR/health_check.py"
+SELF_REFLECTION="$APP_DIR/self_reflection.py"
 USAGE_TRACKER="$APP_DIR/usage_tracker.py"
 USAGE_ESTIMATOR="$APP_DIR/usage_estimator.py"
 USAGE_STATE="$INSTANCE/usage_state.json"
@@ -121,6 +122,10 @@ echo "[koan] Running memory cleanup..."
 # Health check: warn if Telegram bridge is not running
 echo "[koan] Checking Telegram bridge health..."
 "$PYTHON" "$HEALTH_CHECK" "$KOAN_ROOT" --max-age 120 || true
+
+# Self-reflection: every 10 sessions, trigger introspection
+echo "[koan] Checking self-reflection trigger..."
+"$PYTHON" "$SELF_REFLECTION" "$INSTANCE" --notify || true
 
 # Check start_on_pause config: create .koan-pause if true (boot into pause mode)
 START_ON_PAUSE=$("$PYTHON" -c "from app.utils import get_start_on_pause; print('true' if get_start_on_pause() else 'false')" 2>/dev/null || echo "false")
