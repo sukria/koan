@@ -5,8 +5,12 @@
 
 set -euo pipefail
 
-KOAN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export KOAN_ROOT
+# Ensure KOAN_ROOT is set - mandatory from config
+if [ -z "${KOAN_ROOT:-}" ]; then
+  echo "[koan] Error: KOAN_ROOT environment variable not set."
+  exit 1
+fi
+
 INSTANCE="$KOAN_ROOT/instance"
 APP_DIR="$KOAN_ROOT/koan/app"
 NOTIFY="$APP_DIR/notify.py"
