@@ -158,6 +158,21 @@ def handle_command(text: str):
         handle_resume()
         return
 
+    if cmd == "/sparring":
+        _handle_sparring()
+        return
+
+    if cmd.startswith("/reflect "):
+        _handle_reflect(text[9:].strip())
+
+    if cmd == "/help":
+        _handle_help()
+        return
+
+    if cmd == "/usage":
+        _run_in_worker(_handle_usage)
+        return
+
     # Unknown command — pass to Claude as chat
     handle_chat(text)
 
@@ -206,6 +221,90 @@ def _build_status() -> str:
     return "\n".join(parts)
 
 
+def _handle_help():
+    """Send the list of available commands."""
+    help_text = (
+        "Commandes disponibles :\n\n"
+        "/help — cette aide\n"
+        "/status — état rapide (missions, pause, loop)\n"
+        "/usage — status détaillé formaté par Claude (quota, missions, progression)\n"
+        "/stop — arrêter Kōan après la mission en cours\n"
+        "/pause — mettre en pause (pas de nouvelles missions)\n"
+        "/resume — reprendre après pause ou quota épuisé\n"
+        "\n"
+        "Pour envoyer une mission : commencer par \"mission:\" ou un verbe d'action (implement, fix, add...)\n"
+        "Tout autre message = conversation libre avec Kōan."
+    )
+    send_telegram(help_text)
+
+
+def _handle_usage():
+    """Build a rich status from usage.md + missions.md + pending.md, formatted by Claude."""
+    # Gather raw data
+    usage_text = "Pas de données de quota disponibles."
+    usage_path = INSTANCE_DIR / "usage.md"
+    if usage_path.exists():
+        usage_text = usage_path.read_text().strip() or usage_text
+
+    missions_text = "Aucune mission."
+    if MISSIONS_FILE.exists():
+        from app.missions import parse_sections
+        sections = parse_sections(MISSIONS_FILE.read_text())
+        parts = []
+        in_progress = sections.get("in_progress", [])
+        pending = sections.get("pending", [])
+        done = sections.get("done", [])
+        if in_progress:
+            parts.append("En cours :\n" + "\n".join(in_progress[:5]))
+        if pending:
+            parts.append(f"En attente ({len(pending)}) :\n" + "\n".join(pending[:5]))
+        if done:
+            parts.append(f"Terminées : {len(done)}")
+        if parts:
+            missions_text = "\n\n".join(parts)
+
+    pending_text = "Aucun run en cours."
+    pending_path = INSTANCE_DIR / "journal" / "pending.md"
+    if pending_path.exists():
+        content = pending_path.read_text().strip()
+        if content:
+            # Keep last 1500 chars
+            if len(content) > 1500:
+                pending_text = "...\n" + content[-1500:]
+            else:
+                pending_text = content
+
+    from app.prompts import load_prompt
+    prompt = load_prompt(
+        "usage-status",
+        SOUL=SOUL,
+        USAGE=usage_text,
+        MISSIONS=missions_text,
+        PENDING=pending_text,
+    )
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--max-turns", "1"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            response = result.stdout.strip()
+            # Clean markdown artifacts
+            response = response.replace("**", "").replace("```", "").replace("##", "")
+            response = re.sub(r'^#{1,6}\s+', '', response, flags=re.MULTILINE)
+            send_telegram(response)
+        else:
+            # Fallback: send raw data
+            fallback = f"Quota: {usage_text[:200]}\n\nMissions: {missions_text[:300]}"
+            send_telegram(fallback)
+    except subprocess.TimeoutExpired:
+        send_telegram("Timeout sur le formatage. Réessaie.")
+    except Exception as e:
+        print(f"[awake] Usage error: {e}")
+        send_telegram("Erreur lors du formatage /usage.")
+
+
 def handle_resume():
     """Resume from pause or quota exhaustion."""
     pause_file = KOAN_ROOT / ".koan-pause"
@@ -236,6 +335,92 @@ def handle_resume():
     except Exception as e:
         print(f"[awake] Error checking quota reset: {e}")
         send_telegram("Error checking quota. /status or check manually.")
+
+
+def _handle_sparring():
+    """Launch a sparring session — strategic challenge, not code talk."""
+    send_telegram("Mode sparring activé. Je réfléchis...")
+
+    from app.prompts import load_prompt
+
+    # Load context for strategic sparring
+    strategy = ""
+    strategy_file = INSTANCE_DIR / "memory" / "global" / "strategy.md"
+    if strategy_file.exists():
+        strategy = strategy_file.read_text()
+
+    emotional = ""
+    emotional_file = INSTANCE_DIR / "memory" / "global" / "emotional-memory.md"
+    if emotional_file.exists():
+        emotional = emotional_file.read_text()[:1000]
+
+    prefs = ""
+    prefs_file = INSTANCE_DIR / "memory" / "global" / "human-preferences.md"
+    if prefs_file.exists():
+        prefs = prefs_file.read_text()
+
+    # Recent missions for context
+    recent_missions = ""
+    if MISSIONS_FILE.exists():
+        from app.missions import parse_sections
+        sections = parse_sections(MISSIONS_FILE.read_text())
+        in_progress = sections.get("in_progress", [])
+        pending = sections.get("pending", [])
+        parts = []
+        if in_progress:
+            parts.append("In progress:\n" + "\n".join(in_progress[:5]))
+        if pending:
+            parts.append("Pending:\n" + "\n".join(pending[:5]))
+        recent_missions = "\n".join(parts)
+
+    hour = datetime.now().hour
+    time_hint = "It's late night." if hour >= 22 else "It's evening." if hour >= 18 else "It's afternoon." if hour >= 12 else "It's morning."
+
+    prompt = load_prompt(
+        "sparring",
+        SOUL=SOUL,
+        PREFS=prefs,
+        STRATEGY=strategy,
+        EMOTIONAL_MEMORY=emotional,
+        RECENT_MISSIONS=recent_missions,
+        TIME_HINT=time_hint,
+    )
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--max-turns", "1"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            response = result.stdout.strip()
+            # Clean markdown
+            response = response.replace("**", "").replace("```", "")
+            send_telegram(response)
+            save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
+        else:
+            send_telegram("Rien de percutant à dire pour le moment. Reviens plus tard.")
+    except subprocess.TimeoutExpired:
+        send_telegram("Timeout — mon cerveau a besoin de plus de temps. Réessaie.")
+    except Exception as e:
+        print(f"[awake] Sparring error: {e}")
+        send_telegram("Erreur pendant le sparring. Réessaie.")
+
+
+def _handle_reflect(message: str):
+    """Handle /reflect command — write human's reflection to shared journal."""
+    shared_journal = INSTANCE_DIR / "shared-journal.md"
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry = f"\n## Alexis — {timestamp}\n\n{message}\n"
+
+    # Append to shared journal
+    import fcntl as _fcntl
+    shared_journal.parent.mkdir(parents=True, exist_ok=True)
+    with open(shared_journal, "a") as f:
+        _fcntl.flock(f, _fcntl.LOCK_EX)
+        f.write(entry)
+
+    send_telegram("Noté dans le journal partagé. J'y réfléchirai.")
 
 
 def handle_mission(text: str):
@@ -350,6 +535,18 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
     journal_block = f"Today's journal (excerpt):\n{journal_context}" if journal_context else ""
     missions_block = f"Current missions state:\n{missions_context}" if missions_context else ""
 
+    # Load emotional memory for relationship-aware responses
+    emotional_context = ""
+    if not lite:
+        emotional_path = INSTANCE_DIR / "memory" / "global" / "emotional-memory.md"
+        if emotional_path.exists():
+            content = emotional_path.read_text().strip()
+            # Take last 800 chars — enough for tone, not too heavy
+            if len(content) > 800:
+                emotional_context = "...\n" + content[-800:]
+            else:
+                emotional_context = content
+
     prompt = load_prompt(
         "chat",
         SOUL=SOUL,
@@ -362,6 +559,13 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
         TIME_HINT=time_hint,
         TEXT=text,
     )
+
+    # Inject emotional memory before the user message (if available)
+    if emotional_context:
+        prompt = prompt.replace(
+            f"« {text} »",
+            f"Emotional memory (relationship context, use to color your tone):\n{emotional_context}\n\nThe human sends you this message on Telegram:\n\n  « {text} »",
+        )
 
     # Hard cap: if prompt exceeds 12k chars, force lite mode
     MAX_PROMPT_CHARS = 12000

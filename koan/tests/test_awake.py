@@ -20,6 +20,8 @@ from app.awake import (
     _format_outbox_message,
     _clean_chat_response,
     _build_status,
+    _handle_help,
+    _handle_usage,
     _run_in_worker,
     get_updates,
     check_config,
@@ -815,3 +817,122 @@ class TestCleanChatResponse:
     def test_preserves_normal_text(self):
         text = "Tout va bien, j'ai fini le travail."
         assert _clean_chat_response(text) == text
+
+
+# ---------------------------------------------------------------------------
+# /help
+# ---------------------------------------------------------------------------
+
+class TestHandleHelp:
+    @patch("app.awake.send_telegram")
+    def test_help_sends_command_list(self, mock_send):
+        _handle_help()
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "/help" in msg
+        assert "/status" in msg
+        assert "/usage" in msg
+        assert "/stop" in msg
+        assert "/pause" in msg
+        assert "/resume" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_mission_syntax(self, mock_send):
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "mission" in msg.lower()
+
+    @patch("app.awake._handle_help")
+    def test_handle_command_routes_help(self, mock_help):
+        handle_command("/help")
+        mock_help.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# /usage
+# ---------------------------------------------------------------------------
+
+class TestHandleUsage:
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_usage_calls_claude_with_context(self, mock_run, mock_send, tmp_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="Quota 60%, 3 missions en cours.")
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        usage_file = instance / "usage.md"
+        usage_file.write_text("Session (5hr) : 60% (reset in 2h)\nWeekly (7 day) : 40% (Resets in 3d)")
+        missions_file = instance / "missions.md"
+        missions_file.write_text("## En attente\n\n- fix bug\n\n## En cours\n\n## Terminées\n")
+        journal_dir = instance / "journal"
+        journal_dir.mkdir()
+
+        with patch("app.awake.INSTANCE_DIR", instance), \
+             patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.SOUL", "test soul"):
+            _handle_usage()
+
+        mock_run.assert_called_once()
+        prompt_arg = mock_run.call_args[0][0][2]  # ["claude", "-p", prompt, ...]
+        assert "60%" in prompt_arg
+        mock_send.assert_called_once_with("Quota 60%, 3 missions en cours.")
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_usage_fallback_on_claude_failure(self, mock_run, mock_send, tmp_path):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        (instance / "usage.md").write_text("Session : 30%")
+        missions_file = instance / "missions.md"
+        missions_file.write_text("## En attente\n\n## En cours\n\n## Terminées\n")
+        journal_dir = instance / "journal"
+        journal_dir.mkdir()
+
+        with patch("app.awake.INSTANCE_DIR", instance), \
+             patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.SOUL", ""):
+            _handle_usage()
+
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "30%" in msg
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 60))
+    def test_usage_timeout(self, mock_run, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        journal_dir = instance / "journal"
+        journal_dir.mkdir()
+
+        with patch("app.awake.INSTANCE_DIR", instance), \
+             patch("app.awake.MISSIONS_FILE", instance / "missions.md"), \
+             patch("app.awake.SOUL", ""):
+            _handle_usage()
+
+        mock_send.assert_called_once()
+        assert "Timeout" in mock_send.call_args[0][0]
+
+    @patch("app.awake._run_in_worker")
+    def test_handle_command_routes_usage(self, mock_worker):
+        handle_command("/usage")
+        mock_worker.assert_called_once_with(_handle_usage)
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_usage_includes_pending(self, mock_run, mock_send, tmp_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="Run en cours: fix auth")
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        journal_dir = instance / "journal"
+        journal_dir.mkdir()
+        pending = journal_dir / "pending.md"
+        pending.write_text("# Mission: fix auth\n22:00 — Started\n22:01 — Reading code")
+
+        with patch("app.awake.INSTANCE_DIR", instance), \
+             patch("app.awake.MISSIONS_FILE", instance / "missions.md"), \
+             patch("app.awake.SOUL", ""):
+            _handle_usage()
+
+        prompt_arg = mock_run.call_args[0][0][2]
+        assert "fix auth" in prompt_arg

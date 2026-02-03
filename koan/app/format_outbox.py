@@ -75,6 +75,16 @@ def load_memory_context(instance_dir: Path, project_name: str = "") -> str:
         if recent:
             parts.append("Acquired personality traits:\n" + "\n".join(recent))
 
+    # Emotional memory (relationship context)
+    emotional_file = instance_dir / "memory" / "global" / "emotional-memory.md"
+    if emotional_file.exists():
+        content = emotional_file.read_text().strip()
+        lines = content.splitlines()
+        # Take key sections — skip headers, keep substance
+        recent = [l for l in lines if l.strip() and not l.startswith("#")][-15:]
+        if recent:
+            parts.append("Emotional memory (relationship context):\n" + "\n".join(recent))
+
     # Recent summary (last 5 lines)
     summary_file = instance_dir / "memory" / "summary.md"
     if summary_file.exists():
