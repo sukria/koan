@@ -199,6 +199,22 @@ def _build_status() -> str:
 
     parts = ["📊 Kōan Status"]
 
+    # Run loop status — FIRST, most important info
+    pause_file = KOAN_ROOT / ".koan-pause"
+    stop_file = KOAN_ROOT / ".koan-stop"
+
+    if pause_file.exists():
+        parts.append("\n⏸️ **PAUSED** — No missions being executed")
+        parts.append("   /resume to continue")
+    elif stop_file.exists():
+        parts.append("\n⛔ **STOP REQUESTED** — Finishing current work")
+    else:
+        parts.append("\n▶️ **ACTIVE** — Run loop running")
+
+    status_file = KOAN_ROOT / ".koan-status"
+    if status_file.exists():
+        parts.append(f"   Loop: {status_file.read_text().strip()}")
+
     # Parse missions by project
     if MISSIONS_FILE.exists():
         content = MISSIONS_FILE.read_text()
@@ -223,19 +239,6 @@ def _build_status() -> str:
                         for m in pending[:3]:
                             display = re.sub(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*', '', m)
                             parts.append(f"    {display}")
-
-    # Run loop status
-    pause_file = KOAN_ROOT / ".koan-pause"
-    if pause_file.exists():
-        parts.append("\n⏸️ Paused (use /resume to unpause)")
-
-    stop_file = KOAN_ROOT / ".koan-stop"
-    if stop_file.exists():
-        parts.append("\n⛔ Stop requested")
-
-    status_file = KOAN_ROOT / ".koan-status"
-    if status_file.exists():
-        parts.append(f"\nLoop: {status_file.read_text().strip()}")
 
     return "\n".join(parts)
 
@@ -551,6 +554,23 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
             if pending:
                 parts.append(f"Pending: {len(pending)} mission(s)")
             missions_context = "\n".join(parts)
+
+    # Run loop status (CRITICAL for pause awareness)
+    run_loop_status = ""
+    pause_file = KOAN_ROOT / ".koan-pause"
+    stop_file = KOAN_ROOT / ".koan-stop"
+    if pause_file.exists():
+        run_loop_status = "\n\nRun loop status: ⏸️ PAUSED — Missions are NOT being executed"
+    elif stop_file.exists():
+        run_loop_status = "\n\nRun loop status: ⛔ STOP REQUESTED — Finishing current work"
+    else:
+        run_loop_status = "\n\nRun loop status: ▶️ RUNNING"
+
+    # Append run loop status to missions context
+    if missions_context:
+        missions_context += run_loop_status
+    else:
+        missions_context = f"No pending missions.{run_loop_status}"
 
     # Determine time-of-day for natural tone
     hour = datetime.now().hour

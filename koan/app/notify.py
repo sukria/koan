@@ -58,7 +58,7 @@ def format_and_send(raw_message: str, instance_dir: str = None,
     """Format a message through Claude with Kōan's personality, then send to Telegram.
 
     Every message sent to Telegram should go through this function to ensure
-    consistent personality, language (French), and readability on mobile.
+    consistent personality and readability on mobile.
 
     Args:
         raw_message: The raw/technical message to format

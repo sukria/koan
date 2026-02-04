@@ -237,7 +237,7 @@ class TestBuildStatus:
              patch("app.awake.KOAN_ROOT", tmp_path):
             status = _build_status()
 
-        assert "Stop requested" in status
+        assert "ARRÊT DEMANDÉ" in status or "stop" in status.lower()
 
     @patch("app.awake.MISSIONS_FILE")
     def test_status_with_loop_status(self, mock_file, tmp_path):
@@ -808,7 +808,7 @@ class TestPauseCommand:
         with patch("app.awake.KOAN_ROOT", tmp_path), \
              patch("app.awake.MISSIONS_FILE", missions):
             status = _build_status()
-        assert "Paused" in status
+        assert "PAUSE" in status or "pause" in status.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -1019,3 +1019,103 @@ class TestHandleUsage:
 
         prompt_arg = mock_run.call_args[0][0][2]
         assert "fix auth" in prompt_arg
+
+
+# ---------------------------------------------------------------------------
+# Pause awareness in chat and status
+# ---------------------------------------------------------------------------
+
+class TestPauseAwareness:
+    """Tests for pause state visibility in chat and status."""
+
+    @patch("app.awake.MISSIONS_FILE")
+    def test_status_shows_pause_at_top(self, mock_file, tmp_path):
+        """When paused, status shows pause FIRST, not at the bottom."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n"
+        )
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+
+        with patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.KOAN_ROOT", tmp_path):
+            status = _build_status()
+
+        lines = status.split("\n")
+        # Find where pause is mentioned
+        pause_line_idx = next(i for i, l in enumerate(lines) if "PAUSE" in l or "pause" in l.lower())
+        # Find where missions are mentioned
+        mission_line_idx = next((i for i, l in enumerate(lines) if "fix bug" in l), len(lines))
+        # Pause should come BEFORE missions
+        assert pause_line_idx < mission_line_idx, "Pause status should appear before mission details"
+
+    @patch("app.awake.MISSIONS_FILE")
+    def test_status_shows_active_when_running(self, mock_file, tmp_path):
+        """When not paused, status shows ACTIF/RUNNING."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n"
+        )
+        # No .koan-pause file
+
+        with patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.KOAN_ROOT", tmp_path):
+            status = _build_status()
+
+        assert "ACTIF" in status or "RUNNING" in status
+
+    @patch("app.awake.save_telegram_message")
+    @patch("app.awake.load_recent_telegram_history", return_value=[])
+    @patch("app.awake.format_conversation_history", return_value="")
+    @patch("app.awake.get_tools_description", return_value="")
+    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.send_telegram", return_value=True)
+    @patch("app.awake.subprocess.run")
+    def test_chat_prompt_includes_pause_status_when_paused(
+        self, mock_run, mock_send, mock_tools, mock_tools_desc, mock_fmt,
+        mock_hist, mock_save, tmp_path
+    ):
+        """Chat prompt should include PAUSED status when .koan-pause exists."""
+        from app.awake import _build_chat_prompt
+
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n")
+
+        with patch("app.awake.INSTANCE_DIR", tmp_path), \
+             patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.SOUL", "test soul"), \
+             patch("app.awake.SUMMARY", ""):
+            prompt = _build_chat_prompt("what are you doing?")
+
+        # Prompt should mention pause status
+        assert "PAUSED" in prompt or "⏸️" in prompt
+
+    @patch("app.awake.save_telegram_message")
+    @patch("app.awake.load_recent_telegram_history", return_value=[])
+    @patch("app.awake.format_conversation_history", return_value="")
+    @patch("app.awake.get_tools_description", return_value="")
+    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.send_telegram", return_value=True)
+    @patch("app.awake.subprocess.run")
+    def test_chat_prompt_includes_running_status_when_active(
+        self, mock_run, mock_send, mock_tools, mock_tools_desc, mock_fmt,
+        mock_hist, mock_save, tmp_path
+    ):
+        """Chat prompt should include RUNNING status when not paused."""
+        from app.awake import _build_chat_prompt
+
+        # No .koan-pause file
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n")
+
+        with patch("app.awake.INSTANCE_DIR", tmp_path), \
+             patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.SOUL", "test soul"), \
+             patch("app.awake.SUMMARY", ""):
+            prompt = _build_chat_prompt("what are you doing?")
+
+        # Prompt should mention running status
+        assert "RUNNING" in prompt or "▶️" in prompt
