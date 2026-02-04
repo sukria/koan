@@ -104,7 +104,7 @@ class TestInsertPendingMission:
         assert missions.exists()
         content = missions.read_text()
         assert "- First task" in content
-        assert "## En attente" in content
+        assert "## Pending" in content
 
     def test_handles_english_sections(self, tmp_path):
         from app.utils import insert_pending_mission
@@ -122,7 +122,7 @@ class TestInsertPendingMission:
 
         insert_pending_mission(missions, "- Orphan task")
         content = missions.read_text()
-        assert "## En attente" in content
+        assert "## Pending" in content
         assert "- Orphan task" in content
 
     def test_concurrent_inserts_no_lost_missions(self, tmp_path):

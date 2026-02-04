@@ -106,10 +106,10 @@ def generate_report(report_type: str = "morning") -> str:
     """
     if report_type == "morning":
         target = date.today() - timedelta(days=1)
-        header = f"Rapport du {target.strftime('%d/%m/%Y')}"
+        header = f"Report for {target.strftime('%Y-%m-%d')}"
     else:
         target = date.today()
-        header = f"Bilan de la journée"
+        header = "Daily Summary"
 
     journal = _read_journal(target)
     completed = _parse_completed_missions()
@@ -119,14 +119,14 @@ def generate_report(report_type: str = "morning") -> str:
 
     # Completed missions
     if completed:
-        lines.append("Missions terminees:")
+        lines.append("Completed missions:")
         for m in completed[-5:]:  # Last 5 max
             lines.append(f"  . {m}")
         lines.append("")
 
     # Pending missions
     if pending > 0:
-        lines.append(f"En attente: {pending} mission(s)")
+        lines.append(f"Pending: {pending} mission(s)")
         lines.append("")
 
     # Journal summary (extract key sections)
@@ -142,12 +142,12 @@ def generate_report(report_type: str = "morning") -> str:
                     activities.append(activity)
 
         if activities:
-            lines.append("Activite:")
+            lines.append("Activity:")
             for a in activities[-6:]:  # Last 6 max
                 lines.append(f"  . {a}")
             lines.append("")
     else:
-        lines.append("Pas d'activite enregistree.")
+        lines.append("No activity recorded.")
         lines.append("")
 
     # In-progress long-running items
@@ -163,12 +163,12 @@ def generate_report(report_type: str = "morning") -> str:
                 long_running.append(first_line[4:].strip())
 
         if long_running:
-            lines.append("En cours (long):")
+            lines.append("In Progress (long-running):")
             for lr in long_running:
                 lines.append(f"  . {lr}")
             lines.append("")
 
-    lines.append("-- Koan")
+    lines.append("-- Kōan")
     return "\n".join(lines)
 
 

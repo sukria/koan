@@ -105,7 +105,7 @@ class TestInsertMission:
 
     def test_insert_into_empty(self):
         result = insert_mission("", "- New task")
-        assert "## En attente" in result
+        assert "## Pending" in result
         assert "- New task" in result
 
     def test_insert_english_header(self):
@@ -116,7 +116,7 @@ class TestInsertMission:
     def test_insert_no_pending_section(self):
         content = "# Missions\n\n## En cours\n"
         result = insert_mission(content, "- Task")
-        assert "## En attente" in result
+        assert "## Pending" in result
         assert "- Task" in result
 
 

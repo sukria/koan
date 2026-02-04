@@ -24,7 +24,7 @@ _SECTION_MAP = {
     "completed": "done",
 }
 
-DEFAULT_SKELETON = "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+DEFAULT_SKELETON = "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
 
 
 def classify_section(header_text: str) -> Optional[str]:
@@ -94,7 +94,7 @@ def insert_mission(content: str, entry: str) -> str:
         content = DEFAULT_SKELETON
 
     marker = None
-    for candidate in ("## En attente", "## Pending"):
+    for candidate in ("## Pending", "## En attente"):
         if candidate in content:
             marker = candidate
             break
@@ -105,7 +105,7 @@ def insert_mission(content: str, entry: str) -> str:
             idx += 1
         content = content[:idx] + f"\n{entry}\n" + content[idx:]
     else:
-        content += f"\n## En attente\n\n{entry}\n"
+        content += f"\n## Pending\n\n{entry}\n"
 
     return content
 
