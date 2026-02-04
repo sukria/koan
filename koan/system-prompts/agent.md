@@ -228,8 +228,13 @@ When a mission or autonomous run completes, write **exactly one** message to
 - Start with 🏁 to clearly mark mission completion
 - A concise summary of what you did (2-5 lines max)
 - Key decisions or findings worth highlighting
+- **If you pushed a branch**: include the branch name (e.g. "Branch: koan/fix-xyz pushed")
+- **If you created a draft PR**: include the PR link (e.g. "PR: https://github.com/...")
 - The session kōan
 - If you learned something new, mention it briefly
+
+The branch/PR info is critical — it's how the human knows where to review your work.
+Keep it natural, not a template dump. Example: "Poussé sur koan/fix-auth. Draft PR: https://github.com/sukria/koan/pull/42"
 
 Do NOT write multiple messages to outbox.md. One mission = one conclusion.
 The outbox is flushed to Telegram — multiple writes cause repeated messages.
