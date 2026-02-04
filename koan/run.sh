@@ -177,19 +177,40 @@ while true; do
   if [ -f "$KOAN_ROOT/.koan-pause" ]; then
     echo "[koan] Paused. Contemplative mode. ($(date '+%H:%M'))"
 
-    # Check auto-resume: if paused due to quota and 5h have passed, resume
+    # Check auto-resume: if paused due to quota, resume when reset time is reached
     if [ -f "$KOAN_ROOT/.koan-pause-reason" ]; then
       PAUSE_REASON=$(head -1 "$KOAN_ROOT/.koan-pause-reason")
-      PAUSE_TIMESTAMP=$(tail -1 "$KOAN_ROOT/.koan-pause-reason")
+      # Second line is now the reset timestamp (or pause timestamp for max_runs)
+      RESET_OR_PAUSE_TS=$(sed -n '2p' "$KOAN_ROOT/.koan-pause-reason")
+      # Third line (if exists) is the display info
+      RESET_DISPLAY=$(sed -n '3p' "$KOAN_ROOT/.koan-pause-reason" 2>/dev/null || echo "")
       CURRENT_TIMESTAMP=$(date +%s)
-      TIME_ELAPSED=$((CURRENT_TIMESTAMP - PAUSE_TIMESTAMP))
-      FIVE_HOURS=$((5 * 60 * 60))
 
-      if [ $TIME_ELAPSED -ge $FIVE_HOURS ]; then
-        echo "[koan] Auto-resume: 5h have passed since pause ($PAUSE_REASON)"
+      SHOULD_RESUME=false
+      if [ "$PAUSE_REASON" = "quota" ]; then
+        # For quota: resume when current time >= reset timestamp
+        if [ -n "$RESET_OR_PAUSE_TS" ] && [ "$CURRENT_TIMESTAMP" -ge "$RESET_OR_PAUSE_TS" ]; then
+          SHOULD_RESUME=true
+          echo "[koan] Auto-resume: quota reset time reached ($RESET_DISPLAY)"
+        fi
+      else
+        # For max_runs and other reasons: use old 5h cooldown
+        TIME_ELAPSED=$((CURRENT_TIMESTAMP - RESET_OR_PAUSE_TS))
+        FIVE_HOURS=$((5 * 60 * 60))
+        if [ $TIME_ELAPSED -ge $FIVE_HOURS ]; then
+          SHOULD_RESUME=true
+          echo "[koan] Auto-resume: 5h have passed since pause ($PAUSE_REASON)"
+        fi
+      fi
+
+      if [ "$SHOULD_RESUME" = true ]; then
         rm -f "$KOAN_ROOT/.koan-pause" "$KOAN_ROOT/.koan-pause-reason"
-        count=0  # Reset run counter on auto-resume
-        notify "🔄 Koan auto-resumed after 5h cooldown (reason: $PAUSE_REASON)"
+        count=0  # Reset run counter on auto-resume — start fresh at MAX capacity
+        if [ "$PAUSE_REASON" = "quota" ]; then
+          notify "🔄 Koan auto-resumed: quota reset time reached. Starting fresh (0/$MAX_RUNS runs)."
+        else
+          notify "🔄 Koan auto-resumed after 5h cooldown (reason: $PAUSE_REASON)"
+        fi
         continue
       fi
     fi
@@ -537,6 +558,22 @@ EOF
     RESET_INFO=$(echo "$CLAUDE_COMBINED" | grep -o "resets.*" | head -1 || echo "")
     echo "[koan] Quota reached. $RESET_INFO"
 
+    # Parse reset time to get actual timestamp
+    RESET_PARSER="$APP_DIR/reset_parser.py"
+    RESET_PARSED=$("$PYTHON" "$RESET_PARSER" parse "$RESET_INFO" 2>/dev/null || echo "|$RESET_INFO")
+    RESET_TIMESTAMP=$(echo "$RESET_PARSED" | cut -d'|' -f1)
+    RESET_DISPLAY=$(echo "$RESET_PARSED" | cut -d'|' -f2)
+
+    # Calculate time until reset for display
+    if [ -n "$RESET_TIMESTAMP" ]; then
+      RESET_UNTIL=$("$PYTHON" "$RESET_PARSER" until "$RESET_TIMESTAMP" 2>/dev/null || echo "unknown")
+      RESUME_MSG="Auto-resume at reset time (~$RESET_UNTIL)"
+    else
+      RESET_TIMESTAMP=$(date +%s)  # Fallback: current time + 5h (old behavior)
+      RESET_TIMESTAMP=$((RESET_TIMESTAMP + 5 * 3600))
+      RESUME_MSG="Auto-resume in ~5h (reset time unknown)"
+    fi
+
     # Write to journal (per-project)
     JOURNAL_DIR="$INSTANCE/journal/$(date +%Y-%m-%d)"
     JOURNAL_FILE="$JOURNAL_DIR/$PROJECT_NAME.md"
@@ -545,15 +582,17 @@ EOF
 
 ## Quota Exhausted — $(date '+%H:%M:%S')
 
-Claude quota reached after $count runs (project: $PROJECT_NAME). $RESET_INFO
+Claude quota reached after $count runs (project: $PROJECT_NAME). $RESET_DISPLAY
 
-Koan entering pause mode. Auto-resume in 5h or use \`/resume\` to restart manually.
+$RESUME_MSG or use \`/resume\` to restart manually.
 EOF
 
     # Create pause file + reason file for auto-resume
+    # Store actual reset timestamp for smart auto-resume
     touch "$KOAN_ROOT/.koan-pause"
     echo "quota" > "$KOAN_ROOT/.koan-pause-reason"
-    echo "$(date +%s)" >> "$KOAN_ROOT/.koan-pause-reason"
+    echo "$RESET_TIMESTAMP" >> "$KOAN_ROOT/.koan-pause-reason"
+    echo "$RESET_DISPLAY" >> "$KOAN_ROOT/.koan-pause-reason"
 
     # Commit journal update
     cd "$INSTANCE"
@@ -562,9 +601,9 @@ EOF
       git commit -m "koan: quota exhausted $(date +%Y-%m-%d-%H:%M)" && \
       git push origin main 2>/dev/null || true
 
-    notify "⚠️ Claude quota exhausted. $RESET_INFO
+    notify "⚠️ Claude quota exhausted. $RESET_DISPLAY
 
-Koan paused after $count runs. Auto-resume in 5h or use /resume to restart manually."
+Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
     rm -f "$CLAUDE_OUT" "$CLAUDE_ERR"
     CLAUDE_OUT=""
     continue  # Go back to start of loop (will enter pause mode)

@@ -339,14 +339,33 @@ def handle_resume():
     quota_file = KOAN_ROOT / ".koan-quota-reset"  # Legacy, kept for compat
 
     if pause_file.exists():
-        # Read pause reason for better messaging
+        # Read pause reason and reset info for better messaging
         reason = "manual"
+        reset_timestamp = None
+        reset_display = ""
+
         if pause_reason_file.exists():
-            reason = pause_reason_file.read_text().strip().split("\n")[0]
+            lines = pause_reason_file.read_text().strip().split("\n")
+            reason = lines[0] if lines else "manual"
+            if len(lines) > 1:
+                try:
+                    reset_timestamp = int(lines[1])
+                except ValueError:
+                    pass
+            if len(lines) > 2:
+                reset_display = lines[2]
+
         pause_file.unlink(missing_ok=True)
         pause_reason_file.unlink(missing_ok=True)
+
         if reason == "quota":
-            send_telegram("Unpaused (was: quota exhausted). Run loop continues.")
+            # Check if we're resuming before the reset time
+            if reset_timestamp and time.time() < reset_timestamp:
+                from app.reset_parser import time_until_reset
+                remaining = time_until_reset(reset_timestamp)
+                send_telegram(f"Unpaused (was: quota exhausted). Note: reset is in ~{remaining}. Run loop continues anyway.")
+            else:
+                send_telegram("Unpaused (was: quota exhausted). Quota should be reset. Run loop continues.")
         elif reason == "max_runs":
             send_telegram("Unpaused (was: max_runs). Run counter reset, loop continues.")
         else:

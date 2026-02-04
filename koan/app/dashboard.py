@@ -67,8 +67,31 @@ def get_signal_status() -> dict:
     status = {
         "stop_requested": (KOAN_ROOT / ".koan-stop").exists(),
         "quota_paused": (KOAN_ROOT / ".koan-quota-reset").exists(),
+        "paused": (KOAN_ROOT / ".koan-pause").exists(),
         "loop_status": "",
+        "pause_reason": "",
+        "reset_time": "",
     }
+
+    # Read pause reason file for detailed status
+    pause_reason_file = KOAN_ROOT / ".koan-pause-reason"
+    if pause_reason_file.exists():
+        try:
+            lines = pause_reason_file.read_text().strip().split("\n")
+            status["pause_reason"] = lines[0] if lines else ""
+            if len(lines) > 2:
+                status["reset_time"] = lines[2]  # Human-readable reset info
+            elif len(lines) > 1:
+                # Try to format the timestamp
+                try:
+                    from app.reset_parser import time_until_reset
+                    ts = int(lines[1])
+                    status["reset_time"] = f"in ~{time_until_reset(ts)}"
+                except (ValueError, ImportError):
+                    pass
+        except Exception:
+            pass
+
     status_file = KOAN_ROOT / ".koan-status"
     if status_file.exists():
         status["loop_status"] = status_file.read_text().strip()
