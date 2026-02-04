@@ -181,6 +181,10 @@ def handle_command(text: str):
     if cmd.startswith("/reflect "):
         _handle_reflect(text[9:].strip())
 
+    if cmd == "/ping":
+        _handle_ping()
+        return
+
     if cmd == "/help":
         _handle_help()
         return
@@ -238,6 +242,30 @@ def _build_status() -> str:
         parts.append(f"\nLoop: {status_file.read_text().strip()}")
 
     return "\n".join(parts)
+
+def _handle_ping():
+    """Check if the run loop (make run) is alive and report status."""
+    # Check if run.sh process is running
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "run\\.sh"],
+            capture_output=True, text=True, timeout=5,
+        )
+        run_loop_alive = result.returncode == 0
+    except Exception:
+        run_loop_alive = False
+
+    pause_file = KOAN_ROOT / ".koan-pause"
+    stop_file = KOAN_ROOT / ".koan-stop"
+
+    if run_loop_alive and stop_file.exists():
+        send_telegram("⛔ Run loop is stopping after current mission.")
+    elif run_loop_alive and pause_file.exists():
+        send_telegram("⏸️ Run loop is paused. /resume to unpause.")
+    elif run_loop_alive:
+        send_telegram("✅")
+    else:
+        send_telegram("❌ Run loop is not running.\n\nTo restart:\n  make run &")
 
 
 def _handle_help():
