@@ -138,7 +138,7 @@ def save_reflection(instance_dir: Path, observations: str):
     timestamp = datetime.now().strftime("%Y-%m-%d")
 
     new_content = personality_file.read_text() if personality_file.exists() else ""
-    new_content += f"\n\n## Réflexion — {timestamp}\n\n{observations}\n"
+    new_content += f"\n\n## Reflection — {timestamp}\n\n{observations}\n"
 
     atomic_write(personality_file, new_content)
 
@@ -151,11 +151,11 @@ def notify_outbox(instance_dir: Path, observations: str):
         observations: Reflection observations to share
     """
     outbox_file = instance_dir / "outbox.md"
-    message = f"""🪷 Moment de réflexion — session divisible par 10.
+    message = f"""🪷 Reflection moment — session divisible by 10.
 
 {observations}
 
-(Auto-réflexion périodique, cf. personality-evolution.md)"""
+(Periodic self-reflection, see personality-evolution.md)"""
 
     atomic_write(outbox_file, message)
 

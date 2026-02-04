@@ -1,12 +1,20 @@
 """Tests for self_reflection module."""
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.self_reflection import should_reflect, build_reflection_prompt, save_reflection, notify_outbox
+from app.self_reflection import (
+    should_reflect,
+    build_reflection_prompt,
+    run_reflection,
+    save_reflection,
+    notify_outbox,
+)
 
 
 @pytest.fixture
@@ -84,12 +92,12 @@ class TestSaveReflection:
         personality.write_text("# Personality Evolution\n")
         save_reflection(instance_dir, "- I notice I love audits")
         content = personality.read_text()
-        assert "Réflexion" in content
+        assert "Reflection" in content
         assert "I notice I love audits" in content
 
     def test_appends_to_existing(self, instance_dir):
         personality = instance_dir / "memory" / "global" / "personality-evolution.md"
-        personality.write_text("# Personality\n\n## Réflexion — 2026-01-01\n\n- old\n")
+        personality.write_text("# Personality\n\n## Reflection — 2026-01-01\n\n- old\n")
         save_reflection(instance_dir, "- new observation")
         content = personality.read_text()
         assert "old" in content
@@ -100,7 +108,7 @@ class TestSaveReflection:
         personality.write_text("# Personality\n")
         save_reflection(instance_dir, "- test")
         content = personality.read_text()
-        assert re.search(r"## Réflexion — \d{4}-\d{2}-\d{2}", content)
+        assert re.search(r"## Reflection — \d{4}-\d{2}-\d{2}", content)
 
 
 class TestNotifyOutbox:
@@ -120,3 +128,116 @@ class TestNotifyOutbox:
         content = outbox.read_text()
         assert "old message" not in content
         assert "new reflection" in content
+
+
+class TestShouldReflectEdgeCases:
+    def test_empty_summary(self, instance_dir):
+        summary = instance_dir / "memory" / "summary.md"
+        summary.write_text("")
+        assert should_reflect(instance_dir) is False
+
+    def test_no_session_numbers(self, instance_dir):
+        summary = instance_dir / "memory" / "summary.md"
+        summary.write_text("Just some text without session numbers\n")
+        assert should_reflect(instance_dir) is False
+
+
+class TestRunReflection:
+    @patch("app.self_reflection.subprocess.run")
+    def test_successful_reflection(self, mock_run, instance_dir):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="- I notice I like tests\n- I avoid fluff\n"
+        )
+        result = run_reflection(instance_dir)
+        assert "I notice I like tests" in result
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == "claude"
+        assert "-p" in call_args
+
+    @patch("app.self_reflection.subprocess.run")
+    def test_claude_failure_returns_empty(self, mock_run, instance_dir):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="Error")
+        result = run_reflection(instance_dir)
+        assert result == ""
+
+    @patch("app.self_reflection.subprocess.run")
+    def test_claude_empty_output(self, mock_run, instance_dir):
+        mock_run.return_value = MagicMock(returncode=0, stdout="   ")
+        result = run_reflection(instance_dir)
+        assert result == ""
+
+    @patch("app.self_reflection.subprocess.run")
+    def test_timeout_returns_empty(self, mock_run, instance_dir):
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=60)
+        result = run_reflection(instance_dir)
+        assert result == ""
+
+    @patch("app.self_reflection.subprocess.run")
+    def test_generic_exception_returns_empty(self, mock_run, instance_dir):
+        mock_run.side_effect = OSError("No such file")
+        result = run_reflection(instance_dir)
+        assert result == ""
+
+
+class TestSelfReflectionCLI:
+    """CLI tests use direct function calls instead of runpy to avoid re-import issues."""
+
+    @patch("app.self_reflection.subprocess.run")
+    def test_main_with_force(self, mock_subprocess, instance_dir):
+        mock_subprocess.return_value = MagicMock(
+            returncode=0, stdout="- observation"
+        )
+        personality = instance_dir / "memory" / "global" / "personality-evolution.md"
+        personality.write_text("# Personality\n")
+        summary = instance_dir / "memory" / "summary.md"
+        summary.write_text("Session 5 (project: koan) : test\n")
+
+        from app.self_reflection import main
+        with patch.object(sys, "argv", ["self_reflection.py", str(instance_dir), "--force"]):
+            main()
+        mock_subprocess.assert_called_once()
+        assert "observation" in personality.read_text()
+
+    def test_main_skips_when_not_time(self, instance_dir):
+        summary = instance_dir / "memory" / "summary.md"
+        summary.write_text("Session 3 (project: koan) : test\n")
+
+        from app.self_reflection import main
+        with patch.object(sys, "argv", ["self_reflection.py", str(instance_dir)]):
+            main()  # Should complete without error (not time for reflection)
+
+    def test_main_exits_on_missing_args(self):
+        from app.self_reflection import main
+        with patch.object(sys, "argv", ["self_reflection.py"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    def test_main_exits_on_missing_dir(self, tmp_path):
+        from app.self_reflection import main
+        with patch.object(sys, "argv", ["self_reflection.py", str(tmp_path / "nonexistent")]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    @patch("app.self_reflection.subprocess.run")
+    def test_main_with_notify(self, mock_subprocess, instance_dir):
+        mock_subprocess.return_value = MagicMock(
+            returncode=0, stdout="- observation"
+        )
+        personality = instance_dir / "memory" / "global" / "personality-evolution.md"
+        personality.write_text("# Personality\n")
+
+        from app.self_reflection import main
+        with patch.object(sys, "argv", ["self_reflection.py", str(instance_dir), "--force", "--notify"]):
+            main()
+        outbox = instance_dir / "outbox.md"
+        assert outbox.exists()
+
+    @patch("app.self_reflection.subprocess.run")
+    def test_main_no_observations(self, mock_subprocess, instance_dir):
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="")
+        from app.self_reflection import main
+        with patch.object(sys, "argv", ["self_reflection.py", str(instance_dir), "--force"]):
+            main()  # Should complete without error

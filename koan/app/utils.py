@@ -29,7 +29,7 @@ KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 _PROJECT_TAG_RE = re.compile(r'\[projec?t:([a-zA-Z0-9_-]+)\]')
 _PROJECT_TAG_STRIP_RE = re.compile(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*')
 
-_MISSIONS_DEFAULT = "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+_MISSIONS_DEFAULT = "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
 _MISSIONS_LOCK = threading.Lock()
 
 
@@ -369,7 +369,7 @@ def insert_pending_mission(missions_path: Path, entry: str):
                 content = _MISSIONS_DEFAULT
 
             marker = None
-            for candidate in ("## En attente", "## Pending"):
+            for candidate in ("## Pending", "## En attente"):
                 if candidate in content:
                     marker = candidate
                     break
@@ -380,7 +380,7 @@ def insert_pending_mission(missions_path: Path, entry: str):
                     idx += 1
                 content = content[:idx] + f"\n{entry}\n" + content[idx:]
             else:
-                content += f"\n## En attente\n\n{entry}\n"
+                content += f"\n## Pending\n\n{entry}\n"
 
             f.seek(0)
             f.truncate()

@@ -1,12 +1,13 @@
 """Tests for pick_mission.py — intelligent mission picker."""
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.pick_mission import parse_picker_output, build_prompt, pick_mission, fallback_extract
+from app.pick_mission import parse_picker_output, build_prompt, pick_mission, fallback_extract, call_claude
 
 
 class TestParsePickerOutput:
@@ -198,3 +199,73 @@ class TestPickMission:
         result = pick_mission(str(tmp_path), "koan:/p1;anantys:/p2", "1", "implement")
         assert result == "anantys:add feature"
         mock_claude.assert_called_once()
+
+
+class TestCallClaude:
+    @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
+    @patch("app.pick_mission.build_claude_flags", return_value=["--model", "haiku"])
+    @patch("app.pick_mission.subprocess.run")
+    def test_successful_json_result(self, mock_run, mock_flags, mock_models):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"result": "mission:koan:fix tests"}),
+        )
+        result = call_claude("test prompt")
+        assert result == "mission:koan:fix tests"
+
+    @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
+    @patch("app.pick_mission.build_claude_flags", return_value=[])
+    @patch("app.pick_mission.subprocess.run")
+    def test_nonzero_exit_code(self, mock_run, mock_flags, mock_models):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+        result = call_claude("test prompt")
+        assert result == ""
+
+    @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
+    @patch("app.pick_mission.build_claude_flags", return_value=[])
+    @patch("app.pick_mission.subprocess.run")
+    def test_json_with_content_field(self, mock_run, mock_flags, mock_models):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"content": "mission:koan:audit"}),
+        )
+        result = call_claude("test prompt")
+        assert result == "mission:koan:audit"
+
+    @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
+    @patch("app.pick_mission.build_claude_flags", return_value=[])
+    @patch("app.pick_mission.subprocess.run")
+    def test_non_json_output(self, mock_run, mock_flags, mock_models):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="mission:koan:fix tests",
+        )
+        result = call_claude("test prompt")
+        assert result == "mission:koan:fix tests"
+
+
+class TestParsePickerOutputEdgeCases:
+    def test_mission_with_empty_project(self):
+        project, title = parse_picker_output("mission::fix tests")
+        assert project is None
+
+    def test_mission_with_empty_title(self):
+        project, title = parse_picker_output("mission:koan:")
+        assert project is None
+
+    def test_mission_only_two_parts(self):
+        project, title = parse_picker_output("mission:koan")
+        assert project is None
+
+
+class TestPickMissionCLI:
+    """CLI tests — pick_mission.py has no main() function, just __main__ guard.
+    We test the missing-args path via runpy, and the happy paths are already
+    covered by TestPickMission integration tests."""
+
+    def test_cli_exit_on_missing_args(self):
+        with patch.object(sys, "argv", ["pick_mission.py"]):
+            with pytest.raises(SystemExit) as exc_info:
+                from tests._helpers import run_module
+                run_module("app.pick_mission", run_name="__main__")
+            assert exc_info.value.code == 1

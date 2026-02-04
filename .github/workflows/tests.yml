@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+        include:
+          - python-version: "3.14"
+            allow-prereleases: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: ${{ matrix.allow-prereleases || false }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r koan/requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        working-directory: koan
+        env:
+          KOAN_ROOT: ${{ github.workspace }}/koan
+          PYTHONPATH: "."
+          KOAN_TELEGRAM_TOKEN: "fake-token-for-ci"
+          KOAN_TELEGRAM_CHAT_ID: "123456789"          
+        run: pytest tests/ -v

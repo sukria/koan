@@ -12,6 +12,7 @@ from app.usage_estimator import (
     _fresh_state,
     _load_state,
     _maybe_reset,
+    _estimate_reset_time,
     _write_usage_md,
     _get_limits,
     cmd_update,
@@ -194,3 +195,163 @@ class TestGetLimits:
         session, weekly = _get_limits(config)
         assert session == 100000
         assert weekly == 1000000
+
+
+class TestEstimateResetTime:
+    def test_returns_time_remaining(self):
+        # Start 1 hour ago, 5h duration → ~4h remaining
+        start = (datetime.now() - timedelta(hours=1)).isoformat()
+        result = _estimate_reset_time(start, 5.0)
+        assert "h" in result or "m" in result
+        assert result != "unknown"
+        assert result != "0m"
+
+    def test_returns_0m_when_past(self):
+        start = (datetime.now() - timedelta(hours=10)).isoformat()
+        result = _estimate_reset_time(start, 5.0)
+        assert result == "0m"
+
+    def test_returns_unknown_on_invalid_iso(self):
+        result = _estimate_reset_time("not-a-date", 5.0)
+        assert result == "unknown"
+
+    def test_hours_and_minutes_format(self):
+        # Start 30 minutes ago, 5h duration → should be like "4h30m"
+        start = (datetime.now() - timedelta(minutes=30)).isoformat()
+        result = _estimate_reset_time(start, 5.0)
+        assert "h" in result
+
+    def test_minutes_only_format(self):
+        # Start 4h50m ago, 5h duration → ~10m remaining
+        start = (datetime.now() - timedelta(hours=4, minutes=50)).isoformat()
+        result = _estimate_reset_time(start, 5.0)
+        assert "m" in result
+
+
+class TestExtractTokensStatsMeta:
+    def test_stats_nested_tokens(self, tmp_path):
+        f = tmp_path / "stats.json"
+        f.write_text(json.dumps({
+            "result": "done",
+            "stats": {"input_tokens": 2000, "output_tokens": 500},
+        }))
+        assert _extract_tokens(f) == 2500
+
+    def test_metadata_nested_tokens(self, tmp_path):
+        f = tmp_path / "meta.json"
+        f.write_text(json.dumps({
+            "result": "done",
+            "metadata": {"input_tokens": 1000, "output_tokens": 300},
+        }))
+        assert _extract_tokens(f) == 1300
+
+    def test_session_nested_tokens(self, tmp_path):
+        f = tmp_path / "session.json"
+        f.write_text(json.dumps({
+            "result": "done",
+            "session": {"input_tokens": 500, "output_tokens": 100},
+        }))
+        assert _extract_tokens(f) == 600
+
+
+class TestMaybeResetEdgeCases:
+    def test_missing_session_start_key(self):
+        state = {"weekly_start": datetime.now().isoformat(), "weekly_tokens": 0}
+        # Missing session_start should not crash
+        result = _maybe_reset(state)
+        assert "session_start" in result
+
+    def test_invalid_session_start_value(self):
+        state = _fresh_state()
+        state["session_start"] = "garbage"
+        result = _maybe_reset(state)
+        assert "session_start" in result
+
+    def test_weekly_reset_on_monday_crossing(self):
+        state = _fresh_state()
+        state["weekly_tokens"] = 100000
+        # Set weekly start to 3 days ago — if we crossed a Monday, should reset
+        three_days_ago = datetime.now() - timedelta(days=3)
+        state["weekly_start"] = three_days_ago.isoformat()
+        result = _maybe_reset(state)
+        # Result depends on day of week — just verify no crash
+        assert "weekly_tokens" in result
+
+
+class TestLoadState:
+    def test_fresh_state_for_missing_file(self, tmp_path):
+        state = _load_state(tmp_path / "nonexistent.json")
+        assert state["session_tokens"] == 0
+        assert state["weekly_tokens"] == 0
+
+    def test_fresh_state_for_corrupted_file(self, tmp_path):
+        f = tmp_path / "bad.json"
+        f.write_text("not json")
+        state = _load_state(f)
+        assert state["session_tokens"] == 0
+
+
+class TestUsageEstimatorCLI:
+    """CLI tests call main() directly to avoid runpy re-import issues."""
+
+    @patch("app.usage_estimator.load_config", return_value={})
+    def test_main_update(self, mock_config, tmp_path):
+        import sys
+        from app.usage_estimator import main
+        claude_json = tmp_path / "out.json"
+        claude_json.write_text(json.dumps({"input_tokens": 100, "output_tokens": 50}))
+        state_file = tmp_path / "state.json"
+        usage_md = tmp_path / "usage.md"
+
+        with patch.object(sys, "argv", [
+            "usage_estimator.py", "update",
+            str(claude_json), str(state_file), str(usage_md),
+        ]):
+            main()
+        assert usage_md.exists()
+
+    @patch("app.usage_estimator.load_config", return_value={})
+    def test_main_refresh(self, mock_config, tmp_path):
+        import sys
+        from app.usage_estimator import main
+        state_file = tmp_path / "state.json"
+        usage_md = tmp_path / "usage.md"
+
+        with patch.object(sys, "argv", [
+            "usage_estimator.py", "refresh",
+            str(state_file), str(usage_md),
+        ]):
+            main()
+        assert usage_md.exists()
+
+    def test_main_missing_args(self):
+        import sys
+        from app.usage_estimator import main
+        with patch.object(sys, "argv", ["usage_estimator.py"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    def test_main_unknown_command(self):
+        import sys
+        from app.usage_estimator import main
+        with patch.object(sys, "argv", ["usage_estimator.py", "destroy"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    def test_main_update_missing_args(self):
+        import sys
+        from app.usage_estimator import main
+        with patch.object(sys, "argv", ["usage_estimator.py", "update"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    def test_main_refresh_missing_args(self):
+        import sys
+        from app.usage_estimator import main
+        with patch.object(sys, "argv", ["usage_estimator.py", "refresh"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1

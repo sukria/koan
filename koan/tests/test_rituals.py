@@ -1,6 +1,8 @@
 """Tests for rituals module."""
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -133,3 +135,77 @@ class TestRunRitual:
         result = run_ritual("morning", instance_dir)
 
         assert result is False
+
+    @patch("app.rituals.subprocess.run")
+    def test_handles_generic_exception(self, mock_run, koan_root, instance_dir, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+        mock_run.side_effect = OSError("Permission denied")
+
+        result = run_ritual("morning", instance_dir)
+        assert result is False
+
+    @patch("app.rituals.subprocess.run")
+    def test_empty_stdout(self, mock_run, koan_root, instance_dir, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = run_ritual("morning", instance_dir)
+        assert result is True
+
+
+class TestRitualsCLI:
+    """CLI tests call main() directly to avoid runpy re-import issues."""
+
+    @patch("app.rituals.subprocess.run")
+    def test_main_morning(self, mock_subprocess, koan_root, instance_dir, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="Morning!", stderr="")
+
+        from app.rituals import main
+        with patch.object(sys, "argv", ["rituals.py", "morning", str(instance_dir)]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+
+    @patch("app.rituals.subprocess.run")
+    def test_main_evening(self, mock_subprocess, koan_root, instance_dir, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="Evening!", stderr="")
+
+        from app.rituals import main
+        with patch.object(sys, "argv", ["rituals.py", "evening", str(instance_dir)]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+
+    def test_main_missing_args(self):
+        from app.rituals import main
+        with patch.object(sys, "argv", ["rituals.py"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    def test_main_invalid_ritual_type(self, instance_dir):
+        from app.rituals import main
+        with patch.object(sys, "argv", ["rituals.py", "midnight", str(instance_dir)]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    def test_main_missing_instance_dir(self, tmp_path):
+        from app.rituals import main
+        with patch.object(sys, "argv", ["rituals.py", "morning", str(tmp_path / "nonexistent")]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    @patch("app.rituals.subprocess.run")
+    def test_main_failure_exits_1(self, mock_subprocess, koan_root, instance_dir, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+        mock_subprocess.return_value = MagicMock(returncode=1, stdout="", stderr="Error")
+
+        from app.rituals import main
+        with patch.object(sys, "argv", ["rituals.py", "morning", str(instance_dir)]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
