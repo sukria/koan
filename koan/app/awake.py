@@ -273,6 +273,7 @@ def _handle_help():
     help_text = (
         "Commandes disponibles :\n\n"
         "/help — cette aide\n"
+        "/ping — check if run loop is alive (✅/❌)\n"
         "/status — état rapide (missions, pause, loop)\n"
         "/usage — status détaillé formaté par Claude (quota, missions, progression)\n"
         "/stop — arrêter Kōan après la mission en cours\n"
