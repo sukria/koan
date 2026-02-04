@@ -158,11 +158,11 @@ class TestGenerateReport:
              patch("app.daily_report.INSTANCE_DIR", tmp_path):
             report = generate_report("morning")
 
-        assert "Rapport du" in report
+        assert "Report for" in report
         assert "Done thing" in report
-        assert "En attente: 1" in report
+        assert "Pending: 1" in report
         assert "Big project" in report
-        assert "-- Koan" in report
+        assert "-- Kōan" in report
 
     def test_evening_report(self, tmp_path):
         missions_file = tmp_path / "missions.md"
@@ -171,8 +171,8 @@ class TestGenerateReport:
              patch("app.daily_report.INSTANCE_DIR", tmp_path):
             report = generate_report("evening")
 
-        assert "Bilan de la journée" in report
-        assert "-- Koan" in report
+        assert "Daily Summary" in report
+        assert "-- Kōan" in report
 
     def test_journal_activities_extracted(self, tmp_path):
         """Journal ## headers should appear as activities in the report."""
@@ -187,7 +187,7 @@ class TestGenerateReport:
         with patch("app.daily_report.MISSIONS_FILE", missions_file), \
              patch("app.daily_report.INSTANCE_DIR", tmp_path):
             report = generate_report("evening")
-        assert "Activite:" in report
+        assert "Activity:" in report
         assert "Session 75" in report
 
     def test_journal_timestamps_stripped(self, tmp_path):
@@ -210,8 +210,8 @@ class TestGenerateReport:
         with patch("app.daily_report.MISSIONS_FILE", missing_file), \
              patch("app.daily_report.INSTANCE_DIR", tmp_path):
             report = generate_report("morning")
-        assert "Rapport du" in report
-        assert "-- Koan" in report
+        assert "Report for" in report
+        assert "-- Kōan" in report
 
 
 # ---------------------------------------------------------------------------

@@ -92,12 +92,12 @@ class TestSaveReflection:
         personality.write_text("# Personality Evolution\n")
         save_reflection(instance_dir, "- I notice I love audits")
         content = personality.read_text()
-        assert "Réflexion" in content
+        assert "Reflection" in content
         assert "I notice I love audits" in content
 
     def test_appends_to_existing(self, instance_dir):
         personality = instance_dir / "memory" / "global" / "personality-evolution.md"
-        personality.write_text("# Personality\n\n## Réflexion — 2026-01-01\n\n- old\n")
+        personality.write_text("# Personality\n\n## Reflection — 2026-01-01\n\n- old\n")
         save_reflection(instance_dir, "- new observation")
         content = personality.read_text()
         assert "old" in content
@@ -108,7 +108,7 @@ class TestSaveReflection:
         personality.write_text("# Personality\n")
         save_reflection(instance_dir, "- test")
         content = personality.read_text()
-        assert re.search(r"## Réflexion — \d{4}-\d{2}-\d{2}", content)
+        assert re.search(r"## Reflection — \d{4}-\d{2}-\d{2}", content)
 
 
 class TestNotifyOutbox:

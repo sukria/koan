@@ -180,16 +180,16 @@ def index():
     # Determine overall state
     if signals["stop_requested"]:
         state = "stopped"
-        state_label = "Arrêté"
+        state_label = "Stopped"
     elif signals["quota_paused"]:
         state = "paused"
-        state_label = "Quota épuisé"
+        state_label = "Quota Exhausted"
     elif signals["loop_status"]:
         state = "running"
         state_label = f"Run {signals['loop_status']}"
     else:
         state = "idle"
-        state_label = "Inactif"
+        state_label = "Idle"
 
     return render_template("dashboard.html",
         state=state,
@@ -272,7 +272,7 @@ def chat_send():
             )
             response = result.stdout.strip()
             if not response:
-                response = "Je n'ai pas pu formuler de réponse. Réessaie ?"
+                response = "I couldn't formulate a response. Try again?"
             # Save assistant response to history
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
             return jsonify({"ok": True, "type": "chat", "response": response})
@@ -291,11 +291,11 @@ def chat_send():
                     save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
                     return jsonify({"ok": True, "type": "chat", "response": response})
                 else:
-                    timeout_msg = f"Timeout après {CHAT_TIMEOUT}s — essaie une question plus courte."
+                    timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question."
                     save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
                     return jsonify({"ok": True, "type": "chat", "response": timeout_msg})
             except subprocess.TimeoutExpired:
-                timeout_msg = f"Timeout après {CHAT_TIMEOUT}s — essaie une question plus courte."
+                timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question."
                 save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
                 return jsonify({"ok": True, "type": "chat", "response": timeout_msg})
             except (OSError, ValueError) as e:

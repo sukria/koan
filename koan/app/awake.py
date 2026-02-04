@@ -162,16 +162,16 @@ def handle_command(text: str):
     if cmd == "/verbose":
         verbose_file = KOAN_ROOT / ".koan-verbose"
         verbose_file.write_text("VERBOSE")
-        send_telegram("Verbose mode ON. Je t'envoie chaque update de progression.")
+        send_telegram("Verbose mode ON. I'll send you each progress update.")
         return
 
     if cmd == "/silent":
         verbose_file = KOAN_ROOT / ".koan-verbose"
         if verbose_file.exists():
             verbose_file.unlink()
-            send_telegram("Verbose mode OFF. Silence radio jusqu'à la conclusion.")
+            send_telegram("Verbose mode OFF. Silent until conclusion.")
         else:
-            send_telegram("Déjà en mode silent.")
+            send_telegram("Already in silent mode.")
         return
 
     if cmd == "/sparring":
@@ -243,16 +243,16 @@ def _build_status() -> str:
 def _handle_help():
     """Send the list of available commands."""
     help_text = (
-        "Commandes disponibles :\n\n"
-        "/help — cette aide\n"
-        "/status — état rapide (missions, pause, loop)\n"
-        "/usage — status détaillé formaté par Claude (quota, missions, progression)\n"
-        "/stop — arrêter Kōan après la mission en cours\n"
-        "/pause — mettre en pause (pas de nouvelles missions)\n"
-        "/resume — reprendre après pause ou quota épuisé\n"
+        "Available commands:\n\n"
+        "/help — this help\n"
+        "/status — quick status (missions, pause, loop)\n"
+        "/usage — detailed status formatted by Claude (quota, missions, progress)\n"
+        "/stop — stop Kōan after current mission\n"
+        "/pause — pause (no new missions)\n"
+        "/resume — resume after pause or quota exhausted\n"
         "\n"
-        "Pour envoyer une mission : commencer par \"mission:\" ou un verbe d'action (implement, fix, add...)\n"
-        "Tout autre message = conversation libre avec Kōan."
+        "To send a mission: start with \"mission:\" or an action verb (implement, fix, add...)\n"
+        "Any other message = free conversation with Kōan."
     )
     send_telegram(help_text)
 
@@ -260,12 +260,12 @@ def _handle_help():
 def _handle_usage():
     """Build a rich status from usage.md + missions.md + pending.md, formatted by Claude."""
     # Gather raw data
-    usage_text = "Pas de données de quota disponibles."
+    usage_text = "No quota data available."
     usage_path = INSTANCE_DIR / "usage.md"
     if usage_path.exists():
         usage_text = usage_path.read_text().strip() or usage_text
 
-    missions_text = "Aucune mission."
+    missions_text = "No missions."
     if MISSIONS_FILE.exists():
         from app.missions import parse_sections
         sections = parse_sections(MISSIONS_FILE.read_text())
@@ -274,15 +274,15 @@ def _handle_usage():
         pending = sections.get("pending", [])
         done = sections.get("done", [])
         if in_progress:
-            parts.append("En cours :\n" + "\n".join(in_progress[:5]))
+            parts.append("In progress:\n" + "\n".join(in_progress[:5]))
         if pending:
-            parts.append(f"En attente ({len(pending)}) :\n" + "\n".join(pending[:5]))
+            parts.append(f"Pending ({len(pending)}):\n" + "\n".join(pending[:5]))
         if done:
-            parts.append(f"Terminées : {len(done)}")
+            parts.append(f"Done: {len(done)}")
         if parts:
             missions_text = "\n\n".join(parts)
 
-    pending_text = "Aucun run en cours."
+    pending_text = "No run in progress."
     pending_path = INSTANCE_DIR / "journal" / "pending.md"
     if pending_path.exists():
         content = pending_path.read_text().strip()
@@ -323,10 +323,10 @@ def _handle_usage():
             fallback = f"Quota: {usage_text[:200]}\n\nMissions: {missions_text[:300]}"
             send_telegram(fallback)
     except subprocess.TimeoutExpired:
-        send_telegram("Timeout sur le formatage. Réessaie.")
+        send_telegram("Timeout formatting /usage. Try again.")
     except Exception as e:
         print(f"[awake] Usage error: {e}")
-        send_telegram("Erreur lors du formatage /usage.")
+        send_telegram("Error formatting /usage.")
 
 
 def handle_resume():
@@ -375,7 +375,7 @@ def handle_resume():
 
 def _handle_sparring():
     """Launch a sparring session — strategic challenge, not code talk."""
-    send_telegram("Mode sparring activé. Je réfléchis...")
+    send_telegram("Sparring mode activated. I'm thinking...")
 
     from app.prompts import load_prompt
 
@@ -439,12 +439,12 @@ def _handle_sparring():
             send_telegram(response)
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
         else:
-            send_telegram("Rien de percutant à dire pour le moment. Reviens plus tard.")
+            send_telegram("Nothing compelling to say right now. Come back later.")
     except subprocess.TimeoutExpired:
-        send_telegram("Timeout — mon cerveau a besoin de plus de temps. Réessaie.")
+        send_telegram("Timeout — my brain needs more time. Try again.")
     except Exception as e:
         print(f"[awake] Sparring error: {e}")
-        send_telegram("Erreur pendant le sparring. Réessaie.")
+        send_telegram("Error during sparring. Try again.")
 
 
 def _handle_reflect(message: str):
@@ -461,7 +461,7 @@ def _handle_reflect(message: str):
         _fcntl.flock(f, _fcntl.LOCK_EX)
         f.write(entry)
 
-    send_telegram("Noté dans le journal partagé. J'y réfléchirai.")
+    send_telegram("Noted in the shared journal. I'll reflect on it.")
 
 
 def handle_mission(text: str):
