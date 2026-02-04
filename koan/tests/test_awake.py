@@ -626,18 +626,21 @@ class TestCheckConfig:
 class TestMainLoop:
     """Test the main polling loop behavior."""
 
+    TEST_CHAT_ID = "123456789"
+
     @patch("app.awake.write_heartbeat")
     @patch("app.awake.flush_outbox")
     @patch("app.awake.handle_message")
     @patch("app.awake.get_updates")
     @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
     @patch("app.awake.time.sleep", side_effect=StopIteration)  # Break after first iteration
     def test_main_processes_updates(self, mock_sleep, mock_config, mock_updates,
                                     mock_handle, mock_flush, mock_heartbeat):
         """main() fetches updates, dispatches messages, flushes outbox, writes heartbeat."""
-        from app.awake import main, CHAT_ID
+        from app.awake import main
         mock_updates.return_value = [
-            {"update_id": 100, "message": {"text": "hello", "chat": {"id": int(CHAT_ID)}}}
+            {"update_id": 100, "message": {"text": "hello", "chat": {"id": int(self.TEST_CHAT_ID)}}}
         ]
         with pytest.raises(StopIteration):
             main()
@@ -669,16 +672,18 @@ class TestMainLoop:
     @patch("app.awake.handle_message")
     @patch("app.awake.get_updates")
     @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
     @patch("app.awake.time.sleep")
     def test_main_updates_offset(self, mock_sleep, mock_config, mock_updates,
                                   mock_handle, mock_flush, mock_heartbeat):
         """Offset advances to update_id + 1 after processing."""
-        from app.awake import main, CHAT_ID
+        from app.awake import main
+        test_chat_id = self.TEST_CHAT_ID
         call_count = [0]
         def side_effect(offset=None):
             call_count[0] += 1
             if call_count[0] == 1:
-                return [{"update_id": 42, "message": {"text": "hi", "chat": {"id": int(CHAT_ID)}}}]
+                return [{"update_id": 42, "message": {"text": "hi", "chat": {"id": int(test_chat_id)}}}]
             raise StopIteration  # Stop on second get_updates call
         mock_updates.side_effect = side_effect
 
@@ -708,13 +713,14 @@ class TestMainLoop:
     @patch("app.awake.handle_message")
     @patch("app.awake.get_updates")
     @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
     @patch("app.awake.time.sleep", side_effect=StopIteration)
     def test_main_skips_updates_without_text(self, mock_sleep, mock_config, mock_updates,
                                               mock_handle, mock_flush, mock_heartbeat):
         """Updates without text field (e.g., photo, sticker) are ignored."""
-        from app.awake import main, CHAT_ID
+        from app.awake import main
         mock_updates.return_value = [
-            {"update_id": 100, "message": {"chat": {"id": int(CHAT_ID)}}}  # no text
+            {"update_id": 100, "message": {"chat": {"id": int(self.TEST_CHAT_ID)}}}  # no text
         ]
         with pytest.raises(StopIteration):
             main()
