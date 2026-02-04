@@ -218,7 +218,7 @@ class TestChatSend:
             resp = app_client.post("/chat/send", data={"message": "hello", "mode": "chat"})
         data = resp.get_json()
         assert data["ok"] is True
-        assert "Réessaie" in data["response"]
+        assert "Try again?" in data["response"]
 
     @patch("app.dashboard.get_allowed_tools", return_value="")
     @patch("app.dashboard.get_tools_description", return_value="")
