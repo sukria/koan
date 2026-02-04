@@ -89,6 +89,120 @@ def get_author_env() -> Dict[str, str]:
     return {}
 
 
+def get_origin_url(cwd: str) -> str:
+    """Get the origin remote URL for a git repository.
+
+    Returns empty string if origin is not configured or git fails.
+    """
+    exit_code, stdout, _ = run_git(cwd, "remote", "get-url", "origin")
+    if exit_code != 0:
+        return ""
+    return stdout
+
+
+def normalize_git_url(url: str) -> str:
+    """Normalize a git URL for comparison.
+
+    Handles: https://github.com/user/repo.git, git@github.com:user/repo.git,
+    https://github.com/user/repo (no .git suffix).
+    Returns lowercase 'host/user/repo' for comparison.
+    """
+    url = url.strip().lower()
+    # Remove trailing .git
+    if url.endswith(".git"):
+        url = url[:-4]
+    # SSH format: git@github.com:user/repo
+    if url.startswith("git@"):
+        url = url[4:]  # remove git@
+        url = url.replace(":", "/", 1)  # git@host:user/repo -> host/user/repo
+    # HTTPS format: https://github.com/user/repo
+    elif "://" in url:
+        url = url.split("://", 1)[1]
+    # Remove trailing slash
+    url = url.rstrip("/")
+    return url
+
+
+def is_upstream_origin(cwd: str, upstream_url: str) -> bool:
+    """Check if origin remote points to the upstream repository.
+
+    Args:
+        cwd: Project working directory.
+        upstream_url: The canonical upstream URL from config.
+
+    Returns:
+        True if origin matches upstream, False if it's a fork.
+    """
+    if not upstream_url:
+        # No upstream configured — assume origin IS upstream (backward compat)
+        return True
+    origin_url = get_origin_url(cwd)
+    if not origin_url:
+        return False
+    return normalize_git_url(origin_url) == normalize_git_url(upstream_url)
+
+
+def create_pull_request(cwd: str, branch: str, base_branch: str, upstream_url: str) -> Tuple[bool, str]:
+    """Create a pull request on the upstream repository using gh CLI.
+
+    Assumes the branch has already been pushed to origin (the fork).
+
+    Args:
+        cwd: Project working directory.
+        branch: The branch to create a PR from.
+        base_branch: The target branch on upstream.
+        upstream_url: The upstream repository URL (used to derive owner/repo).
+
+    Returns:
+        (success, pr_url_or_error)
+    """
+    # Derive upstream repo identifier (e.g., "sukria/koan") from URL
+    normalized = normalize_git_url(upstream_url)
+    # normalized is like "github.com/sukria/koan"
+    parts = normalized.split("/")
+    if len(parts) < 3:
+        return False, f"Cannot parse upstream URL: {upstream_url}"
+    upstream_repo = f"{parts[-2]}/{parts[-1]}"
+
+    # Get origin owner for cross-fork PR (e.g., "atoomic")
+    origin_url = get_origin_url(cwd)
+    origin_normalized = normalize_git_url(origin_url)
+    origin_parts = origin_normalized.split("/")
+    if len(origin_parts) < 3:
+        return False, f"Cannot parse origin URL: {origin_url}"
+    origin_owner = origin_parts[-2]
+
+    # The head ref for cross-fork PRs is "owner:branch"
+    head_ref = f"{origin_owner}:{branch}"
+
+    subjects = get_branch_commit_messages(cwd, branch, base_branch)
+    title = build_merge_commit_message(branch, "pr", subjects).split("\n")[0]
+    body = "\n".join(f"- {s}" for s in subjects) if subjects else "Auto-generated PR from koan branch."
+
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "create",
+             "--repo", upstream_repo,
+             "--head", head_ref,
+             "--base", base_branch,
+             "--title", title,
+             "--body", body],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return False, result.stderr.strip() or "gh pr create failed"
+        return True, result.stdout.strip()
+    except FileNotFoundError:
+        return False, "gh CLI not found — install GitHub CLI to create PRs from forks"
+    except subprocess.TimeoutExpired:
+        return False, "gh pr create timed out"
+    except Exception as e:
+        return False, str(e)
+
+
 def find_matching_rule(branch: str, rules: List[dict]) -> Optional[dict]:
     """Find the first rule matching the branch name."""
     for rule in rules:
@@ -238,6 +352,13 @@ class GitAutoMerger:
         entry = f"\n## Auto-Merge Failed — {timestamp}\n\n✗ Failed to merge `{branch}`: {error}\nManual intervention required.\n"
         append_to_journal(Path(self.instance_dir), self.project_name, entry)
 
+    def write_pr_success_to_journal(self, branch: str, base_branch: str, pr_url: str):
+        """Write successful PR creation to today's journal."""
+        from app.utils import append_to_journal
+        timestamp = datetime.now().strftime("%H:%M")
+        entry = f"\n## Pull Request Created — {timestamp}\n\n✓ PR for `{branch}` → `{base_branch}`: {pr_url}\n(Fork detected — PR submitted upstream instead of auto-merge)\n"
+        append_to_journal(Path(self.instance_dir), self.project_name, entry)
+
     def auto_merge_branch(self, branch: str) -> int:
         """Main entry point for auto-merge logic.
 
@@ -267,6 +388,20 @@ class GitAutoMerger:
             print(f"[git_auto_merge] Safety check failed: {error}")
             self.write_merge_failure_to_journal(branch, error)
             return 1
+
+        # Fork detection: if origin is not upstream, create PR instead of merging
+        upstream_url = merge_config.get("upstream_url", "")
+        if upstream_url and not is_upstream_origin(self.project_path, upstream_url):
+            print(f"[git_auto_merge] Fork detected — creating PR upstream instead of merging")
+            success, result = create_pull_request(self.project_path, branch, base_branch, upstream_url)
+            if success:
+                print(f"[git_auto_merge] PR created: {result}")
+                self.write_pr_success_to_journal(branch, base_branch, result)
+                return 0
+            else:
+                print(f"[git_auto_merge] PR creation failed: {result}")
+                self.write_merge_failure_to_journal(branch, f"PR creation failed: {result}")
+                return 1
 
         strategy = rule.get("strategy") or merge_config.get("strategy", "squash")
 
@@ -416,6 +551,14 @@ def write_merge_failure_to_journal(instance_dir: str, project_name: str, branch:
     append_to_journal(Path(instance_dir), project_name, entry)
 
 
+def write_pr_success_to_journal(instance_dir: str, project_name: str, branch: str, base_branch: str, pr_url: str):
+    """Write successful PR creation to today's journal."""
+    from app.utils import append_to_journal
+    timestamp = datetime.now().strftime("%H:%M")
+    entry = f"\n## Pull Request Created — {timestamp}\n\n✓ PR for `{branch}` → `{base_branch}`: {pr_url}\n(Fork detected — PR submitted upstream instead of auto-merge)\n"
+    append_to_journal(Path(instance_dir), project_name, entry)
+
+
 def auto_merge_branch(instance_dir: str, project_name: str, project_path: str, branch: str) -> int:
     """Main entry point for auto-merge logic.
 
@@ -444,6 +587,20 @@ def auto_merge_branch(instance_dir: str, project_name: str, project_path: str, b
         print(f"[git_auto_merge] Safety check failed: {error}")
         write_merge_failure_to_journal(instance_dir, project_name, branch, error)
         return 1
+
+    # Fork detection: if origin is not upstream, create PR instead of merging
+    upstream_url = merge_config.get("upstream_url", "")
+    if upstream_url and not is_upstream_origin(project_path, upstream_url):
+        print(f"[git_auto_merge] Fork detected — creating PR upstream instead of merging")
+        success, result = create_pull_request(project_path, branch, base_branch, upstream_url)
+        if success:
+            print(f"[git_auto_merge] PR created: {result}")
+            write_pr_success_to_journal(instance_dir, project_name, branch, base_branch, result)
+            return 0
+        else:
+            print(f"[git_auto_merge] PR creation failed: {result}")
+            write_merge_failure_to_journal(instance_dir, project_name, branch, f"PR creation failed: {result}")
+            return 1
 
     strategy = rule.get("strategy") or merge_config.get("strategy", "squash")
 

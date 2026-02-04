@@ -9,6 +9,10 @@ from app.git_auto_merge import (
     should_auto_merge,
     run_git,
     get_author_env,
+    get_origin_url,
+    normalize_git_url,
+    is_upstream_origin,
+    create_pull_request,
     is_working_tree_clean,
     is_branch_pushed,
     perform_merge,
@@ -18,6 +22,7 @@ from app.git_auto_merge import (
     auto_merge_branch,
     write_merge_success_to_journal,
     write_merge_failure_to_journal,
+    write_pr_success_to_journal,
 )
 from app.utils import get_auto_merge_config
 
@@ -114,6 +119,31 @@ class TestGetAutoMergeConfig:
         assert result["rules"][0]["pattern"] == "koan/hotfix-*"
         assert result["rules"][1]["pattern"] == "koan/*"
 
+    def test_upstream_url_from_global(self):
+        """upstream_url from global config."""
+        config = {
+            "git_auto_merge": {"upstream_url": "https://github.com/sukria/koan.git"}
+        }
+        result = get_auto_merge_config(config, "koan")
+        assert result["upstream_url"] == "https://github.com/sukria/koan.git"
+
+    def test_upstream_url_from_project_override(self):
+        """Project-level upstream_url overrides global."""
+        config = {
+            "git_auto_merge": {"upstream_url": "https://github.com/global/repo.git"},
+            "projects": {
+                "koan": {"git_auto_merge": {"upstream_url": "https://github.com/sukria/koan.git"}}
+            }
+        }
+        result = get_auto_merge_config(config, "koan")
+        assert result["upstream_url"] == "https://github.com/sukria/koan.git"
+
+    def test_upstream_url_defaults_empty(self):
+        """upstream_url defaults to empty string."""
+        config = {}
+        result = get_auto_merge_config(config, "koan")
+        assert result["upstream_url"] == ""
+
     def test_missing_config_section(self):
         """When git_auto_merge section missing, return safe defaults."""
         config = {}
@@ -123,6 +153,7 @@ class TestGetAutoMergeConfig:
         assert result["base_branch"] == "main"  # Default
         assert result["strategy"] == "squash"  # Default
         assert result["rules"] == []  # Empty
+        assert result["upstream_url"] == ""  # Default
 
 
 # --- find_matching_rule ---
@@ -371,6 +402,152 @@ class TestGetAuthorEnv:
             args_passed = list(commit_call[0])
             assert "--author" not in args_passed
             assert "env" in commit_call[1]
+
+
+# --- get_origin_url ---
+
+class TestGetOriginUrl:
+    def test_success(self):
+        """Returns origin URL when git succeeds."""
+        with patch("app.git_auto_merge.run_git", return_value=(0, "https://github.com/atoomic/koan.git", "")):
+            assert get_origin_url("/tmp") == "https://github.com/atoomic/koan.git"
+
+    def test_failure(self):
+        """Returns empty string when git fails."""
+        with patch("app.git_auto_merge.run_git", return_value=(1, "", "error")):
+            assert get_origin_url("/tmp") == ""
+
+
+# --- normalize_git_url ---
+
+class TestNormalizeGitUrl:
+    def test_https_with_git_suffix(self):
+        assert normalize_git_url("https://github.com/sukria/koan.git") == "github.com/sukria/koan"
+
+    def test_https_without_git_suffix(self):
+        assert normalize_git_url("https://github.com/sukria/koan") == "github.com/sukria/koan"
+
+    def test_ssh_format(self):
+        assert normalize_git_url("git@github.com:sukria/koan.git") == "github.com/sukria/koan"
+
+    def test_ssh_without_git_suffix(self):
+        assert normalize_git_url("git@github.com:sukria/koan") == "github.com/sukria/koan"
+
+    def test_case_insensitive(self):
+        assert normalize_git_url("https://GitHub.com/Sukria/Koan.git") == "github.com/sukria/koan"
+
+    def test_trailing_slash(self):
+        assert normalize_git_url("https://github.com/sukria/koan/") == "github.com/sukria/koan"
+
+    def test_same_repo_different_formats(self):
+        """SSH and HTTPS URLs for same repo should normalize identically."""
+        ssh = normalize_git_url("git@github.com:sukria/koan.git")
+        https = normalize_git_url("https://github.com/sukria/koan.git")
+        assert ssh == https
+
+
+# --- is_upstream_origin ---
+
+class TestIsUpstreamOrigin:
+    def test_origin_matches_upstream(self):
+        """When origin matches upstream URL, returns True."""
+        with patch("app.git_auto_merge.get_origin_url", return_value="https://github.com/sukria/koan.git"):
+            assert is_upstream_origin("/tmp", "https://github.com/sukria/koan.git") is True
+
+    def test_origin_is_fork(self):
+        """When origin is a fork, returns False."""
+        with patch("app.git_auto_merge.get_origin_url", return_value="https://github.com/atoomic/koan.git"):
+            assert is_upstream_origin("/tmp", "https://github.com/sukria/koan.git") is False
+
+    def test_no_upstream_configured(self):
+        """When no upstream_url is configured, assume origin IS upstream (backward compat)."""
+        assert is_upstream_origin("/tmp", "") is True
+
+    def test_origin_ssh_upstream_https(self):
+        """Cross-format comparison works (SSH origin vs HTTPS upstream)."""
+        with patch("app.git_auto_merge.get_origin_url", return_value="git@github.com:sukria/koan.git"):
+            assert is_upstream_origin("/tmp", "https://github.com/sukria/koan.git") is True
+
+    def test_origin_url_empty(self):
+        """When origin URL is empty (no remote), returns False."""
+        with patch("app.git_auto_merge.get_origin_url", return_value=""):
+            assert is_upstream_origin("/tmp", "https://github.com/sukria/koan.git") is False
+
+
+# --- create_pull_request ---
+
+class TestCreatePullRequest:
+    def test_success(self):
+        """PR created successfully returns URL."""
+        with patch("app.git_auto_merge.get_origin_url", return_value="https://github.com/atoomic/koan.git"), \
+             patch("app.git_auto_merge.get_branch_commit_messages", return_value=["fix bug"]), \
+             patch("app.git_auto_merge.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/sukria/koan/pull/42", stderr="")
+            ok, url = create_pull_request("/tmp", "koan/fix", "main", "https://github.com/sukria/koan.git")
+            assert ok is True
+            assert "pull/42" in url
+            # Verify gh CLI was called with correct args
+            call_args = mock_run.call_args[0][0]
+            assert "gh" in call_args
+            assert "--repo" in call_args
+            assert "sukria/koan" in call_args
+            assert "--head" in call_args
+            # Head should be "atoomic:koan/fix" for cross-fork PR
+            head_idx = call_args.index("--head") + 1
+            assert call_args[head_idx] == "atoomic:koan/fix"
+
+    def test_gh_failure(self):
+        """gh pr create failure returns error."""
+        with patch("app.git_auto_merge.get_origin_url", return_value="https://github.com/atoomic/koan.git"), \
+             patch("app.git_auto_merge.get_branch_commit_messages", return_value=[]), \
+             patch("app.git_auto_merge.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="already exists")
+            ok, err = create_pull_request("/tmp", "koan/fix", "main", "https://github.com/sukria/koan.git")
+            assert ok is False
+            assert "already exists" in err
+
+    def test_gh_not_installed(self):
+        """Missing gh CLI returns helpful error."""
+        with patch("app.git_auto_merge.get_origin_url", return_value="https://github.com/atoomic/koan.git"), \
+             patch("app.git_auto_merge.get_branch_commit_messages", return_value=[]), \
+             patch("app.git_auto_merge.subprocess.run", side_effect=FileNotFoundError):
+            ok, err = create_pull_request("/tmp", "koan/fix", "main", "https://github.com/sukria/koan.git")
+            assert ok is False
+            assert "gh CLI not found" in err
+
+    def test_gh_timeout(self):
+        """gh CLI timeout returns error."""
+        import subprocess as sp
+        with patch("app.git_auto_merge.get_origin_url", return_value="https://github.com/atoomic/koan.git"), \
+             patch("app.git_auto_merge.get_branch_commit_messages", return_value=[]), \
+             patch("app.git_auto_merge.subprocess.run", side_effect=sp.TimeoutExpired("gh", 30)):
+            ok, err = create_pull_request("/tmp", "koan/fix", "main", "https://github.com/sukria/koan.git")
+            assert ok is False
+            assert "timed out" in err
+
+    def test_bad_upstream_url(self):
+        """Unparseable upstream URL returns error."""
+        with patch("app.git_auto_merge.get_origin_url", return_value="https://github.com/atoomic/koan.git"):
+            ok, err = create_pull_request("/tmp", "koan/fix", "main", "notaurl")
+            assert ok is False
+            assert "Cannot parse" in err
+
+
+# --- write_pr_success_to_journal ---
+
+class TestWritePrSuccessToJournal:
+    def test_writes_pr_entry(self, tmp_path):
+        """PR success entry written to journal."""
+        inst = str(tmp_path)
+        write_pr_success_to_journal(inst, "koan", "koan/fix", "main", "https://github.com/sukria/koan/pull/42")
+
+        from datetime import datetime
+        journal_file = tmp_path / "journal" / datetime.now().strftime("%Y-%m-%d") / "koan.md"
+        assert journal_file.exists()
+        content = journal_file.read_text()
+        assert "Pull Request Created" in content
+        assert "pull/42" in content
+        assert "Fork detected" in content
 
 
 # --- Integration Tests ---
@@ -935,3 +1112,83 @@ class TestAutoMergeBranch:
         result = auto_merge_branch("/inst", "koan", "/proj", "koan/fix")
         assert result == 1
         mock_journal.assert_called_once()
+
+    @patch("app.git_auto_merge.write_pr_success_to_journal")
+    @patch("app.git_auto_merge.create_pull_request", return_value=(True, "https://github.com/sukria/koan/pull/42"))
+    @patch("app.git_auto_merge.is_upstream_origin", return_value=False)
+    @patch("app.git_auto_merge.is_branch_pushed", return_value=True)
+    @patch("app.git_auto_merge.is_working_tree_clean", return_value=True)
+    @patch("app.git_auto_merge.get_auto_merge_config")
+    @patch("app.git_auto_merge.load_config")
+    def test_fork_creates_pr(self, mock_load, mock_cfg, mock_clean, mock_pushed, mock_upstream, mock_pr, mock_journal):
+        """Fork detected: create PR instead of merge."""
+        mock_load.return_value = self._base_config()
+        mock_cfg.return_value = {
+            "enabled": True, "base_branch": "main", "strategy": "squash",
+            "upstream_url": "https://github.com/sukria/koan.git",
+            "rules": [{"pattern": "koan/*", "auto_merge": True}]
+        }
+        result = auto_merge_branch("/inst", "koan", "/proj", "koan/fix")
+        assert result == 0
+        mock_pr.assert_called_once_with("/proj", "koan/fix", "main", "https://github.com/sukria/koan.git")
+        mock_journal.assert_called_once()
+
+    @patch("app.git_auto_merge.write_merge_failure_to_journal")
+    @patch("app.git_auto_merge.create_pull_request", return_value=(False, "already exists"))
+    @patch("app.git_auto_merge.is_upstream_origin", return_value=False)
+    @patch("app.git_auto_merge.is_branch_pushed", return_value=True)
+    @patch("app.git_auto_merge.is_working_tree_clean", return_value=True)
+    @patch("app.git_auto_merge.get_auto_merge_config")
+    @patch("app.git_auto_merge.load_config")
+    def test_fork_pr_failure(self, mock_load, mock_cfg, mock_clean, mock_pushed, mock_upstream, mock_pr, mock_journal):
+        """Fork detected but PR creation fails."""
+        mock_load.return_value = self._base_config()
+        mock_cfg.return_value = {
+            "enabled": True, "base_branch": "main", "strategy": "squash",
+            "upstream_url": "https://github.com/sukria/koan.git",
+            "rules": [{"pattern": "koan/*", "auto_merge": True}]
+        }
+        result = auto_merge_branch("/inst", "koan", "/proj", "koan/fix")
+        assert result == 1
+        mock_journal.assert_called_once()
+        assert "PR creation failed" in mock_journal.call_args[0][3]
+
+    @patch("app.git_auto_merge.perform_merge", return_value=(True, ""))
+    @patch("app.git_auto_merge.cleanup_local_branch", return_value=True)
+    @patch("app.git_auto_merge.write_merge_success_to_journal")
+    @patch("app.git_auto_merge.is_upstream_origin", return_value=True)
+    @patch("app.git_auto_merge.is_branch_pushed", return_value=True)
+    @patch("app.git_auto_merge.is_working_tree_clean", return_value=True)
+    @patch("app.git_auto_merge.get_auto_merge_config")
+    @patch("app.git_auto_merge.load_config")
+    def test_upstream_origin_merges_normally(self, mock_load, mock_cfg, mock_clean, mock_pushed, mock_upstream, mock_journal, mock_local_cleanup, mock_merge):
+        """When origin IS upstream, proceed with normal merge."""
+        mock_load.return_value = self._base_config()
+        mock_cfg.return_value = {
+            "enabled": True, "base_branch": "main", "strategy": "squash",
+            "upstream_url": "https://github.com/sukria/koan.git",
+            "rules": [{"pattern": "koan/*", "auto_merge": True}]
+        }
+        result = auto_merge_branch("/inst", "koan", "/proj", "koan/fix")
+        assert result == 0
+        mock_merge.assert_called_once()
+        mock_journal.assert_called_once()
+
+    @patch("app.git_auto_merge.perform_merge", return_value=(True, ""))
+    @patch("app.git_auto_merge.cleanup_local_branch", return_value=True)
+    @patch("app.git_auto_merge.write_merge_success_to_journal")
+    @patch("app.git_auto_merge.is_branch_pushed", return_value=True)
+    @patch("app.git_auto_merge.is_working_tree_clean", return_value=True)
+    @patch("app.git_auto_merge.get_auto_merge_config")
+    @patch("app.git_auto_merge.load_config")
+    def test_no_upstream_url_merges_normally(self, mock_load, mock_cfg, mock_clean, mock_pushed, mock_journal, mock_local_cleanup, mock_merge):
+        """When no upstream_url configured, merge normally (backward compat)."""
+        mock_load.return_value = self._base_config()
+        mock_cfg.return_value = {
+            "enabled": True, "base_branch": "main", "strategy": "squash",
+            "upstream_url": "",
+            "rules": [{"pattern": "koan/*", "auto_merge": True}]
+        }
+        result = auto_merge_branch("/inst", "koan", "/proj", "koan/fix")
+        assert result == 0
+        mock_merge.assert_called_once()

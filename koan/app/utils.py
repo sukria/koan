@@ -309,7 +309,8 @@ def get_auto_merge_config(config: dict, project_name: str) -> dict:
         "enabled": project_cfg.get("enabled", global_cfg.get("enabled", True)),
         "base_branch": project_cfg.get("base_branch", global_cfg.get("base_branch", "main")),
         "strategy": project_cfg.get("strategy", global_cfg.get("strategy", "squash")),
-        "rules": project_cfg.get("rules", global_cfg.get("rules", []))
+        "rules": project_cfg.get("rules", global_cfg.get("rules", [])),
+        "upstream_url": project_cfg.get("upstream_url", global_cfg.get("upstream_url", "")),
     }
 
 
