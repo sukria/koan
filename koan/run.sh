@@ -136,12 +136,22 @@ if [ "$START_ON_PAUSE" = "true" ] && [ ! -f "$KOAN_ROOT/.koan-pause" ]; then
 fi
 
 echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
-STARTUP_PROJECTS=$(IFS=', '; echo "${PROJECT_NAMES[*]}")
+SORTED_PROJECTS=($(printf '%s\n' "${PROJECT_NAMES[@]}" | sort))
+STARTUP_PROJECT_LIST=""
+for p in "${SORTED_PROJECTS[@]}"; do
+  STARTUP_PROJECT_LIST="${STARTUP_PROJECT_LIST}
+  • ${p}"
+done
 STARTUP_PAUSE=""
 if [ -f "$KOAN_ROOT/.koan-pause" ]; then
-  STARTUP_PAUSE=" Currently PAUSED."
+  STARTUP_PAUSE="
+Currently PAUSED."
 fi
-notify "Koan starting — $MAX_RUNS max runs, ${INTERVAL}s interval. Projects: $STARTUP_PROJECTS. Current: ${PROJECT_NAMES[0]}.$STARTUP_PAUSE"
+notify "Koan starting — $MAX_RUNS max runs, ${INTERVAL}s interval.
+
+Projects:${STARTUP_PROJECT_LIST}
+
+Current: ${PROJECT_NAMES[0]}.${STARTUP_PAUSE}"
 
 # Git sync: check what changed since last run (branches merged, new commits)
 echo "[koan] Running git sync..."
@@ -291,7 +301,14 @@ while true; do
     if [ -z "$PROJECT_PATH" ]; then
       echo "[koan] Error: Mission references unknown project: $PROJECT_NAME"
       echo "[koan] Known projects: ${PROJECT_NAMES[*]}"
-      notify "Mission error: Unknown project '$PROJECT_NAME'. Known projects: ${PROJECT_NAMES[*]}"
+      ERROR_PROJECT_LIST=""
+      for p in "${SORTED_PROJECTS[@]}"; do
+        ERROR_PROJECT_LIST="${ERROR_PROJECT_LIST}
+  • ${p}"
+      done
+      notify "Mission error: Unknown project '$PROJECT_NAME'.
+
+Known projects:${ERROR_PROJECT_LIST}"
       exit 1
     fi
   else
