@@ -22,6 +22,7 @@ from app.awake import (
     _build_status,
     _handle_help,
     _handle_ping,
+    _handle_queue,
     _handle_projects,
     _handle_usage,
     _handle_recurring_add,
@@ -1270,3 +1271,65 @@ class TestHandleCommandRecurring:
     def test_cancel_recurring_route(self, mock_cancel):
         handle_command("/cancel-recurring 1")
         mock_cancel.assert_called_once_with("1")
+
+
+# ---------------------------------------------------------------------------
+# /queue
+# ---------------------------------------------------------------------------
+
+class TestHandleQueue:
+    @patch("app.awake.send_telegram")
+    def test_queue_with_missions(self, mock_send, tmp_path):
+        """Shows full numbered queue."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "- [project:koan] add tests\n"
+            "- fix bug\n"
+            "- refactor auth\n\n"
+            "## En cours\n\n"
+            "- [project:koan] doing stuff\n\n"
+            "## Terminées\n"
+        )
+        with patch("app.awake.MISSIONS_FILE", missions_file):
+            _handle_queue()
+        msg = mock_send.call_args[0][0]
+        assert "Mission Queue" in msg
+        assert "In progress" in msg
+        assert "doing stuff" in msg
+        assert "1." in msg
+        assert "2." in msg
+        assert "3." in msg
+        assert "Pending (3)" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_queue_empty(self, mock_send, tmp_path):
+        """Empty queue shows appropriate message."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n")
+        with patch("app.awake.MISSIONS_FILE", missions_file):
+            _handle_queue()
+        msg = mock_send.call_args[0][0]
+        assert "vide" in msg.lower()
+
+    @patch("app.awake.send_telegram")
+    def test_queue_no_file(self, mock_send, tmp_path):
+        """Missing missions.md shows empty message."""
+        with patch("app.awake.MISSIONS_FILE", tmp_path / "nonexistent.md"):
+            _handle_queue()
+        msg = mock_send.call_args[0][0]
+        assert "vide" in msg.lower()
+
+    @patch("app.awake._handle_queue")
+    def test_handle_command_routes_queue(self, mock_queue):
+        """handle_command routes /queue to _handle_queue."""
+        handle_command("/queue")
+        mock_queue.assert_called_once()
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_queue(self, mock_send):
+        """/help output includes /queue."""
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/queue" in msg

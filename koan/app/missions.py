@@ -209,6 +209,53 @@ def group_by_project(content: str) -> Dict[str, Dict[str, List[str]]]:
     return dict(result)
 
 
+def format_queue(content: str) -> str:
+    """Build a full numbered queue of pending and in-progress missions.
+
+    Returns a formatted string showing all missions with position numbers,
+    grouped as in-progress first then pending. Project tags are stripped
+    from display but project name is shown inline.
+    """
+    sections = parse_sections(content)
+    in_progress = sections.get("in_progress", [])
+    pending = sections.get("pending", [])
+
+    if not in_progress and not pending:
+        return "File d'attente vide. Rien en cours."
+
+    lines = ["📋 Mission Queue\n"]
+
+    if in_progress:
+        lines.append("▶️ In progress:")
+        for item in in_progress:
+            project = extract_project_tag(item)
+            display = _strip_project_tag(item)
+            tag = f" [{project}]" if project != "default" else ""
+            lines.append(f"  → {display}{tag}")
+
+    if pending:
+        lines.append(f"\n⏳ Pending ({len(pending)}):")
+        for i, item in enumerate(pending, 1):
+            project = extract_project_tag(item)
+            display = _strip_project_tag(item)
+            tag = f" [{project}]" if project != "default" else ""
+            lines.append(f"  {i}. {display}{tag}")
+
+    return "\n".join(lines)
+
+
+def _strip_project_tag(item: str) -> str:
+    """Remove [project:X] / [projet:X] tag and leading '- ' from a mission line."""
+    # Take first line only (for multi-line blocks)
+    first_line = item.split("\n")[0]
+    # Remove leading "- "
+    if first_line.startswith("- "):
+        first_line = first_line[2:]
+    # Remove project tag
+    first_line = re.sub(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*', '', first_line)
+    return first_line.strip()
+
+
 def find_section_boundaries(lines: List[str]) -> Dict[str, Tuple[int, int]]:
     """Find line indices for each section.
 

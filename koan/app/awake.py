@@ -191,6 +191,10 @@ def handle_command(text: str):
         _handle_ping()
         return
 
+    if cmd == "/queue":
+        _handle_queue()
+        return
+
     if cmd == "/help":
         _handle_help()
         return
@@ -291,6 +295,18 @@ def _handle_ping():
         send_telegram("❌ Run loop is not running.\n\nTo restart:\n  make run &")
 
 
+def _handle_queue():
+    """Send the full numbered mission queue."""
+    from app.missions import format_queue
+
+    if not MISSIONS_FILE.exists():
+        send_telegram("File d'attente vide. Rien en cours.")
+        return
+
+    content = MISSIONS_FILE.read_text()
+    send_telegram(format_queue(content))
+
+
 def _handle_projects():
     """Send the list of configured projects."""
     projects = get_known_projects()
@@ -310,6 +326,7 @@ def _handle_help():
         "/help — cette aide\n"
         "/ping — vérifier si le run loop tourne (✅/❌)\n"
         "/status — état rapide (missions, pause, loop)\n"
+        "/queue — file d'attente complète avec numéros\n"
         "/usage — status détaillé formaté par Claude (quota, missions, progression)\n"
         "/projects — liste des projets configurés\n"
         "/stop — arrêter Kōan après la mission en cours\n"

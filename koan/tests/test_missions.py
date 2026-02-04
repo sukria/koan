@@ -10,6 +10,7 @@ from app.missions import (
     extract_project_tag,
     group_by_project,
     find_section_boundaries,
+    format_queue,
     DEFAULT_SKELETON,
 )
 
@@ -438,3 +439,94 @@ class TestSubHeaderProjectGrouping:
         assert len(result["koan"]["pending"]) >= 1
         assert "anantys" in result
         assert len(result["anantys"]["pending"]) >= 1
+
+
+# --- format_queue ---
+
+class TestFormatQueue:
+    """Tests for format_queue() — full numbered mission queue display."""
+
+    def test_empty_queue(self):
+        content = "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+        result = format_queue(content)
+        assert "vide" in result.lower()
+
+    def test_pending_only(self):
+        content = (
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "- fix the login bug\n"
+            "- add dark mode\n"
+            "- refactor auth\n\n"
+            "## En cours\n\n"
+            "## Terminées\n"
+        )
+        result = format_queue(content)
+        assert "1. fix the login bug" in result
+        assert "2. add dark mode" in result
+        assert "3. refactor auth" in result
+        assert "Pending (3)" in result
+
+    def test_in_progress_and_pending(self):
+        content = (
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "- task two\n\n"
+            "## En cours\n\n"
+            "- task one\n\n"
+            "## Terminées\n"
+        )
+        result = format_queue(content)
+        assert "In progress" in result
+        assert "→ task one" in result
+        assert "1. task two" in result
+
+    def test_strips_project_tags(self):
+        content = (
+            "## En attente\n\n"
+            "- [project:koan] add tests\n"
+            "- [project:web-app] fix CSRF\n\n"
+            "## En cours\n\n"
+            "- [project:koan] doing stuff\n\n"
+        )
+        result = format_queue(content)
+        assert "[project:koan]" not in result
+        assert "[project:web-app]" not in result
+        assert "[koan]" in result
+        assert "[web-app]" in result
+        assert "add tests" in result
+        assert "fix CSRF" in result
+
+    def test_no_tag_for_default_project(self):
+        content = (
+            "## En attente\n\n"
+            "- untagged task\n\n"
+            "## En cours\n\n"
+        )
+        result = format_queue(content)
+        assert "1. untagged task" in result
+        assert "[default]" not in result
+
+    def test_done_missions_excluded(self):
+        content = (
+            "## En attente\n\n"
+            "- pending task\n\n"
+            "## En cours\n\n"
+            "## Terminées\n\n"
+            "- old done task\n"
+        )
+        result = format_queue(content)
+        assert "pending task" in result
+        assert "old done task" not in result
+
+    def test_in_progress_only(self):
+        content = (
+            "## En attente\n\n"
+            "## En cours\n\n"
+            "- working on it\n\n"
+            "## Terminées\n"
+        )
+        result = format_queue(content)
+        assert "In progress" in result
+        assert "→ working on it" in result
+        assert "Pending" not in result
