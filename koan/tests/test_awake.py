@@ -1062,7 +1062,7 @@ class TestPauseAwareness:
              patch("app.awake.KOAN_ROOT", tmp_path):
             status = _build_status()
 
-        assert "ACTIF" in status or "RUNNING" in status
+        assert "ACTIVE" in status
 
     @patch("app.awake.save_telegram_message")
     @patch("app.awake.load_recent_telegram_history", return_value=[])
