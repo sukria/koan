@@ -21,6 +21,7 @@ from app.awake import (
     _clean_chat_response,
     _build_status,
     _handle_help,
+    _handle_log,
     _handle_mcp,
     _handle_ping,
     _handle_queue,
@@ -1582,3 +1583,123 @@ class TestMcpInChat:
         cmd = mock_run.call_args[0][0]
         turns_idx = cmd.index("--max-turns")
         assert cmd[turns_idx + 1] == "1"
+
+
+# ---------------------------------------------------------------------------
+# /log command
+# ---------------------------------------------------------------------------
+
+class TestHandleLog:
+    """Test /log and /journal command handler."""
+
+    @patch("app.awake.send_telegram")
+    def test_log_project_today(self, mock_send, tmp_path):
+        """'/log koan' shows today's journal for koan."""
+        from datetime import date
+        d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("## Session 29\nDid work on /log command.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("koan")
+        msg = mock_send.call_args[0][0]
+        assert "koan" in msg
+        assert "Did work" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_no_args_all_projects(self, mock_send, tmp_path):
+        """'/log' shows today's journal for all projects."""
+        from datetime import date
+        d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("koan stuff")
+        (d / "web-app.md").write_text("web-app stuff")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("")
+        msg = mock_send.call_args[0][0]
+        assert "koan" in msg
+        assert "web-app" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_yesterday(self, mock_send, tmp_path):
+        """'/log koan yesterday' shows yesterday's journal."""
+        from datetime import date, timedelta
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        d = tmp_path / "journal" / yesterday
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("Yesterday's work.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("koan yesterday")
+        msg = mock_send.call_args[0][0]
+        assert "Yesterday's work" in msg
+        assert yesterday in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_specific_date(self, mock_send, tmp_path):
+        """'/log koan 2026-01-15' shows that date's journal."""
+        d = tmp_path / "journal" / "2026-01-15"
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("Old entry from Jan.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("koan 2026-01-15")
+        msg = mock_send.call_args[0][0]
+        assert "Old entry" in msg
+        assert "2026-01-15" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_no_journal_found(self, mock_send, tmp_path):
+        """Shows 'no journal' when nothing exists."""
+        (tmp_path / "journal").mkdir()
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("koan")
+        msg = mock_send.call_args[0][0]
+        assert "Pas de journal" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_date_only_no_project(self, mock_send, tmp_path):
+        """'/log 2026-01-15' shows all projects for that date."""
+        d = tmp_path / "journal" / "2026-01-15"
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("koan stuff")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("2026-01-15")
+        msg = mock_send.call_args[0][0]
+        assert "koan" in msg
+        assert "2026-01-15" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_yesterday_no_project(self, mock_send, tmp_path):
+        """'/log yesterday' shows all projects for yesterday."""
+        from datetime import date, timedelta
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        d = tmp_path / "journal" / yesterday
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("yesterday stuff")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("yesterday")
+        msg = mock_send.call_args[0][0]
+        assert "yesterday stuff" in msg
+
+    @patch("app.awake._handle_log")
+    def test_handle_command_routes_log(self, mock_log):
+        """handle_command routes /log to _handle_log."""
+        handle_command("/log koan")
+        mock_log.assert_called_once_with("koan")
+
+    @patch("app.awake._handle_log")
+    def test_handle_command_routes_journal(self, mock_log):
+        """handle_command routes /journal to _handle_log."""
+        handle_command("/journal koan")
+        mock_log.assert_called_once_with("koan")
+
+    @patch("app.awake._handle_log")
+    def test_handle_command_routes_log_bare(self, mock_log):
+        """handle_command routes bare /log to _handle_log."""
+        handle_command("/log")
+        mock_log.assert_called_once_with("")
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_log(self, mock_send):
+        """/help output includes /log."""
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/log" in msg

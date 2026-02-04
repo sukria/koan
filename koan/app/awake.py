@@ -199,6 +199,15 @@ def handle_command(text: str):
         _handle_priority(text[9:].strip())
         return
 
+    if cmd.startswith("/log") or cmd.startswith("/journal"):
+        # Extract args after command name
+        if cmd.startswith("/journal"):
+            args = text[8:].strip()
+        else:
+            args = text[4:].strip()
+        _handle_log(args)
+        return
+
     if cmd == "/mcp":
         _handle_mcp()
         return
@@ -378,6 +387,42 @@ def _handle_priority(args: str):
         send_telegram("Error reordering missions.")
 
 
+def _handle_log(args: str):
+    """Show the latest journal entry for a project.
+
+    Usage:
+        /log              — today's journal (all projects)
+        /log koan         — today's journal for project koan
+        /log koan yesterday — yesterday's journal for koan
+        /log koan 2026-02-03 — specific date
+    """
+    from datetime import date as _date, timedelta
+    from app.utils import get_latest_journal
+
+    parts = args.split() if args else []
+    project = None
+    target_date = None
+
+    if len(parts) >= 1:
+        # First arg: project name (unless it looks like a date)
+        if re.match(r'^\d{4}-\d{2}-\d{2}$', parts[0]):
+            target_date = parts[0]
+        elif parts[0] == "yesterday":
+            target_date = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            project = parts[0]
+
+    if len(parts) >= 2 and target_date is None:
+        # Second arg: date
+        if parts[1] == "yesterday":
+            target_date = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        elif re.match(r'^\d{4}-\d{2}-\d{2}$', parts[1]):
+            target_date = parts[1]
+
+    result = get_latest_journal(INSTANCE_DIR, project=project, target_date=target_date)
+    send_telegram(result)
+
+
 def _handle_mcp():
     """Send the list of configured MCP servers."""
     from app.mcp_servers import list_mcp_servers, get_mcp_capabilities, format_mcp_list
@@ -409,6 +454,7 @@ def _handle_help():
         "/queue — file d'attente complète avec numéros\n"
         "/priority <n> — remonter la mission #n en tête de queue\n"
         "/usage — status détaillé formaté par Claude (quota, missions, progression)\n"
+        "/log [projet] [date] — dernier journal (ex: /log koan, /log koan yesterday)\n"
         "/projects — liste des projets configurés\n"
         "/mcp — serveurs MCP connectés (email, calendrier, etc.)\n"
         "/stop — arrêter Kōan après la mission en cours\n"
