@@ -6,12 +6,12 @@ export
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
 
-setup: $(VENV)/bin/activate
+setup: $(VENV)/.installed
 
-$(VENV)/bin/activate: koan/requirements.txt
+$(VENV)/.installed: koan/requirements.txt
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install -r koan/requirements.txt
-	@touch $(VENV)/bin/activate
+	@touch $@
 
 awake: setup
 	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/awake.py
@@ -19,9 +19,9 @@ awake: setup
 run:
 	./koan/run.sh
 
-say:
+say: setup
 	@test -n "$(m)" || (echo "Usage: make say m=\"your message\"" && exit 1)
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON) -c "from app.awake import handle_message; handle_message('$(m)')"
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -c "from app.awake import handle_message; handle_message('$(m)')"
 
 test: setup
 	$(VENV)/bin/pip install -q pytest 2>/dev/null
