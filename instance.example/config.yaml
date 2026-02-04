@@ -1,5 +1,10 @@
 # Kōan Configuration
 
+# CLI provider — which AI agent binary to use
+# Options: "claude" (default), "copilot" (GitHub Copilot CLI)
+# Override via KOAN_CLI_PROVIDER env var
+cli_provider: "claude"
+
 # Paths
 project_path: "/path/to/anantys-back"  # Target project to analyze
 pilot_repo: "/path/to/koan"            # This repo

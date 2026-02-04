@@ -190,6 +190,18 @@ def build_mcp_flags() -> List[str]:
     return flags
 
 
+def get_mcp_config_paths() -> List[str]:
+    """Get raw MCP config file paths from config.yaml.
+
+    Returns:
+        List of config paths/strings, or empty list.
+    """
+    config = load_config()
+    mcp_config = config.get("mcp", {})
+    configs = mcp_config.get("configs", [])
+    return [str(c) for c in configs] if configs else []
+
+
 def get_mcp_prompt_context() -> str:
     """Build MCP context string for inclusion in prompts.
 

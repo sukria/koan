@@ -111,8 +111,10 @@ def run_reflection(instance_dir: Path) -> str:
     prompt = build_reflection_prompt(instance_dir)
 
     try:
+        from app.cli_provider import build_full_command
+        cmd = build_full_command(prompt=prompt, max_turns=1)
         result = subprocess.run(
-            ["claude", "-p", prompt, "--max-turns", "1"],
+            cmd,
             capture_output=True, text=True, timeout=60,
             check=False
         )

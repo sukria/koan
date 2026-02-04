@@ -172,14 +172,16 @@ def run_pr_review(
     send_telegram(f"Analyzing review comments on `{branch}`...")
     prompt = build_pr_prompt(context)
 
+    from app.cli_provider import build_full_command
     models = get_model_config()
-    flags = build_claude_flags(model=models["mission"], fallback=models["fallback"])
 
-    cmd = [
-        "claude", "-p", prompt,
-        "--allowedTools", "Bash,Read,Write,Glob,Grep,Edit",
-        "--max-turns", "30",
-    ] + flags
+    cmd = build_full_command(
+        prompt=prompt,
+        allowed_tools=["Bash", "Read", "Write", "Glob", "Grep", "Edit"],
+        model=models["mission"],
+        fallback=models["fallback"],
+        max_turns=30,
+    )
 
     try:
         result = subprocess.run(

@@ -264,18 +264,27 @@ def chat_send():
 
         prompt = _build_dashboard_prompt(text)
         project_path = os.environ.get("KOAN_PROJECT_PATH", str(KOAN_ROOT))
-        allowed_tools = get_allowed_tools()
+        allowed_tools_str = get_allowed_tools()
+        allowed_tools_list = [t.strip() for t in allowed_tools_str.split(",") if t.strip()]
         models = get_model_config()
-        chat_flags = build_claude_flags(model=models["chat"], fallback=models["fallback"])
 
-        # Add MCP config flags if MCP servers are available
-        from app.mcp_servers import build_mcp_flags
-        mcp_flags = build_mcp_flags()
-        max_turns = "3" if mcp_flags else "1"
+        # Add MCP config paths if MCP servers are available
+        from app.mcp_servers import get_mcp_config_paths
+        from app.cli_provider import build_full_command
+        mcp_configs = get_mcp_config_paths()
+        max_turns = 3 if mcp_configs else 1
 
         try:
+            cmd = build_full_command(
+                prompt=prompt,
+                allowed_tools=allowed_tools_list,
+                model=models["chat"],
+                fallback=models["fallback"],
+                max_turns=max_turns,
+                mcp_configs=mcp_configs or None,
+            )
             result = subprocess.run(
-                ["claude", "-p", prompt, "--allowedTools", allowed_tools, "--max-turns", max_turns] + chat_flags + mcp_flags,
+                cmd,
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=project_path,
             )
@@ -290,8 +299,16 @@ def chat_send():
             print(f"[dashboard] Chat timed out ({CHAT_TIMEOUT}s). Retrying with lite context...")
             lite_prompt = _build_dashboard_prompt(text, lite=True)
             try:
+                cmd = build_full_command(
+                    prompt=lite_prompt,
+                    allowed_tools=allowed_tools_list,
+                    model=models["chat"],
+                    fallback=models["fallback"],
+                    max_turns=1,
+                    mcp_configs=mcp_configs or None,
+                )
                 result = subprocess.run(
-                    ["claude", "-p", lite_prompt, "--allowedTools", allowed_tools, "--max-turns", "1"] + chat_flags + mcp_flags,
+                    cmd,
                     capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                     cwd=project_path,
                 )

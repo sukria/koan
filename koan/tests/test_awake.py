@@ -1593,11 +1593,11 @@ class TestMcpInChat:
     @patch("app.awake.get_tools_description", return_value="")
     @patch("app.awake.send_telegram")
     @patch("subprocess.run")
-    @patch("app.mcp_servers.build_mcp_flags", return_value=["--mcp-config", "/test.json"])
+    @patch("app.mcp_servers.get_mcp_config_paths", return_value=["/test.json"])
     @patch("app.mcp_servers.get_mcp_prompt_context", return_value="")
     def test_chat_includes_mcp_flags(self, mock_ctx, mock_mcp, mock_run, mock_send,
                                       mock_tools_desc, mock_fmt, mock_hist, mock_save, tmp_path):
-        """Chat handler includes MCP flags in Claude CLI call."""
+        """Chat handler includes MCP flags in CLI call."""
         mock_run.return_value = MagicMock(returncode=0, stdout="response text")
         with patch("app.awake.INSTANCE_DIR", tmp_path), \
              patch("app.awake.KOAN_ROOT", tmp_path), \
@@ -1616,7 +1616,7 @@ class TestMcpInChat:
     @patch("app.awake.get_tools_description", return_value="")
     @patch("app.awake.send_telegram")
     @patch("subprocess.run")
-    @patch("app.mcp_servers.build_mcp_flags", return_value=["--mcp-config", "/test.json"])
+    @patch("app.mcp_servers.get_mcp_config_paths", return_value=["/test.json"])
     @patch("app.mcp_servers.get_mcp_prompt_context", return_value="")
     def test_chat_with_mcp_uses_more_turns(self, mock_ctx, mock_mcp, mock_run, mock_send,
                                             mock_tools_desc, mock_fmt, mock_hist, mock_save, tmp_path):
@@ -1639,7 +1639,7 @@ class TestMcpInChat:
     @patch("app.awake.get_tools_description", return_value="")
     @patch("app.awake.send_telegram")
     @patch("subprocess.run")
-    @patch("app.mcp_servers.build_mcp_flags", return_value=[])
+    @patch("app.mcp_servers.get_mcp_config_paths", return_value=[])
     @patch("app.mcp_servers.get_mcp_prompt_context", return_value="")
     def test_chat_without_mcp_uses_one_turn(self, mock_ctx, mock_mcp, mock_run, mock_send,
                                              mock_tools_desc, mock_fmt, mock_hist, mock_save, tmp_path):
