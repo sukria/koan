@@ -8,6 +8,7 @@ from app.git_auto_merge import (
     find_matching_rule,
     should_auto_merge,
     run_git,
+    get_author_env,
     is_working_tree_clean,
     is_branch_pushed,
     perform_merge,
@@ -301,6 +302,77 @@ class TestShouldAutoMerge:
         assert base_branch == ""
 
 
+# --- get_author_env ---
+
+class TestGetAuthorEnv:
+    def test_returns_env_vars_when_email_set(self):
+        """When KOAN_EMAIL is set, return GIT_AUTHOR/COMMITTER env vars."""
+        with patch.dict("os.environ", {"KOAN_EMAIL": "koan@example.com"}):
+            env = get_author_env()
+            assert env == {
+                "GIT_AUTHOR_NAME": "Koan",
+                "GIT_AUTHOR_EMAIL": "koan@example.com",
+                "GIT_COMMITTER_NAME": "Koan",
+                "GIT_COMMITTER_EMAIL": "koan@example.com",
+            }
+
+    def test_returns_empty_dict_when_no_email(self):
+        """When KOAN_EMAIL is not set, return empty dict."""
+        with patch.dict("os.environ", {}, clear=False):
+            # Ensure KOAN_EMAIL is not present
+            import os
+            env_backup = os.environ.pop("KOAN_EMAIL", None)
+            try:
+                env = get_author_env()
+                assert env == {}
+            finally:
+                if env_backup is not None:
+                    os.environ["KOAN_EMAIL"] = env_backup
+
+    def test_no_author_flag_in_merge_calls(self):
+        """Verify merge strategy passes env kwarg, not --author args."""
+        calls = [
+            (0, "fix stuff", ""),  # git log
+            (0, "", ""),  # checkout
+            (0, "", ""),  # pull
+            (0, "", ""),  # merge --no-ff
+            (0, "", ""),  # push
+            (0, "", ""),  # checkout (finally)
+        ]
+        with patch("app.git_auto_merge.run_git", side_effect=calls) as mock, \
+             patch.dict("os.environ", {"KOAN_EMAIL": "koan@test.com"}):
+            ok, err = perform_merge("/tmp", "koan/fix", "main", "merge")
+            assert ok is True
+            # The merge call (4th call, index 3) should NOT have --author
+            merge_call = mock.call_args_list[3]
+            args_passed = list(merge_call[0])  # positional args
+            assert "--author" not in args_passed
+            # Should have env kwarg
+            assert "env" in merge_call[1]
+            assert merge_call[1]["env"]["GIT_AUTHOR_EMAIL"] == "koan@test.com"
+
+    def test_squash_commit_uses_env(self):
+        """Verify squash strategy passes env to commit, not --author args."""
+        calls = [
+            (0, "fix stuff", ""),  # git log
+            (0, "", ""),  # checkout
+            (0, "", ""),  # pull
+            (0, "", ""),  # merge --squash
+            (0, "", ""),  # commit
+            (0, "", ""),  # push
+            (0, "", ""),  # checkout (finally)
+        ]
+        with patch("app.git_auto_merge.run_git", side_effect=calls) as mock, \
+             patch.dict("os.environ", {"KOAN_EMAIL": "koan@test.com"}):
+            ok, err = perform_merge("/tmp", "koan/fix", "main", "squash")
+            assert ok is True
+            # The commit call (5th call, index 4) should use env, not --author
+            commit_call = mock.call_args_list[4]
+            args_passed = list(commit_call[0])
+            assert "--author" not in args_passed
+            assert "env" in commit_call[1]
+
+
 # --- Integration Tests ---
 
 class TestIntegration:
@@ -381,7 +453,7 @@ class TestRunGit:
             assert out == "output"
             assert err == ""
             mock_run.assert_called_once_with(
-                ["git", "status"], cwd="/tmp", capture_output=True, text=True, timeout=30
+                ["git", "status"], cwd="/tmp", capture_output=True, text=True, timeout=30, env=None
             )
 
     def test_failure(self):
