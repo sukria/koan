@@ -187,6 +187,10 @@ def handle_command(text: str):
         _handle_projects()
         return
 
+    if cmd == "/ping":
+        _handle_ping()
+        return
+
     if cmd == "/help":
         _handle_help()
         return
@@ -246,6 +250,31 @@ def _build_status() -> str:
     return "\n".join(parts)
 
 
+def _handle_ping():
+    """Check if the run loop (make run) is alive and report status."""
+    # Check if run.sh process is running
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "run\\.sh"],
+            capture_output=True, text=True, timeout=5,
+        )
+        run_loop_alive = result.returncode == 0
+    except Exception:
+        run_loop_alive = False
+
+    pause_file = KOAN_ROOT / ".koan-pause"
+    stop_file = KOAN_ROOT / ".koan-stop"
+
+    if run_loop_alive and stop_file.exists():
+        send_telegram("⛔ Run loop is stopping after current mission.")
+    elif run_loop_alive and pause_file.exists():
+        send_telegram("⏸️ Run loop is paused. /resume to unpause.")
+    elif run_loop_alive:
+        send_telegram("✅")
+    else:
+        send_telegram("❌ Run loop is not running.\n\nTo restart:\n  make run &")
+
+
 def _handle_projects():
     """Send the list of configured projects."""
     projects = get_known_projects()
@@ -263,6 +292,7 @@ def _handle_help():
     help_text = (
         "Commandes disponibles :\n\n"
         "/help — cette aide\n"
+        "/ping — vérifier si le run loop tourne (✅/❌)\n"
         "/status — état rapide (missions, pause, loop)\n"
         "/usage — status détaillé formaté par Claude (quota, missions, progression)\n"
         "/projects — liste des projets configurés\n"

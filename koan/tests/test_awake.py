@@ -21,6 +21,7 @@ from app.awake import (
     _clean_chat_response,
     _build_status,
     _handle_help,
+    _handle_ping,
     _handle_projects,
     _handle_usage,
     _run_in_worker,
@@ -937,6 +938,77 @@ class TestCleanChatResponse:
     def test_preserves_normal_text(self):
         text = "Tout va bien, j'ai fini le travail."
         assert _clean_chat_response(text) == text
+
+
+# ---------------------------------------------------------------------------
+# /ping
+# ---------------------------------------------------------------------------
+
+class TestHandlePing:
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_ping_running(self, mock_run, mock_send, tmp_path):
+        """Run loop alive, no pause/stop → ✅"""
+        mock_run.return_value = MagicMock(returncode=0, stdout="12345")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            _handle_ping()
+        mock_send.assert_called_once_with("✅")
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_ping_not_running(self, mock_run, mock_send, tmp_path):
+        """Run loop not alive → ❌ with restart hint"""
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            _handle_ping()
+        msg = mock_send.call_args[0][0]
+        assert "❌" in msg
+        assert "make run" in msg
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_ping_paused(self, mock_run, mock_send, tmp_path):
+        """Run loop alive but paused → ⏸️"""
+        mock_run.return_value = MagicMock(returncode=0, stdout="12345")
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            _handle_ping()
+        msg = mock_send.call_args[0][0]
+        assert "⏸️" in msg
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_ping_stopping(self, mock_run, mock_send, tmp_path):
+        """Run loop alive but stop requested → ⛔"""
+        mock_run.return_value = MagicMock(returncode=0, stdout="12345")
+        (tmp_path / ".koan-stop").write_text("STOP")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            _handle_ping()
+        msg = mock_send.call_args[0][0]
+        assert "⛔" in msg
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_ping_pgrep_exception(self, mock_run, mock_send, tmp_path):
+        """pgrep fails with exception → treat as not running"""
+        mock_run.side_effect = OSError("pgrep not found")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            _handle_ping()
+        msg = mock_send.call_args[0][0]
+        assert "❌" in msg
+
+    @patch("app.awake._handle_ping")
+    def test_handle_command_routes_ping(self, mock_ping):
+        """handle_command routes /ping to _handle_ping"""
+        handle_command("/ping")
+        mock_ping.assert_called_once()
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_ping(self, mock_send):
+        """/help output includes /ping"""
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/ping" in msg
 
 
 # ---------------------------------------------------------------------------
