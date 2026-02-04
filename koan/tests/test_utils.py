@@ -469,3 +469,44 @@ class TestGetStartOnPause:
         # No config file at all
         from app.utils import get_start_on_pause
         assert get_start_on_pause() is False
+
+
+class TestGetKnownProjects:
+    def test_multi_project(self, monkeypatch):
+        monkeypatch.setenv("KOAN_PROJECTS", "beta:/b;alpha:/a")
+        from app.utils import get_known_projects
+        result = get_known_projects()
+        assert result == [("alpha", "/a"), ("beta", "/b")]
+
+    def test_single_project_fallback(self, monkeypatch):
+        monkeypatch.delenv("KOAN_PROJECTS", raising=False)
+        monkeypatch.setenv("KOAN_PROJECT_PATH", "/my/project")
+        from app.utils import get_known_projects
+        result = get_known_projects()
+        assert result == [("default", "/my/project")]
+
+    def test_empty_when_no_env(self, monkeypatch):
+        monkeypatch.delenv("KOAN_PROJECTS", raising=False)
+        monkeypatch.delenv("KOAN_PROJECT_PATH", raising=False)
+        from app.utils import get_known_projects
+        assert get_known_projects() == []
+
+    def test_sorts_alphabetically_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("KOAN_PROJECTS", "Zulu:/z;alpha:/a;Beta:/b")
+        from app.utils import get_known_projects
+        result = get_known_projects()
+        assert [name for name, _ in result] == ["alpha", "Beta", "Zulu"]
+
+    def test_handles_whitespace(self, monkeypatch):
+        monkeypatch.setenv("KOAN_PROJECTS", " foo : /foo ; bar : /bar ")
+        from app.utils import get_known_projects
+        result = get_known_projects()
+        assert result == [("bar", "/bar"), ("foo", "/foo")]
+
+    def test_skips_malformed_entries(self, monkeypatch):
+        monkeypatch.setenv("KOAN_PROJECTS", "good:/path;badentry;also_good:/other")
+        from app.utils import get_known_projects
+        result = get_known_projects()
+        assert len(result) == 2
+        assert result[0][0] == "also_good"
+        assert result[1][0] == "good"

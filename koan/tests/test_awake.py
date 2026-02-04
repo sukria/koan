@@ -21,6 +21,7 @@ from app.awake import (
     _clean_chat_response,
     _build_status,
     _handle_help,
+    _handle_projects,
     _handle_usage,
     _run_in_worker,
     get_updates,
@@ -303,6 +304,48 @@ class TestHandleCommand:
     def test_unknown_command_falls_to_chat(self, mock_chat):
         handle_command("/unknown")
         mock_chat.assert_called_once_with("/unknown")
+
+    @patch("app.awake._handle_projects")
+    def test_projects_delegates(self, mock_projects):
+        handle_command("/projects")
+        mock_projects.assert_called_once()
+
+    @patch("app.awake._handle_reflect")
+    @patch("app.awake.handle_chat")
+    def test_reflect_returns_without_falling_to_chat(self, mock_chat, mock_reflect):
+        handle_command("/reflect some thought")
+        mock_reflect.assert_called_once_with("some thought")
+        mock_chat.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _handle_projects
+# ---------------------------------------------------------------------------
+
+class TestHandleProjects:
+    @patch("app.awake.get_known_projects", return_value=[("alpha", "/a"), ("beta", "/b")])
+    @patch("app.awake.send_telegram")
+    def test_lists_projects_sorted(self, mock_send, mock_projects):
+        _handle_projects()
+        msg = mock_send.call_args[0][0]
+        assert "alpha" in msg
+        assert "beta" in msg
+        assert msg.index("alpha") < msg.index("beta")
+
+    @patch("app.awake.get_known_projects", return_value=[])
+    @patch("app.awake.send_telegram")
+    def test_empty_projects(self, mock_send, mock_projects):
+        _handle_projects()
+        msg = mock_send.call_args[0][0]
+        assert "Aucun" in msg
+
+    @patch("app.awake.get_known_projects", return_value=[("solo", "/only/one")])
+    @patch("app.awake.send_telegram")
+    def test_single_project(self, mock_send, mock_projects):
+        _handle_projects()
+        msg = mock_send.call_args[0][0]
+        assert "solo" in msg
+        assert "/only/one" in msg
 
 
 # ---------------------------------------------------------------------------

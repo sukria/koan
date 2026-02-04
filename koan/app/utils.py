@@ -327,6 +327,30 @@ def parse_project(text: str) -> Tuple[Optional[str], str]:
     return None, text
 
 
+def get_known_projects() -> list:
+    """Return sorted list of (name, path) tuples from KOAN_PROJECTS env var.
+
+    Format: name:path;name2:path2
+    Falls back to KOAN_PROJECT_PATH with name "default" for single-project mode.
+    Returns empty list if neither is set.
+    """
+    projects_str = os.environ.get("KOAN_PROJECTS", "")
+    if projects_str:
+        result = []
+        for pair in projects_str.split(";"):
+            pair = pair.strip()
+            if ":" in pair:
+                name, path = pair.split(":", 1)
+                result.append((name.strip(), path.strip()))
+        return sorted(result, key=lambda x: x[0].lower())
+
+    single_path = os.environ.get("KOAN_PROJECT_PATH", "")
+    if single_path:
+        return [("default", single_path)]
+
+    return []
+
+
 def atomic_write(path: Path, content: str):
     """Write content to a file atomically using write-to-temp + rename.
 

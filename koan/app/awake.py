@@ -31,6 +31,7 @@ from app.utils import (
     load_dotenv,
     parse_project as _parse_project,
     insert_pending_mission,
+    get_known_projects,
     save_telegram_message,
     load_recent_telegram_history,
     format_conversation_history,
@@ -180,6 +181,11 @@ def handle_command(text: str):
 
     if cmd.startswith("/reflect "):
         _handle_reflect(text[9:].strip())
+        return
+
+    if cmd == "/projects":
+        _handle_projects()
+        return
 
     if cmd == "/help":
         _handle_help()
@@ -240,6 +246,18 @@ def _build_status() -> str:
     return "\n".join(parts)
 
 
+def _handle_projects():
+    """Send the list of configured projects."""
+    projects = get_known_projects()
+    if not projects:
+        send_telegram("Aucun projet configuré.")
+        return
+    lines = ["Projets configurés :"]
+    for name, path in projects:
+        lines.append(f"  • {name} — {path}")
+    send_telegram("\n".join(lines))
+
+
 def _handle_help():
     """Send the list of available commands."""
     help_text = (
@@ -247,6 +265,7 @@ def _handle_help():
         "/help — cette aide\n"
         "/status — état rapide (missions, pause, loop)\n"
         "/usage — status détaillé formaté par Claude (quota, missions, progression)\n"
+        "/projects — liste des projets configurés\n"
         "/stop — arrêter Kōan après la mission en cours\n"
         "/pause — mettre en pause (pas de nouvelles missions)\n"
         "/resume — reprendre après pause ou quota épuisé\n"
