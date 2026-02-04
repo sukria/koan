@@ -1,8 +1,13 @@
 # Kōan Configuration
+#
+# IMPORTANT: Values starting with "CHANGE:" must be updated before running.
+# Kōan will work with sensible defaults for most other settings.
 
-# Paths
-project_path: "/path/to/anantys-back"  # Target project to analyze
-pilot_repo: "/path/to/koan"            # This repo
+# Paths — these are mostly set via environment variables now.
+# You can override here if needed, but KOAN_PROJECT_PATH / KOAN_PROJECTS
+# in .env is the preferred method.
+# project_path: "/path/to/your/project"
+# pilot_repo: "/path/to/koan"
 
 # Budget & Scheduling
 max_runs_per_day: 20
@@ -21,9 +26,11 @@ fast_reply: false
 contemplative_chance: 10
 
 # Telegram
+# NOTE: Prefer setting these in .env (KOAN_TELEGRAM_TOKEN, KOAN_TELEGRAM_CHAT_ID)
+# These config values are only used if the env vars are not set.
 telegram:
-  bot_token: "YOUR_BOT_TOKEN"  # From @BotFather
-  chat_id: "YOUR_CHAT_ID"     # From first message to bot
+  bot_token: ""   # Set via KOAN_TELEGRAM_TOKEN in .env (recommended)
+  chat_id: ""     # Set via KOAN_TELEGRAM_CHAT_ID in .env (recommended)
 
 # Usage thresholds
 budget:
@@ -70,9 +77,10 @@ usage:
 
 # Per-project overrides
 # Override git_auto_merge settings for specific projects
-projects:
-  mysafeproject:
-    git_auto_merge:
-      enabled: true
-      base_branch: "main"
-      strategy: "squash"
+# Example: if you have a project named "myapp" configured via KOAN_PROJECTS
+# projects:
+#   myapp:
+#     git_auto_merge:
+#       enabled: true
+#       base_branch: "main"
+#       strategy: "squash"
