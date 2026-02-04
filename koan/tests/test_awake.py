@@ -24,6 +24,9 @@ from app.awake import (
     _handle_ping,
     _handle_projects,
     _handle_usage,
+    _handle_recurring_add,
+    _handle_recurring_list,
+    _handle_cancel_recurring,
     _run_in_worker,
     get_updates,
     check_config,
@@ -1128,3 +1131,142 @@ class TestHandleUsage:
 
         prompt_arg = mock_run.call_args[0][0][2]
         assert "fix auth" in prompt_arg
+
+
+# ---------------------------------------------------------------------------
+# Recurring mission commands (/daily, /hourly, /weekly, /recurring)
+# ---------------------------------------------------------------------------
+
+class TestHandleRecurringAdd:
+    @patch("app.awake.send_telegram")
+    def test_daily_add(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_recurring_add("daily", "check unread emails")
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "daily" in msg
+        assert "check unread emails" in msg
+        assert (instance / "recurring.json").exists()
+
+    @patch("app.awake.send_telegram")
+    def test_hourly_add(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_recurring_add("hourly", "check open PRs")
+        msg = mock_send.call_args[0][0]
+        assert "hourly" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_weekly_add(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_recurring_add("weekly", "security audit")
+        msg = mock_send.call_args[0][0]
+        assert "weekly" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_add_with_project(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_recurring_add("daily", "[project:koan] check logs")
+        msg = mock_send.call_args[0][0]
+        assert "project:koan" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_add_empty_body(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_recurring_add("daily", "")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+
+
+class TestHandleRecurringList:
+    @patch("app.awake.send_telegram")
+    def test_empty_list(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_recurring_list()
+        msg = mock_send.call_args[0][0]
+        assert "No recurring" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_shows_missions(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        from app.recurring import add_recurring
+        add_recurring(instance / "recurring.json", "daily", "check emails")
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_recurring_list()
+        msg = mock_send.call_args[0][0]
+        assert "check emails" in msg
+        assert "[daily]" in msg
+
+
+class TestHandleCancelRecurring:
+    @patch("app.awake.send_telegram")
+    def test_cancel_empty_shows_help(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_cancel_recurring("")
+        msg = mock_send.call_args[0][0]
+        assert "No recurring" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_cancel_by_number(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        from app.recurring import add_recurring
+        add_recurring(instance / "recurring.json", "daily", "check emails")
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_cancel_recurring("1")
+        msg = mock_send.call_args[0][0]
+        assert "removed" in msg.lower() or "Recurring mission removed" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_cancel_invalid(self, mock_send, tmp_path):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        from app.recurring import add_recurring
+        add_recurring(instance / "recurring.json", "daily", "check emails")
+        with patch("app.awake.INSTANCE_DIR", instance):
+            _handle_cancel_recurring("99")
+        msg = mock_send.call_args[0][0]
+        assert "Invalid" in msg
+
+
+class TestHandleCommandRecurring:
+    """Test that handle_command routes recurring commands correctly."""
+
+    @patch("app.awake._handle_recurring_add")
+    def test_daily_route(self, mock_add):
+        handle_command("/daily check emails")
+        mock_add.assert_called_once_with("daily", "check emails")
+
+    @patch("app.awake._handle_recurring_add")
+    def test_hourly_route(self, mock_add):
+        handle_command("/hourly check PRs")
+        mock_add.assert_called_once_with("hourly", "check PRs")
+
+    @patch("app.awake._handle_recurring_add")
+    def test_weekly_route(self, mock_add):
+        handle_command("/weekly audit security")
+        mock_add.assert_called_once_with("weekly", "audit security")
+
+    @patch("app.awake._handle_recurring_list")
+    def test_recurring_list_route(self, mock_list):
+        handle_command("/recurring")
+        mock_list.assert_called_once()
+
+    @patch("app.awake._handle_cancel_recurring")
+    def test_cancel_recurring_route(self, mock_cancel):
+        handle_command("/cancel-recurring 1")
+        mock_cancel.assert_called_once_with("1")

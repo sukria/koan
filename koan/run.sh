@@ -260,6 +260,10 @@ while true; do
   echo "  Safety margin: 10% → Available: ${AVAILABLE_PCT}%"
   echo ""
 
+  # Inject due recurring missions into pending queue
+  RECURRING_SCHEDULER="$APP_DIR/recurring_scheduler.py"
+  "$PYTHON" "$RECURRING_SCHEDULER" "$INSTANCE" 2>/dev/null || true
+
   # Pick next mission using Claude-based intelligent picker
   LAST_PROJECT=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "")
   PICK_MISSION="$APP_DIR/pick_mission.py"
