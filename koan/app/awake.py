@@ -186,6 +186,10 @@ def handle_command(text: str):
         _handle_ping()
         return
 
+    if cmd.startswith("/priority"):
+        _handle_priority(text[9:].strip())
+        return
+
     if cmd == "/help":
         _handle_help()
         return
@@ -272,6 +276,69 @@ def _handle_ping():
         send_telegram("❌ Run loop is not running.\n\nTo restart:\n  make run &")
 
 
+def _handle_priority(args: str):
+    """Move a pending mission to the top of the queue (or to a specific position).
+
+    Usage:
+        /priority 3        — move mission #3 to position 1 (top)
+        /priority 5 2      — move mission #5 to position 2
+    """
+    from app.missions import reorder_mission, format_queue
+
+    if not args:
+        # Show queue with usage hint
+        if MISSIONS_FILE.exists():
+            content = MISSIONS_FILE.read_text()
+            msg = format_queue(content)
+            msg += "\n\nUsage: /priority <n> — bumps mission #n to the top"
+            send_telegram(msg)
+        else:
+            send_telegram("Queue is empty.\n\nUsage: /priority <n>")
+        return
+
+    # Parse args: "/priority N" or "/priority N M"
+    parts = args.split()
+    try:
+        position = int(parts[0])
+    except ValueError:
+        send_telegram(f"Invalid number: {parts[0]}\nUsage: /priority <n>")
+        return
+
+    target = 1
+    if len(parts) > 1:
+        try:
+            target = int(parts[1])
+        except ValueError:
+            send_telegram(f"Invalid target: {parts[1]}\nUsage: /priority <n> [target]")
+            return
+
+    # File-locked read-modify-write
+    if not MISSIONS_FILE.exists():
+        send_telegram("No missions file found.")
+        return
+
+    try:
+        with open(MISSIONS_FILE, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            content = f.read()
+            new_content, moved = reorder_mission(content, position, target)
+            f.seek(0)
+            f.truncate()
+            f.write(new_content)
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+        if target == 1:
+            send_telegram(f"⬆️ Bumped to top:\n{moved}")
+        else:
+            send_telegram(f"🔀 Moved to position {target}:\n{moved}")
+        print(f"[awake] Priority: moved #{position} → #{target}: {moved[:60]}")
+    except ValueError as e:
+        send_telegram(str(e))
+    except Exception as e:
+        print(f"[awake] Priority error: {e}")
+        send_telegram("Error reordering missions.")
+
+
 def _handle_help():
     """Send the list of available commands."""
     help_text = (
@@ -280,6 +347,7 @@ def _handle_help():
         "CONTROL\n"
         "/pause — pause (no new missions)\n"
         "/resume — resume after pause or quota exhausted\n"
+        "/priority <n> — bump mission #n to top of queue\n"
         "/stop — stop Kōan after current mission\n"
         "\n"
         "MONITORING\n"

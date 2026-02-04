@@ -10,6 +10,7 @@ from app.missions import (
     extract_project_tag,
     group_by_project,
     find_section_boundaries,
+    reorder_mission,
     DEFAULT_SKELETON,
 )
 
@@ -438,3 +439,152 @@ class TestSubHeaderProjectGrouping:
         assert len(result["koan"]["pending"]) >= 1
         assert "anantys" in result
         assert len(result["anantys"]["pending"]) >= 1
+
+
+# --- reorder_mission ---
+
+REORDER_CONTENT = (
+    "# Missions\n\n"
+    "## En attente\n\n"
+    "- Fix the login bug\n"
+    "- Add dark mode\n"
+    "- Refactor auth module\n"
+    "- Write API docs\n\n"
+    "## En cours\n\n"
+    "## Terminées\n"
+)
+
+
+class TestReorderMission:
+    """Tests for reorder_mission() — move pending missions to a new position."""
+
+    def test_move_to_top(self):
+        """Moving #3 to top should put 'Refactor auth module' first."""
+        new_content, moved = reorder_mission(REORDER_CONTENT, 3)
+        assert moved == "Refactor auth module"
+        sections = parse_sections(new_content)
+        pending = sections["pending"]
+        assert len(pending) == 4
+        assert "Refactor auth" in pending[0]
+        assert "Fix the login" in pending[1]
+
+    def test_move_to_specific_position(self):
+        """Moving #4 to position 2."""
+        new_content, moved = reorder_mission(REORDER_CONTENT, 4, 2)
+        assert moved == "Write API docs"
+        sections = parse_sections(new_content)
+        pending = sections["pending"]
+        assert len(pending) == 4
+        assert "Fix the login" in pending[0]
+        assert "Write API docs" in pending[1]
+        assert "Add dark mode" in pending[2]
+
+    def test_move_first_to_last(self):
+        """Moving #1 to position 4 (last)."""
+        new_content, moved = reorder_mission(REORDER_CONTENT, 1, 4)
+        assert moved == "Fix the login bug"
+        sections = parse_sections(new_content)
+        pending = sections["pending"]
+        assert len(pending) == 4
+        assert "Add dark mode" in pending[0]
+        assert "Fix the login" in pending[3]
+
+    def test_same_position_raises(self):
+        """Moving #2 to position 2 should raise ValueError."""
+        with pytest.raises(ValueError, match="already at position"):
+            reorder_mission(REORDER_CONTENT, 2, 2)
+
+    def test_invalid_position_too_high(self):
+        """Position 10 on a 4-item queue should raise."""
+        with pytest.raises(ValueError, match="Invalid position"):
+            reorder_mission(REORDER_CONTENT, 10)
+
+    def test_invalid_position_zero(self):
+        """Position 0 should raise."""
+        with pytest.raises(ValueError, match="Invalid position"):
+            reorder_mission(REORDER_CONTENT, 0)
+
+    def test_invalid_target(self):
+        """Target 10 on a 4-item queue should raise."""
+        with pytest.raises(ValueError, match="Invalid target"):
+            reorder_mission(REORDER_CONTENT, 1, 10)
+
+    def test_no_pending_section(self):
+        """No pending section should raise."""
+        content = "# Missions\n\n## En cours\n\n- Working\n"
+        with pytest.raises(ValueError, match="No pending"):
+            reorder_mission(content, 1)
+
+    def test_empty_pending(self):
+        """Empty pending section should raise."""
+        content = "# Missions\n\n## En attente\n\n## En cours\n"
+        with pytest.raises(ValueError, match="No pending missions"):
+            reorder_mission(content, 1)
+
+    def test_preserves_other_sections(self):
+        """In-progress and done sections should be unchanged."""
+        content = (
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "- Task A\n"
+            "- Task B\n"
+            "- Task C\n\n"
+            "## En cours\n\n"
+            "- Working on X\n\n"
+            "## Terminées\n\n"
+            "- Done Y\n"
+        )
+        new_content, _ = reorder_mission(content, 3)
+        sections = parse_sections(new_content)
+        assert len(sections["in_progress"]) == 1
+        assert "Working on X" in sections["in_progress"][0]
+        assert len(sections["done"]) == 1
+        assert "Done Y" in sections["done"][0]
+
+    def test_with_project_tags(self):
+        """Project tags should be preserved during reorder."""
+        content = (
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "- [project:koan] first task\n"
+            "- [project:web-app] second task\n"
+            "- [project:koan] third task\n\n"
+            "## En cours\n\n"
+        )
+        new_content, moved = reorder_mission(content, 2)
+        assert moved == "second task"
+        assert "[project:web-app] second task" in new_content
+        sections = parse_sections(new_content)
+        assert "[project:web-app]" in sections["pending"][0]
+
+    def test_two_items_swap(self):
+        """With only 2 items, moving #2 to top is a swap."""
+        content = (
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "- First\n"
+            "- Second\n\n"
+            "## En cours\n"
+        )
+        new_content, moved = reorder_mission(content, 2)
+        assert moved == "Second"
+        sections = parse_sections(new_content)
+        assert "Second" in sections["pending"][0]
+        assert "First" in sections["pending"][1]
+
+    def test_with_continuation_lines(self):
+        """Missions with continuation lines should move as a block."""
+        content = (
+            "# Missions\n\n"
+            "## En attente\n\n"
+            "- Simple task\n"
+            "- Complex task\n"
+            "  with extra detail\n"
+            "- Another task\n\n"
+            "## En cours\n"
+        )
+        new_content, moved = reorder_mission(content, 2)
+        assert "Complex task" in moved
+        lines = new_content.splitlines()
+        complex_idx = next(i for i, l in enumerate(lines) if "Complex task" in l)
+        assert "extra detail" in lines[complex_idx + 1]

@@ -21,6 +21,7 @@ from app.awake import (
     _clean_chat_response,
     _build_status,
     _handle_help,
+    _handle_priority,
     _handle_usage,
     _run_in_worker,
     get_updates,
@@ -1154,3 +1155,115 @@ class TestPauseAwareness:
 
         # Prompt should mention running status
         assert "RUNNING" in prompt or "▶️" in prompt
+
+
+# ---------------------------------------------------------------------------
+# /priority command
+# ---------------------------------------------------------------------------
+
+class TestHandlePriority:
+    """Test /priority command handler."""
+
+    QUEUE_CONTENT = (
+        "# Missions\n\n"
+        "## En attente\n\n"
+        "- Fix login bug\n"
+        "- Add dark mode\n"
+        "- Refactor auth\n\n"
+        "## En cours\n\n"
+        "## Terminées\n"
+    )
+
+    @patch("app.awake.send_telegram")
+    def test_priority_bumps_to_top(self, mock_send, tmp_path):
+        """'/priority 3' moves mission #3 to position 1."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(self.QUEUE_CONTENT)
+        with patch("app.awake.MISSIONS_FILE", missions_file):
+            _handle_priority("3")
+        msg = mock_send.call_args[0][0]
+        assert "Refactor auth" in msg
+        assert "Bumped to top" in msg
+        # Verify file was updated
+        from app.missions import parse_sections
+        sections = parse_sections(missions_file.read_text())
+        assert "Refactor auth" in sections["pending"][0]
+
+    @patch("app.awake.send_telegram")
+    def test_priority_specific_target(self, mock_send, tmp_path):
+        """'/priority 3 2' moves mission #3 to position 2."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(self.QUEUE_CONTENT)
+        with patch("app.awake.MISSIONS_FILE", missions_file):
+            _handle_priority("3 2")
+        msg = mock_send.call_args[0][0]
+        assert "Refactor auth" in msg
+        assert "position 2" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_priority_no_args_shows_queue(self, mock_send, tmp_path):
+        """Bare '/priority' shows queue + usage hint."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(self.QUEUE_CONTENT)
+        with patch("app.awake.MISSIONS_FILE", missions_file):
+            _handle_priority("")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+        assert "Mission Queue" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_priority_invalid_number(self, mock_send, tmp_path):
+        """'/priority abc' shows error."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(self.QUEUE_CONTENT)
+        with patch("app.awake.MISSIONS_FILE", missions_file):
+            _handle_priority("abc")
+        msg = mock_send.call_args[0][0]
+        assert "Invalid number" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_priority_out_of_range(self, mock_send, tmp_path):
+        """'/priority 99' shows error."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(self.QUEUE_CONTENT)
+        with patch("app.awake.MISSIONS_FILE", missions_file):
+            _handle_priority("99")
+        msg = mock_send.call_args[0][0]
+        assert "Invalid position" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_priority_no_file(self, mock_send, tmp_path):
+        """No missions file shows error."""
+        with patch("app.awake.MISSIONS_FILE", tmp_path / "nonexistent.md"):
+            _handle_priority("1")
+        msg = mock_send.call_args[0][0]
+        assert "No missions file" in msg
+
+    @patch("app.awake._handle_priority")
+    def test_handle_command_routes_priority(self, mock_priority):
+        """handle_command routes /priority to _handle_priority."""
+        handle_command("/priority 3")
+        mock_priority.assert_called_once_with("3")
+
+    @patch("app.awake._handle_priority")
+    def test_handle_command_routes_bare_priority(self, mock_priority):
+        """handle_command routes bare /priority."""
+        handle_command("/priority")
+        mock_priority.assert_called_once_with("")
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_priority(self, mock_send):
+        """/help output includes /priority."""
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/priority" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_priority_empty_queue(self, mock_send, tmp_path):
+        """'/priority' with no pending missions shows empty."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n")
+        with patch("app.awake.MISSIONS_FILE", missions_file):
+            _handle_priority("")
+        msg = mock_send.call_args[0][0]
+        assert "empty" in msg.lower() or "Usage" in msg
