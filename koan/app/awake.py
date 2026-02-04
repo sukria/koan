@@ -199,6 +199,22 @@ def handle_command(text: str):
         _run_in_worker(_handle_usage)
         return
 
+    if cmd == "/recurring":
+        _handle_recurring_list()
+        return
+
+    if cmd.startswith("/cancel-recurring"):
+        _handle_cancel_recurring(text[17:].strip())
+        return
+
+    # Recurring mission commands: /daily, /hourly, /weekly
+    for prefix in ("/daily", "/hourly", "/weekly"):
+        if cmd.startswith(prefix):
+            freq = prefix[1:]  # "daily", "hourly", "weekly"
+            body = text[len(prefix):].strip()
+            _handle_recurring_add(freq, body)
+            return
+
     # Unknown command — pass to Claude as chat
     handle_chat(text)
 
@@ -300,10 +316,71 @@ def _handle_help():
         "/pause — mettre en pause (pas de nouvelles missions)\n"
         "/resume — reprendre après pause ou quota épuisé\n"
         "\n"
+        "Missions récurrentes :\n"
+        "/daily <desc> — mission quotidienne\n"
+        "/hourly <desc> — mission toutes les heures\n"
+        "/weekly <desc> — mission hebdomadaire\n"
+        "/recurring — lister les missions récurrentes\n"
+        "/cancel-recurring <n> — supprimer une récurrence\n"
+        "\n"
         "Pour envoyer une mission : commencer par \"mission:\" ou un verbe d'action (implement, fix, add...)\n"
         "Tout autre message = conversation libre avec Kōan."
     )
     send_telegram(help_text)
+
+
+def _handle_recurring_add(frequency: str, body: str):
+    """Add a recurring mission with the given frequency."""
+    if not body:
+        send_telegram(f"Usage: /{frequency} <description>\nEx: /{frequency} check open pull requests")
+        return
+
+    project, text = parse_project(body)
+    recurring_path = INSTANCE_DIR / "recurring.json"
+
+    try:
+        from app.recurring import add_recurring
+        mission = add_recurring(recurring_path, frequency, text, project)
+        ack = f"🔁 Recurring mission added ({frequency})"
+        if project:
+            ack += f" [project:{project}]"
+        ack += f":\n\n{text}"
+        send_telegram(ack)
+        print(f"[awake] Recurring mission added: [{frequency}] {text[:60]}")
+    except ValueError as e:
+        send_telegram(str(e))
+
+
+def _handle_recurring_list():
+    """List all recurring missions."""
+    recurring_path = INSTANCE_DIR / "recurring.json"
+
+    from app.recurring import list_recurring, format_recurring_list
+    missions = list_recurring(recurring_path)
+    send_telegram(format_recurring_list(missions))
+
+
+def _handle_cancel_recurring(identifier: str):
+    """Cancel a recurring mission by number or keyword."""
+    recurring_path = INSTANCE_DIR / "recurring.json"
+
+    if not identifier:
+        from app.recurring import list_recurring, format_recurring_list
+        missions = list_recurring(recurring_path)
+        if missions:
+            msg = format_recurring_list(missions)
+            msg += "\n\nUsage: /cancel-recurring <number or keyword>"
+            send_telegram(msg)
+        else:
+            send_telegram("No recurring missions to cancel.")
+        return
+
+    try:
+        from app.recurring import remove_recurring
+        removed = remove_recurring(recurring_path, identifier)
+        send_telegram(f"Recurring mission removed: {removed}")
+    except ValueError as e:
+        send_telegram(str(e))
 
 
 def _handle_usage():
