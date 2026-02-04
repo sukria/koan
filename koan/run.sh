@@ -388,7 +388,7 @@ while true; do
     echo "  Mission: $MISSION_TITLE"
     echo "  Project: $PROJECT_NAME"
     echo ""
-    notify "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] Mission taken: $MISSION_TITLE"
+    notify "🚀 Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] Mission taken: $MISSION_TITLE"
   else
     ESTIMATED_COST="5.0"
     # Uppercase mode for display (bash 3.2 compatible)
@@ -398,7 +398,7 @@ while true; do
     echo "  Project: $PROJECT_NAME"
     echo "  Focus: $FOCUS_AREA"
     echo ""
-    notify "Run $RUN_NUM/$MAX_RUNS — Autonomous: ${AUTONOMOUS_MODE} mode on $PROJECT_NAME"
+    notify "🚀 Run $RUN_NUM/$MAX_RUNS — Autonomous: ${AUTONOMOUS_MODE} mode on $PROJECT_NAME"
   fi
 
   # Build mission instruction for agent prompt
@@ -600,9 +600,9 @@ Koan paused after $count runs. Auto-resume in 5h or use /resume to restart manua
     fi
   else
     if [ -n "$MISSION_TITLE" ]; then
-      notify "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] Mission failed: $MISSION_TITLE"
+      notify "❌ Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] Mission failed: $MISSION_TITLE"
     else
-      notify "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] Run failed"
+      notify "❌ Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] Run failed"
     fi
   fi
 

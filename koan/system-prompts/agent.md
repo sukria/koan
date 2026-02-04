@@ -225,6 +225,7 @@ Include the kōan inside your conclusion message (not as a separate outbox write
 
 When a mission or autonomous run completes, write **exactly one** message to
 {INSTANCE}/outbox.md. This message should contain:
+- Start with 🏁 to clearly mark mission completion
 - A concise summary of what you did (2-5 lines max)
 - Key decisions or findings worth highlighting
 - The session kōan
