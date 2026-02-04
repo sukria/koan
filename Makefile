@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: setup awake run clean say migrate test dashboard errand-run errand-awake
+.PHONY: setup awake run clean say migrate test dashboard errand-run errand-awake install
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
@@ -38,6 +38,12 @@ errand-run:
 
 errand-awake: setup
 	caffeinate -i sh -c 'cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/awake.py'
+
+install:
+	@echo "→ Starting Kōan Setup Wizard..."
+	@python3 -m venv $(VENV) 2>/dev/null || true
+	@$(VENV)/bin/pip install -q flask 2>/dev/null || pip3 install -q flask 2>/dev/null
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. python3 app/setup_wizard.py
 
 clean:
 	rm -rf $(VENV)

@@ -1,0 +1,114 @@
+{% extends "wizard/base.html" %}
+{% set step = 1 %}
+
+{% block title %}Welcome - Kōan Setup{% endblock %}
+{% block subtitle %}Let's get you started{% endblock %}
+
+{% block content %}
+<div class="wizard-card">
+    <h2>Prerequisites</h2>
+    <p>Before we begin, let's make sure everything is ready.</p>
+
+    <ul class="check-list">
+        <li class="check-item">
+            <span class="check-icon {% if status.claude_installed %}success{% else %}error{% endif %}">
+                {% if status.claude_installed %}✓{% else %}✗{% endif %}
+            </span>
+            <span class="check-text">
+                Claude Code CLI
+                {% if not status.claude_installed %}
+                <div class="form-hint">
+                    Install from <a href="https://claude.ai/code" target="_blank" style="color: var(--accent)">claude.ai/code</a>
+                </div>
+                {% endif %}
+            </span>
+        </li>
+        <li class="check-item">
+            <span class="check-icon success">✓</span>
+            <span class="check-text">Python 3.8+</span>
+        </li>
+        <li class="check-item">
+            <span class="check-icon {% if status.instance_exists %}success{% else %}pending{% endif %}">
+                {% if status.instance_exists %}✓{% else %}○{% endif %}
+            </span>
+            <span class="check-text">
+                Instance directory
+                {% if not status.instance_exists %}
+                <div class="form-hint">Will be created automatically</div>
+                {% endif %}
+            </span>
+        </li>
+        <li class="check-item">
+            <span class="check-icon {% if status.env_exists %}success{% else %}pending{% endif %}">
+                {% if status.env_exists %}✓{% else %}○{% endif %}
+            </span>
+            <span class="check-text">
+                Environment file (.env)
+                {% if not status.env_exists %}
+                <div class="form-hint">Will be created from template</div>
+                {% endif %}
+            </span>
+        </li>
+    </ul>
+</div>
+
+<div class="wizard-card">
+    <h2>What is Kōan?</h2>
+    <p>
+        Kōan is an autonomous background agent that uses idle Claude API quota to work on your projects.
+        It runs continuously, picking up missions you assign via Telegram, executing them through Claude Code CLI,
+        and reporting back.
+    </p>
+    <p style="margin-top: 1rem; color: var(--text);">
+        <strong>Philosophy:</strong> "The agent proposes. The human decides."
+    </p>
+</div>
+
+{% if not status.claude_installed %}
+<div class="alert alert-warning">
+    <span>⚠️</span>
+    <div>
+        <strong>Claude Code CLI required</strong><br>
+        <span style="color: var(--text-muted)">Install and authenticate Claude Code before continuing.</span>
+    </div>
+</div>
+{% endif %}
+
+<div class="btn-row end">
+    {% if status.claude_installed %}
+    <button id="btn-continue" class="btn btn-primary" onclick="initAndContinue()">
+        Continue →
+    </button>
+    {% else %}
+    <button class="btn btn-primary" disabled>
+        Install Claude Code first
+    </button>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function initAndContinue() {
+    const btn = document.getElementById('btn-continue');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Initializing...';
+
+    try {
+        const response = await fetch('/step/welcome/init', { method: 'POST' });
+        const data = await response.json();
+        if (data.ok) {
+            window.location.href = '/step/telegram';
+        } else {
+            alert('Failed to initialize. Please try again.');
+            btn.disabled = false;
+            btn.innerHTML = 'Continue →';
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+        btn.disabled = false;
+        btn.innerHTML = 'Continue →';
+    }
+}
+</script>
+{% endblock %}
