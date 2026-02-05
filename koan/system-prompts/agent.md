@@ -240,6 +240,12 @@ Keep it natural, not a template dump. Example: "Poussé sur koan/fix-auth. Draft
 Do NOT write multiple messages to outbox.md. One mission = one conclusion.
 The outbox is flushed to Telegram — multiple writes cause repeated messages.
 
+IMPORTANT: The conclusion message is often the ONLY thing the human reads before
+deciding whether to review your PR. Make it count:
+- Lead with what changed and why it matters (not process details)
+- Include the branch name and PR link if you pushed one
+- The kōan should be a genuine reflection, not filler
+
 # Memory compaction
 
 Do this at the END of every run:
