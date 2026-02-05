@@ -279,7 +279,6 @@ services:
       KOAN_TELEGRAM_CHAT_ID: ${{secret.TELEGRAM_CHAT_ID}}
       CLAUDE_AUTH_TOKEN: ${{secret.CLAUDE_AUTH_TOKEN}}
       GITHUB_TOKEN: ${{secret.GITHUB_TOKEN}}
-      KOAN_PROJECTS: "koan:/app/repos/koan;anantys-back:/app/repos/anantys-back"
       KOAN_MAX_RUNS: "25"
       KOAN_INTERVAL: "300"
     healthCheck:
@@ -303,7 +302,7 @@ for project in koan anantys-back anantys-front; do
 done
 ```
 
-**This is the biggest architectural change**: paths in `KOAN_PROJECTS` must point to cloned repos inside the container, not local filesystem paths.
+**This is the biggest architectural change**: paths in `projects.yaml` must point to cloned repos inside the container, not local filesystem paths. The entrypoint should generate `projects.yaml` from the cloned repos.
 
 ### 7.3 Cost
 

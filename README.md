@@ -43,7 +43,7 @@ Optional:
 
 ## Features
 
-- **Multi-project support** — Up to 5 projects with per-project memory isolation, round-robin rotation
+- **Multi-project support** — Unlimited projects via `projects.yaml`, per-project memory isolation, round-robin rotation
 - **Smart mission picker** — Claude-based prioritization when 3+ missions across 2+ projects; direct extraction otherwise
 - **Crash recovery** — Stale "In Progress" missions auto-reset on restart
 - **Auto-merge** — Configurable per-project merge of koan/* branches (squash/merge/rebase strategies)

@@ -19,6 +19,7 @@ venv/
 # Environment & secrets
 .env
 .envrc
+projects.yaml
 
 # OS
 .DS_Store

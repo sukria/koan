@@ -55,7 +55,12 @@ MISSIONS_FILE = INSTANCE_DIR / "missions.md"
 OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
 TELEGRAM_HISTORY_FILE = INSTANCE_DIR / "telegram-history.jsonl"
 TOPICS_FILE = INSTANCE_DIR / "previous-discussions-topics.json"
-PROJECT_PATH = os.environ.get("KOAN_PROJECT_PATH", "")
+def _get_default_project_path() -> str:
+    """Get path of the first configured project, or empty string."""
+    projects = get_known_projects()
+    return projects[0][1] if projects else ""
+
+PROJECT_PATH = _get_default_project_path()
 
 # Context loaded once at startup
 SOUL = ""
@@ -597,7 +602,7 @@ def _handle_pr(args: str):
 def _resolve_project_path(repo_name: str) -> Optional[str]:
     """Find local project path matching a repository name.
 
-    Tries known projects first, then falls back to KOAN_PROJECT_PATH.
+    Tries known projects first, then falls back to the first configured project.
     """
     projects = get_known_projects()
     # Try exact match on project name

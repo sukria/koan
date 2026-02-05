@@ -437,27 +437,79 @@ def parse_project(text: str) -> Tuple[Optional[str], str]:
 
 
 def get_known_projects() -> list:
-    """Return sorted list of (name, path) tuples from KOAN_PROJECTS env var.
+    """Return sorted list of (name, path) tuples from projects.yaml.
 
-    Format: name:path;name2:path2
-    Falls back to KOAN_PROJECT_PATH with name "default" for single-project mode.
-    Returns empty list if neither is set.
+    Reads KOAN_ROOT/projects.yaml which contains a list of project entries
+    with 'name' and 'path' keys. Returns empty list if the file is missing
+    or contains no valid entries.
     """
-    projects_str = os.environ.get("KOAN_PROJECTS", "")
-    if projects_str:
-        result = []
-        for pair in projects_str.split(";"):
-            pair = pair.strip()
-            if ":" in pair:
-                name, path = pair.split(":", 1)
-                result.append((name.strip(), path.strip()))
-        return sorted(result, key=lambda x: x[0].lower())
+    projects_path = KOAN_ROOT / "projects.yaml"
+    if not projects_path.exists():
+        return []
 
-    single_path = os.environ.get("KOAN_PROJECT_PATH", "")
-    if single_path:
-        return [("default", single_path)]
+    try:
+        data = yaml.safe_load(projects_path.read_text())
+    except (yaml.YAMLError, OSError):
+        return []
 
-    return []
+    if not isinstance(data, dict):
+        return []
+
+    projects = data.get("projects")
+    if not isinstance(projects, list):
+        return []
+
+    result = []
+    for entry in projects:
+        if isinstance(entry, dict) and "name" in entry and "path" in entry:
+            name = str(entry["name"]).strip()
+            path = str(entry["path"]).strip()
+            if name and path:
+                result.append((name, path))
+    return sorted(result, key=lambda x: x[0].lower())
+
+
+def get_projects_string() -> str:
+    """Return projects as semicolon-separated 'name:path' string.
+
+    Used by run.sh to pass project info to CLI scripts that expect the legacy format.
+    """
+    projects = get_known_projects()
+    return ";".join(f"{name}:{path}" for name, path in projects)
+
+
+def validate_projects_config() -> None:
+    """Validate projects.yaml exists and is valid. Exits with error if not.
+
+    Called at startup by run.sh and awake.py to fail fast with a clear message.
+    """
+    projects_path = KOAN_ROOT / "projects.yaml"
+    if not projects_path.exists():
+        sample = KOAN_ROOT / "projects.sample.yaml"
+        msg = (
+            f"[koan] Error: {projects_path} not found.\n"
+            f"Project configuration has moved from KOAN_PROJECTS env var to projects.yaml.\n"
+        )
+        if sample.exists():
+            msg += f"Copy the sample and edit it:\n  cp {sample} {projects_path}\n"
+        else:
+            msg += (
+                "Create projects.yaml with your projects:\n"
+                "  projects:\n"
+                "    - name: my-app\n"
+                "      path: /path/to/my-app\n"
+            )
+        print(msg, file=sys.stderr)
+        raise SystemExit(1)
+
+    projects = get_known_projects()
+    if not projects:
+        print(
+            f"[koan] Error: {projects_path} contains no valid projects.\n"
+            "Each entry needs 'name' and 'path' keys. See projects.sample.yaml.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def atomic_write(path: Path, content: str):

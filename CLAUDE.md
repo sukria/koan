@@ -61,7 +61,7 @@ Communication between processes happens through shared files in `instance/` with
 ## Conventions
 
 - Claude always creates **`koan/*` branches**, never commits to main
-- Environment config via `.env` file and `KOAN_*` variables (e.g., `KOAN_PROJECTS=name:path;name2:path2`)
-- Multi-project support: up to 5 projects, each with isolated memory under `memory/projects/{name}/`
+- Environment config via `.env` file and `KOAN_*` variables
+- Multi-project support via `projects.yaml`, with isolated memory under `memory/projects/{name}/`
 - Tests use temp directories and isolated env vars — no real Telegram calls
 - `system-prompt.md` defines the Claude agent's identity, priorities, and autonomous mode rules

@@ -34,32 +34,26 @@ fi
 MAX_RUNS=${KOAN_MAX_RUNS:-25}
 INTERVAL=${KOAN_INTERVAL:-5}
 
-# Parse projects configuration (bash 3.2 compatible - no associative arrays)
+# Load projects from projects.yaml (via Python helper)
 PROJECT_NAMES=()
 PROJECT_PATHS=()
 
-if [ -n "$KOAN_PROJECTS" ]; then
-  # Multi-project mode: parse name:path;name:path;...
-  IFS=';' read -ra PROJECT_PAIRS <<< "$KOAN_PROJECTS"
-  for pair in "${PROJECT_PAIRS[@]}"; do
-    IFS=':' read -r name path <<< "$pair"
-    PROJECT_NAMES+=("$name")
-    PROJECT_PATHS+=("$path")
-  done
-elif [ -n "$KOAN_PROJECT_PATH" ]; then
-  # Single-project mode (backward compatible)
-  PROJECT_NAMES=("default")
-  PROJECT_PATHS=("$KOAN_PROJECT_PATH")
-else
-  echo "[koan] Error: Set KOAN_PROJECT_PATH or KOAN_PROJECTS env var."
+# Validate projects.yaml exists and is valid (exits with clear error if not)
+"$PYTHON" -c "from app.utils import validate_projects_config; validate_projects_config()" || exit 1
+
+# Read projects into bash arrays
+PROJECTS_STR=$("$PYTHON" -c "from app.utils import get_projects_string; print(get_projects_string())")
+if [ -z "$PROJECTS_STR" ]; then
+  echo "[koan] Error: No projects found in projects.yaml."
   exit 1
 fi
 
-# Validate project configuration
-if [ ${#PROJECT_NAMES[@]} -gt 5 ]; then
-  echo "[koan] Error: Max 5 projects allowed. You have ${#PROJECT_NAMES[@]}."
-  exit 1
-fi
+IFS=';' read -ra PROJECT_PAIRS <<< "$PROJECTS_STR"
+for pair in "${PROJECT_PAIRS[@]}"; do
+  IFS=':' read -r name path <<< "$pair"
+  PROJECT_NAMES+=("$name")
+  PROJECT_PATHS+=("$path")
+done
 
 for i in "${!PROJECT_NAMES[@]}"; do
   name="${PROJECT_NAMES[$i]}"
@@ -251,7 +245,7 @@ while true; do
   fi
 
   # Parse usage.md and decide autonomous mode
-  USAGE_DECISION=$("$PYTHON" "$USAGE_TRACKER" "$INSTANCE/usage.md" "$count" "$KOAN_PROJECTS" 2>/dev/null || echo "implement:50:Tracker error:0")
+  USAGE_DECISION=$("$PYTHON" "$USAGE_TRACKER" "$INSTANCE/usage.md" "$count" "$PROJECTS_STR" 2>/dev/null || echo "implement:50:Tracker error:0")
   IFS=':' read -r AUTONOMOUS_MODE AVAILABLE_PCT DECISION_REASON RECOMMENDED_PROJECT_IDX <<< "$USAGE_DECISION"
 
   # Display usage status (verbose logging)
@@ -276,7 +270,7 @@ while true; do
   LAST_PROJECT=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "")
   PICK_MISSION="$APP_DIR/pick_mission.py"
   PICK_STDERR=$(mktemp)
-  PICK_RESULT=$("$PYTHON" "$PICK_MISSION" "$INSTANCE" "$KOAN_PROJECTS" "$RUN_NUM" "$AUTONOMOUS_MODE" "$LAST_PROJECT" 2>"$PICK_STDERR" || echo "")
+  PICK_RESULT=$("$PYTHON" "$PICK_MISSION" "$INSTANCE" "$PROJECTS_STR" "$RUN_NUM" "$AUTONOMOUS_MODE" "$LAST_PROJECT" 2>"$PICK_STDERR" || echo "")
   if [ -s "$PICK_STDERR" ]; then
     echo "[koan] Mission picker stderr:"
     cat "$PICK_STDERR"

@@ -59,16 +59,25 @@ KOAN_SLACK_BOT_TOKEN=xoxb-your-token
 KOAN_SLACK_CHANNEL_ID=C01234ABCDE
 ```
 
-### 4. Set environment variables
+### 4. Configure your projects
+
+```bash
+cp projects.sample.yaml projects.yaml
+$EDITOR projects.yaml    # Add your project names and paths
+```
+
+The `projects.yaml` file is gitignored — your paths stay local. There is no limit on the number of projects.
+
+### 5. Set environment variables
 
 ```bash
 cp env.example .env
-$EDITOR .env    # Fill in your token, chat ID and project path
+$EDITOR .env    # Fill in your token and chat ID
 ```
 
 The `.env` file is gitignored — your secrets stay local.
 
-### 5. Install dependencies
+### 6. Install dependencies
 
 ```bash
 make setup
@@ -76,7 +85,7 @@ make setup
 
 This creates a `.venv/` and installs Python dependencies from `requirements.txt`.
 
-### 6. Run
+### 7. Run
 
 ```bash
 # Terminal 1: Telegram bridge
@@ -139,6 +148,4 @@ Alternatively: **System Settings → Energy → Prevent automatic sleeping when 
 | `KOAN_INTERVAL` | 5 | Seconds between runs |
 | `KOAN_BRIDGE_INTERVAL` | 3 | Messaging poll interval (seconds) |
 | `KOAN_CHAT_TIMEOUT` | 180 | Claude CLI timeout for chat responses (seconds) |
-| `KOAN_PROJECTS` | — | Multi-project config: `name:path;name2:path2` |
-| `KOAN_PROJECT_PATH` | — | Single-project path (alternative to `KOAN_PROJECTS`) |
 | `KOAN_GIT_SYNC_INTERVAL` | 5 | Runs between git sync checks |

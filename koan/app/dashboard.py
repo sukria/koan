@@ -263,7 +263,9 @@ def chat_send():
         save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
 
         prompt = _build_dashboard_prompt(text)
-        project_path = os.environ.get("KOAN_PROJECT_PATH", str(KOAN_ROOT))
+        from app.utils import get_known_projects
+        projects = get_known_projects()
+        project_path = projects[0][1] if projects else str(KOAN_ROOT)
         allowed_tools_str = get_allowed_tools()
         allowed_tools_list = [t.strip() for t in allowed_tools_str.split(",") if t.strip()]
         models = get_model_config()

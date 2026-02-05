@@ -1,0 +1,18 @@
+# Koan — Project Configuration
+#
+# Copy this file to projects.yaml and edit to match your setup.
+# Each entry defines a project Koan can work on.
+#
+# projects.yaml is gitignored — your paths stay local.
+# There is no limit on the number of projects.
+
+projects:
+  - name: my-app
+    path: /Users/you/workspace/my-app
+
+  - name: backend
+    path: /Users/you/workspace/backend
+
+  # Add as many projects as you need:
+  # - name: frontend
+  #   path: /Users/you/workspace/frontend

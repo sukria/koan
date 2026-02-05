@@ -545,41 +545,114 @@ class TestGetStartOnPause:
 
 
 class TestGetKnownProjects:
-    def test_multi_project(self, monkeypatch):
-        monkeypatch.setenv("KOAN_PROJECTS", "beta:/b;alpha:/a")
-        from app.utils import get_known_projects
-        result = get_known_projects()
+    def _write_projects_yaml(self, tmp_path, content):
+        (tmp_path / "projects.yaml").write_text(content)
+
+    def test_multi_project(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        self._write_projects_yaml(tmp_path, "projects:\n  - name: beta\n    path: /b\n  - name: alpha\n    path: /a\n")
+        result = utils.get_known_projects()
         assert result == [("alpha", "/a"), ("beta", "/b")]
 
-    def test_single_project_fallback(self, monkeypatch):
-        monkeypatch.delenv("KOAN_PROJECTS", raising=False)
-        monkeypatch.setenv("KOAN_PROJECT_PATH", "/my/project")
-        from app.utils import get_known_projects
-        result = get_known_projects()
-        assert result == [("default", "/my/project")]
+    def test_empty_when_no_file(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        assert utils.get_known_projects() == []
 
-    def test_empty_when_no_env(self, monkeypatch):
-        monkeypatch.delenv("KOAN_PROJECTS", raising=False)
-        monkeypatch.delenv("KOAN_PROJECT_PATH", raising=False)
-        from app.utils import get_known_projects
-        assert get_known_projects() == []
-
-    def test_sorts_alphabetically_case_insensitive(self, monkeypatch):
-        monkeypatch.setenv("KOAN_PROJECTS", "Zulu:/z;alpha:/a;Beta:/b")
-        from app.utils import get_known_projects
-        result = get_known_projects()
+    def test_sorts_alphabetically_case_insensitive(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        self._write_projects_yaml(tmp_path, "projects:\n  - name: Zulu\n    path: /z\n  - name: alpha\n    path: /a\n  - name: Beta\n    path: /b\n")
+        result = utils.get_known_projects()
         assert [name for name, _ in result] == ["alpha", "Beta", "Zulu"]
 
-    def test_handles_whitespace(self, monkeypatch):
-        monkeypatch.setenv("KOAN_PROJECTS", " foo : /foo ; bar : /bar ")
-        from app.utils import get_known_projects
-        result = get_known_projects()
+    def test_handles_whitespace(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        self._write_projects_yaml(tmp_path, "projects:\n  - name: ' foo '\n    path: ' /foo '\n  - name: ' bar '\n    path: ' /bar '\n")
+        result = utils.get_known_projects()
         assert result == [("bar", "/bar"), ("foo", "/foo")]
 
-    def test_skips_malformed_entries(self, monkeypatch):
-        monkeypatch.setenv("KOAN_PROJECTS", "good:/path;badentry;also_good:/other")
-        from app.utils import get_known_projects
-        result = get_known_projects()
+    def test_skips_malformed_entries(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        self._write_projects_yaml(tmp_path, "projects:\n  - name: good\n    path: /path\n  - bad_entry\n  - name: also_good\n    path: /other\n")
+        result = utils.get_known_projects()
         assert len(result) == 2
         assert result[0][0] == "also_good"
         assert result[1][0] == "good"
+
+    def test_empty_projects_list(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        self._write_projects_yaml(tmp_path, "projects: []\n")
+        assert utils.get_known_projects() == []
+
+    def test_invalid_yaml(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        (tmp_path / "projects.yaml").write_text(": invalid: yaml: [")
+        assert utils.get_known_projects() == []
+
+    def test_no_projects_key(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        self._write_projects_yaml(tmp_path, "other_key: value\n")
+        assert utils.get_known_projects() == []
+
+    def test_many_projects(self, monkeypatch, tmp_path):
+        """Verify there is no artificial project limit."""
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        entries = "\n".join(f"  - name: project{i}\n    path: /p{i}" for i in range(20))
+        self._write_projects_yaml(tmp_path, f"projects:\n{entries}\n")
+        result = utils.get_known_projects()
+        assert len(result) == 20
+
+
+class TestGetProjectsString:
+    def _write_projects_yaml(self, tmp_path, content):
+        (tmp_path / "projects.yaml").write_text(content)
+
+    def test_returns_semicolon_separated(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        self._write_projects_yaml(tmp_path, "projects:\n  - name: alpha\n    path: /a\n  - name: beta\n    path: /b\n")
+        result = utils.get_projects_string()
+        assert result == "alpha:/a;beta:/b"
+
+    def test_empty_when_no_file(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        assert utils.get_projects_string() == ""
+
+
+class TestValidateProjectsConfig:
+    def test_exits_when_no_file(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        with pytest.raises(SystemExit):
+            utils.validate_projects_config()
+
+    def test_exits_when_empty_projects(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        (tmp_path / "projects.yaml").write_text("projects: []\n")
+        with pytest.raises(SystemExit):
+            utils.validate_projects_config()
+
+    def test_passes_with_valid_config(self, monkeypatch, tmp_path):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        (tmp_path / "projects.yaml").write_text("projects:\n  - name: test\n    path: /test\n")
+        utils.validate_projects_config()  # Should not raise
+
+    def test_mentions_sample_file(self, monkeypatch, tmp_path, capsys):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        (tmp_path / "projects.sample.yaml").write_text("# sample")
+        with pytest.raises(SystemExit):
+            utils.validate_projects_config()
+        captured = capsys.readouterr()
+        assert "projects.sample.yaml" in captured.err
