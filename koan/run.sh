@@ -235,16 +235,20 @@ while true; do
       export KOAN_CURRENT_PROJECT="$PROJECT_NAME"
       export KOAN_CURRENT_PROJECT_PATH="$PROJECT_PATH"
 
+      PAUSE_SESSION_INFO="Pause mode. Run loop paused."
       CONTEMPLATE_PROMPT=$(sed \
         -e "s|{INSTANCE}|$INSTANCE|g" \
         -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
+        -e "s|{SESSION_INFO}|$PAUSE_SESSION_INFO|g" \
         "$KOAN_ROOT/koan/system-prompts/contemplative.md")
 
       cd "$INSTANCE"
       CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
       set +e
       # shellcheck disable=SC2086
-      claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 3 $CONTEMPLATE_FLAGS 2>/dev/null
+      echo "[koan] Running contemplative session..."
+      claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 5 $CONTEMPLATE_FLAGS 2>/dev/null
+      echo "[koan] Contemplative session ended."
       set -e
     fi
 
@@ -350,21 +354,25 @@ $KNOWN_PROJECTS"
         notify "🪷 Run $RUN_NUM/$MAX_RUNS — Contemplative mode (rolled $CONTEMPLATE_ROLL < $CONTEMPLATIVE_CHANCE%)"
 
         # Run contemplative session (same as pause mode contemplation, but doesn't enter pause)
+        CONTEMPLATE_SESSION_INFO="Run $RUN_NUM/$MAX_RUNS on $PROJECT_NAME. Mode: $AUTONOMOUS_MODE. Triggered by $CONTEMPLATIVE_CHANCE% contemplative chance."
         CONTEMPLATE_PROMPT=$(sed \
           -e "s|{INSTANCE}|$INSTANCE|g" \
           -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
+          -e "s|{SESSION_INFO}|$CONTEMPLATE_SESSION_INFO|g" \
           "$KOAN_ROOT/koan/system-prompts/contemplative.md")
 
         cd "$INSTANCE"
         CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
         set +e
         # shellcheck disable=SC2086
-        claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 3 $CONTEMPLATE_FLAGS 2>/dev/null
+        echo "[koan] Running contemplative session..."
+        claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 5 $CONTEMPLATE_FLAGS 2>/dev/null
+        echo "[koan] Contemplative session ended."
         set -e
 
         # Contemplative session done — increment counter and loop
         count=$((count + 1))
-        echo "[koan] Contemplative session complete. Sleeping ${INTERVAL}s..."
+        echo "[koan] Sleeping ${INTERVAL}s..."
         sleep "$INTERVAL"
         continue
       fi
