@@ -93,10 +93,11 @@ fi
 # Set up GitHub CLI identity if GITHUB_USER is configured
 if [ -n "${GITHUB_USER:-}" ]; then
   GH_AUTH_OUTPUT=$("$PYTHON" -m app.github_auth 2>/dev/null)
-  if [ $? -eq 0 ] && [ -n "$GH_AUTH_OUTPUT" ]; then
-    eval "export $GH_AUTH_OUTPUT"
+  GH_AUTH_EXIT=$?
+  if [ $GH_AUTH_EXIT -eq 0 ] && [ -n "$GH_AUTH_OUTPUT" ]; then
+    export "${GH_AUTH_OUTPUT?}"
     echo "[koan] GitHub CLI authenticated as $GITHUB_USER"
-  elif [ $? -ne 0 ]; then
+  else
     echo "[koan] Warning: GitHub auth failed for $GITHUB_USER — gh commands may fail"
   fi
 fi
