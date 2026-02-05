@@ -860,7 +860,13 @@ def handle_message(text: str):
 
 
 def main():
+    from app.banners import print_bridge_banner
+
     check_config()
+
+    provider_name = "telegram" # about to become dynamic with provider abstraction
+    print_bridge_banner(f"messaging bridge — {provider_name.lower()}")
+
     # Compact old conversation history to avoid context bleed across sessions
     compacted = compact_telegram_history(TELEGRAM_HISTORY_FILE, TOPICS_FILE)
     if compacted:
