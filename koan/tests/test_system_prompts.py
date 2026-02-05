@@ -42,6 +42,16 @@ def test_agent_prompt_has_all_required_placeholders():
         assert placeholder in agent_prompt, f"Missing placeholder: {placeholder}"
 
 
+def test_agent_prompt_has_branch_pr_notification_instructions():
+    """Conclusion message should instruct agent to report branch name and PR link."""
+    agent_prompt = (PROMPTS_DIR / "agent.md").read_text()
+
+    # Must mention branch notification in conclusion section
+    assert "pushed a branch" in agent_prompt
+    # Must mention PR link
+    assert "draft PR" in agent_prompt
+
+
 def test_all_prompts_exist():
     """All referenced prompt files should exist."""
     expected_prompts = [
