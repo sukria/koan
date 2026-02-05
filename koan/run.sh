@@ -115,6 +115,9 @@ trap cleanup INT TERM
 
 count=0
 
+# Print startup banner
+"$PYTHON" -c "from app.banners import print_agent_banner; print_agent_banner('agent loop — $CLI_PROVIDER')" 2>/dev/null || true
+
 # Crash recovery: move stale in-progress missions back to pending
 RECOVER="$APP_DIR/recover.py"
 echo "[koan] Checking for interrupted missions..."
