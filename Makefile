@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: setup awake run clean say migrate test dashboard errand-run errand-awake install
+.PHONY: setup awake run clean say migrate test dashboard errand-run errand-awake install sync-instance
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
@@ -47,3 +47,14 @@ install:
 
 clean:
 	rm -rf $(VENV)
+
+sync-instance:
+	@mkdir -p instance
+	@for f in instance.example/*; do \
+		name=$$(basename "$$f"); \
+		if [ ! -e "instance/$$name" ]; then \
+			echo "→ Copying $$name"; \
+			cp -r "$$f" "instance/$$name"; \
+		fi; \
+	done
+	@echo "✓ instance/ synced with instance.example/"
