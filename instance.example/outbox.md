@@ -1,3 +1,3 @@
 # Outbox
 
-Messages here will be sent to Telegram by bridge.py, then cleared.
+Messages here will be sent to the messaging bridge (awake.py), then cleared.

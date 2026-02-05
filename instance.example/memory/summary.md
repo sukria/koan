@@ -1,6 +1,6 @@
 # Session Summary
 
-Rolling summary of past sessions. Updated by Kōan after each run.
+Rolling summary of past sessions. Updated by Koan after each run.
 
 ## 2026-01-31
 

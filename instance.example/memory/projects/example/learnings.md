@@ -1,3 +1,3 @@
 # Learnings
 
-Accumulated knowledge about the target project codebase. Updated as Kōan explores.
+Accumulated knowledge about the target project codebase. Updated as Koan explores.

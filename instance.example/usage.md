@@ -1,6 +1,6 @@
 # Usage
 
-Paste your `/usage` output below. Kōan will parse this at the start of each run.
+Paste your `/usage` output below. Koan will parse this at the start of each run.
 
 ```
 Current session
