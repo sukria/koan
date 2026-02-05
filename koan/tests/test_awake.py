@@ -726,6 +726,41 @@ class TestMainLoop:
             main()
         mock_handle.assert_not_called()
 
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates", side_effect=KeyboardInterrupt)
+    @patch("app.awake.check_config")
+    def test_main_ctrl_c_exits_gracefully(self, mock_config, mock_updates,
+                                           mock_handle, mock_flush, mock_heartbeat,
+                                           capsys):
+        """CTRL-C (KeyboardInterrupt) exits cleanly without traceback."""
+        from app.awake import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "Shutting down" in captured.out
+
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates", return_value=[])
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    @patch("app.awake.time.sleep", side_effect=KeyboardInterrupt)
+    def test_main_ctrl_c_during_sleep_exits_gracefully(self, mock_sleep, mock_config,
+                                                        mock_updates, mock_handle,
+                                                        mock_flush, mock_heartbeat,
+                                                        capsys):
+        """CTRL-C during sleep between polls also exits cleanly."""
+        from app.awake import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "Shutting down" in captured.out
+
 
 # ---------------------------------------------------------------------------
 # /pause command

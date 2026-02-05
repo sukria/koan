@@ -876,20 +876,24 @@ def main():
     print(f"[awake] Polling every {POLL_INTERVAL}s (chat mode: fast reply)")
     offset = None
 
-    while True:
-        updates = get_updates(offset)
-        for update in updates:
-            offset = update["update_id"] + 1
-            msg = update.get("message", {})
-            text = msg.get("text", "")
-            chat_id = str(msg.get("chat", {}).get("id", ""))
-            if chat_id == CHAT_ID and text:
-                print(f"[awake] Received: {text[:60]}")
-                handle_message(text)
+    try:
+        while True:
+            updates = get_updates(offset)
+            for update in updates:
+                offset = update["update_id"] + 1
+                msg = update.get("message", {})
+                text = msg.get("text", "")
+                chat_id = str(msg.get("chat", {}).get("id", ""))
+                if chat_id == CHAT_ID and text:
+                    print(f"[awake] Received: {text[:60]}")
+                    handle_message(text)
 
-        flush_outbox()
-        write_heartbeat(str(KOAN_ROOT))
-        time.sleep(POLL_INTERVAL)
+            flush_outbox()
+            write_heartbeat(str(KOAN_ROOT))
+            time.sleep(POLL_INTERVAL)
+    except KeyboardInterrupt:
+        print("\n[awake] Shutting down.")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
