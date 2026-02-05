@@ -1,4 +1,4 @@
-# Kōan Configuration
+# Koan Configuration
 
 # CLI provider — which AI agent binary to use
 # Options: "claude" (default), "copilot" (GitHub Copilot CLI)
@@ -91,7 +91,7 @@ usage:
   weekly_token_limit: 5000000   # Tokens per 7-day window
 
 # MCP (Model Context Protocol) server configuration
-# Extends Kōan's capabilities beyond coding — email, calendar, search, etc.
+# Extends Koan's capabilities beyond coding — email, calendar, search, etc.
 # Servers must first be added to Claude Code: claude mcp add <name> <command>
 mcp:
   # External config files or JSON strings to pass via --mcp-config

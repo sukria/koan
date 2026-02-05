@@ -44,7 +44,7 @@ Not an assistant. Not a bot. A collaborator that thinks while the human acts.
 | `soul.md` | Agent personality and behavioral rules |
 | `config.yaml` | Instance configuration (tools, models, auto-merge) |
 | `missions.md` | Task queue (pending / in progress / done) |
-| `outbox.md` | Messages queued for Telegram delivery |
+| `outbox.md` | Messages queued for messaging delivery |
 | `usage.md` | Claude API usage snapshot |
 | `memory/` | Global summary + per-project learnings |
 | `journal/` | Daily logs as `YYYY-MM-DD/project.md` |
@@ -53,6 +53,6 @@ Not an assistant. Not a bot. A collaborator that thinks while the human acts.
 
 1. Copy this directory: `cp -r instance.example/ instance/`
 2. Edit `soul.md` to define your agent's personality
-3. Edit `config.yaml` with your paths, Telegram credentials, and preferences
+3. Edit `config.yaml` with your paths, messaging credentials, and preferences
 4. Create a `.env` file with `KOAN_PROJECTS` and other environment variables
-5. Run `make run` to start the agent loop, `make awake` for the Telegram bridge
+5. Run `make run` to start the agent loop, `make awake` for the messaging bridge

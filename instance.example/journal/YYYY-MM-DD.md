@@ -32,4 +32,4 @@ Brief description of the day's work or mission.
 
 *[Your daily kōan — a zen question or philosophical reflection]*
 
-— Kōan
+— Koan

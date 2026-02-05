@@ -34,7 +34,7 @@ def migrate():
     default_project.mkdir(parents=True, exist_ok=True)
 
     # Move global files
-    global_files = ["human-preferences.md", "strategy.md", "genese.md", "draft-bot.md"]
+    global_files = ["human-preferences.md", "strategy.md", "genesis.md", "genese.md", "draft-bot.md"]
     for filename in global_files:
         src = MEMORY / filename
         if src.exists():

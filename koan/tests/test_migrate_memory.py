@@ -45,12 +45,12 @@ class TestMigrate:
 
     def test_moves_global_files(self, patched_migrate, memory_dir):
         """Global files (human-preferences, strategy, etc.) move to global/."""
-        for name in ["human-preferences.md", "strategy.md", "genese.md"]:
+        for name in ["human-preferences.md", "strategy.md", "genesis.md"]:
             (memory_dir / name).write_text(f"# {name}")
 
         patched_migrate.migrate()
 
-        for name in ["human-preferences.md", "strategy.md", "genese.md"]:
+        for name in ["human-preferences.md", "strategy.md", "genesis.md"]:
             assert (memory_dir / "global" / name).exists()
             assert not (memory_dir / name).exists()
 
