@@ -180,6 +180,7 @@ def handle_command(text: str):
 
     if cmd.startswith("/reflect "):
         _handle_reflect(text[9:].strip())
+        return
 
     if cmd == "/ping":
         _handle_ping()
@@ -274,17 +275,35 @@ def _handle_ping():
 def _handle_help():
     """Send the list of available commands."""
     help_text = (
-        "Available commands:\n\n"
-        "/help — this help\n"
-        "/ping — check if run loop is alive (✅/❌)\n"      
-        "/status — quick status (missions, pause, loop)\n"
-        "/usage — detailed status formatted by Claude (quota, missions, progress)\n"
-        "/stop — stop Kōan after current mission\n"
+        "Kōan — Commands\n"
+        "\n"
+        "CONTROL\n"
         "/pause — pause (no new missions)\n"
         "/resume — resume after pause or quota exhausted\n"
+        "/stop — stop Kōan after current mission\n"
         "\n"
-        "To send a mission: start with \"mission:\" or an action verb (implement, fix, add...)\n"
-        "Any other message = free conversation with Kōan."
+        "MONITORING\n"
+        "/status — quick status (missions, pause, loop)\n"
+        "/usage — detailed status (quota, progress)\n"
+        "/ping — check if run loop is alive (✅/❌)\n"
+        "/verbose — receive every progress update\n"
+        "/silent — mute updates (default mode)\n"
+        "\n"
+        "INTERACTION\n"
+        "/sparring — start a strategic sparring session\n"
+        "/reflect <text> — note a reflection in the shared journal\n"
+        "/help — this help\n"
+        "\n"
+        "MISSIONS\n"
+        '"mission:" prefix or an action verb:\n'
+        "  fix the login bug\n"
+        "  implement dark mode\n"
+        "  mission: refactor the auth module\n"
+        "\n"
+        "To target a project:\n"
+        "  [project:myproject] fix the login bug\n"
+        "\n"
+        "Any other message = free conversation."
     )
     send_telegram(help_text)
 
