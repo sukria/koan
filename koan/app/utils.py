@@ -382,6 +382,9 @@ def insert_pending_mission(missions_path: Path, entry: str):
             else:
                 content += f"\n## Pending\n\n{entry}\n"
 
+            from app.missions import normalize_content
+            content = normalize_content(content)
+
             f.seek(0)
             f.truncate()
             f.write(content)
