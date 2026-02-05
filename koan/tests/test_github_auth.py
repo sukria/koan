@@ -136,6 +136,7 @@ class TestSetupGithubAuth:
 class TestCLIEntryPoint:
     def test_prints_token_on_success(self, monkeypatch, capsys):
         monkeypatch.setenv("GITHUB_USER", "my-bot")
+        monkeypatch.delenv("GH_TOKEN", raising=False)
         mock_run = MagicMock(return_value=MagicMock(returncode=0, stdout="ghp_token123\n"))
         monkeypatch.setattr(subprocess, "run", mock_run)
         with pytest.raises(SystemExit) as exc_info:
@@ -154,6 +155,7 @@ class TestCLIEntryPoint:
 
     def test_exits_1_on_failure(self, monkeypatch):
         monkeypatch.setenv("GITHUB_USER", "my-bot")
+        monkeypatch.delenv("GH_TOKEN", raising=False)
         mock_run = MagicMock(return_value=MagicMock(returncode=1, stdout=""))
         monkeypatch.setattr(subprocess, "run", mock_run)
         with patch("app.notify.send_telegram"):

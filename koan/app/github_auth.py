@@ -52,10 +52,6 @@ def get_gh_token(username: str) -> Optional[str]:
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
         return None
-    except FileNotFoundError:
-        return None
-    except subprocess.TimeoutExpired:
-        return None
     except Exception:
         return None
 
@@ -123,29 +119,17 @@ def setup_github_auth() -> bool:
 
 
 if __name__ == "__main__":
-    """CLI entry point for run.sh integration.
-
-    Prints GH_TOKEN=<token> on success (for eval in bash).
-    Exits 0 if no GITHUB_USER configured or token retrieved.
-    Exits 1 if GITHUB_USER set but token retrieval failed.
-    """
+    # CLI entry point for run.sh integration.
+    # Prints GH_TOKEN=<token> on success (for eval in bash).
+    # Exits 0 if no GITHUB_USER configured or token retrieved.
+    # Exits 1 if GITHUB_USER set but token retrieval failed.
     username = get_github_user()
     if not username:
         sys.exit(0)
 
-    token = get_gh_token(username)
-    if token:
-        print(f"GH_TOKEN={token}")
+    if setup_github_auth():
+        # setup_github_auth sets os.environ["GH_TOKEN"] on success
+        print(f"GH_TOKEN={os.environ['GH_TOKEN']}")
         sys.exit(0)
 
-    # Failure — try to alert
-    print(f"[github_auth] Failed to get token for user: {username}", file=sys.stderr)
-    try:
-        from app.notify import send_telegram
-        send_telegram(
-            f"⚠️ GitHub auth failed for `{username}`. "
-            f"Run `gh auth login --user {username}` to fix."
-        )
-    except Exception:
-        pass
     sys.exit(1)
