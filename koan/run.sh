@@ -90,6 +90,17 @@ if [ -n "${KOAN_EMAIL:-}" ]; then
   export GIT_COMMITTER_EMAIL="$KOAN_EMAIL"
 fi
 
+# Set up GitHub CLI identity if GITHUB_USER is configured
+if [ -n "${GITHUB_USER:-}" ]; then
+  GH_AUTH_OUTPUT=$("$PYTHON" -m app.github_auth 2>/dev/null)
+  if [ $? -eq 0 ] && [ -n "$GH_AUTH_OUTPUT" ]; then
+    eval "export $GH_AUTH_OUTPUT"
+    echo "[koan] GitHub CLI authenticated as $GITHUB_USER"
+  elif [ $? -ne 0 ]; then
+    echo "[koan] Warning: GitHub auth failed for $GITHUB_USER — gh commands may fail"
+  fi
+fi
+
 # Initialize .koan-project with first project
 echo "${PROJECT_NAMES[0]}" > "$KOAN_ROOT/.koan-project"
 export KOAN_CURRENT_PROJECT="${PROJECT_NAMES[0]}"
