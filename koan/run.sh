@@ -480,6 +480,20 @@ create koan/* branches, commit, and push, but DO NOT merge yourself.
   fi
   PROMPT="$PROMPT$MERGE_POLICY"
 
+  # Deep Research suggestions: for DEEP mode autonomous work, inject priority topics
+  DEEP_RESEARCH="$APP_DIR/deep_research.py"
+  if [ "$AUTONOMOUS_MODE" = "deep" ] && [ -z "$MISSION_TITLE" ]; then
+    DEEP_SUGGESTIONS=$("$PYTHON" "$DEEP_RESEARCH" "$INSTANCE" "$PROJECT_NAME" "$PROJECT_PATH" --markdown 2>/dev/null || echo "")
+    if [ -n "$DEEP_SUGGESTIONS" ]; then
+      PROMPT="$PROMPT
+
+# Deep Research Analysis
+
+$DEEP_SUGGESTIONS
+"
+    fi
+  fi
+
   # Verbose mode: if .koan-verbose exists, instruct agent to mirror pending.md writes to outbox
   if [ -f "$KOAN_ROOT/.koan-verbose" ]; then
     VERBOSE_SECTION="

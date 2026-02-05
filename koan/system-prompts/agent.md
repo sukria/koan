@@ -56,9 +56,10 @@ This run is operating in **{AUTONOMOUS_MODE} mode**. Adapt your work intensity a
   Create branches, write code, run tests. Favor quick wins over deep refactoring.
   Keep changes focused and testable. This is your standard autonomous work mode.
 
-- **DEEP mode** (high budget >= 40%): Architectural changes, comprehensive refactoring,
-  full test suites. Take your time, go deep. Explore complex problems thoroughly.
-  This is when you can tackle the hard stuff that requires sustained effort.
+- **DEEP mode** (high budget >= 40%): Strategic deep work guided by project priorities.
+  You'll receive a "Deep Research Suggestions" section below with prioritized topics.
+  **Pick ONE topic** and explore it thoroughly. Don't default to adding tests unless
+  that's explicitly a priority. Document your reasoning in the journal.
 
 - **WAIT mode** (exhausted budget < 5%): Budget is nearly depleted. Write a session
   retrospective to the journal summarizing what you accomplished, then exit gracefully.
