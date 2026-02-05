@@ -230,7 +230,10 @@ def build_claude_flags(
     fallback: str = "",
     disallowed_tools: Optional[List[str]] = None,
 ) -> List[str]:
-    """Build extra CLI flags for a Claude invocation.
+    """Build extra CLI flags for the configured CLI provider.
+
+    Provider-aware: delegates to the configured CLI provider (claude/copilot)
+    to generate the correct flags for the active backend.
 
     Args:
         model: Model name/alias (empty = use default)
@@ -240,19 +243,14 @@ def build_claude_flags(
     Returns:
         List of CLI flag strings to append to the command.
     """
-    flags: List[str] = []
-    if model:
-        flags.extend(["--model", model])
-    if fallback:
-        flags.extend(["--fallback-model", fallback])
-    if disallowed_tools:
-        flags.extend(["--disallowedTools"] + disallowed_tools)
-    return flags
+    from app.cli_provider import build_cli_flags
+    return build_cli_flags(model, fallback, disallowed_tools)
 
 
 def get_claude_flags_for_role(role: str, autonomous_mode: str = "") -> str:
     """Get CLI flags for a Claude invocation role, as a space-separated string.
 
+    Provider-aware: delegates to the configured CLI provider (claude/copilot).
     Designed to be called from run.sh to get model/fallback flags.
 
     Args:
@@ -262,30 +260,83 @@ def get_claude_flags_for_role(role: str, autonomous_mode: str = "") -> str:
     Returns:
         Space-separated CLI flags string (may be empty)
     """
+    from app.cli_provider import get_provider
+    provider = get_provider()
     models = get_model_config()
-    flags: List[str] = []
+
+    model = ""
+    fallback = ""
+    disallowed: Optional[List[str]] = None
 
     if role == "mission":
         model = models["mission"]
         # In review mode, prefer cheaper model if configured
         if autonomous_mode == "review" and models["review_mode"]:
             model = models["review_mode"]
-        if model:
-            flags.extend(["--model", model])
-        if models["fallback"]:
-            flags.extend(["--fallback-model", models["fallback"]])
+        fallback = models["fallback"]
         # Review mode: block write tools
         if autonomous_mode == "review":
-            flags.extend(["--disallowedTools", "Bash", "Edit", "Write"])
+            disallowed = ["Bash", "Edit", "Write"]
     elif role == "contemplative":
-        if models["lightweight"]:
-            flags.extend(["--model", models["lightweight"]])
+        model = models["lightweight"]
     elif role == "chat":
-        if models["chat"]:
-            flags.extend(["--model", models["chat"]])
-        if models["fallback"]:
-            flags.extend(["--fallback-model", models["fallback"]])
+        model = models["chat"]
+        fallback = models["fallback"]
 
+    flags = provider.build_extra_flags(model, fallback, disallowed)
+    return " ".join(flags)
+
+
+def get_cli_binary_for_shell() -> str:
+    """Get the CLI binary name for shell scripts (run.sh).
+
+    Returns:
+        Binary name string (e.g., "claude", "copilot", "gh copilot").
+    """
+    from app.cli_provider import get_cli_binary
+    return get_cli_binary()
+
+
+def get_cli_provider_name() -> str:
+    """Get the configured CLI provider name.
+
+    Returns:
+        Provider name string ("claude" or "copilot").
+    """
+    from app.cli_provider import get_provider_name
+    return get_provider_name()
+
+
+def get_tool_flags_for_shell(tools: str) -> str:
+    """Convert a comma-separated tool string to provider-specific flags.
+
+    Designed for run.sh to get tool flags as a single string.
+
+    Args:
+        tools: Comma-separated tool names (e.g., "Read,Write,Glob,Grep")
+
+    Returns:
+        Space-separated CLI flags string.
+    """
+    from app.cli_provider import build_tool_flags
+    tool_list = [t.strip() for t in tools.split(",") if t.strip()]
+    flags = build_tool_flags(tool_list)
+    return " ".join(flags)
+
+
+def get_output_flags_for_shell(fmt: str) -> str:
+    """Convert an output format to provider-specific flags.
+
+    Designed for run.sh to get output format flags as a single string.
+
+    Args:
+        fmt: Output format (e.g., "json")
+
+    Returns:
+        Space-separated CLI flags string.
+    """
+    from app.cli_provider import build_output_flags
+    flags = build_output_flags(fmt)
     return " ".join(flags)
 
 

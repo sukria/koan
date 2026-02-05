@@ -336,10 +336,9 @@ def _handle_usage():
 
     try:
         # Use fast_reply model (lightweight/Haiku) if configured
+        from app.cli_provider import build_full_command
         fast_model = get_fast_reply_model()
-        cmd = ["claude", "-p", prompt, "--max-turns", "1"]
-        if fast_model:
-            cmd.extend(["--model", fast_model])
+        cmd = build_full_command(prompt=prompt, model=fast_model, max_turns=1)
         result = subprocess.run(
             cmd,
             capture_output=True, text=True, timeout=60,
@@ -475,10 +474,9 @@ def _handle_sparring():
 
     try:
         # Use fast_reply model (lightweight/Haiku) if configured
+        from app.cli_provider import build_full_command
         fast_model = get_fast_reply_model()
-        cmd = ["claude", "-p", prompt, "--max-turns", "1"]
-        if fast_model:
-            cmd.extend(["--model", fast_model])
+        cmd = build_full_command(prompt=prompt, model=fast_model, max_turns=1)
         result = subprocess.run(
             cmd,
             capture_output=True, text=True, timeout=60,
@@ -715,13 +713,22 @@ def handle_chat(text: str):
     save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
 
     prompt = _build_chat_prompt(text)
-    allowed_tools = get_allowed_tools()
+    allowed_tools_str = get_allowed_tools()
+    allowed_tools_list = [t.strip() for t in allowed_tools_str.split(",") if t.strip()]
     models = get_model_config()
-    chat_flags = build_claude_flags(model=models["chat"], fallback=models["fallback"])
+
+    from app.cli_provider import build_full_command
+    cmd = build_full_command(
+        prompt=prompt,
+        allowed_tools=allowed_tools_list,
+        model=models["chat"],
+        fallback=models["fallback"],
+        max_turns=1,
+    )
 
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt, "--allowedTools", allowed_tools, "--max-turns", "1"] + chat_flags,
+            cmd,
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )
@@ -732,19 +739,26 @@ def handle_chat(text: str):
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
             print(f"[awake] Chat reply: {response[:80]}...")
         elif result.returncode != 0:
-            print(f"[awake] Claude error: {result.stderr[:200]}")
+            print(f"[awake] CLI error: {result.stderr[:200]}")
             error_msg = "Hmm, I couldn't formulate a response. Try again?"
             send_telegram(error_msg)
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", error_msg)
         else:
-            print("[awake] Empty response from Claude.")
+            print("[awake] Empty response from CLI.")
     except subprocess.TimeoutExpired:
-        print(f"[awake] Claude timed out ({CHAT_TIMEOUT}s). Retrying with lite context...")
+        print(f"[awake] CLI timed out ({CHAT_TIMEOUT}s). Retrying with lite context...")
         # Retry with reduced context
         lite_prompt = _build_chat_prompt(text, lite=True)
+        lite_cmd = build_full_command(
+            prompt=lite_prompt,
+            allowed_tools=allowed_tools_list,
+            model=models["chat"],
+            fallback=models["fallback"],
+            max_turns=1,
+        )
         try:
             result = subprocess.run(
-                ["claude", "-p", lite_prompt, "--allowedTools", allowed_tools, "--max-turns", "1"] + chat_flags,
+                lite_cmd,
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=PROJECT_PATH or str(KOAN_ROOT),
             )
@@ -767,7 +781,7 @@ def handle_chat(text: str):
             send_telegram(error_msg)
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", error_msg)
     except Exception as e:
-        print(f"[awake] Claude error: {e}")
+        print(f"[awake] CLI error: {e}")
 
 
 def flush_outbox():

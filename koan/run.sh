@@ -135,7 +135,11 @@ if [ "$START_ON_PAUSE" = "true" ] && [ ! -f "$KOAN_ROOT/.koan-pause" ]; then
   touch "$KOAN_ROOT/.koan-pause"
 fi
 
-echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
+# Resolve CLI binary from provider config (claude or copilot)
+CLI_BIN=$("$PYTHON" -c "from app.utils import get_cli_binary_for_shell; print(get_cli_binary_for_shell())" 2>/dev/null || echo "claude")
+CLI_PROVIDER=$("$PYTHON" -c "from app.utils import get_cli_provider_name; print(get_cli_provider_name())" 2>/dev/null || echo "claude")
+
+echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s, CLI: $CLI_PROVIDER ($CLI_BIN)"
 STARTUP_PROJECTS=$(printf '%s\n' "${PROJECT_NAMES[@]}" | sort | sed 's/^/  • /')
 STARTUP_PAUSE=""
 if [ -f "$KOAN_ROOT/.koan-pause" ]; then
@@ -242,9 +246,10 @@ while true; do
 
       cd "$INSTANCE"
       CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
+      CONTEMPLATE_TOOLS=$("$PYTHON" -c "from app.utils import get_tool_flags_for_shell; print(get_tool_flags_for_shell('Read,Write,Glob,Grep'))" 2>/dev/null || echo "--allowedTools Read,Write,Glob,Grep")
       set +e
       # shellcheck disable=SC2086
-      claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 3 $CONTEMPLATE_FLAGS 2>/dev/null
+      $CLI_BIN -p "$CONTEMPLATE_PROMPT" $CONTEMPLATE_TOOLS --max-turns 3 $CONTEMPLATE_FLAGS 2>/dev/null
       set -e
     fi
 
@@ -357,9 +362,10 @@ $KNOWN_PROJECTS"
 
         cd "$INSTANCE"
         CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
+        CONTEMPLATE_TOOLS=$("$PYTHON" -c "from app.utils import get_tool_flags_for_shell; print(get_tool_flags_for_shell('Read,Write,Glob,Grep'))" 2>/dev/null || echo "--allowedTools Read,Write,Glob,Grep")
         set +e
         # shellcheck disable=SC2086
-        claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 3 $CONTEMPLATE_FLAGS 2>/dev/null
+        $CLI_BIN -p "$CONTEMPLATE_PROMPT" $CONTEMPLATE_TOOLS --max-turns 3 $CONTEMPLATE_FLAGS 2>/dev/null
         set -e
 
         # Contemplative session done — increment counter and loop
@@ -534,9 +540,11 @@ EOF
   CLAUDE_OUT="$(mktemp)"
   CLAUDE_ERR="$(mktemp)"
   MISSION_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('mission', '$AUTONOMOUS_MODE'))" 2>/dev/null || echo "")
+  MISSION_TOOLS=$("$PYTHON" -c "from app.utils import get_tool_flags_for_shell; print(get_tool_flags_for_shell('Bash,Read,Write,Glob,Grep,Edit'))" 2>/dev/null || echo "--allowedTools Bash,Read,Write,Glob,Grep,Edit")
+  OUTPUT_FLAGS=$("$PYTHON" -c "from app.utils import get_output_flags_for_shell; print(get_output_flags_for_shell('json'))" 2>/dev/null || echo "--output-format json")
   set +e  # Don't exit on error, we need to check the output
   # shellcheck disable=SC2086
-  claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit --output-format json $MISSION_FLAGS > "$CLAUDE_OUT" 2>"$CLAUDE_ERR"
+  $CLI_BIN -p "$PROMPT" $MISSION_TOOLS $OUTPUT_FLAGS $MISSION_FLAGS > "$CLAUDE_OUT" 2>"$CLAUDE_ERR"
   CLAUDE_EXIT=$?
   set -e
 

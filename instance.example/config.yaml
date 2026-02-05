@@ -3,6 +3,11 @@
 # IMPORTANT: Values starting with "CHANGE:" must be updated before running.
 # Kōan will work with sensible defaults for most other settings.
 
+# CLI provider — which AI agent binary to use
+# Options: "claude" (default), "copilot" (GitHub Copilot CLI)
+# Override via KOAN_CLI_PROVIDER env var
+cli_provider: "claude"
+
 # Paths — these are mostly set via environment variables now.
 # You can override here if needed, but KOAN_PROJECT_PATH / KOAN_PROJECTS
 # in .env is the preferred method.

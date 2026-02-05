@@ -57,8 +57,14 @@ def run_ritual(ritual_type: str, instance_dir: Path) -> bool:
         return False
 
     try:
+        from app.cli_provider import build_full_command
+        cmd = build_full_command(
+            prompt=prompt,
+            allowed_tools=["Read", "Write", "Glob"],
+            max_turns=3,
+        )
         result = subprocess.run(
-            ["claude", "-p", prompt, "--allowedTools", "Read,Write,Glob", "--max-turns", "3"],
+            cmd,
             capture_output=True, text=True, timeout=90,
             check=False
         )

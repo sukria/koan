@@ -48,15 +48,17 @@ def build_prompt(
 
 
 def call_claude(prompt: str) -> str:
-    """Call Claude CLI with the picker prompt. Returns raw text output."""
+    """Call CLI with the picker prompt. Returns raw text output."""
+    from app.cli_provider import build_full_command
     models = get_model_config()
-    extra_flags = build_claude_flags(model=models["lightweight"])
+    cmd = build_full_command(
+        prompt=prompt,
+        model=models["lightweight"],
+        max_turns=1,
+        output_format="json",
+    )
     result = subprocess.run(
-        [
-            "claude", "-p", prompt,
-            "--max-turns", "1",
-            "--output-format", "json",
-        ] + extra_flags,
+        cmd,
         capture_output=True,
         text=True,
         timeout=60,

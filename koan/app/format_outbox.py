@@ -149,11 +149,12 @@ def format_for_telegram(raw_content: str, soul: str, prefs: str,
     )
 
     try:
-        # Call Claude CLI to format the message (lightweight model)
+        # Call CLI to format the message (lightweight model)
+        from app.cli_provider import build_full_command
         models = get_model_config()
-        extra_flags = build_claude_flags(model=models["lightweight"])
+        cmd = build_full_command(prompt=prompt, model=models["lightweight"])
         result = subprocess.run(
-            ["claude", "-p", prompt] + extra_flags,
+            cmd,
             input=None,  # Prompt is self-contained
             capture_output=True,
             text=True,
