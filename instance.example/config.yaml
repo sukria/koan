@@ -41,9 +41,14 @@ budget:
   stop_at_percent: 85   # Stop running
 
 # Claude tools configuration
-# These tools will be available when Claude is invoked for chat responses
+# SECURITY: Chat and missions have separate tool sets to prevent prompt injection.
+# Telegram messages are untrusted input — they only get read-only tools.
 tools:
-  allowed: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
+  # Chat tools — restricted set for Telegram/dashboard conversations
+  # Default is read-only: no Bash, Edit, or Write to prevent prompt injection
+  chat: ["Read", "Glob", "Grep"]
+  # Mission tools — full access for autonomous execution
+  mission: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
   description: |
     Available capabilities:
     - File operations: Read, Edit, Write files in the project

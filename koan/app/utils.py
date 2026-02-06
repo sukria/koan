@@ -153,14 +153,43 @@ def load_config() -> dict:
         return {}
 
 
-def get_allowed_tools() -> str:
-    """Get comma-separated list of allowed tools from config.
+def get_chat_tools() -> str:
+    """Get comma-separated list of tools for chat responses.
 
-    Returns default tools if config doesn't specify.
+    Chat uses a restricted set by default (read-only) to prevent prompt
+    injection attacks from Telegram messages. Bash is explicitly excluded.
+
+    Config key: tools.chat (default: Read, Glob, Grep)
+
+    Returns:
+        Comma-separated tool names.
     """
     config = load_config()
-    tools = config.get("tools", {}).get("allowed", ["Read", "Glob", "Grep", "Edit", "Write"])
+    default_chat_tools = ["Read", "Glob", "Grep"]
+    tools = config.get("tools", {}).get("chat", default_chat_tools)
     return ",".join(tools)
+
+
+def get_mission_tools() -> str:
+    """Get comma-separated list of tools for mission execution.
+
+    Missions run with full tool access including Bash for code execution.
+
+    Config key: tools.mission (default: Read, Glob, Grep, Edit, Write, Bash)
+
+    Returns:
+        Comma-separated tool names.
+    """
+    config = load_config()
+    default_mission_tools = ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
+    tools = config.get("tools", {}).get("mission", default_mission_tools)
+    return ",".join(tools)
+
+
+# Backward compatibility alias
+def get_allowed_tools() -> str:
+    """Deprecated: Use get_chat_tools() or get_mission_tools() instead."""
+    return get_mission_tools()
 
 
 def get_tools_description() -> str:
