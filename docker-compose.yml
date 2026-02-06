@@ -1,0 +1,34 @@
+# Kōan Docker Compose — Local Development
+#
+# Usage:
+#   1. Copy env.docker.example to .env.docker and fill in your values
+#   2. docker compose up --build
+#
+# Modes:
+#   docker compose up              — full stack (agent + bridge)
+#   docker compose run koan test   — run test suite
+#   docker compose run koan shell  — interactive shell
+
+services:
+  koan:
+    build: .
+    container_name: koan
+    env_file:
+      - .env.docker
+    environment:
+      - KOAN_ROOT=/app
+      - PYTHONPATH=/app/koan
+    volumes:
+      # Persist instance state across restarts
+      - koan-instance:/app/instance
+      # Persist cloned project repos
+      - koan-repos:/app/repos
+    restart: unless-stopped
+    # No ports exposed by default — Telegram-only mode
+    # Uncomment to expose dashboard:
+    # ports:
+    #   - "5001:5001"
+
+volumes:
+  koan-instance:
+  koan-repos:

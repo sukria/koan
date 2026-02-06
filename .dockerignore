@@ -1,0 +1,34 @@
+# Runtime state (user-specific)
+instance/
+.koan*
+.last-review-sha
+.coverage
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Environment & secrets
+.env
+.env.*
+.envrc
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+
+# Test cache
+.pytest_cache/
+
+# Docker
+Dockerfile
+docker-compose*.yml
