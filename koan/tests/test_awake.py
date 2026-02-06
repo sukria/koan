@@ -78,6 +78,70 @@ class TestIsMission:
     def test_empty_string(self):
         assert is_mission("") is False
 
+    def test_long_message_with_verb_only_at_start(self):
+        """Long messages should only match verbs at the start, not mid-text."""
+        # Verb at start — IS a mission
+        long_mission = "implement " + "x " * 150
+        assert is_mission(long_mission) is True
+        # Verb buried mid-text — NOT a mission
+        long_chat = "I was thinking about how we should " + "x " * 100 + " and then implement something"
+        assert is_mission(long_chat) is False
+
+    def test_conversational_with_action_verb(self):
+        """Short messages starting with action verbs but clearly conversational."""
+        # These are correctly classified as missions by the current heuristic.
+        # Users should use /chat to override when needed.
+        assert is_mission("add me to the list") is True  # starts with "add"
+        assert is_mission("run me through the pipeline") is True  # starts with "run"
+
+    def test_long_conversational_not_mission(self):
+        """Long conversational messages without leading verbs are not missions."""
+        long_chat = "Hey, I wanted to discuss something with you. " + "blah " * 60
+        assert is_mission(long_chat) is False
+
+
+# ---------------------------------------------------------------------------
+# /chat command (force chat mode)
+# ---------------------------------------------------------------------------
+
+class TestHandleChatCommand:
+    """Test /chat prefix to force chat mode."""
+
+    @patch("app.awake._run_in_worker")
+    def test_chat_command_routes_to_chat(self, mock_worker):
+        """'/chat fix the bug' should route to chat, not mission."""
+        handle_command("/chat fix the bug")
+        mock_worker.assert_called_once_with(handle_chat, "fix the bug")
+
+    @patch("app.awake._run_in_worker")
+    def test_chat_command_strips_prefix(self, mock_worker):
+        """/chat should strip the prefix and pass the rest as chat text."""
+        handle_command("/chat implement dark mode for the dashboard")
+        mock_worker.assert_called_once_with(
+            handle_chat, "implement dark mode for the dashboard"
+        )
+
+    @patch("app.awake.send_telegram")
+    def test_chat_command_empty_shows_usage(self, mock_send):
+        """/chat with no text should show usage help."""
+        handle_command("/chat")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+        assert "/chat" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_chat_command_whitespace_only_shows_usage(self, mock_send):
+        """/chat followed by only whitespace shows usage."""
+        handle_command("/chat   ")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+
+    @patch("app.awake._run_in_worker")
+    def test_chat_via_handle_message(self, mock_worker):
+        """/chat goes through handle_message -> handle_command -> chat."""
+        handle_message("/chat add me to the list of testers")
+        mock_worker.assert_called_once_with(handle_chat, "add me to the list of testers")
+
 
 # ---------------------------------------------------------------------------
 # is_command
@@ -960,6 +1024,12 @@ class TestHandleHelp:
         _handle_help()
         msg = mock_send.call_args[0][0]
         assert "mission" in msg.lower()
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_chat_command(self, mock_send):
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/chat" in msg
 
     @patch("app.awake._handle_help")
     def test_handle_command_routes_help(self, mock_help):

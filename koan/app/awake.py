@@ -110,8 +110,8 @@ def is_mission(text: str) -> bool:
     # Explicit prefix always wins
     if text.lower().startswith("mission:") or text.lower().startswith("mission :"):
         return True
-    # Long messages (>200 chars) with imperative verbs are likely missions
-    if len(text) > 200 and MISSION_RE.search(text):
+    # Long messages (>200 chars) that start with imperative verbs are likely missions
+    if len(text) > 200 and MISSION_RE.match(text):
         return True
     # Short imperative sentences
     if MISSION_RE.match(text):
@@ -135,6 +135,15 @@ def parse_project(text: str) -> Tuple[Optional[str], str]:
 def handle_command(text: str):
     """Handle /commands locally — no Claude needed."""
     cmd = text.strip().lower()
+
+    # /chat forces chat mode — bypass mission classification
+    if cmd.startswith("/chat"):
+        chat_text = text[5:].strip()
+        if not chat_text:
+            send_telegram("Usage: /chat <message>\nForces chat mode for messages that look like missions.")
+            return
+        _run_in_worker(handle_chat, chat_text)
+        return
 
     if cmd == "/stop":
         (KOAN_ROOT / ".koan-stop").write_text("STOP")
@@ -336,6 +345,7 @@ def _handle_help():
         "/silent — mute updates (default mode)\n"
         "\n"
         "INTERACTION\n"
+        "/chat <msg> — force chat mode (bypass mission detection)\n"
         "/sparring — start a strategic sparring session\n"
         "/reflect <text> — note a reflection in the shared journal\n"
         "/help — this help\n"
@@ -348,6 +358,8 @@ def _handle_help():
         "\n"
         "To target a project:\n"
         "  [project:myproject] fix the login bug\n"
+        "\n"
+        "To force chat: /chat <message> (useful when your message looks like a mission)\n"
         "\n"
         "Any other message = free conversation."
     )
