@@ -345,6 +345,86 @@ def promote_idea(content: str, index: int) -> Tuple[str, Optional[str]]:
     return updated, deleted
 
 
+def list_pending(content: str) -> List[str]:
+    """Return all pending mission lines."""
+    sections = parse_sections(content)
+    return sections["pending"]
+
+
+def cancel_pending_mission(content: str, identifier: str) -> Tuple[str, str]:
+    """Cancel a pending mission by number (1-indexed) or keyword match.
+
+    Args:
+        content: Full missions.md content.
+        identifier: A number string ("3") or keyword ("fix auth").
+
+    Returns:
+        (updated_content, cancelled_mission_text)
+
+    Raises:
+        ValueError: If no matching mission is found.
+    """
+    pending = list_pending(content)
+    if not pending:
+        raise ValueError("No pending missions.")
+
+    identifier = identifier.strip()
+
+    # Determine which pending item to cancel
+    target_idx = None
+    if identifier.isdigit():
+        num = int(identifier) - 1
+        if num < 0 or num >= len(pending):
+            raise ValueError(
+                f"Mission #{identifier} not found. "
+                f"There are {len(pending)} pending mission(s)."
+            )
+        target_idx = num
+    else:
+        # Keyword match (case-insensitive, first match)
+        keyword = identifier.lower()
+        for i, item in enumerate(pending):
+            if keyword in item.lower():
+                target_idx = i
+                break
+        if target_idx is None:
+            raise ValueError(f'No pending mission matching "{identifier}".')
+
+    target_text = pending[target_idx]
+
+    # Remove the target from raw content by finding the Nth "- " line in pending section
+    lines = content.splitlines()
+    boundaries = find_section_boundaries(lines)
+    if "pending" not in boundaries:
+        raise ValueError("No pending section found.")
+
+    start, end = boundaries["pending"]
+    pending_count = 0
+    remove_start = None
+    remove_end = None
+
+    for i in range(start + 1, end):
+        stripped = lines[i].strip()
+        if stripped.startswith("- "):
+            if pending_count == target_idx:
+                remove_start = i
+                # Include continuation lines (indented, non-empty, non-header)
+                remove_end = i + 1
+                for j in range(i + 1, end):
+                    next_stripped = lines[j].strip()
+                    if next_stripped == "" or next_stripped.startswith("- ") or next_stripped.startswith("#"):
+                        break
+                    remove_end = j + 1
+                break
+            pending_count += 1
+
+    if remove_start is None:
+        raise ValueError("Could not locate mission in file content.")
+
+    new_lines = lines[:remove_start] + lines[remove_end:]
+    return "\n".join(new_lines), target_text
+
+
 def find_section_boundaries(lines: List[str]) -> Dict[str, Tuple[int, int]]:
     """Find line indices for each section.
 
