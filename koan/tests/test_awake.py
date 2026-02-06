@@ -29,6 +29,16 @@ from app.awake import (
     check_config,
     MISSIONS_FILE,
 )
+from app.command_handlers import (
+    build_status,
+    handle_help,
+    handle_log,
+    handle_usage,
+    handle_mission_command,
+    handle_ping,
+    handle_sparring,
+    handle_reflect,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +132,7 @@ class TestHandleChatCommand:
             handle_chat, "implement dark mode for the dashboard"
         )
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_chat_command_empty_shows_usage(self, mock_send):
         """/chat with no text should show usage help."""
         handle_command("/chat")
@@ -130,7 +140,7 @@ class TestHandleChatCommand:
         assert "Usage" in msg
         assert "/chat" in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_chat_command_whitespace_only_shows_usage(self, mock_send):
         """/chat followed by only whitespace shows usage."""
         handle_command("/chat   ")
@@ -206,30 +216,27 @@ class TestParseProject:
 # ---------------------------------------------------------------------------
 
 class TestHandleMission:
-    @patch("app.awake.send_telegram")
-    @patch("app.awake.MISSIONS_FILE")
-    @patch("app.awake.INSTANCE_DIR")
-    def test_mission_appended_to_pending(self, mock_inst, mock_file, mock_send, tmp_path):
+    @patch("app.command_handlers.send_telegram")
+    @patch("app.command_handlers.MISSIONS_FILE")
+    def test_mission_appended_to_pending(self, mock_file, mock_send, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## En attente\n\n(aucune)\n\n## En cours\n\n## Terminées\n"
         )
-        mock_file.__class__ = type(missions_file)
-        # Directly test the file manipulation logic
-        with patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_mission("mission: audit security")
 
         content = missions_file.read_text()
         assert "- audit security" in content
         mock_send.assert_called_once()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_mission_with_project_tag(self, mock_send, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## En attente\n\n(aucune)\n\n## En cours\n\n"
         )
-        with patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_mission("[project:koan] add tests")
 
         content = missions_file.read_text()
@@ -241,8 +248,7 @@ class TestHandleMission:
 # ---------------------------------------------------------------------------
 
 class TestBuildStatus:
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_with_french_sections(self, mock_file, tmp_path):
+    def test_status_with_french_sections(self, tmp_path):
         """_build_status handles French section names from missions.md."""
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
@@ -253,9 +259,9 @@ class TestBuildStatus:
             "## En cours\n\n"
             "- [project:koan] doing stuff\n\n"
         )
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            status = build_status()
 
         assert "Kōan Status" in status
         # Missions split by project: koan gets 1 pending + 1 in_progress, default gets 1 pending
@@ -263,8 +269,7 @@ class TestBuildStatus:
         assert "**default**" in status
         assert "In progress: 1" in status
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_shows_pending_titles(self, mock_file, tmp_path):
+    def test_status_shows_pending_titles(self, tmp_path):
         """_build_status shows pending mission titles, not just count."""
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
@@ -274,9 +279,9 @@ class TestBuildStatus:
             "- [project:koan] fix dashboard\n\n"
             "## En cours\n\n"
         )
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            status = build_status()
 
         assert "Pending: 2" in status
         assert "add tests" in status
@@ -284,35 +289,32 @@ class TestBuildStatus:
         # Project tags should be stripped from display
         assert "[project:koan]" not in status
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_empty(self, mock_file, tmp_path):
+    def test_status_empty(self, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            status = build_status()
 
         assert "Kōan Status" in status
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_with_stop_file(self, mock_file, tmp_path):
+    def test_status_with_stop_file(self, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
         (tmp_path / ".koan-stop").write_text("STOP")
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            status = build_status()
 
         assert "ARRÊT DEMANDÉ" in status or "stop" in status.lower()
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_with_loop_status(self, mock_file, tmp_path):
+    def test_status_with_loop_status(self, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
         (tmp_path / ".koan-status").write_text("Run 3/20")
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            status = build_status()
 
         assert "Run 3/20" in status
 
@@ -322,52 +324,54 @@ class TestBuildStatus:
 # ---------------------------------------------------------------------------
 
 class TestHandleCommand:
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_stop_creates_file(self, mock_send, tmp_path):
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_command("/stop")
         assert (tmp_path / ".koan-stop").exists()
         mock_send.assert_called_once()
 
-    @patch("app.awake._build_status", return_value="📊 Kōan Status\nAll clear")
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.build_status", return_value="📊 Kōan Status\nAll clear")
+    @patch("app.command_handlers.send_telegram")
     def test_status_calls_build_status(self, mock_send, mock_build):
         handle_command("/status")
         mock_build.assert_called_once()
         mock_send.assert_called_once_with("📊 Kōan Status\nAll clear")
 
-    @patch("app.awake.handle_resume")
+    @patch("app.command_handlers.handle_resume")
     def test_resume_delegates(self, mock_resume):
         handle_command("/resume")
         mock_resume.assert_called_once()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_verbose_creates_file(self, mock_send, tmp_path):
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_command("/verbose")
         assert (tmp_path / ".koan-verbose").exists()
         mock_send.assert_called_once()
         assert "Verbose" in mock_send.call_args[0][0] or "verbose" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_silent_removes_verbose_file(self, mock_send, tmp_path):
         verbose_file = tmp_path / ".koan-verbose"
         verbose_file.write_text("VERBOSE")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_command("/silent")
         assert not verbose_file.exists()
         mock_send.assert_called_once()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_silent_when_already_silent(self, mock_send, tmp_path):
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_command("/silent")
         mock_send.assert_called_once()
         assert "silent" in mock_send.call_args[0][0].lower() or "Déjà" in mock_send.call_args[0][0]
 
-    @patch("app.awake.handle_chat")
-    def test_unknown_command_falls_to_chat(self, mock_chat):
-        handle_command("/unknown")
+    def test_unknown_command_falls_to_chat(self):
+        """Unknown commands are passed to handle_chat callback."""
+        mock_chat = MagicMock()
+        from app.command_handlers import handle_command as ch_handle_command
+        ch_handle_command("/unknown", MagicMock(), mock_chat)
         mock_chat.assert_called_once_with("/unknown")
 
 
@@ -376,37 +380,37 @@ class TestHandleCommand:
 # ---------------------------------------------------------------------------
 
 class TestHandleResume:
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_no_quota_file(self, mock_send, tmp_path):
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert "No pause or quota hold" in mock_send.call_args[0][0]
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_likely_reset(self, mock_send, tmp_path):
         quota_file = tmp_path / ".koan-quota-reset"
         old_ts = str(int(time.time()) - 3 * 3600)  # 3 hours ago
         quota_file.write_text(f"resets 7pm (Europe/Paris)\n{old_ts}")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert not quota_file.exists()
         assert "Quota likely reset" in mock_send.call_args[0][0]
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_not_yet_reset(self, mock_send, tmp_path):
         quota_file = tmp_path / ".koan-quota-reset"
         recent_ts = str(int(time.time()) - 30 * 60)  # 30 min ago
         quota_file.write_text(f"resets 7pm (Europe/Paris)\n{recent_ts}")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert quota_file.exists()
         assert "not reset yet" in mock_send.call_args[0][0]
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_corrupt_quota_file(self, mock_send, tmp_path):
         quota_file = tmp_path / ".koan-quota-reset"
         quota_file.write_text("garbage\nnot-a-number")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert "Error" in mock_send.call_args[0][0]
 
@@ -833,82 +837,81 @@ class TestMainLoop:
 # ---------------------------------------------------------------------------
 
 class TestPauseCommand:
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_pause_creates_file(self, mock_send, tmp_path):
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_command("/pause")
         assert (tmp_path / ".koan-pause").exists()
         mock_send.assert_called_once()
         assert "paused" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_pause_already_paused(self, mock_send, tmp_path):
         (tmp_path / ".koan-pause").write_text("PAUSE")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_command("/pause")
         assert "already paused" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_resume_clears_pause(self, mock_send, tmp_path):
         (tmp_path / ".koan-pause").write_text("PAUSE")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert not (tmp_path / ".koan-pause").exists()
         assert "unpaused" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_resume_pause_takes_priority_over_quota(self, mock_send, tmp_path):
         """If both pause and quota files exist, /resume clears pause first."""
         (tmp_path / ".koan-pause").write_text("PAUSE")
         (tmp_path / ".koan-quota-reset").write_text("resets 7pm\n0")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert not (tmp_path / ".koan-pause").exists()
         assert (tmp_path / ".koan-quota-reset").exists()
         assert "unpaused" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_resume_with_quota_reason(self, mock_send, tmp_path):
         """Resume cleans up both pause and pause-reason files, reports quota reason."""
         (tmp_path / ".koan-pause").write_text("PAUSE")
         (tmp_path / ".koan-pause-reason").write_text("quota\n1234567890")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert not (tmp_path / ".koan-pause").exists()
         assert not (tmp_path / ".koan-pause-reason").exists()
         assert "quota" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_resume_with_max_runs_reason(self, mock_send, tmp_path):
         """Resume cleans up both files and reports max_runs reason."""
         (tmp_path / ".koan-pause").write_text("PAUSE")
         (tmp_path / ".koan-pause-reason").write_text("max_runs\n1234567890")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert not (tmp_path / ".koan-pause").exists()
         assert not (tmp_path / ".koan-pause-reason").exists()
         assert "max_runs" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_resume_pause_without_reason(self, mock_send, tmp_path):
         """Resume with pause file but no reason file (manual /pause)."""
         (tmp_path / ".koan-pause").write_text("PAUSE")
-        with patch("app.awake.KOAN_ROOT", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
         assert not (tmp_path / ".koan-pause").exists()
         # Should say "unpaused" without specific reason
         assert "unpaused" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
-    def test_status_shows_pause(self, mock_send, tmp_path):
+    def test_status_shows_pause(self, tmp_path):
         (tmp_path / ".koan-pause").write_text("PAUSE")
         instance = tmp_path / "instance"
         instance.mkdir()
         missions = instance / "missions.md"
         missions.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n")
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions):
-            status = _build_status()
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions):
+            status = build_status()
         assert "PAUSE" in status or "pause" in status.lower()
 
 
@@ -1008,9 +1011,9 @@ class TestCleanChatResponse:
 # ---------------------------------------------------------------------------
 
 class TestHandleHelp:
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_help_sends_command_list(self, mock_send):
-        _handle_help()
+        handle_help()
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         assert "/help" in msg
@@ -1020,19 +1023,19 @@ class TestHandleHelp:
         assert "/pause" in msg
         assert "/resume" in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_help_mentions_mission_syntax(self, mock_send):
-        _handle_help()
+        handle_help()
         msg = mock_send.call_args[0][0]
         assert "mission" in msg.lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_help_mentions_chat_command(self, mock_send):
-        _handle_help()
+        handle_help()
         msg = mock_send.call_args[0][0]
         assert "/chat" in msg
 
-    @patch("app.awake._handle_help")
+    @patch("app.command_handlers.handle_help")
     def test_handle_command_routes_help(self, mock_help):
         handle_command("/help")
         mock_help.assert_called_once()
@@ -1043,7 +1046,7 @@ class TestHandleHelp:
 # ---------------------------------------------------------------------------
 
 class TestHandleUsage:
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     @patch("subprocess.run")
     def test_usage_calls_claude_with_context(self, mock_run, mock_send, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="Quota 60%, 3 missions en cours.")
@@ -1056,17 +1059,17 @@ class TestHandleUsage:
         journal_dir = instance / "journal"
         journal_dir.mkdir()
 
-        with patch("app.awake.INSTANCE_DIR", instance), \
-             patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.SOUL", "test soul"):
-            _handle_usage()
+        with patch("app.command_handlers.INSTANCE_DIR", instance), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.SOUL", "test soul"):
+            handle_usage()
 
         mock_run.assert_called_once()
         prompt_arg = mock_run.call_args[0][0][2]  # ["claude", "-p", prompt, ...]
         assert "60%" in prompt_arg
         mock_send.assert_called_once_with("Quota 60%, 3 missions en cours.")
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     @patch("subprocess.run")
     def test_usage_fallback_on_claude_failure(self, mock_run, mock_send, tmp_path):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
@@ -1078,16 +1081,16 @@ class TestHandleUsage:
         journal_dir = instance / "journal"
         journal_dir.mkdir()
 
-        with patch("app.awake.INSTANCE_DIR", instance), \
-             patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.SOUL", ""):
-            _handle_usage()
+        with patch("app.command_handlers.INSTANCE_DIR", instance), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.SOUL", ""):
+            handle_usage()
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         assert "30%" in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     @patch("subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 60))
     def test_usage_timeout(self, mock_run, mock_send, tmp_path):
         instance = tmp_path / "instance"
@@ -1095,10 +1098,10 @@ class TestHandleUsage:
         journal_dir = instance / "journal"
         journal_dir.mkdir()
 
-        with patch("app.awake.INSTANCE_DIR", instance), \
-             patch("app.awake.MISSIONS_FILE", instance / "missions.md"), \
-             patch("app.awake.SOUL", ""):
-            _handle_usage()
+        with patch("app.command_handlers.INSTANCE_DIR", instance), \
+             patch("app.command_handlers.MISSIONS_FILE", instance / "missions.md"), \
+             patch("app.command_handlers.SOUL", ""):
+            handle_usage()
 
         mock_send.assert_called_once()
         assert "Timeout" in mock_send.call_args[0][0]
@@ -1108,7 +1111,7 @@ class TestHandleUsage:
         handle_command("/usage")
         mock_worker.assert_called_once_with(_handle_usage)
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     @patch("subprocess.run")
     def test_usage_includes_pending(self, mock_run, mock_send, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="Run en cours: fix auth")
@@ -1119,10 +1122,10 @@ class TestHandleUsage:
         pending = journal_dir / "pending.md"
         pending.write_text("# Mission: fix auth\n22:00 — Started\n22:01 — Reading code")
 
-        with patch("app.awake.INSTANCE_DIR", instance), \
-             patch("app.awake.MISSIONS_FILE", instance / "missions.md"), \
-             patch("app.awake.SOUL", ""):
-            _handle_usage()
+        with patch("app.command_handlers.INSTANCE_DIR", instance), \
+             patch("app.command_handlers.MISSIONS_FILE", instance / "missions.md"), \
+             patch("app.command_handlers.SOUL", ""):
+            handle_usage()
 
         prompt_arg = mock_run.call_args[0][0][2]
         assert "fix auth" in prompt_arg
@@ -1135,8 +1138,7 @@ class TestHandleUsage:
 class TestPauseAwareness:
     """Tests for pause state visibility in chat and status."""
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_shows_pause_at_top(self, mock_file, tmp_path):
+    def test_status_shows_pause_at_top(self, tmp_path):
         """When paused, status shows pause FIRST, not at the bottom."""
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
@@ -1144,9 +1146,9 @@ class TestPauseAwareness:
         )
         (tmp_path / ".koan-pause").write_text("PAUSE")
 
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            status = build_status()
 
         lines = status.split("\n")
         # Find where pause is mentioned
@@ -1156,8 +1158,7 @@ class TestPauseAwareness:
         # Pause should come BEFORE missions
         assert pause_line_idx < mission_line_idx, "Pause status should appear before mission details"
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_shows_active_when_running(self, mock_file, tmp_path):
+    def test_status_shows_active_when_running(self, tmp_path):
         """When not paused, status shows ACTIF/RUNNING."""
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
@@ -1165,9 +1166,9 @@ class TestPauseAwareness:
         )
         # No .koan-pause file
 
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
+             patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            status = build_status()
 
         assert "ACTIVE" in status
 
@@ -1282,60 +1283,60 @@ class TestChatToolsSecurity:
 class TestHandleMissionCommand:
     """Test /mission command — parity with 'mission:' keyword."""
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_bare_mission_shows_usage(self, mock_send):
-        _handle_mission_command("/mission")
+        handle_mission_command("/mission")
         msg = mock_send.call_args[0][0]
         assert "Usage" in msg
 
-    @patch("app.awake.handle_mission")
-    @patch("app.awake.get_known_projects", return_value=["koan"])
+    @patch("app.command_handlers.handle_mission")
+    @patch("app.command_handlers.get_known_projects", return_value=["koan"])
     def test_single_project_auto_proceeds(self, mock_projects, mock_mission):
-        _handle_mission_command("/mission fix the login bug")
+        handle_mission_command("/mission fix the login bug")
         mock_mission.assert_called_once_with("fix the login bug")
 
-    @patch("app.awake.send_telegram")
-    @patch("app.awake.get_known_projects", return_value=["koan", "webapp"])
+    @patch("app.command_handlers.send_telegram")
+    @patch("app.command_handlers.get_known_projects", return_value=["koan", "webapp"])
     def test_multi_project_asks_user(self, mock_projects, mock_send):
-        _handle_mission_command("/mission fix the login bug")
+        handle_mission_command("/mission fix the login bug")
         msg = mock_send.call_args[0][0]
         assert "Which project" in msg
         assert "koan" in msg
         assert "webapp" in msg
 
-    @patch("app.awake.handle_mission")
-    @patch("app.awake.get_known_projects", return_value=["koan", "webapp"])
+    @patch("app.command_handlers.handle_mission")
+    @patch("app.command_handlers.get_known_projects", return_value=["koan", "webapp"])
     def test_project_tag_bypasses_ask(self, mock_projects, mock_mission):
-        _handle_mission_command("/mission [project:koan] fix the login bug")
+        handle_mission_command("/mission [project:koan] fix the login bug")
         mock_mission.assert_called_once_with("[project:koan] fix the login bug")
 
-    @patch("app.awake.handle_mission")
+    @patch("app.command_handlers.handle_mission")
     def test_mission_colon_format(self, mock_mission):
-        _handle_mission_command("/mission: fix the login bug")
+        handle_mission_command("/mission: fix the login bug")
         mock_mission.assert_called_once_with("fix the login bug")
 
-    @patch("app.awake._handle_mission_command")
+    @patch("app.command_handlers.handle_mission_command")
     def test_handle_command_routes_mission(self, mock_handler):
         handle_command("/mission fix the bug")
         mock_handler.assert_called_once_with("/mission fix the bug")
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_whitespace_only_shows_usage(self, mock_send):
-        _handle_mission_command("/mission   ")
+        handle_mission_command("/mission   ")
         msg = mock_send.call_args[0][0]
         assert "Usage" in msg
 
-    @patch("app.awake.handle_mission")
-    @patch("app.awake.get_known_projects", return_value=[])
+    @patch("app.command_handlers.handle_mission")
+    @patch("app.command_handlers.get_known_projects", return_value=[])
     def test_no_known_projects_proceeds(self, mock_projects, mock_mission):
-        _handle_mission_command("/mission fix the login bug")
+        handle_mission_command("/mission fix the login bug")
         mock_mission.assert_called_once_with("fix the login bug")
 
 
 class TestHandleHelpIncludesMission:
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_help_mentions_mission_command(self, mock_send):
-        _handle_help()
+        handle_help()
         msg = mock_send.call_args[0][0]
         assert "/mission" in msg
 # /log command
@@ -1344,20 +1345,20 @@ class TestHandleHelpIncludesMission:
 class TestHandleLog:
     """Test /log and /journal command handler."""
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_log_project_today(self, mock_send, tmp_path):
         """'/log koan' shows today's journal for koan."""
         from datetime import date
         d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
         d.mkdir(parents=True)
         (d / "koan.md").write_text("## Session 29\nDid work on /log command.")
-        with patch("app.awake.INSTANCE_DIR", tmp_path):
-            _handle_log("koan")
+        with patch("app.command_handlers.INSTANCE_DIR", tmp_path):
+            handle_log("koan")
         msg = mock_send.call_args[0][0]
         assert "koan" in msg
         assert "Did work" in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_log_no_args_all_projects(self, mock_send, tmp_path):
         """'/log' shows today's journal for all projects."""
         from datetime import date
@@ -1365,13 +1366,13 @@ class TestHandleLog:
         d.mkdir(parents=True)
         (d / "koan.md").write_text("koan stuff")
         (d / "web-app.md").write_text("web-app stuff")
-        with patch("app.awake.INSTANCE_DIR", tmp_path):
-            _handle_log("")
+        with patch("app.command_handlers.INSTANCE_DIR", tmp_path):
+            handle_log("")
         msg = mock_send.call_args[0][0]
         assert "koan" in msg
         assert "web-app" in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_log_yesterday(self, mock_send, tmp_path):
         """'/log koan yesterday' shows yesterday's journal."""
         from datetime import date, timedelta
@@ -1379,46 +1380,46 @@ class TestHandleLog:
         d = tmp_path / "journal" / yesterday
         d.mkdir(parents=True)
         (d / "koan.md").write_text("Yesterday's work.")
-        with patch("app.awake.INSTANCE_DIR", tmp_path):
-            _handle_log("koan yesterday")
+        with patch("app.command_handlers.INSTANCE_DIR", tmp_path):
+            handle_log("koan yesterday")
         msg = mock_send.call_args[0][0]
         assert "Yesterday's work" in msg
         assert yesterday in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_log_specific_date(self, mock_send, tmp_path):
         """'/log koan 2026-01-15' shows that date's journal."""
         d = tmp_path / "journal" / "2026-01-15"
         d.mkdir(parents=True)
         (d / "koan.md").write_text("Old entry from Jan.")
-        with patch("app.awake.INSTANCE_DIR", tmp_path):
-            _handle_log("koan 2026-01-15")
+        with patch("app.command_handlers.INSTANCE_DIR", tmp_path):
+            handle_log("koan 2026-01-15")
         msg = mock_send.call_args[0][0]
         assert "Old entry" in msg
         assert "2026-01-15" in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_log_no_journal_found(self, mock_send, tmp_path):
         """Shows 'no journal' when nothing exists."""
         (tmp_path / "journal").mkdir()
-        with patch("app.awake.INSTANCE_DIR", tmp_path):
-            _handle_log("koan")
+        with patch("app.command_handlers.INSTANCE_DIR", tmp_path):
+            handle_log("koan")
         msg = mock_send.call_args[0][0]
         assert "No journal" in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_log_date_only_no_project(self, mock_send, tmp_path):
         """'/log 2026-01-15' shows all projects for that date."""
         d = tmp_path / "journal" / "2026-01-15"
         d.mkdir(parents=True)
         (d / "koan.md").write_text("koan stuff")
-        with patch("app.awake.INSTANCE_DIR", tmp_path):
-            _handle_log("2026-01-15")
+        with patch("app.command_handlers.INSTANCE_DIR", tmp_path):
+            handle_log("2026-01-15")
         msg = mock_send.call_args[0][0]
         assert "koan" in msg
         assert "2026-01-15" in msg
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_log_yesterday_no_project(self, mock_send, tmp_path):
         """'/log yesterday' shows all projects for yesterday."""
         from datetime import date, timedelta
@@ -1426,32 +1427,32 @@ class TestHandleLog:
         d = tmp_path / "journal" / yesterday
         d.mkdir(parents=True)
         (d / "koan.md").write_text("yesterday stuff")
-        with patch("app.awake.INSTANCE_DIR", tmp_path):
-            _handle_log("yesterday")
+        with patch("app.command_handlers.INSTANCE_DIR", tmp_path):
+            handle_log("yesterday")
         msg = mock_send.call_args[0][0]
         assert "yesterday stuff" in msg
 
-    @patch("app.awake._handle_log")
+    @patch("app.command_handlers.handle_log")
     def test_handle_command_routes_log(self, mock_log):
-        """handle_command routes /log to _handle_log."""
+        """handle_command routes /log to handle_log."""
         handle_command("/log koan")
         mock_log.assert_called_once_with("koan")
 
-    @patch("app.awake._handle_log")
+    @patch("app.command_handlers.handle_log")
     def test_handle_command_routes_journal(self, mock_log):
-        """handle_command routes /journal to _handle_log."""
+        """handle_command routes /journal to handle_log."""
         handle_command("/journal koan")
         mock_log.assert_called_once_with("koan")
 
-    @patch("app.awake._handle_log")
+    @patch("app.command_handlers.handle_log")
     def test_handle_command_routes_log_bare(self, mock_log):
-        """handle_command routes bare /log to _handle_log."""
+        """handle_command routes bare /log to handle_log."""
         handle_command("/log")
         mock_log.assert_called_once_with("")
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_help_mentions_log(self, mock_send):
         """/help output includes /log."""
-        _handle_help()
+        handle_help()
         msg = mock_send.call_args[0][0]
         assert "/log" in msg
