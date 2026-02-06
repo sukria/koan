@@ -47,8 +47,12 @@ def build_mission_command(
     from app.cli_provider import build_full_command
 
     # Get mission tools (comma-separated list)
-    tools_str = get_mission_tools(project_name)
-    tools_list = [t.strip() for t in tools_str.split(",") if t.strip()]
+    # REVIEW mode: enforce read-only at tool level (no Bash/Write/Edit)
+    if autonomous_mode == "review":
+        tools_list = ["Read", "Glob", "Grep"]
+    else:
+        tools_str = get_mission_tools(project_name)
+        tools_list = [t.strip() for t in tools_str.split(",") if t.strip()]
 
     # Get model configuration with per-project overrides
     models = get_model_config(project_name)
