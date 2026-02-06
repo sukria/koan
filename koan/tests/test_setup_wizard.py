@@ -294,6 +294,28 @@ class TestProjectValidation:
         assert data["valid"] is True
         assert data["is_git_repo"] is True
 
+    def test_validate_unwritable_path(self, wizard_app):
+        """Non-writable path should fail (L3 from issue #61)."""
+        client, root = wizard_app
+
+        project_dir = root / "readonly-project"
+        project_dir.mkdir()
+        # Make directory read-only
+        project_dir.chmod(0o444)
+
+        try:
+            response = client.post(
+                "/step/projects/validate",
+                json={"path": str(project_dir)},
+                content_type="application/json"
+            )
+            data = json.loads(response.data)
+            assert data["valid"] is False
+            assert "writable" in data["error"].lower() or "permission" in data["error"].lower()
+        finally:
+            # Restore permissions for cleanup
+            project_dir.chmod(0o755)
+
 
 class TestProjectSave:
     """Tests for saving project configuration."""

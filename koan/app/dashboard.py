@@ -436,8 +436,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Kōan Dashboard")
     parser.add_argument("--port", type=int, default=5001)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode (not recommended)")
     args = parser.parse_args()
+
+    # Security warning for network exposure (M3 from issue #61)
+    if args.host != "127.0.0.1":
+        print("[dashboard] ⚠️  WARNING: Dashboard is exposed to the network!")
+        print("[dashboard] ⚠️  There is NO authentication on this dashboard.")
+        print("[dashboard] ⚠️  Anyone on your network can view and modify missions.")
+        if args.debug:
+            print("[dashboard] ⚠️  Debug mode is enabled — code execution possible!")
 
     print(f"[dashboard] Starting on http://{args.host}:{args.port}")
     print(f"[dashboard] Instance: {INSTANCE_DIR}")
-    app.run(host=args.host, port=args.port, debug=True)
+    # M1 from issue #61: debug=False by default to prevent code execution
+    app.run(host=args.host, port=args.port, debug=args.debug)
