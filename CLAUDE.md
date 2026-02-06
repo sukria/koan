@@ -65,3 +65,4 @@ Communication between processes happens through shared files in `instance/` with
 - Multi-project support: up to 5 projects, each with isolated memory under `memory/projects/{name}/`
 - Tests use temp directories and isolated env vars — no real Telegram calls
 - `system-prompt.md` defines the Claude agent's identity, priorities, and autonomous mode rules
+- **No inline prompts in Python code** — All LLM prompts MUST be extracted to `koan/system-prompts/*.md` files (100% English). Python modules load these templates at runtime using `Path(__file__).parent.parent / "system-prompts" / "filename.md"`.
