@@ -564,9 +564,26 @@ EOF
   CLAUDE_OUT="$(mktemp)"
   CLAUDE_ERR="$(mktemp)"
   MISSION_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('mission', '$AUTONOMOUS_MODE'))" 2>/dev/null || echo "")
+  BROWSER_FLAGS=$("$PYTHON" -c "from app.browser_access import get_browser_flags_for_shell; print(get_browser_flags_for_shell())" 2>/dev/null || echo "")
+  # Inject browser capability context into the prompt when enabled
+  if [ -n "$BROWSER_FLAGS" ]; then
+    PROMPT="$PROMPT
+
+# Browser Access
+
+You have browser access via Playwright MCP. You can use browser tools to:
+- Navigate to URLs and read page content
+- Take screenshots for visual verification
+- Run E2E tests in a real browser
+- Check browser console for errors
+- Interact with web pages (click, type, etc.)
+
+Use it when the mission benefits from web interaction (testing,
+documentation, verification)."
+  fi
   set +e  # Don't exit on error, we need to check the output
   # shellcheck disable=SC2086
-  claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit --output-format json $MISSION_FLAGS > "$CLAUDE_OUT" 2>"$CLAUDE_ERR"
+  claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit --output-format json $MISSION_FLAGS $BROWSER_FLAGS > "$CLAUDE_OUT" 2>"$CLAUDE_ERR"
   CLAUDE_EXIT=$?
   set -e
 

@@ -78,6 +78,15 @@ usage:
   session_token_limit: 500000   # Tokens per 5h session window
   weekly_token_limit: 5000000   # Tokens per 7-day window
 
+# Browser access (Playwright MCP)
+# Enables Claude to interact with web browsers for E2E testing,
+# documentation fetching, and web automation.
+# Requires Node.js/npx installed on the system.
+browser:
+  enabled: false                  # Global on/off switch
+  headless: true                  # Run browser in headless mode (no visible window)
+  allowed_domains: []             # Planned (not yet enforced). Example: ["localhost", "docs.python.org"]
+
 # Per-project overrides
 # Override git_auto_merge settings for specific projects
 # Example: if you have a project named "myapp" configured via KOAN_PROJECTS

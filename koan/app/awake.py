@@ -186,6 +186,10 @@ def handle_command(text: str):
         _handle_ping()
         return
 
+    if cmd == "/browser":
+        _handle_browser()
+        return
+
     if cmd == "/help":
         _handle_help()
         return
@@ -272,6 +276,12 @@ def _handle_ping():
         send_telegram("❌ Run loop is not running.\n\nTo restart:\n  make run &")
 
 
+def _handle_browser():
+    """Show browser access status."""
+    from app.browser_access import format_browser_status
+    send_telegram(format_browser_status())
+
+
 def _handle_help():
     """Send the list of available commands."""
     help_text = (
@@ -286,6 +296,7 @@ def _handle_help():
         "/status — quick status (missions, pause, loop)\n"
         "/usage — detailed status (quota, progress)\n"
         "/ping — check if run loop is alive (✅/❌)\n"
+        "/browser — browser access status\n"
         "/verbose — receive every progress update\n"
         "/silent — mute updates (default mode)\n"
         "\n"
