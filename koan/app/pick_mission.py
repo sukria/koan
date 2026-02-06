@@ -62,9 +62,7 @@ def call_claude(prompt: str) -> str:
         timeout=60,
     )
     if result.returncode != 0:
-        print(f"[pick_mission] Claude returned exit code {result.returncode}", file=sys.stderr)
-        if result.stderr:
-            print(f"[pick_mission] stderr: {result.stderr[:500]}", file=sys.stderr)
+        print(f"[pick_mission] Claude error (exit {result.returncode}): {result.stderr[:200]}", file=sys.stderr)
         return ""
 
     # Parse JSON output

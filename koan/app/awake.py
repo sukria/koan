@@ -438,6 +438,8 @@ def _handle_usage():
             if result.stderr:
                 print(f"[awake] /usage Claude stderr: {result.stderr[:500]}")
             # Fallback: send raw data
+            if result.returncode != 0:
+                print(f"[awake] /usage Claude error (exit {result.returncode}): {result.stderr[:200]}")
             fallback = f"Quota: {usage_text[:200]}\n\nMissions: {missions_text[:300]}"
             send_telegram(fallback)
     except subprocess.TimeoutExpired:
@@ -576,7 +578,9 @@ def _handle_sparring():
             send_telegram(response)
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
         else:
-            if result.stderr:
+            if result.returncode != 0:
+                print(f"[awake] /sparring Claude error (exit {result.returncode}): {result.stderr[:200]}")
+            elif result.stderr:
                 print(f"[awake] /sparring Claude stderr: {result.stderr[:500]}")
             send_telegram("Nothing compelling to say right now. Come back later.")
     except subprocess.TimeoutExpired:

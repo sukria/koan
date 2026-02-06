@@ -224,6 +224,17 @@ class TestCallClaude:
     @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
     @patch("app.pick_mission.build_claude_flags", return_value=[])
     @patch("app.pick_mission.subprocess.run")
+    def test_nonzero_exit_code_logs_stderr(self, mock_run, mock_flags, mock_models, capsys):
+        """Verify that Claude errors are logged to stderr (M4 security finding)."""
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="Rate limit exceeded")
+        call_claude("test prompt")
+        captured = capsys.readouterr()
+        assert "[pick_mission] Claude error" in captured.err
+        assert "Rate limit exceeded" in captured.err
+
+    @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
+    @patch("app.pick_mission.build_claude_flags", return_value=[])
+    @patch("app.pick_mission.subprocess.run")
     def test_json_with_content_field(self, mock_run, mock_flags, mock_models):
         mock_run.return_value = MagicMock(
             returncode=0,
