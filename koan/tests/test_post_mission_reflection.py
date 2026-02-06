@@ -96,11 +96,13 @@ class TestBuildReflectionPrompt:
 
         assert "Security audit of banking module" in prompt
 
-    def test_prompt_requests_french(self, tmp_path):
-        """Prompt requests French output."""
+    def test_prompt_uses_generic_language(self, tmp_path):
+        """Prompt uses generic terms (your human) and references soul.md for language preferences."""
         prompt = build_reflection_prompt(tmp_path, "Test mission")
 
-        assert "French" in prompt or "Alexis" in prompt
+        assert "your human" in prompt
+        assert "soul.md" in prompt
+        assert "Alexis" not in prompt  # No personal names in system prompts
 
 
 class TestWriteToJournal:
