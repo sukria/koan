@@ -148,7 +148,8 @@ def recover_missions(instance_dir: str) -> int:
                 new_lines.append("")
 
     from app.utils import atomic_write
-    atomic_write(missions_path, "\n".join(new_lines) + "\n")
+    from app.missions import normalize_content
+    atomic_write(missions_path, normalize_content("\n".join(new_lines) + "\n"))
     return len(recovered)
 
 
