@@ -118,6 +118,8 @@ def run_reflection(instance_dir: Path) -> str:
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
+        elif result.returncode != 0:
+            print(f"[self_reflection] Claude error: {result.stderr[:200]}", file=sys.stderr)
     except subprocess.TimeoutExpired:
         print("[self_reflection] Claude timeout", file=sys.stderr)
     except Exception as e:

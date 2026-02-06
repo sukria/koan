@@ -162,6 +162,16 @@ class TestRunReflection:
         assert result == ""
 
     @patch("app.self_reflection.subprocess.run")
+    def test_claude_failure_logs_stderr(self, mock_run, instance_dir, capsys):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="API rate limit exceeded"
+        )
+        run_reflection(instance_dir)
+        captured = capsys.readouterr()
+        assert "[self_reflection] Claude error:" in captured.err
+        assert "API rate limit" in captured.err
+
+    @patch("app.self_reflection.subprocess.run")
     def test_claude_empty_output(self, mock_run, instance_dir):
         mock_run.return_value = MagicMock(returncode=0, stdout="   ")
         result = run_reflection(instance_dir)
