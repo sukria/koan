@@ -20,7 +20,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple
 
 # If usage.md is older than this, widen safety margin (data may be stale)
 STALENESS_THRESHOLD_SECONDS = 6 * 3600  # 6 hours

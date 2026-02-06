@@ -11,10 +11,8 @@ Usage: python -m app.rituals <morning|evening> <instance_dir>
 import os
 import subprocess
 import sys
-from datetime import date, timedelta
 from pathlib import Path
 
-from app.utils import atomic_write, read_all_journals
 
 
 def load_template(template_name: str, instance_dir: Path) -> str:

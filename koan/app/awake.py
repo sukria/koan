@@ -11,7 +11,6 @@ Fast-response architecture:
 """
 
 import fcntl
-import json
 import os
 import re
 import subprocess
@@ -20,12 +19,13 @@ import threading
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple
 
 import requests
 
 from app.format_outbox import format_for_telegram, load_soul, load_human_prefs, load_memory_context
 from app.health_check import write_heartbeat
+from app.language_preference import get_language, set_language, reset_language, get_language_instruction
 from app.notify import send_telegram
 from app.utils import (
     load_dotenv,
@@ -206,6 +206,10 @@ def handle_command(text: str):
         _handle_log(args)
         return
 
+    if cmd.startswith("/language"):
+        _handle_language(text[9:].strip())
+        return
+
     if cmd == "/help":
         _handle_help()
         return
@@ -337,6 +341,26 @@ def _handle_log(args: str):
     send_telegram(result)
 
 
+def _handle_language(arg: str):
+    """Handle /language command — set or reset reply language preference."""
+    if not arg:
+        usage = "\n\nUsage:\n/language <language> — set reply language\n/language reset — use input language"
+        current = get_language()
+        if current:
+            send_telegram(f"Current language: {current}{usage}")
+        else:
+            send_telegram(f"No language override set (replying in input language).{usage}")
+        return
+
+    if arg.lower() == "reset":
+        reset_language()
+        send_telegram("Language preference reset. I'll reply in the same language as your messages.")
+        return
+
+    set_language(arg)
+    send_telegram(f"Language set to {arg.lower()}. All my replies will now be in {arg.lower()}.")
+
+
 def _handle_help():
     """Send the list of available commands."""
     help_text = (
@@ -358,6 +382,8 @@ def _handle_help():
         "INTERACTION\n"
         "/chat <msg> — force chat mode (bypass mission detection)\n"
         "/sparring — start a strategic sparring session\n"
+        "/language <lang> — set reply language (e.g. /language english)\n"
+        "/language reset — reply in same language as input\n"
         "/reflect <text> — note a reflection in the shared journal\n"
         "/pr <url> — review and update a GitHub PR (full pipeline)\n"
         "/help — this help\n"
@@ -906,6 +932,11 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
         TEXT=text,
     )
 
+    # Inject language preference override
+    lang_instruction = get_language_instruction()
+    if lang_instruction:
+        prompt += f"\n\n{lang_instruction}"
+
     # Inject emotional memory before the user message (if available)
     if emotional_context:
         prompt = prompt.replace(
@@ -1104,8 +1135,10 @@ def handle_message(text: str):
 
 def main():
     from app.banners import print_bridge_banner
+    from app.github_auth import setup_github_auth
 
     check_config()
+    setup_github_auth()
 
     provider_name = "telegram" # about to become dynamic with provider abstraction
     print_bridge_banner(f"messaging bridge — {provider_name.lower()}")

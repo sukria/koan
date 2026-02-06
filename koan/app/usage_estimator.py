@@ -14,7 +14,6 @@ Writes usage.md in the same format as manual /usage paste.
 """
 
 import json
-import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path

@@ -22,13 +22,11 @@ Returns JSON with suggested topics and reasoning.
 """
 
 import json
-import os
 import re
 import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 
 class DeepResearch:

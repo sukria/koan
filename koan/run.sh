@@ -131,6 +131,18 @@ if [ -n "${KOAN_EMAIL:-}" ]; then
   export GIT_COMMITTER_EMAIL="$KOAN_EMAIL"
 fi
 
+# Set up GitHub CLI identity if GITHUB_USER is configured
+if [ -n "${GITHUB_USER:-}" ]; then
+  GH_AUTH_OUTPUT=$("$PYTHON" -m app.github_auth 2>/dev/null)
+  GH_AUTH_EXIT=$?
+  if [ $GH_AUTH_EXIT -eq 0 ] && [ -n "$GH_AUTH_OUTPUT" ]; then
+    export "${GH_AUTH_OUTPUT?}"
+    echo "[koan] GitHub CLI authenticated as $GITHUB_USER"
+  else
+    echo "[koan] Warning: GitHub auth failed for $GITHUB_USER — gh commands may fail"
+  fi
+fi
+
 # Initialize .koan-project with first project
 echo "${PROJECT_NAMES[0]}" > "$KOAN_ROOT/.koan-project"
 export KOAN_CURRENT_PROJECT="${PROJECT_NAMES[0]}"
@@ -226,43 +238,13 @@ while true; do
   if [ -f "$KOAN_ROOT/.koan-pause" ]; then
     log pause "Paused. Contemplative mode. ($(date '+%H:%M'))"
 
-    # Check auto-resume: if paused due to quota, resume when reset time is reached
-    if [ -f "$KOAN_ROOT/.koan-pause-reason" ]; then
-      PAUSE_REASON=$(head -1 "$KOAN_ROOT/.koan-pause-reason")
-      # Second line is now the reset timestamp (or pause timestamp for max_runs)
-      RESET_OR_PAUSE_TS=$(sed -n '2p' "$KOAN_ROOT/.koan-pause-reason")
-      # Third line (if exists) is the display info
-      RESET_DISPLAY=$(sed -n '3p' "$KOAN_ROOT/.koan-pause-reason" 2>/dev/null || echo "")
-      CURRENT_TIMESTAMP=$(date +%s)
-
-      SHOULD_RESUME=false
-      if [ "$PAUSE_REASON" = "quota" ]; then
-        # For quota: resume when current time >= reset timestamp
-        if [ -n "$RESET_OR_PAUSE_TS" ] && [ "$CURRENT_TIMESTAMP" -ge "$RESET_OR_PAUSE_TS" ]; then
-          SHOULD_RESUME=true
-          log pause "Auto-resume: quota reset time reached ($RESET_DISPLAY)"
-        fi
-      else
-        # For max_runs and other reasons: use old 5h cooldown
-        TIME_ELAPSED=$((CURRENT_TIMESTAMP - RESET_OR_PAUSE_TS))
-        FIVE_HOURS=$((5 * 60 * 60))
-        if [ $TIME_ELAPSED -ge $FIVE_HOURS ]; then
-          SHOULD_RESUME=true
-          log pause "Auto-resume: 5h have passed since pause ($PAUSE_REASON)"
-        fi
-      fi
-
-      if [ "$SHOULD_RESUME" = true ]; then
-        rm -f "$KOAN_ROOT/.koan-pause" "$KOAN_ROOT/.koan-pause-reason"
-        count=0  # Reset run counter on auto-resume — start fresh at MAX capacity
-        if [ "$PAUSE_REASON" = "quota" ]; then
-          notify "🔄 Koan auto-resumed: quota reset time reached. Starting fresh (0/$MAX_RUNS runs)."
-        else
-          notify "🔄 Koan auto-resumed after 5h cooldown (reason: $PAUSE_REASON)"
-        fi
-        continue
-      fi
-    fi
+    # Check auto-resume via pause_manager (handles quota reset + 5h cooldown)
+    RESUME_MSG=$("$PYTHON" -m app.pause_manager check "$KOAN_ROOT" 2>/dev/null) && {
+      log pause "Auto-resume: $RESUME_MSG"
+      count=0  # Reset run counter on auto-resume — start fresh at MAX capacity
+      notify "🔄 Koan auto-resumed: $RESUME_MSG. Starting fresh (0/$MAX_RUNS runs)."
+      continue
+    }
 
     # Check for manual /resume (pause file removed but we're still in pause block from previous iteration)
     # This shouldn't normally happen since the continue at end of sleep loop would catch it,
@@ -284,12 +266,10 @@ while true; do
       export KOAN_CURRENT_PROJECT="$PROJECT_NAME"
       export KOAN_CURRENT_PROJECT_PATH="$PROJECT_PATH"
 
-      PAUSE_SESSION_INFO="Pause mode. Run loop paused."
-      CONTEMPLATE_PROMPT=$(sed \
-        -e "s|{INSTANCE}|$INSTANCE|g" \
-        -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
-        -e "s|{SESSION_INFO}|$PAUSE_SESSION_INFO|g" \
-        "$KOAN_ROOT/koan/system-prompts/contemplative.md")
+      CONTEMPLATE_PROMPT=$("$PYTHON" -m app.prompt_builder contemplative \
+        --instance "$INSTANCE" \
+        --project-name "$PROJECT_NAME" \
+        --session-info "Pause mode. Run loop paused.")
 
       cd "$INSTANCE"
       CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
@@ -403,12 +383,10 @@ $KNOWN_PROJECTS"
         notify "🪷 Run $RUN_NUM/$MAX_RUNS — Contemplative mode (rolled $CONTEMPLATE_ROLL < $CONTEMPLATIVE_CHANCE%)"
 
         # Run contemplative session (same as pause mode contemplation, but doesn't enter pause)
-        CONTEMPLATE_SESSION_INFO="Run $RUN_NUM/$MAX_RUNS on $PROJECT_NAME. Mode: $AUTONOMOUS_MODE. Triggered by $CONTEMPLATIVE_CHANCE% contemplative chance."
-        CONTEMPLATE_PROMPT=$(sed \
-          -e "s|{INSTANCE}|$INSTANCE|g" \
-          -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
-          -e "s|{SESSION_INFO}|$CONTEMPLATE_SESSION_INFO|g" \
-          "$KOAN_ROOT/koan/system-prompts/contemplative.md")
+        CONTEMPLATE_PROMPT=$("$PYTHON" -m app.prompt_builder contemplative \
+          --instance "$INSTANCE" \
+          --project-name "$PROJECT_NAME" \
+          --session-info "Run $RUN_NUM/$MAX_RUNS on $PROJECT_NAME. Mode: $AUTONOMOUS_MODE. Triggered by $CONTEMPLATIVE_CHANCE% contemplative chance.")
 
         cd "$INSTANCE"
         CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
@@ -435,10 +413,8 @@ $KNOWN_PROJECTS"
         echo ""
         # Send retrospective and enter pause mode
         "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
-        # Create pause file + reason file for auto-resume
-        touch "$KOAN_ROOT/.koan-pause"
-        echo "quota" > "$KOAN_ROOT/.koan-pause-reason"
-        echo "$(date +%s)" >> "$KOAN_ROOT/.koan-pause-reason"
+        # Create pause via pause_manager
+        "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota"
         notify "⏸️ Koan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Auto-resume in 5h or use /resume."
         continue  # Go back to start of loop (will enter pause mode)
         ;;
@@ -486,93 +462,17 @@ $KNOWN_PROJECTS"
     notify "🚀 Run $RUN_NUM/$MAX_RUNS — Autonomous: ${AUTONOMOUS_MODE} mode on $PROJECT_NAME"
   fi
 
-  # Build mission instruction for agent prompt
-  if [ -n "$MISSION_TITLE" ]; then
-    MISSION_INSTRUCTION="Your assigned mission is: **${MISSION_TITLE}** Mark it In Progress in missions.md. Execute it thoroughly. Take your time — go deep, don't rush."
-  else
-    MISSION_INSTRUCTION="No specific mission assigned. Look for pending missions for ${PROJECT_NAME} in missions.md (check [project:${PROJECT_NAME}] tags and ### project:${PROJECT_NAME} sub-headers). If none found, proceed to autonomous mode."
-  fi
-
-  # Build prompt from template, replacing placeholders
-  PROMPT=$(sed \
-    -e "s|{INSTANCE}|$INSTANCE|g" \
-    -e "s|{PROJECT_PATH}|$PROJECT_PATH|g" \
-    -e "s|{PROJECT_NAME}|$PROJECT_NAME|g" \
-    -e "s|{RUN_NUM}|$RUN_NUM|g" \
-    -e "s|{MAX_RUNS}|$MAX_RUNS|g" \
-    -e "s|{AUTONOMOUS_MODE}|${AUTONOMOUS_MODE:-implement}|g" \
-    -e "s|{FOCUS_AREA}|${FOCUS_AREA:-General autonomous work}|g" \
-    -e "s|{AVAILABLE_PCT}|${AVAILABLE_PCT:-50}|g" \
-    "$KOAN_ROOT/koan/system-prompts/agent.md")
-  # Replace mission instruction separately (may contain special chars)
-  PROMPT="${PROMPT//\{MISSION_INSTRUCTION\}/$MISSION_INSTRUCTION}"
-
-  # Append merge policy based on config
-  MERGE_POLICY=""
-  if "$PYTHON" -c "
-from app.utils import load_config, get_auto_merge_config
-config = load_config()
-merge_cfg = get_auto_merge_config(config, '$PROJECT_NAME')
-import sys
-sys.exit(0 if merge_cfg.get('enabled', True) and merge_cfg.get('rules') else 1)
-" 2>/dev/null; then
-    MERGE_POLICY="
-
-# Git Merge Policy (Auto-Merge Enabled)
-
-Auto-merge is ENABLED for this project. After you complete your work on a koan/* branch
-and push it, the system will automatically merge it according to configured rules.
-
-Just focus on: creating koan/* branch, implementing, committing, pushing.
-The auto-merge system handles the merge to the base branch after mission completion.
-"
-  else
-    MERGE_POLICY="
-
-# Git Merge Policy
-
-Auto-merge is NOT configured for this project. Follow standard workflow:
-create koan/* branches, commit, and push, but DO NOT merge yourself.
-"
-  fi
-  PROMPT="$PROMPT$MERGE_POLICY"
-
-  # Deep Research suggestions: for DEEP mode autonomous work, inject priority topics
-  DEEP_RESEARCH="$APP_DIR/deep_research.py"
-  if [ "$AUTONOMOUS_MODE" = "deep" ] && [ -z "$MISSION_TITLE" ]; then
-    DEEP_SUGGESTIONS=$("$PYTHON" "$DEEP_RESEARCH" "$INSTANCE" "$PROJECT_NAME" "$PROJECT_PATH" --markdown 2>/dev/null || echo "")
-    if [ -n "$DEEP_SUGGESTIONS" ]; then
-      PROMPT="$PROMPT
-
-# Deep Research Analysis
-
-$DEEP_SUGGESTIONS
-"
-    fi
-  fi
-
-  # Verbose mode: if .koan-verbose exists, instruct agent to mirror pending.md writes to outbox
-  if [ -f "$KOAN_ROOT/.koan-verbose" ]; then
-    VERBOSE_SECTION="
-
-# Verbose Mode (ACTIVE)
-
-The human has activated verbose mode (/verbose). Every time you write a progress line
-to pending.md, you MUST ALSO write the same line to {INSTANCE}/outbox.md so the human
-gets real-time updates on Telegram. Use this pattern:
-
-\`\`\`bash
-MSG=\"\$(date +%H:%M) — description\"
-echo \"\$MSG\" >> {INSTANCE}/journal/pending.md
-echo \"\$MSG\" >> {INSTANCE}/outbox.md
-\`\`\`
-
-This replaces the single echo to pending.md. Do this for EVERY progress update.
-The conclusion message at the end of the mission is still a single write as usual.
-"
-    VERBOSE_SECTION="${VERBOSE_SECTION//\{INSTANCE\}/$INSTANCE}"
-    PROMPT="$PROMPT$VERBOSE_SECTION"
-  fi
+  # Build complete agent prompt (template + merge policy + deep research + verbose mode)
+  PROMPT=$("$PYTHON" -m app.prompt_builder agent \
+    --instance "$INSTANCE" \
+    --project-name "$PROJECT_NAME" \
+    --project-path "$PROJECT_PATH" \
+    --run-num "$RUN_NUM" \
+    --max-runs "$MAX_RUNS" \
+    --autonomous-mode "${AUTONOMOUS_MODE:-implement}" \
+    --focus-area "${FOCUS_AREA:-General autonomous work}" \
+    --available-pct "${AVAILABLE_PCT:-50}" \
+    --mission-title "$MISSION_TITLE")
 
   # Create pending.md — live progress journal for this run
   PENDING_FILE="$INSTANCE/journal/pending.md"
@@ -659,12 +559,8 @@ Claude quota reached after $count runs (project: $PROJECT_NAME). $RESET_DISPLAY
 $RESUME_MSG or use \`/resume\` to restart manually.
 EOF
 
-    # Create pause file + reason file for auto-resume
-    # Store actual reset timestamp for smart auto-resume
-    touch "$KOAN_ROOT/.koan-pause"
-    echo "quota" > "$KOAN_ROOT/.koan-pause-reason"
-    echo "$RESET_TIMESTAMP" >> "$KOAN_ROOT/.koan-pause-reason"
-    echo "$RESET_DISPLAY" >> "$KOAN_ROOT/.koan-pause-reason"
+    # Create pause via pause_manager with parsed reset timestamp
+    "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota" "$RESET_TIMESTAMP" "$RESET_DISPLAY"
 
     # Commit journal update
     cd "$INSTANCE"
@@ -757,9 +653,7 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
     log koan "Max runs ($MAX_RUNS) reached. Running evening ritual before pause."
     "$PYTHON" "$RITUALS" evening "$INSTANCE" || true
     log pause "Entering pause mode (auto-resume in 5h)."
-    touch "$KOAN_ROOT/.koan-pause"
-    echo "max_runs" > "$KOAN_ROOT/.koan-pause-reason"
-    echo "$(date +%s)" >> "$KOAN_ROOT/.koan-pause-reason"
+    "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "max_runs"
     notify "⏸️ Koan paused: $MAX_RUNS runs completed. Auto-resume in 5h or use /resume to restart."
     # Don't reset count here — it gets reset on auto-resume or manual /resume
     continue  # Go back to start of loop (will enter pause mode)

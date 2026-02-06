@@ -14,12 +14,11 @@ Usage:
     python3 git_sync.py <instance_dir> <project_name> <project_path>
 """
 
-import fcntl
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 
 # ---------------------------------------------------------------------------

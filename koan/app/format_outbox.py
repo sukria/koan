@@ -14,13 +14,13 @@ Usage: python format_outbox.py <instance_dir> [project_name] < raw_message
 Reads raw content from stdin, formats it via Claude, outputs to stdout.
 """
 
-import os
 import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
+from app.language_preference import get_language_instruction
 from app.utils import get_model_config, build_claude_flags
 
 
@@ -147,6 +147,11 @@ def format_for_telegram(raw_content: str, soul: str, prefs: str,
         TIME_HINT=time_hint,
         RAW_CONTENT=raw_content,
     )
+
+    # Inject language preference override
+    lang_instruction = get_language_instruction()
+    if lang_instruction:
+        prompt += f"\n\n{lang_instruction}"
 
     try:
         # Call Claude CLI to format the message (lightweight model)
