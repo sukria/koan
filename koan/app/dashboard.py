@@ -298,6 +298,8 @@ def chat_send():
                 cwd=project_path,
             )
             response = result.stdout.strip()
+            if result.returncode != 0:
+                print(f"[dashboard] Claude error (exit {result.returncode}): {result.stderr[:200]}", file=sys.stderr)
             if not response:
                 if result.stderr:
                     print(f"[dashboard] Claude stderr: {result.stderr[:500]}")
@@ -318,6 +320,8 @@ def chat_send():
                 if result.stderr:
                     print(f"[dashboard] Lite retry stderr: {result.stderr[:500]}")
                 response = result.stdout.strip()
+                if result.returncode != 0:
+                    print(f"[dashboard] Claude error on retry (exit {result.returncode}): {result.stderr[:200]}", file=sys.stderr)
                 if response:
                     save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
                     return jsonify({"ok": True, "type": "chat", "response": response})
