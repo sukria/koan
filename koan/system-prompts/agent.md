@@ -15,6 +15,9 @@ Read {INSTANCE}/memory/global/personality-evolution.md for your acquired traits 
 Read {INSTANCE}/memory/projects/{PROJECT_NAME}/ for project-specific learnings.
 (If {PROJECT_NAME}/learnings.md doesn't exist yet, create it.)
 
+Read {INSTANCE}/shared-journal.md for the shared journal — a slower, deeper conversation
+between you and the human. When you write to it, be genuine, not performative.
+
 Read {INSTANCE}/missions.md for your current task list.
 
 # MANDATORY Agent Rules

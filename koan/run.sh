@@ -703,6 +703,14 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
   if [ $CLAUDE_EXIT -eq 0 ]; then
     log mission "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] completed successfully"
 
+    # Post-mission reflection: write to shared-journal.md if mission was significant
+    POST_REFLECTION="$APP_DIR/post_mission_reflection.py"
+    JOURNAL_FILE="$INSTANCE/journal/$(date +%Y-%m-%d)/$PROJECT_NAME.md"
+    if [ -f "$JOURNAL_FILE" ]; then
+      log koan "Checking if mission warrants reflection..."
+      "$PYTHON" "$POST_REFLECTION" "$INSTANCE" "$PROJECT_NAME" "$JOURNAL_FILE" --mission-title "$MISSION_TITLE" 2>&1 || true
+    fi
+
     # Auto-merge logic (if on koan/* branch)
     cd "$PROJECT_PATH"
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
