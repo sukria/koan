@@ -326,6 +326,26 @@ class TestChatSend:
         assert data["ok"] is False
         assert "claude not found" in data["error"]
 
+    @patch("app.dashboard.get_allowed_tools", return_value="")
+    @patch("app.dashboard.get_tools_description", return_value="")
+    @patch("app.dashboard.save_telegram_message")
+    @patch("app.dashboard.load_recent_telegram_history", return_value=[])
+    @patch("app.dashboard.format_conversation_history", return_value="")
+    @patch("app.dashboard.subprocess.run")
+    def test_chat_empty_response_logs_stderr(self, mock_run, mock_fmt, mock_hist, mock_save,
+                                              mock_tools_desc, mock_tools, app_client, instance_dir, capsys):
+        """When Claude returns empty stdout with stderr, stderr should be logged."""
+        mock_run.return_value = MagicMock(stdout="", stderr="model overloaded", returncode=1)
+        with patch.object(dashboard, "TELEGRAM_HISTORY_FILE", instance_dir / "history.jsonl"), \
+             patch.object(dashboard, "SOUL_FILE", instance_dir / "soul.md"), \
+             patch.object(dashboard, "SUMMARY_FILE", instance_dir / "memory" / "summary.md"), \
+             patch.object(dashboard, "JOURNAL_DIR", instance_dir / "journal"):
+            resp = app_client.post("/chat/send", data={"message": "hello", "mode": "chat"})
+        data = resp.get_json()
+        assert data["ok"] is True
+        captured = capsys.readouterr()
+        assert "model overloaded" in captured.out
+
     def test_chat_send_with_project_tag(self, app_client, instance_dir):
         with patch.object(dashboard, "MISSIONS_FILE", instance_dir / "missions.md"):
             resp = app_client.post("/chat/send", data={

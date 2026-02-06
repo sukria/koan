@@ -299,6 +299,8 @@ def chat_send():
             )
             response = result.stdout.strip()
             if not response:
+                if result.stderr:
+                    print(f"[dashboard] Claude stderr: {result.stderr[:500]}")
                 response = "I couldn't formulate a response. Try again?"
             # Save assistant response to history
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
@@ -313,6 +315,8 @@ def chat_send():
                     capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                     cwd=project_path,
                 )
+                if result.stderr:
+                    print(f"[dashboard] Lite retry stderr: {result.stderr[:500]}")
                 response = result.stdout.strip()
                 if response:
                     save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
@@ -436,8 +440,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Kōan Dashboard")
     parser.add_argument("--port", type=int, default=5001)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable Flask debug mode (NOT recommended)")
     args = parser.parse_args()
+
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            f"[dashboard] WARNING: Binding to {args.host} exposes the dashboard "
+            f"to the network. No authentication or rate limiting is configured.",
+            file=sys.stderr,
+        )
 
     print(f"[dashboard] Starting on http://{args.host}:{args.port}")
     print(f"[dashboard] Instance: {INSTANCE_DIR}")
-    app.run(host=args.host, port=args.port, debug=True)
+    app.run(host=args.host, port=args.port, debug=args.debug)

@@ -326,6 +326,10 @@ def validate_project():
     if not project_path.is_dir():
         return jsonify({"valid": False, "error": "Path is not a directory"})
 
+    # Check writability
+    if not os.access(project_path, os.W_OK):
+        return jsonify({"valid": False, "error": "Path is not writable"})
+
     # Check for CLAUDE.md (optional but nice to have)
     has_claude_md = (project_path / "CLAUDE.md").exists()
 
