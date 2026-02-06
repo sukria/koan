@@ -506,9 +506,15 @@ EOF
   CLAUDE_OUT="$(mktemp)"
   CLAUDE_ERR="$(mktemp)"
   MISSION_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('mission', '$AUTONOMOUS_MODE'))" 2>/dev/null || echo "")
+  # REVIEW mode: enforce read-only at tool level (no Bash/Write/Edit)
+  if [ "$AUTONOMOUS_MODE" = "review" ]; then
+    MISSION_TOOLS="Read,Glob,Grep"
+  else
+    MISSION_TOOLS="Bash,Read,Write,Glob,Grep,Edit"
+  fi
   set +e  # Don't exit on error, we need to check the output
   # shellcheck disable=SC2086
-  claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit --output-format json $MISSION_FLAGS > "$CLAUDE_OUT" 2>"$CLAUDE_ERR"
+  claude -p "$PROMPT" --allowedTools "$MISSION_TOOLS" --output-format json $MISSION_FLAGS > "$CLAUDE_OUT" 2>"$CLAUDE_ERR"
   CLAUDE_EXIT=$?
   set -e
 
