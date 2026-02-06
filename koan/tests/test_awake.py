@@ -22,6 +22,10 @@ from app.awake import (
     _build_status,
     _handle_help,
     _handle_usage,
+    _handle_magic,
+    _get_projects_for_magic,
+    _gather_git_activity,
+    _gather_project_structure,
     _run_in_worker,
     get_updates,
     check_config,
@@ -1154,3 +1158,120 @@ class TestPauseAwareness:
 
         # Prompt should mention running status
         assert "RUNNING" in prompt or "▶️" in prompt
+
+
+# ---------------------------------------------------------------------------
+# /magic and /ai
+# ---------------------------------------------------------------------------
+
+class TestMagicCommand:
+    """Tests for /magic and /ai creative exploration command."""
+
+    @patch("app.awake._run_in_worker")
+    def test_handle_command_routes_magic(self, mock_worker):
+        handle_command("/magic")
+        mock_worker.assert_called_once_with(_handle_magic)
+
+    @patch("app.awake._run_in_worker")
+    def test_handle_command_routes_ai(self, mock_worker):
+        handle_command("/ai")
+        mock_worker.assert_called_once_with(_handle_magic)
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_magic(self, mock_send):
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/magic" in msg
+
+    def test_get_projects_from_env(self, monkeypatch):
+        """Projects are read from KOAN_PROJECTS env var."""
+        monkeypatch.setenv("KOAN_PROJECTS", "foo:/tmp;bar:/tmp")
+        projects = _get_projects_for_magic()
+        assert len(projects) == 2
+        assert projects[0][0] == "foo"
+        assert projects[1][0] == "bar"
+
+    def test_get_projects_fallback_to_project_path(self, tmp_path, monkeypatch):
+        """Falls back to PROJECT_PATH when KOAN_PROJECTS is not set."""
+        monkeypatch.delenv("KOAN_PROJECTS", raising=False)
+        with patch("app.awake.PROJECT_PATH", str(tmp_path)):
+            projects = _get_projects_for_magic()
+        assert len(projects) == 1
+        assert projects[0][0] == tmp_path.name
+
+    def test_get_projects_empty_when_nothing_configured(self, monkeypatch):
+        """Returns empty list when no projects configured."""
+        monkeypatch.delenv("KOAN_PROJECTS", raising=False)
+        with patch("app.awake.PROJECT_PATH", ""):
+            projects = _get_projects_for_magic()
+        assert projects == []
+
+    def test_get_projects_filters_invalid_paths(self, monkeypatch):
+        """Invalid paths are excluded from project list."""
+        monkeypatch.setenv("KOAN_PROJECTS", "foo:/nonexistent/path;bar:/tmp")
+        projects = _get_projects_for_magic()
+        assert len(projects) == 1
+        assert projects[0][0] == "bar"
+
+    @patch("subprocess.run")
+    def test_gather_git_activity(self, mock_run):
+        """Git activity includes commits and branches."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="abc1234 fix login\ndef5678 add tests",
+        )
+        result = _gather_git_activity("/tmp")
+        assert "fix login" in result
+
+    def test_gather_project_structure(self, tmp_path):
+        """Project structure lists files and directories."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "README.md").write_text("hello")
+        (tmp_path / ".hidden").write_text("skip")
+
+        result = _gather_project_structure(str(tmp_path))
+        assert "src/" in result
+        assert "tests/" in result
+        assert "README.md" in result
+        assert ".hidden" not in result
+
+    @patch("app.awake.send_telegram")
+    def test_magic_no_projects(self, mock_send):
+        """Shows error when no projects configured."""
+        with patch("app.awake._get_projects_for_magic", return_value=[]):
+            _handle_magic()
+        mock_send.assert_called_once()
+        assert "No projects" in mock_send.call_args[0][0]
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run")
+    def test_magic_calls_claude_with_project(self, mock_run, mock_send, tmp_path):
+        """Magic calls Claude with project context."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="Ideas for your project:\n- Idea 1\n- Idea 2",
+        )
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text("## En attente\n\n## En cours\n\n## Terminées\n")
+
+        with patch("app.awake._get_projects_for_magic", return_value=[("test", str(tmp_path))]), \
+             patch("app.awake.MISSIONS_FILE", missions_file), \
+             patch("app.awake.SOUL", "test soul"):
+            _handle_magic()
+
+        # Should send "Exploring..." then the result
+        assert mock_send.call_count == 2
+        assert "Exploring test" in mock_send.call_args_list[0][0][0]
+
+    @patch("app.awake.send_telegram")
+    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 90))
+    def test_magic_timeout(self, mock_run, mock_send):
+        """Timeout sends fallback message."""
+        with patch("app.awake._get_projects_for_magic", return_value=[("test", "/tmp")]), \
+             patch("app.awake.MISSIONS_FILE", MagicMock(exists=MagicMock(return_value=False))), \
+             patch("app.awake.SOUL", ""):
+            _handle_magic()
+
+        last_msg = mock_send.call_args_list[-1][0][0]
+        assert "Timeout" in last_msg

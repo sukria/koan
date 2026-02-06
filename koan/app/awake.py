@@ -194,6 +194,10 @@ def handle_command(text: str):
         _run_in_worker(_handle_usage)
         return
 
+    if cmd in ("/magic", "/ai"):
+        _run_in_worker(_handle_magic)
+        return
+
     # Unknown command — pass to Claude as chat
     handle_chat(text)
 
@@ -291,6 +295,7 @@ def _handle_help():
         "\n"
         "INTERACTION\n"
         "/sparring — start a strategic sparring session\n"
+        "/magic — creative ideas to improve a project\n"
         "/reflect <text> — note a reflection in the shared journal\n"
         "/help — this help\n"
         "\n"
@@ -515,6 +520,149 @@ def _handle_sparring():
     except Exception as e:
         print(f"[awake] Sparring error: {e}")
         send_telegram("Error during sparring. Try again.")
+
+
+def _handle_magic():
+    """Explore a project and suggest creative improvement ideas."""
+    import random
+
+    # Pick a project — random from known projects, or fallback to PROJECT_PATH
+    projects = _get_projects_for_magic()
+    if not projects:
+        send_telegram("No projects configured. Set KOAN_PROJECTS or KOAN_PROJECT_PATH.")
+        return
+
+    name, path = random.choice(projects)
+    send_telegram(f"Exploring {name}...")
+
+    # Gather recent git activity
+    git_activity = _gather_git_activity(path)
+
+    # Gather project structure (top-level files + directories)
+    project_structure = _gather_project_structure(path)
+
+    # Current missions context
+    missions_context = ""
+    if MISSIONS_FILE.exists():
+        from app.missions import parse_sections
+        sections = parse_sections(MISSIONS_FILE.read_text())
+        in_progress = sections.get("in_progress", [])
+        pending = sections.get("pending", [])
+        parts = []
+        if in_progress:
+            parts.append("In progress:\n" + "\n".join(in_progress[:5]))
+        if pending:
+            parts.append("Pending:\n" + "\n".join(pending[:5]))
+        missions_context = "\n".join(parts) if parts else "No active missions."
+
+    from app.prompts import load_prompt
+    prompt = load_prompt(
+        "magic-explore",
+        SOUL=SOUL,
+        PROJECT_NAME=name,
+        GIT_ACTIVITY=git_activity,
+        PROJECT_STRUCTURE=project_structure,
+        MISSIONS_CONTEXT=missions_context,
+    )
+
+    try:
+        fast_model = get_fast_reply_model()
+        cmd = ["claude", "-p", prompt, "--max-turns", "1"]
+        if fast_model:
+            cmd.extend(["--model", fast_model])
+        result = subprocess.run(
+            cmd,
+            capture_output=True, text=True, timeout=90,
+            cwd=path,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            response = _clean_chat_response(result.stdout.strip())
+            send_telegram(response)
+        else:
+            send_telegram(f"Couldn't generate ideas for {name}. Try again later.")
+    except subprocess.TimeoutExpired:
+        send_telegram("Timeout exploring. Try again.")
+    except Exception as e:
+        print(f"[awake] Magic error: {e}")
+        send_telegram("Error during exploration. Try again.")
+
+
+def _get_projects_for_magic() -> list:
+    """Get list of (name, path) tuples for project exploration."""
+    # Try KOAN_PROJECTS env var (semicolon-separated name:path pairs)
+    projects_str = os.environ.get("KOAN_PROJECTS", "")
+    if projects_str:
+        projects = []
+        for pair in projects_str.split(";"):
+            pair = pair.strip()
+            if ":" in pair:
+                name, path = pair.split(":", 1)
+                if name.strip() and path.strip() and Path(path.strip()).is_dir():
+                    projects.append((name.strip(), path.strip()))
+        if projects:
+            return projects
+
+    # Fallback to PROJECT_PATH
+    if PROJECT_PATH and Path(PROJECT_PATH).is_dir():
+        name = Path(PROJECT_PATH).name
+        return [(name, PROJECT_PATH)]
+
+    return []
+
+
+def _gather_git_activity(project_path: str) -> str:
+    """Gather recent git activity for a project."""
+    parts = []
+    try:
+        # Recent commits
+        result = subprocess.run(
+            ["git", "log", "--oneline", "-15", "--no-merges"],
+            capture_output=True, text=True, timeout=10,
+            cwd=project_path,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            parts.append("Recent commits:\n" + result.stdout.strip())
+
+        # Recent branches
+        result = subprocess.run(
+            ["git", "branch", "-r", "--sort=-committerdate", "--format=%(refname:short)"],
+            capture_output=True, text=True, timeout=10,
+            cwd=project_path,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            branches = result.stdout.strip().split("\n")[:10]
+            parts.append("Active branches:\n" + "\n".join(branches))
+
+        # Files changed recently
+        result = subprocess.run(
+            ["git", "diff", "--stat", "HEAD~10", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+            cwd=project_path,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            parts.append("Recent changes:\n" + result.stdout.strip())
+
+    except (subprocess.TimeoutExpired, Exception) as e:
+        parts.append(f"(git activity unavailable: {e})")
+
+    return "\n\n".join(parts) if parts else "No git activity available."
+
+
+def _gather_project_structure(project_path: str) -> str:
+    """Gather top-level project structure."""
+    try:
+        p = Path(project_path)
+        entries = sorted(p.iterdir())
+        dirs = [e.name + "/" for e in entries if e.is_dir() and not e.name.startswith(".")]
+        files = [e.name for e in entries if e.is_file() and not e.name.startswith(".")]
+        parts = []
+        if dirs:
+            parts.append("Directories: " + ", ".join(dirs[:20]))
+        if files:
+            parts.append("Files: " + ", ".join(files[:20]))
+        return "\n".join(parts)
+    except Exception:
+        return "Structure unavailable."
 
 
 def _handle_reflect(message: str):
