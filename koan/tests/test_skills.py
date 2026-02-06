@@ -463,3 +463,237 @@ class TestSkill:
         handler.write_text("def handle(ctx): pass")
         skill = Skill(name="test", scope="koan", handler_path=handler)
         assert skill.has_handler()
+
+    def test_worker_default_false(self):
+        skill = Skill(name="test", scope="koan")
+        assert not skill.worker
+
+    def test_worker_explicit_true(self):
+        skill = Skill(name="test", scope="koan", worker=True)
+        assert skill.worker
+
+
+# ---------------------------------------------------------------------------
+# Worker field parsing
+# ---------------------------------------------------------------------------
+
+class TestWorkerField:
+    """Tests for the 'worker: true' field in SKILL.md."""
+
+    def test_worker_true_parsed(self, tmp_path):
+        skill_dir = tmp_path / "core" / "blocking"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: blocking
+            scope: core
+            description: A blocking skill
+            worker: true
+            commands:
+              - name: blocking
+                description: Does blocking work
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.worker is True
+
+    def test_worker_false_parsed(self, tmp_path):
+        skill_dir = tmp_path / "core" / "fast"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: fast
+            scope: core
+            description: A fast skill
+            worker: false
+            commands:
+              - name: fast
+                description: Does fast work
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.worker is False
+
+    def test_worker_absent_defaults_false(self, tmp_path):
+        skill_dir = tmp_path / "core" / "normal"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: normal
+            scope: core
+            description: A normal skill
+            commands:
+              - name: normal
+                description: Does normal work
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.worker is False
+
+    def test_sparring_skill_is_worker(self):
+        """Sparring core skill should have worker=true."""
+        registry = build_registry()
+        skill = registry.get("core", "sparring")
+        assert skill is not None
+        assert skill.worker is True
+
+    def test_pr_skill_is_worker(self):
+        """PR core skill should have worker=true."""
+        registry = build_registry()
+        skill = registry.get("core", "pr")
+        assert skill is not None
+        assert skill.worker is True
+
+    def test_status_skill_not_worker(self):
+        """Status core skill should NOT be a worker (reads files only)."""
+        registry = build_registry()
+        skill = registry.get("core", "status")
+        assert skill is not None
+        assert skill.worker is False
+
+
+# ---------------------------------------------------------------------------
+# Scoped command resolution
+# ---------------------------------------------------------------------------
+
+class TestResolveScopedCommand:
+    def _make_registry(self, tmp_path):
+        """Create a registry with skills in multiple scopes."""
+        # core/status
+        status_dir = tmp_path / "core" / "status"
+        status_dir.mkdir(parents=True)
+        (status_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: status
+            scope: core
+            description: Show status
+            commands:
+              - name: status
+                description: Quick status
+              - name: ping
+                description: Check liveness
+            ---
+        """))
+
+        # myproject/review
+        review_dir = tmp_path / "myproject" / "review"
+        review_dir.mkdir(parents=True)
+        (review_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: review
+            scope: myproject
+            description: Code review
+            commands:
+              - name: review
+                description: Run code review
+            ---
+        """))
+
+        return SkillRegistry(tmp_path)
+
+    def test_resolve_scope_skill(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        result = registry.resolve_scoped_command("myproject.review")
+        assert result is not None
+        skill, cmd, args = result
+        assert skill.name == "review"
+        assert cmd == "review"
+        assert args == ""
+
+    def test_resolve_scope_skill_with_args(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        result = registry.resolve_scoped_command("myproject.review some args here")
+        assert result is not None
+        skill, cmd, args = result
+        assert skill.name == "review"
+        assert cmd == "review"
+        assert args == "some args here"
+
+    def test_resolve_scope_skill_subcommand(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        result = registry.resolve_scoped_command("core.status.ping")
+        assert result is not None
+        skill, cmd, args = result
+        assert skill.name == "status"
+        assert cmd == "ping"
+
+    def test_resolve_nonexistent_scope(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        assert registry.resolve_scoped_command("unknown.review") is None
+
+    def test_resolve_nonexistent_skill(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        assert registry.resolve_scoped_command("core.unknown") is None
+
+    def test_resolve_single_segment_returns_none(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        assert registry.resolve_scoped_command("status") is None
+
+
+# ---------------------------------------------------------------------------
+# PR skill handler
+# ---------------------------------------------------------------------------
+
+class TestPrSkillHandler:
+    """Tests for the /pr core skill handler."""
+
+    def _load_handler(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pr_handler",
+            str(Path(__file__).parent.parent / "skills" / "core" / "pr" / "handler.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_no_args_returns_usage(self, tmp_path):
+        mod = self._load_handler()
+        ctx = SkillContext(koan_root=tmp_path, instance_dir=tmp_path, args="")
+        result = mod.handle(ctx)
+        assert "Usage" in result
+        assert "/pr" in result
+
+    def test_invalid_url_returns_error(self, tmp_path):
+        mod = self._load_handler()
+        ctx = SkillContext(koan_root=tmp_path, instance_dir=tmp_path, args="not-a-url")
+        result = mod.handle(ctx)
+        assert "No valid GitHub PR URL" in result
+
+    def test_pr_skill_registered(self):
+        """PR skill should be discoverable in the default registry."""
+        registry = build_registry()
+        assert "core.pr" in registry
+        skill = registry.get("core", "pr")
+        assert skill.worker is True
+
+    def test_pr_command_findable(self):
+        """The 'pr' command should be resolvable via find_by_command."""
+        registry = build_registry()
+        skill = registry.find_by_command("pr")
+        assert skill is not None
+        assert skill.name == "pr"
+
+
+# ---------------------------------------------------------------------------
+# Default registry includes all core skills
+# ---------------------------------------------------------------------------
+
+class TestCoreSkillsComplete:
+    """Verify all expected core skills are registered."""
+
+    def test_all_core_skills_present(self):
+        registry = build_registry()
+        expected = {"status", "journal", "sparring", "reflect",
+                    "verbose", "chat", "mission", "language", "pr"}
+        actual = {s.name for s in registry.list_by_scope("core")}
+        assert expected.issubset(actual), f"Missing: {expected - actual}"
+
+    def test_all_core_skills_have_handlers(self):
+        """Every core skill should have a handler.py."""
+        registry = build_registry()
+        for skill in registry.list_by_scope("core"):
+            assert skill.has_handler(), f"Skill {skill.name} missing handler.py"

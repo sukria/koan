@@ -7,5 +7,6 @@ commands:
   - name: sparring
     description: Launch a sparring session
     aliases: []
+worker: true
 handler: handler.py
 ---

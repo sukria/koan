@@ -27,7 +27,7 @@ from app.format_outbox import format_for_telegram, load_soul, load_human_prefs, 
 from app.health_check import write_heartbeat
 from app.language_preference import get_language_instruction
 from app.notify import send_telegram
-from app.skills import SkillRegistry, SkillContext, execute_skill, build_registry
+from app.skills import Skill, SkillRegistry, SkillContext, execute_skill, build_registry
 from app.utils import (
     load_dotenv,
     parse_project as _parse_project,
@@ -96,9 +96,6 @@ def _reset_registry():
 
 # Core commands that remain hardcoded (safety-critical or bootstrap)
 CORE_COMMANDS = frozenset({"help", "stop", "pause", "resume", "skill"})
-
-# Commands that block (call Claude) and must run in a worker thread
-WORKER_COMMANDS = frozenset({"sparring", "usage"})
 
 
 def check_config():
@@ -210,97 +207,56 @@ def handle_command(text: str):
     skill = registry.find_by_command(command_name)
 
     if skill is not None:
-        ctx = SkillContext(
-            koan_root=KOAN_ROOT,
-            instance_dir=INSTANCE_DIR,
-            command_name=command_name,
-            args=command_args,
-            send_message=send_telegram,
+        _dispatch_skill(skill, command_name, command_args)
+        return
+
+    # Scoped command dispatch: /<scope>.<name> [args]
+    # e.g., /anantys.review or /core.status.ping
+    if "." in command_name:
+        resolved = registry.resolve_scoped_command(
+            command_name + (" " + command_args if command_args else "")
         )
-
-        # Special handling for commands that need worker threads
-        # (sparring and usage call Claude, so they block)
-        if command_name in WORKER_COMMANDS:
-            def _run_skill():
-                result = execute_skill(skill, ctx)
-                if result:
-                    send_telegram(result)
-                    if command_name == "sparring":
-                        save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", result)
-            _run_in_worker(_run_skill)
+        if resolved:
+            skill, subcommand, skill_args = resolved
+            _dispatch_skill(skill, subcommand, skill_args)
             return
-
-        # Special handling for /chat — routes to handle_chat
-        if command_name == "chat":
-            if not command_args:
-                send_telegram("Usage: /chat <message>\nForces chat mode for messages that look like missions.")
-                return
-            _run_in_worker(handle_chat, command_args)
-            return
-
-        # Standard skill execution
-        result = execute_skill(skill, ctx)
-        if result is not None:
-            send_telegram(result)
-        return
-
-    if cmd.startswith("/pr"):
-        args = text.strip()[3:].strip()
-        _handle_pr(args)
-        return
 
     # Unknown command — pass to Claude as chat
     handle_chat(text)
 
 
-def _build_status() -> str:
-    """Build status message grouped by project."""
-    from app.missions import group_by_project
+def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
+    """Dispatch a skill execution — handles worker threads and special cases."""
+    ctx = SkillContext(
+        koan_root=KOAN_ROOT,
+        instance_dir=INSTANCE_DIR,
+        command_name=command_name,
+        args=command_args,
+        send_message=send_telegram,
+    )
 
-    parts = ["📊 Kōan Status"]
+    # Special handling for /chat — routes to handle_chat
+    if command_name == "chat":
+        if not command_args:
+            send_telegram("Usage: /chat <message>\nForces chat mode for messages that look like missions.")
+            return
+        _run_in_worker(handle_chat, command_args)
+        return
 
-    # Run loop status — FIRST, most important info
-    pause_file = KOAN_ROOT / ".koan-pause"
-    stop_file = KOAN_ROOT / ".koan-stop"
+    # Worker thread for blocking skills (calls Claude or external services)
+    if skill.worker:
+        def _run_skill():
+            result = execute_skill(skill, ctx)
+            if result:
+                send_telegram(result)
+        _run_in_worker(_run_skill)
+        return
 
-    if pause_file.exists():
-        parts.append("\n⏸️ **PAUSED** — No missions being executed")
-        parts.append("   /resume to continue")
-    elif stop_file.exists():
-        parts.append("\n⛔ **STOP REQUESTED** — Finishing current work")
-    else:
-        parts.append("\n▶️ **ACTIVE** — Run loop running")
+    # Standard skill execution
+    result = execute_skill(skill, ctx)
+    if result is not None:
+        send_telegram(result)
 
-    status_file = KOAN_ROOT / ".koan-status"
-    if status_file.exists():
-        parts.append(f"   Loop: {status_file.read_text().strip()}")
-
-    # Parse missions by project
-    if MISSIONS_FILE.exists():
-        content = MISSIONS_FILE.read_text()
-        missions_by_project = group_by_project(content)
-
-        if missions_by_project:
-            for project in sorted(missions_by_project.keys()):
-                missions = missions_by_project[project]
-                pending = missions["pending"]
-                in_progress = missions["in_progress"]
-
-                if pending or in_progress:
-                    parts.append(f"\n**{project}**")
-                    if in_progress:
-                        parts.append(f"  In progress: {len(in_progress)}")
-                        for m in in_progress[:2]:
-                            # Remove project tag from display
-                            display = re.sub(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*', '', m)
-                            parts.append(f"    {display}")
-                    if pending:
-                        parts.append(f"  Pending: {len(pending)}")
-                        for m in pending[:3]:
-                            display = re.sub(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*', '', m)
-                            parts.append(f"    {display}")
-
-    return "\n".join(parts)
 
 def _handle_skill_command(args: str):
     """Handle /skill — list skills or invoke a specific one.
@@ -325,13 +281,12 @@ def _handle_skill_command(args: str):
         for scope in non_core_scopes:
             parts.append(f"{scope}")
             for skill in registry.list_by_scope(scope):
-                parts.append(f"  - {skill.name} -- {skill.description}")
                 for cmd in skill.commands:
-                    if cmd.name != skill.name:
-                        parts.append(f"      .{cmd.name} -- {cmd.description}")
+                    desc = cmd.description or skill.description
+                    parts.append(f"  /{scope}.{cmd.name} -- {desc}")
             parts.append("")
 
-        parts.append("Use: /skill <scope>.<name> [args]")
+        parts.append("Use: /<scope>.<name> [args]")
         parts.append("Core skills are listed in /help.")
         send_telegram("\n".join(parts))
         return
@@ -345,13 +300,18 @@ def _handle_skill_command(args: str):
 
     if len(segments) == 1:
         # Just a scope — list skills in that scope
-        scope_skills = registry.list_by_scope(segments[0])
+        scope_name = segments[0]
+        scope_skills = registry.list_by_scope(scope_name)
         if not scope_skills:
-            send_telegram(f"No skills found in scope '{segments[0]}'.")
+            send_telegram(f"No skills found in scope '{scope_name}'.")
             return
-        parts = [f"Skills in {segments[0]}\n"]
+        # Use /command for core skills, /<scope>.<command> for others
+        prefix = "" if scope_name == "core" else f"{scope_name}."
+        parts = [f"Skills in {scope_name}\n"]
         for skill in scope_skills:
-            parts.append(f"  - {skill.name} -- {skill.description}")
+            for cmd in skill.commands:
+                desc = cmd.description or skill.description
+                parts.append(f"  /{prefix}{cmd.name} -- {desc}")
         send_telegram("\n".join(parts))
         return
 
@@ -364,26 +324,7 @@ def _handle_skill_command(args: str):
         send_telegram(f"Skill '{scope}.{skill_name}' not found. /skill to list available skills.")
         return
 
-    ctx = SkillContext(
-        koan_root=KOAN_ROOT,
-        instance_dir=INSTANCE_DIR,
-        command_name=subcommand,
-        args=skill_args,
-        send_message=send_telegram,
-    )
-
-    # Worker thread for blocking skills
-    if subcommand in WORKER_COMMANDS:
-        def _run():
-            result = execute_skill(skill, ctx)
-            if result:
-                send_telegram(result)
-        _run_in_worker(_run)
-        return
-
-    result = execute_skill(skill, ctx)
-    if result is not None:
-        send_telegram(result)
+    _dispatch_skill(skill, subcommand, skill_args)
 
 
 def _handle_help():
@@ -426,9 +367,6 @@ def _handle_help():
         parts.append("")
 
     parts.extend([
-        "OTHER",
-        "/pr <url> -- review and update a GitHub PR (full pipeline)",
-        "",
         "MISSIONS",
         "/mission <desc> -- create a mission (asks for project if ambiguous)",
         '"mission:" prefix or an action verb:',
@@ -506,102 +444,6 @@ def handle_resume():
     except Exception as e:
         print(f"[awake] Error checking quota reset: {e}")
         send_telegram("Error checking quota. /status or check manually.")
-
-
-
-
-
-
-def _resolve_project_path(repo_name: str) -> Optional[str]:
-    """Find local project path matching a repository name.
-
-    Tries known projects first, then falls back to KOAN_PROJECT_PATH.
-    """
-    projects = get_known_projects()
-    # Try exact match on project name
-    for name, path in projects:
-        if name.lower() == repo_name.lower():
-            return path
-    # Try matching repo name against directory basename
-    for name, path in projects:
-        if Path(path).name.lower() == repo_name.lower():
-            return path
-    # Fallback to PROJECT_PATH if only one project
-    if len(projects) == 1:
-        return projects[0][1]
-    if PROJECT_PATH:
-        return PROJECT_PATH
-    return None
-
-
-def _handle_pr(args: str):
-    """Handle /pr command — review and update a pull request.
-
-    Usage:
-        /pr https://github.com/owner/repo/pull/123
-
-    Performs a full pipeline: rebase, address feedback, refactor, review,
-    test, push, and comment on the PR.
-    """
-    if not args:
-        send_telegram(
-            "Usage: /pr <github-pr-url>\n"
-            "Ex: /pr https://github.com/sukria/koan/pull/29\n\n"
-            "Full pipeline: rebase → address feedback → refactor → "
-            "review → test → push → comment."
-        )
-        return
-
-    # Extract URL from args (may contain extra text after the URL)
-    url_match = re.search(r'https?://github\.com/[^\s]+/pull/\d+', args)
-    if not url_match:
-        send_telegram(
-            "No valid GitHub PR URL found.\n"
-            "Ex: /pr https://github.com/owner/repo/pull/123"
-        )
-        return
-
-    pr_url = url_match.group(0)
-    # Strip any fragment (#...) for clean parsing
-    pr_url = pr_url.split("#")[0]
-
-    from app.pr_review import parse_pr_url, run_pr_review
-
-    try:
-        owner, repo, pr_number = parse_pr_url(pr_url)
-    except ValueError as e:
-        send_telegram(str(e))
-        return
-
-    # Determine project path — try to match repo name to known projects
-    project_path = _resolve_project_path(repo)
-    if not project_path:
-        send_telegram(
-            f"Could not find local project matching repo '{repo}'.\n"
-            f"Known projects: "
-            f"{', '.join(n for n, _ in get_known_projects()) or 'none'}"
-        )
-        return
-
-    send_telegram(
-        f"Starting PR review pipeline for #{pr_number} ({owner}/{repo})..."
-    )
-    print(f"[awake] PR review: #{pr_number} on {owner}/{repo} at {project_path}")
-
-    def _do_pr_review():
-        try:
-            success, summary = run_pr_review(
-                owner, repo, pr_number, project_path
-            )
-            if success:
-                send_telegram(f"PR #{pr_number} updated.\n\n{summary[:400]}")
-            else:
-                send_telegram(f"PR #{pr_number} review failed: {summary[:400]}")
-        except Exception as e:
-            print(f"[awake] PR review error: {e}")
-            send_telegram(f"PR review error: {str(e)[:300]}")
-
-    _run_in_worker(_do_pr_review)
 
 
 def handle_mission(text: str):

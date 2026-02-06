@@ -1,8 +1,10 @@
 """Tests for awake.py — message classification, mission handling, project parsing, handlers."""
 
+import importlib.util
 import re
 import subprocess
 import time
+from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
 import pytest
@@ -19,11 +21,9 @@ from app.awake import (
     flush_outbox,
     _format_outbox_message,
     _clean_chat_response,
-    _build_status,
+    _dispatch_skill,
     _handle_help,
     _handle_skill_command,
-    _handle_pr,
-    _resolve_project_path,
     _get_registry,
     _reset_registry,
     _run_in_worker,
@@ -31,6 +31,30 @@ from app.awake import (
     check_config,
     MISSIONS_FILE,
 )
+
+_STATUS_HANDLER_PATH = str(
+    Path(__file__).parent.parent / "skills" / "core" / "status" / "handler.py"
+)
+
+
+def _call_status_handler(tmp_path):
+    """Load and call the status skill handler directly.
+
+    Creates instance_dir if needed and returns the handler output string.
+    """
+    from app.skills import SkillContext
+
+    instance_dir = tmp_path / "instance"
+    instance_dir.mkdir(exist_ok=True)
+    ctx = SkillContext(
+        koan_root=tmp_path,
+        instance_dir=instance_dir,
+        command_name="status",
+    )
+    spec = importlib.util.spec_from_file_location("status_handler", _STATUS_HANDLER_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.handle(ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -239,15 +263,16 @@ class TestHandleMission:
 
 
 # ---------------------------------------------------------------------------
-# _build_status
+# Status skill handler (was _build_status)
 # ---------------------------------------------------------------------------
 
 class TestBuildStatus:
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_with_french_sections(self, mock_file, tmp_path):
-        """_build_status handles French section names from missions.md."""
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text(
+    """Tests for the status skill handler output."""
+
+    def test_status_with_french_sections(self, tmp_path):
+        """Status handler parses French section names from missions.md."""
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n"
             "## En attente\n\n"
             "- [project:koan] add tests\n"
@@ -255,67 +280,54 @@ class TestBuildStatus:
             "## En cours\n\n"
             "- [project:koan] doing stuff\n\n"
         )
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        status = _call_status_handler(tmp_path)
 
-        assert "Kōan Status" in status
-        # Missions split by project: koan gets 1 pending + 1 in_progress, default gets 1 pending
-        assert "**koan**" in status
-        assert "**default**" in status
+        assert "Koan Status" in status
+        assert "koan" in status
+        assert "default" in status
         assert "In progress: 1" in status
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_shows_pending_titles(self, mock_file, tmp_path):
-        """_build_status shows pending mission titles, not just count."""
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text(
+    def test_status_shows_pending_titles(self, tmp_path):
+        """Status handler shows pending mission titles."""
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n"
             "## En attente\n\n"
             "- [project:koan] add tests\n"
             "- [project:koan] fix dashboard\n\n"
             "## En cours\n\n"
         )
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        status = _call_status_handler(tmp_path)
 
         assert "Pending: 2" in status
         assert "add tests" in status
         assert "fix dashboard" in status
-        # Project tags should be stripped from display
         assert "[project:koan]" not in status
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_empty(self, mock_file, tmp_path):
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+    def test_status_empty(self, tmp_path):
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n"
+        )
+        status = _call_status_handler(tmp_path)
+        assert "Koan Status" in status
 
-        assert "Kōan Status" in status
-
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_with_stop_file(self, mock_file, tmp_path):
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
+    def test_status_with_stop_file(self, tmp_path):
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n"
+        )
         (tmp_path / ".koan-stop").write_text("STOP")
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        status = _call_status_handler(tmp_path)
+        assert "STOP REQUESTED" in status or "stop" in status.lower()
 
-        assert "ARRÊT DEMANDÉ" in status or "stop" in status.lower()
-
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_with_loop_status(self, mock_file, tmp_path):
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
+    def test_status_with_loop_status(self, tmp_path):
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n"
+        )
         (tmp_path / ".koan-status").write_text("Run 3/20")
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
-
+        status = _call_status_handler(tmp_path)
         assert "Run 3/20" in status
 
 
@@ -909,16 +921,14 @@ class TestPauseCommand:
         # Should say "unpaused" without specific reason
         assert "unpaused" in mock_send.call_args[0][0].lower()
 
-    @patch("app.awake.send_telegram")
-    def test_status_shows_pause(self, mock_send, tmp_path):
+    def test_status_shows_pause(self, tmp_path):
+        """Status skill handler shows pause state."""
         (tmp_path / ".koan-pause").write_text("PAUSE")
-        instance = tmp_path / "instance"
-        instance.mkdir()
-        missions = instance / "missions.md"
-        missions.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n")
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions):
-            status = _build_status()
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+        )
+        status = _call_status_handler(tmp_path)
         assert "PAUSE" in status or "pause" in status.lower()
 
 
@@ -1053,13 +1063,16 @@ class TestHandleHelp:
 # ---------------------------------------------------------------------------
 
 class TestHandleUsage:
-    @patch("app.awake._run_in_worker")
-    def test_handle_command_routes_usage_to_worker(self, mock_worker, tmp_path):
-        """Usage is routed through skill system and runs in worker."""
+    @patch("app.awake.send_telegram")
+    def test_handle_command_routes_usage_through_skill(self, mock_send, tmp_path):
+        """Usage is routed through skill system (non-blocking, reads files only)."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
         with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path):
+             patch("app.awake.INSTANCE_DIR", instance):
             handle_command("/usage")
-        mock_worker.assert_called_once()
+        mock_send.assert_called_once()
+        assert "Quota" in mock_send.call_args[0][0] or "No quota" in mock_send.call_args[0][0]
 
 
 # ---------------------------------------------------------------------------
@@ -1069,40 +1082,28 @@ class TestHandleUsage:
 class TestPauseAwareness:
     """Tests for pause state visibility in chat and status."""
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_shows_pause_at_top(self, mock_file, tmp_path):
+    def test_status_shows_pause_at_top(self, tmp_path):
         """When paused, status shows pause FIRST, not at the bottom."""
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text(
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n"
         )
         (tmp_path / ".koan-pause").write_text("PAUSE")
 
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
+        status = _call_status_handler(tmp_path)
 
         lines = status.split("\n")
-        # Find where pause is mentioned
         pause_line_idx = next(i for i, l in enumerate(lines) if "PAUSE" in l or "pause" in l.lower())
-        # Find where missions are mentioned
         mission_line_idx = next((i for i, l in enumerate(lines) if "fix bug" in l), len(lines))
-        # Pause should come BEFORE missions
         assert pause_line_idx < mission_line_idx, "Pause status should appear before mission details"
 
-    @patch("app.awake.MISSIONS_FILE")
-    def test_status_shows_active_when_running(self, mock_file, tmp_path):
-        """When not paused, status shows ACTIF/RUNNING."""
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text(
+    def test_status_shows_active_when_running(self, tmp_path):
+        """When not paused, status shows ACTIVE."""
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n## En attente\n\n## En cours\n\n"
         )
-        # No .koan-pause file
-
-        with patch("app.awake.MISSIONS_FILE", missions_file), \
-             patch("app.awake.KOAN_ROOT", tmp_path):
-            status = _build_status()
-
+        status = _call_status_handler(tmp_path)
         assert "ACTIVE" in status
 
     @patch("app.awake.save_telegram_message")
@@ -1329,90 +1330,59 @@ class TestHandleLog:
 
 
 # ---------------------------------------------------------------------------
-# _resolve_project_path
-# ---------------------------------------------------------------------------
-
-class TestResolveProjectPath:
-    @patch("app.awake.get_known_projects")
-    @patch("app.awake.PROJECT_PATH", "")
-    def test_exact_match(self, mock_projects):
-        mock_projects.return_value = [("koan", "/home/user/koan"), ("web", "/home/user/web")]
-        assert _resolve_project_path("koan") == "/home/user/koan"
-
-    @patch("app.awake.get_known_projects")
-    @patch("app.awake.PROJECT_PATH", "")
-    def test_case_insensitive(self, mock_projects):
-        mock_projects.return_value = [("Koan", "/home/user/koan")]
-        assert _resolve_project_path("koan") == "/home/user/koan"
-
-    @patch("app.awake.get_known_projects")
-    @patch("app.awake.PROJECT_PATH", "")
-    def test_basename_match(self, mock_projects):
-        mock_projects.return_value = [("myproject", "/home/user/koan")]
-        assert _resolve_project_path("koan") == "/home/user/koan"
-
-    @patch("app.awake.get_known_projects")
-    @patch("app.awake.PROJECT_PATH", "")
-    def test_single_project_fallback(self, mock_projects):
-        mock_projects.return_value = [("only", "/home/user/only")]
-        assert _resolve_project_path("unknown") == "/home/user/only"
-
-    @patch("app.awake.get_known_projects")
-    @patch("app.awake.PROJECT_PATH", "/fallback/path")
-    def test_project_path_fallback(self, mock_projects):
-        mock_projects.return_value = [("a", "/a"), ("b", "/b")]
-        assert _resolve_project_path("unknown") == "/fallback/path"
-
-    @patch("app.awake.get_known_projects")
-    @patch("app.awake.PROJECT_PATH", "")
-    def test_no_match_returns_none(self, mock_projects):
-        mock_projects.return_value = [("a", "/a"), ("b", "/b")]
-        assert _resolve_project_path("unknown") is None
-
-
-# ---------------------------------------------------------------------------
-# /pr command
+# /pr command (now via skill system)
 # ---------------------------------------------------------------------------
 
 class TestHandlePr:
-    @patch("app.awake.send_telegram")
-    def test_no_args_shows_usage(self, mock_send):
-        _handle_pr("")
-        mock_send.assert_called_once()
-        assert "Usage" in mock_send.call_args[0][0]
+    """Tests for /pr command routed through skill system."""
+
+    def _make_pr_handler(self):
+        """Load the PR skill handler module."""
+        spec = importlib.util.spec_from_file_location(
+            "pr_handler",
+            str(Path(__file__).parent.parent / "skills" / "core" / "pr" / "handler.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_no_args_shows_usage(self, tmp_path):
+        mod = self._make_pr_handler()
+        from app.skills import SkillContext
+        ctx = SkillContext(koan_root=tmp_path, instance_dir=tmp_path, args="")
+        result = mod.handle(ctx)
+        assert "Usage" in result
+
+    def test_invalid_url_shows_error(self, tmp_path):
+        mod = self._make_pr_handler()
+        from app.skills import SkillContext
+        ctx = SkillContext(koan_root=tmp_path, instance_dir=tmp_path, args="not a url")
+        result = mod.handle(ctx)
+        assert "No valid GitHub PR URL" in result
+
+    @patch("app.utils.get_known_projects", return_value=[])
+    def test_no_matching_project(self, mock_projects, tmp_path):
+        mod = self._make_pr_handler()
+        from app.skills import SkillContext
+        ctx = SkillContext(
+            koan_root=tmp_path,
+            instance_dir=tmp_path,
+            args="https://github.com/sukria/unknown-repo/pull/1",
+        )
+        with patch.dict("os.environ", {"KOAN_PROJECT_PATH": ""}):
+            result = mod.handle(ctx)
+        assert "Could not find local project" in result
 
     @patch("app.awake.send_telegram")
-    def test_invalid_url_shows_error(self, mock_send):
-        _handle_pr("not a url")
-        mock_send.assert_called_once()
-        assert "No valid GitHub PR URL" in mock_send.call_args[0][0]
-
-    @patch("app.awake._run_in_worker")
-    @patch("app.awake._resolve_project_path", return_value="/home/user/koan")
-    @patch("app.awake.send_telegram")
-    def test_valid_url_starts_review(self, mock_send, mock_resolve, mock_worker):
-        _handle_pr("https://github.com/sukria/koan/pull/42")
-        mock_worker.assert_called_once()
-        mock_send.assert_called()
-        assert "Starting PR review" in mock_send.call_args_list[-1][0][0]
-
-    @patch("app.awake.get_known_projects", return_value=[])
-    @patch("app.awake._resolve_project_path", return_value=None)
-    @patch("app.awake.send_telegram")
-    def test_no_matching_project(self, mock_send, mock_resolve, mock_projects):
-        _handle_pr("https://github.com/sukria/unknown-repo/pull/1")
-        mock_send.assert_called()
-        assert "Could not find local project" in mock_send.call_args[0][0]
-
-    @patch("app.awake._handle_pr")
-    def test_handle_command_routes_pr(self, mock_pr):
-        handle_command("/pr https://github.com/sukria/koan/pull/1")
-        mock_pr.assert_called_once_with("https://github.com/sukria/koan/pull/1")
-
-    @patch("app.awake._handle_pr")
-    def test_handle_command_routes_pr_no_args(self, mock_pr):
-        handle_command("/pr")
-        mock_pr.assert_called_once_with("")
+    def test_handle_command_routes_pr(self, mock_send, tmp_path):
+        """handle_command dispatches /pr through skill system."""
+        with patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.INSTANCE_DIR", tmp_path), \
+             patch("app.awake.execute_skill") as mock_exec:
+            mock_exec.return_value = "Usage: /pr <url>"
+            handle_command("/pr")
+        # The skill system should handle /pr now
+        mock_exec.assert_called_once()
 
     @patch("app.awake.send_telegram")
     def test_help_includes_pr(self, mock_send):
@@ -1461,3 +1431,126 @@ class TestHandleLanguage:
         _handle_help()
         msg = mock_send.call_args[0][0]
         assert "/language" in msg
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Scoped command dispatch
+# ---------------------------------------------------------------------------
+
+class TestScopedDispatch:
+    """Tests for /<scope>.<name> command routing."""
+
+    @patch("app.awake.send_telegram")
+    def test_scoped_command_dispatches_to_skill(self, mock_send, tmp_path):
+        """/<scope>.<name> should dispatch to a matching skill."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        # Create a custom skill in instance/skills/
+        myskill_dir = instance / "skills" / "myproj" / "greet"
+        myskill_dir.mkdir(parents=True)
+        (myskill_dir / "SKILL.md").write_text(
+            "---\nname: greet\nscope: myproj\ndescription: Greet\n"
+            "commands:\n  - name: greet\n    description: Say hi\n"
+            "handler: handler.py\n---\n"
+        )
+        (myskill_dir / "handler.py").write_text(
+            "def handle(ctx): return f'Hello from {ctx.command_name}!'"
+        )
+        with patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.INSTANCE_DIR", instance):
+            _reset_registry()
+            handle_command("/myproj.greet")
+        mock_send.assert_called()
+        assert "Hello from greet" in mock_send.call_args[0][0]
+        _reset_registry()
+
+    @patch("app.awake.handle_chat")
+    def test_unknown_scoped_command_falls_to_chat(self, mock_chat, tmp_path):
+        """Unknown scoped command falls through to chat."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.INSTANCE_DIR", instance):
+            _reset_registry()
+            handle_command("/unknown.thing")
+        mock_chat.assert_called_once()
+        _reset_registry()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Worker dispatch via skill.worker field
+# ---------------------------------------------------------------------------
+
+class TestWorkerDispatch:
+    """Tests for worker thread routing via skill.worker field."""
+
+    @patch("app.awake._run_in_worker")
+    @patch("app.awake.send_telegram")
+    def test_worker_skill_runs_in_worker_thread(self, mock_send, mock_worker, tmp_path):
+        """Skills with worker=true should dispatch to worker thread."""
+        from app.skills import Skill, SkillCommand
+        skill = Skill(
+            name="blocking",
+            scope="core",
+            worker=True,
+            commands=[SkillCommand(name="blocking")],
+        )
+        _dispatch_skill(skill, "blocking", "")
+        mock_worker.assert_called_once()
+
+    @patch("app.awake.send_telegram")
+    def test_non_worker_skill_runs_inline(self, mock_send, tmp_path):
+        """Skills without worker=true should execute inline."""
+        from app.skills import Skill, SkillCommand
+        skill = Skill(
+            name="fast",
+            scope="core",
+            worker=False,
+            prompt_body="Some result",
+            commands=[SkillCommand(name="fast")],
+        )
+        with patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.INSTANCE_DIR", tmp_path):
+            _dispatch_skill(skill, "fast", "")
+        mock_send.assert_called_once_with("Some result")
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: /skill listing format
+# ---------------------------------------------------------------------------
+
+class TestSkillListingFormat:
+    """Tests for improved /skill listing with / prefix."""
+
+    @patch("app.awake.send_telegram")
+    def test_skill_list_uses_slash_prefix(self, mock_send, tmp_path):
+        """Non-core skills should be listed with /<scope>.<name> format."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        myskill_dir = instance / "skills" / "proj" / "deploy"
+        myskill_dir.mkdir(parents=True)
+        (myskill_dir / "SKILL.md").write_text(
+            "---\nname: deploy\nscope: proj\ndescription: Deploy it\n"
+            "commands:\n  - name: deploy\n    description: Run deploy\n---\n"
+        )
+        with patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.INSTANCE_DIR", instance):
+            _reset_registry()
+            _handle_skill_command("")
+        msg = mock_send.call_args[0][0]
+        assert "/proj.deploy" in msg
+        assert "/<scope>.<name>" in msg
+        _reset_registry()
+
+    @patch("app.awake.send_telegram")
+    def test_skill_scope_listing_core_uses_bare_prefix(self, mock_send, tmp_path):
+        """Core skills listed via /skill core should show /command (no scope prefix)."""
+        with patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.INSTANCE_DIR", tmp_path):
+            _reset_registry()
+            _handle_skill_command("core")
+        msg = mock_send.call_args[0][0]
+        # Core commands should use bare /status not /core.status
+        assert "/status" in msg
+        assert "/core.status" not in msg
+        _reset_registry()

@@ -30,7 +30,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -54,6 +54,7 @@ class Skill:
     handler_path: Optional[Path] = None
     prompt_body: str = ""
     skill_dir: Optional[Path] = None
+    worker: bool = False
 
     @property
     def qualified_name(self) -> str:
@@ -191,6 +192,9 @@ def parse_skill_md(path: Path) -> Optional[Skill]:
 
     skill_dir = path.parent
 
+    # Parse worker flag
+    worker = meta.get("worker", "").lower() in ("true", "yes", "1")
+
     return Skill(
         name=meta["name"],
         scope=meta.get("scope", skill_dir.parent.name),
@@ -200,6 +204,7 @@ def parse_skill_md(path: Path) -> Optional[Skill]:
         handler_path=handler_path,
         prompt_body=prompt_body,
         skill_dir=skill_dir,
+        worker=worker,
     )
 
 
@@ -260,6 +265,31 @@ class SkillRegistry:
 
     def __len__(self) -> int:
         return len(self._skills)
+
+    def resolve_scoped_command(self, text: str) -> Optional[Tuple["Skill", str, str]]:
+        """Resolve a scoped command like 'anantys.review' or 'core.status.ping'.
+
+        Returns:
+            (skill, command_name, args) tuple, or None if no match.
+        """
+        parts = text.split(None, 1)
+        ref = parts[0]
+        args = parts[1] if len(parts) > 1 else ""
+
+        segments = ref.split(".")
+
+        if len(segments) < 2:
+            return None
+
+        scope = segments[0]
+        skill_name = segments[1]
+        subcommand = segments[2] if len(segments) > 2 else skill_name
+
+        skill = self.get(scope, skill_name)
+        if skill is None:
+            return None
+
+        return skill, subcommand, args
 
     def __contains__(self, qualified_name: str) -> bool:
         return qualified_name in self._skills
