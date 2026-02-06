@@ -602,6 +602,7 @@ EOF
 
   # Execute next mission, capture JSON output for token tracking
   cd "$PROJECT_PATH"
+  MISSION_START_TIME=$(date +%s)
   CLAUDE_OUT="$(mktemp)"
   CLAUDE_ERR="$(mktemp)"
   MISSION_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('mission', '$AUTONOMOUS_MODE'))" 2>/dev/null || echo "")
@@ -702,6 +703,17 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
   # those caused triple-repeated conclusions on Telegram.
   if [ $CLAUDE_EXIT -eq 0 ]; then
     log mission "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] completed successfully"
+
+    # Post-mission reflection for significant missions (writes to shared-journal.md)
+    MISSION_END_TIME=$(date +%s)
+    MISSION_DURATION_MINUTES=$(( (MISSION_END_TIME - MISSION_START_TIME) / 60 ))
+    POST_MISSION_REFLECTION="$APP_DIR/post_mission_reflection.py"
+    if [ -n "$MISSION_TITLE" ]; then
+      "$PYTHON" "$POST_MISSION_REFLECTION" "$INSTANCE" "$MISSION_TITLE" "$MISSION_DURATION_MINUTES" 2>/dev/null || true
+    else
+      # Autonomous mode — use mode name as mission text
+      "$PYTHON" "$POST_MISSION_REFLECTION" "$INSTANCE" "Autonomous $AUTONOMOUS_MODE on $PROJECT_NAME" "$MISSION_DURATION_MINUTES" 2>/dev/null || true
+    fi
 
     # Auto-merge logic (if on koan/* branch)
     cd "$PROJECT_PATH"
