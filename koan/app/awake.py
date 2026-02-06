@@ -36,7 +36,7 @@ from app.utils import (
     load_recent_telegram_history,
     format_conversation_history,
     compact_telegram_history,
-    get_allowed_tools,
+    get_chat_tools,
     get_tools_description,
     get_model_config,
     build_claude_flags,
@@ -838,18 +838,22 @@ def _clean_chat_response(text: str) -> str:
 
 
 def handle_chat(text: str):
-    """Lightweight Claude call for conversational messages — fast response."""
+    """Lightweight Claude call for conversational messages — fast response.
+
+    Uses restricted tools (Read/Glob/Grep by default) to prevent prompt
+    injection attacks via Telegram messages. No Bash, Edit, or Write access.
+    """
     # Save user message to history
     save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
 
     prompt = _build_chat_prompt(text)
-    allowed_tools = get_allowed_tools()
+    chat_tools = get_chat_tools()  # Read-only tools for security
     models = get_model_config()
     chat_flags = build_claude_flags(model=models["chat"], fallback=models["fallback"])
 
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt, "--allowedTools", allowed_tools, "--max-turns", "1"] + chat_flags,
+            ["claude", "-p", prompt, "--allowedTools", chat_tools, "--max-turns", "1"] + chat_flags,
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )
@@ -872,7 +876,7 @@ def handle_chat(text: str):
         lite_prompt = _build_chat_prompt(text, lite=True)
         try:
             result = subprocess.run(
-                ["claude", "-p", lite_prompt, "--allowedTools", allowed_tools, "--max-turns", "1"] + chat_flags,
+                ["claude", "-p", lite_prompt, "--allowedTools", chat_tools, "--max-turns", "1"] + chat_flags,
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=PROJECT_PATH or str(KOAN_ROOT),
             )

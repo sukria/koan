@@ -420,7 +420,7 @@ class TestHandleChat:
     @patch("app.awake.load_recent_telegram_history", return_value=[])
     @patch("app.awake.format_conversation_history", return_value="")
     @patch("app.awake.get_tools_description", return_value="")
-    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
     @patch("app.awake.send_telegram", return_value=True)
     @patch("app.awake.subprocess.run")
     def test_successful_chat(self, mock_run, mock_send, mock_tools,
@@ -443,7 +443,7 @@ class TestHandleChat:
     @patch("app.awake.load_recent_telegram_history", return_value=[])
     @patch("app.awake.format_conversation_history", return_value="")
     @patch("app.awake.get_tools_description", return_value="")
-    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
     @patch("app.awake.send_telegram")
     @patch("app.awake.subprocess.run")
     def test_chat_timeout(self, mock_run, mock_send, mock_tools,
@@ -464,7 +464,7 @@ class TestHandleChat:
     @patch("app.awake.load_recent_telegram_history", return_value=[])
     @patch("app.awake.format_conversation_history", return_value="")
     @patch("app.awake.get_tools_description", return_value="")
-    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
     @patch("app.awake.send_telegram")
     @patch("app.awake.subprocess.run")
     def test_chat_error_nonzero_exit(self, mock_run, mock_send, mock_tools,
@@ -484,7 +484,7 @@ class TestHandleChat:
     @patch("app.awake.load_recent_telegram_history", return_value=[])
     @patch("app.awake.format_conversation_history", return_value="")
     @patch("app.awake.get_tools_description", return_value="")
-    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
     @patch("app.awake.send_telegram", return_value=True)
     @patch("app.awake.subprocess.run")
     def test_chat_reads_journal_flat_fallback(self, mock_run, mock_send, mock_tools,
@@ -921,7 +921,7 @@ class TestChatLiteRetryErrors:
     @patch("app.awake.load_recent_telegram_history", return_value=[])
     @patch("app.awake.format_conversation_history", return_value="")
     @patch("app.awake.get_tools_description", return_value="")
-    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
     @patch("app.awake.send_telegram")
     @patch("app.awake.subprocess.run")
     def test_lite_retry_non_timeout_error(self, mock_run, mock_send, mock_tools,
@@ -945,7 +945,7 @@ class TestChatLiteRetryErrors:
     @patch("app.awake.load_recent_telegram_history", return_value=[])
     @patch("app.awake.format_conversation_history", return_value="")
     @patch("app.awake.get_tools_description", return_value="")
-    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
     @patch("app.awake.send_telegram")
     @patch("app.awake.subprocess.run")
     def test_lite_retry_timeout_says_timeout(self, mock_run, mock_send, mock_tools,
@@ -1175,7 +1175,7 @@ class TestPauseAwareness:
     @patch("app.awake.load_recent_telegram_history", return_value=[])
     @patch("app.awake.format_conversation_history", return_value="")
     @patch("app.awake.get_tools_description", return_value="")
-    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
     @patch("app.awake.send_telegram", return_value=True)
     @patch("app.awake.subprocess.run")
     def test_chat_prompt_includes_pause_status_when_paused(
@@ -1203,7 +1203,7 @@ class TestPauseAwareness:
     @patch("app.awake.load_recent_telegram_history", return_value=[])
     @patch("app.awake.format_conversation_history", return_value="")
     @patch("app.awake.get_tools_description", return_value="")
-    @patch("app.awake.get_allowed_tools", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
     @patch("app.awake.send_telegram", return_value=True)
     @patch("app.awake.subprocess.run")
     def test_chat_prompt_includes_running_status_when_active(
@@ -1228,6 +1228,53 @@ class TestPauseAwareness:
         assert "RUNNING" in prompt or "▶️" in prompt
 
 
+class TestChatToolsSecurity:
+    """Tests verifying chat security (restricted tools)."""
+
+    def test_chat_tools_excludes_bash_by_default(self):
+        """Chat tools should NOT include Bash by default (prompt injection protection)."""
+        from app.utils import get_chat_tools
+        with patch("app.utils.load_config", return_value={}):
+            tools = get_chat_tools()
+        assert "Bash" not in tools
+        assert "Edit" not in tools
+        assert "Write" not in tools
+
+    def test_mission_tools_includes_bash(self):
+        """Mission tools should include Bash for code execution."""
+        from app.utils import get_mission_tools
+        with patch("app.utils.load_config", return_value={}):
+            tools = get_mission_tools()
+        assert "Bash" in tools
+
+    @patch("app.awake.save_telegram_message")
+    @patch("app.awake.load_recent_telegram_history", return_value=[])
+    @patch("app.awake.format_conversation_history", return_value="")
+    @patch("app.awake.get_tools_description", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="Read,Glob,Grep")  # Restricted!
+    @patch("app.awake.send_telegram", return_value=True)
+    @patch("app.awake.subprocess.run")
+    def test_handle_chat_uses_chat_tools_not_mission_tools(
+        self, mock_run, mock_send, mock_tools, mock_tools_desc, mock_fmt,
+        mock_hist, mock_save, tmp_path
+    ):
+        """handle_chat() should use get_chat_tools(), not get_mission_tools()."""
+        mock_run.return_value = MagicMock(stdout="Response", returncode=0)
+
+        with patch("app.awake.INSTANCE_DIR", tmp_path), \
+             patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.PROJECT_PATH", ""), \
+             patch("app.awake.TELEGRAM_HISTORY_FILE", tmp_path / "history.jsonl"), \
+             patch("app.awake.SOUL", ""), \
+             patch("app.awake.SUMMARY", ""):
+            handle_chat("test message")
+
+        # Verify the claude call uses the restricted tools
+        call_args = mock_run.call_args[0][0]
+        allowed_idx = call_args.index("--allowedTools")
+        tools_arg = call_args[allowed_idx + 1]
+        assert tools_arg == "Read,Glob,Grep"
+        assert "Bash" not in tools_arg
 # ---------------------------------------------------------------------------
 # /mission command
 # ---------------------------------------------------------------------------

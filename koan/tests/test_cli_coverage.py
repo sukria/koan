@@ -265,19 +265,48 @@ class TestUtilsLoadConfig:
             result = load_config()
         assert result == {}
 
-    def test_get_allowed_tools_default(self):
-        """Default tools returned when config has no tools section."""
-        from app.utils import get_allowed_tools
+    def test_get_chat_tools_default(self):
+        """Default chat tools are read-only (no Bash, Edit, Write)."""
+        from app.utils import get_chat_tools
         with patch("app.utils.load_config", return_value={}):
-            tools = get_allowed_tools()
+            tools = get_chat_tools()
         assert "Read" in tools
+        assert "Glob" in tools
+        assert "Grep" in tools
+        assert "Bash" not in tools
+        assert "Edit" not in tools
+        assert "Write" not in tools
 
-    def test_get_allowed_tools_custom(self):
-        """Custom tools from config."""
-        from app.utils import get_allowed_tools
-        with patch("app.utils.load_config", return_value={"tools": {"allowed": ["Bash"]}}):
-            tools = get_allowed_tools()
+    def test_get_chat_tools_custom(self):
+        """Custom chat tools from config."""
+        from app.utils import get_chat_tools
+        with patch("app.utils.load_config", return_value={"tools": {"chat": ["Read", "Edit"]}}):
+            tools = get_chat_tools()
+        assert tools == "Read,Edit"
+
+    def test_get_mission_tools_default(self):
+        """Default mission tools include Bash."""
+        from app.utils import get_mission_tools
+        with patch("app.utils.load_config", return_value={}):
+            tools = get_mission_tools()
+        assert "Bash" in tools
+        assert "Edit" in tools
+        assert "Write" in tools
+
+    def test_get_mission_tools_custom(self):
+        """Custom mission tools from config."""
+        from app.utils import get_mission_tools
+        with patch("app.utils.load_config", return_value={"tools": {"mission": ["Bash"]}}):
+            tools = get_mission_tools()
         assert tools == "Bash"
+
+    def test_get_allowed_tools_backward_compat(self):
+        """get_allowed_tools() is backward compatible alias for get_mission_tools()."""
+        from app.utils import get_allowed_tools, get_mission_tools
+        with patch("app.utils.load_config", return_value={}):
+            allowed = get_allowed_tools()
+            mission = get_mission_tools()
+        assert allowed == mission
 
     def test_get_tools_description_empty(self):
         """Empty description when config has no description."""
