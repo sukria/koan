@@ -28,15 +28,26 @@ from app.utils import load_config, get_auto_merge_config
 # Low-level git helpers (stateless)
 # ---------------------------------------------------------------------------
 
-def run_git(cwd: str, *args) -> Tuple[int, str, str]:
-    """Run a git command and return (exit_code, stdout, stderr)."""
+def run_git(cwd: str, *args, env: Optional[Dict[str, str]] = None) -> Tuple[int, str, str]:
+    """Run a git command and return (exit_code, stdout, stderr).
+
+    Args:
+        cwd: Working directory for the git command.
+        *args: Git subcommand and arguments.
+        env: Optional extra environment variables to set for this command.
+             Merged on top of the current environment.
+    """
     try:
+        run_env = None
+        if env:
+            run_env = {**os.environ, **env}
         result = subprocess.run(
             ["git"] + list(args),
             cwd=cwd,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=run_env
         )
         return result.returncode, result.stdout.strip(), result.stderr.strip()
     except subprocess.TimeoutExpired:
@@ -60,12 +71,22 @@ def build_merge_commit_message(branch: str, strategy: str, subjects: List[str]) 
     return f"{header}\n\n{body}"
 
 
-def get_author_args() -> List[str]:
-    """Return --author args if KOAN_EMAIL is set."""
+def get_author_env() -> Dict[str, str]:
+    """Return GIT_AUTHOR env vars if KOAN_EMAIL is set.
+
+    Uses GIT_AUTHOR_NAME/EMAIL environment variables instead of --author flag.
+    This works for all git commands (merge, commit, rebase) unlike --author
+    which is only valid for git commit.
+    """
     email = os.environ.get("KOAN_EMAIL", "")
     if email:
-        return ["--author", f"Koan <{email}>"]
-    return []
+        return {
+            "GIT_AUTHOR_NAME": "Koan",
+            "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": "Koan",
+            "GIT_COMMITTER_EMAIL": email,
+        }
+    return {}
 
 
 def find_matching_rule(branch: str, rules: List[dict]) -> Optional[dict]:
@@ -131,7 +152,7 @@ class GitAutoMerger:
     def _perform_merge_inner(self, branch: str, base_branch: str, strategy: str) -> Tuple[bool, str]:
         """Inner merge logic (called by perform_merge with branch safety)."""
         subjects = get_branch_commit_messages(self.project_path, branch, base_branch)
-        author_args = get_author_args()
+        author_env = get_author_env()
 
         exit_code, _, stderr = run_git(self.project_path, "checkout", base_branch)
         if exit_code != 0:
@@ -148,7 +169,7 @@ class GitAutoMerger:
                 return False, f"Merge conflict during squash: {stderr}"
 
             commit_msg = build_merge_commit_message(branch, strategy, subjects)
-            exit_code, _, stderr = run_git(self.project_path, "commit", "-m", commit_msg, *author_args)
+            exit_code, _, stderr = run_git(self.project_path, "commit", "-m", commit_msg, env=author_env)
             if exit_code != 0:
                 return False, f"Failed to commit squash: {stderr}"
 
@@ -168,7 +189,7 @@ class GitAutoMerger:
 
         else:
             commit_msg = build_merge_commit_message(branch, "merge", subjects)
-            exit_code, _, stderr = run_git(self.project_path, "merge", "--no-ff", branch, "-m", commit_msg, *author_args)
+            exit_code, _, stderr = run_git(self.project_path, "merge", "--no-ff", branch, "-m", commit_msg, env=author_env)
             if exit_code != 0:
                 run_git(self.project_path, "merge", "--abort")
                 return False, f"Merge conflict: {stderr}"
@@ -303,7 +324,7 @@ def perform_merge(project_path: str, branch: str, base_branch: str, strategy: st
 def _perform_merge_inner(project_path: str, branch: str, base_branch: str, strategy: str) -> Tuple[bool, str]:
     """Inner merge logic (called by perform_merge with branch safety)."""
     subjects = get_branch_commit_messages(project_path, branch, base_branch)
-    author_args = get_author_args()
+    author_env = get_author_env()
 
     exit_code, _, stderr = run_git(project_path, "checkout", base_branch)
     if exit_code != 0:
@@ -320,7 +341,7 @@ def _perform_merge_inner(project_path: str, branch: str, base_branch: str, strat
             return False, f"Merge conflict during squash: {stderr}"
 
         commit_msg = build_merge_commit_message(branch, strategy, subjects)
-        exit_code, _, stderr = run_git(project_path, "commit", "-m", commit_msg, *author_args)
+        exit_code, _, stderr = run_git(project_path, "commit", "-m", commit_msg, env=author_env)
         if exit_code != 0:
             return False, f"Failed to commit squash: {stderr}"
 
@@ -340,7 +361,7 @@ def _perform_merge_inner(project_path: str, branch: str, base_branch: str, strat
 
     else:
         commit_msg = build_merge_commit_message(branch, "merge", subjects)
-        exit_code, _, stderr = run_git(project_path, "merge", "--no-ff", branch, "-m", commit_msg, *author_args)
+        exit_code, _, stderr = run_git(project_path, "merge", "--no-ff", branch, "-m", commit_msg, env=author_env)
         if exit_code != 0:
             run_git(project_path, "merge", "--abort")
             return False, f"Merge conflict: {stderr}"
