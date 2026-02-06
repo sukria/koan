@@ -308,6 +308,7 @@ class SkillContext:
     command_name: str = ""
     args: str = ""
     send_message: Optional[Callable[[str], Any]] = None
+    handle_chat: Optional[Callable[[str], Any]] = None
 
 
 def execute_skill(skill: Skill, ctx: SkillContext) -> Optional[str]:

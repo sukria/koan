@@ -198,10 +198,8 @@ def handle_command(text: str):
     command_name = parts[0][1:].lower()  # strip the /
     command_args = parts[1] if len(parts) > 1 else ""
 
-    # Special case: /journal is an alias for /log
-    if command_name == "journal":
-        command_name = "log"
-        command_args = text[8:].strip()
+    # Aliases are handled by the skill registry (SKILL.md aliases: field)
+    # No hardcoded alias remapping needed here.
 
     registry = _get_registry()
     skill = registry.find_by_command(command_name)
@@ -226,22 +224,15 @@ def handle_command(text: str):
 
 
 def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
-    """Dispatch a skill execution — handles worker threads and special cases."""
+    """Dispatch a skill execution — handles worker threads and standard calls."""
     ctx = SkillContext(
         koan_root=KOAN_ROOT,
         instance_dir=INSTANCE_DIR,
         command_name=command_name,
         args=command_args,
         send_message=send_telegram,
+        handle_chat=handle_chat,
     )
-
-    # Special handling for /chat — routes to handle_chat
-    if command_name == "chat":
-        if not command_args:
-            send_telegram("Usage: /chat <message>\nForces chat mode for messages that look like missions.")
-            return
-        _run_in_worker(handle_chat, command_args)
-        return
 
     # Worker thread for blocking skills (calls Claude or external services)
     if skill.worker:
@@ -367,15 +358,10 @@ def _handle_help():
         parts.append("")
 
     parts.extend([
-        "MISSIONS",
-        "/mission <desc> -- create a mission (asks for project if ambiguous)",
-        '"mission:" prefix or an action verb:',
+        "TIPS",
+        'Prefix with "mission:" or use an action verb to create a mission:',
         "  fix the login bug",
-        "  implement dark mode",
         "  mission: refactor the auth module",
-        "",
-        "To target a project:",
-        "  /mission [project:koan] fix the login bug",
         "  [project:koan] fix the login bug",
         "",
         "Any other message = free conversation.",
@@ -823,6 +809,13 @@ def main():
     print(f"[awake] Chat ID: {CHAT_ID}")
     print(f"[awake] Soul: {len(SOUL)} chars loaded")
     print(f"[awake] Summary: {len(SUMMARY)} chars loaded")
+    registry = _get_registry()
+    core_count = len(registry.list_by_scope("core"))
+    extra_count = len(registry) - core_count
+    skills_info = f"{core_count} core"
+    if extra_count:
+        skills_info += f" + {extra_count} extra"
+    print(f"[awake] Skills: {skills_info}")
     print(f"[awake] Polling every {POLL_INTERVAL}s (chat mode: fast reply)")
     offset = None
 

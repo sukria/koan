@@ -132,42 +132,59 @@ class TestIsMission:
 # ---------------------------------------------------------------------------
 
 class TestHandleChatCommand:
-    """Test /chat prefix to force chat mode."""
+    """Test /chat prefix to force chat mode.
+
+    /chat is a worker skill — it runs in a background thread and calls
+    ctx.handle_chat() from the skill handler. Tests verify the full
+    dispatch path through the skill system.
+    """
 
     @patch("app.awake._run_in_worker")
-    def test_chat_command_routes_to_chat(self, mock_worker):
-        """'/chat fix the bug' should route to chat, not mission."""
+    def test_chat_command_dispatches_as_worker(self, mock_worker):
+        """'/chat fix the bug' should dispatch via worker thread (skill is worker=true)."""
         handle_command("/chat fix the bug")
-        mock_worker.assert_called_once_with(handle_chat, "fix the bug")
+        mock_worker.assert_called_once()
 
     @patch("app.awake._run_in_worker")
-    def test_chat_command_strips_prefix(self, mock_worker):
-        """/chat should strip the prefix and pass the rest as chat text."""
+    def test_chat_command_with_long_text(self, mock_worker):
+        """/chat with imperative text should still route to chat, not mission."""
         handle_command("/chat implement dark mode for the dashboard")
-        mock_worker.assert_called_once_with(
-            handle_chat, "implement dark mode for the dashboard"
+        mock_worker.assert_called_once()
+
+    def test_chat_command_empty_shows_usage(self, tmp_path):
+        """/chat with no text should return usage from handler."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "chat_handler",
+            str(Path(__file__).parent.parent / "skills" / "core" / "chat" / "handler.py"),
         )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        from app.skills import SkillContext
+        ctx = SkillContext(koan_root=tmp_path, instance_dir=tmp_path, args="")
+        result = mod.handle(ctx)
+        assert "Usage" in result
+        assert "/chat" in result
 
-    @patch("app.awake.send_telegram")
-    def test_chat_command_empty_shows_usage(self, mock_send):
-        """/chat with no text should show usage help."""
-        handle_command("/chat")
-        msg = mock_send.call_args[0][0]
-        assert "Usage" in msg
-        assert "/chat" in msg
-
-    @patch("app.awake.send_telegram")
-    def test_chat_command_whitespace_only_shows_usage(self, mock_send):
-        """/chat followed by only whitespace shows usage."""
-        handle_command("/chat   ")
-        msg = mock_send.call_args[0][0]
-        assert "Usage" in msg
+    def test_chat_command_whitespace_only_shows_usage(self, tmp_path):
+        """/chat followed by only whitespace shows usage from handler."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "chat_handler",
+            str(Path(__file__).parent.parent / "skills" / "core" / "chat" / "handler.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        from app.skills import SkillContext
+        ctx = SkillContext(koan_root=tmp_path, instance_dir=tmp_path, args="")
+        result = mod.handle(ctx)
+        assert "Usage" in result
 
     @patch("app.awake._run_in_worker")
     def test_chat_via_handle_message(self, mock_worker):
-        """/chat goes through handle_message -> handle_command -> chat."""
+        """/chat goes through handle_message -> handle_command -> worker dispatch."""
         handle_message("/chat add me to the list of testers")
-        mock_worker.assert_called_once_with(handle_chat, "add me to the list of testers")
+        mock_worker.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1375,14 +1392,13 @@ class TestHandlePr:
 
     @patch("app.awake.send_telegram")
     def test_handle_command_routes_pr(self, mock_send, tmp_path):
-        """handle_command dispatches /pr through skill system."""
+        """handle_command dispatches /pr through worker (skill has worker=true)."""
         with patch("app.awake.KOAN_ROOT", tmp_path), \
              patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.execute_skill") as mock_exec:
-            mock_exec.return_value = "Usage: /pr <url>"
+             patch("app.awake._run_in_worker") as mock_worker:
             handle_command("/pr")
-        # The skill system should handle /pr now
-        mock_exec.assert_called_once()
+        # PR is a worker skill — should dispatch via _run_in_worker
+        mock_worker.assert_called_once()
 
     @patch("app.awake.send_telegram")
     def test_help_includes_pr(self, mock_send):

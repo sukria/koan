@@ -429,6 +429,7 @@ class TestSkillContext:
         assert ctx.command_name == ""
         assert ctx.args == ""
         assert ctx.send_message is None
+        assert ctx.handle_chat is None
 
     def test_with_send_message(self, tmp_path):
         mock_send = MagicMock()
@@ -439,6 +440,16 @@ class TestSkillContext:
         )
         ctx.send_message("test")
         mock_send.assert_called_once_with("test")
+
+    def test_with_handle_chat(self, tmp_path):
+        mock_chat = MagicMock()
+        ctx = SkillContext(
+            koan_root=tmp_path,
+            instance_dir=tmp_path,
+            handle_chat=mock_chat,
+        )
+        ctx.handle_chat("hello world")
+        mock_chat.assert_called_once_with("hello world")
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +699,8 @@ class TestCoreSkillsComplete:
     def test_all_core_skills_present(self):
         registry = build_registry()
         expected = {"status", "journal", "sparring", "reflect",
-                    "verbose", "chat", "mission", "language", "pr"}
+                    "verbose", "chat", "mission", "language", "pr",
+                    "list", "idea"}
         actual = {s.name for s in registry.list_by_scope("core")}
         assert expected.issubset(actual), f"Missing: {expected - actual}"
 
@@ -697,3 +709,71 @@ class TestCoreSkillsComplete:
         registry = build_registry()
         for skill in registry.list_by_scope("core"):
             assert skill.has_handler(), f"Skill {skill.name} missing handler.py"
+
+    def test_chat_skill_is_worker(self):
+        """Chat skill should be worker=true (handle_chat blocks on Claude call)."""
+        registry = build_registry()
+        skill = registry.get("core", "chat")
+        assert skill is not None
+        assert skill.worker is True
+
+    def test_journal_alias_resolves(self):
+        """'/journal' should resolve via alias to the journal skill."""
+        registry = build_registry()
+        skill = registry.find_by_command("journal")
+        assert skill is not None
+        assert skill.name == "journal"
+
+    def test_log_resolves(self):
+        """'/log' should resolve to the journal skill (primary command)."""
+        registry = build_registry()
+        skill = registry.find_by_command("log")
+        assert skill is not None
+        assert skill.name == "journal"
+
+
+# ---------------------------------------------------------------------------
+# Chat handler with handle_chat callback
+# ---------------------------------------------------------------------------
+
+class TestChatSkillHandler:
+    """Tests for the chat skill handler using handle_chat callback."""
+
+    def _load_handler(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "chat_handler",
+            str(Path(__file__).parent.parent / "skills" / "core" / "chat" / "handler.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_empty_args_returns_usage(self, tmp_path):
+        mod = self._load_handler()
+        ctx = SkillContext(koan_root=tmp_path, instance_dir=tmp_path, args="")
+        result = mod.handle(ctx)
+        assert "Usage" in result
+        assert "/chat" in result
+
+    def test_with_args_calls_handle_chat(self, tmp_path):
+        mod = self._load_handler()
+        mock_chat = MagicMock()
+        ctx = SkillContext(
+            koan_root=tmp_path, instance_dir=tmp_path,
+            args="fix the login bug",
+            handle_chat=mock_chat,
+        )
+        result = mod.handle(ctx)
+        mock_chat.assert_called_once_with("fix the login bug")
+        assert result == ""
+
+    def test_no_handle_chat_callback(self, tmp_path):
+        """Without handle_chat callback, returns error message."""
+        mod = self._load_handler()
+        ctx = SkillContext(
+            koan_root=tmp_path, instance_dir=tmp_path,
+            args="hello world",
+        )
+        result = mod.handle(ctx)
+        assert "not available" in result
