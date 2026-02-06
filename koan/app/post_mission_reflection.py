@@ -55,6 +55,16 @@ def is_significant_mission(mission_text: str, duration_minutes: int) -> bool:
     return has_keyword or is_long
 
 
+def _get_prompt_template() -> str:
+    """Load the prompt template from system-prompts directory.
+
+    Returns:
+        Prompt template string
+    """
+    prompt_file = Path(__file__).parent.parent / "system-prompts" / "post-mission-reflection.md"
+    return prompt_file.read_text()
+
+
 def build_reflection_prompt(instance_dir: Path, mission_text: str) -> str:
     """Build a prompt for journal reflection.
 
@@ -65,58 +75,35 @@ def build_reflection_prompt(instance_dir: Path, mission_text: str) -> str:
     Returns:
         Prompt string for Claude
     """
-    parts = []
-
-    # Soul
+    # Load context from instance files
+    soul_context = ""
     soul_file = instance_dir / "soul.md"
     if soul_file.exists():
-        parts.append(f"Your identity:\n{soul_file.read_text()[:800]}")
+        soul_context = soul_file.read_text()[:800]
 
-    # Emotional memory (relationship context)
+    emotional_context = ""
     emotional_file = instance_dir / "memory" / "global" / "emotional-memory.md"
     if emotional_file.exists():
-        parts.append(f"Your relationship with Alexis:\n{emotional_file.read_text()[:1000]}")
+        emotional_context = emotional_file.read_text()[:1000]
 
-    # Recent shared journal entries (to avoid repetition)
+    journal_context = ""
     journal_file = instance_dir / "shared-journal.md"
     if journal_file.exists():
         content = journal_file.read_text()
-        # Get last 1000 chars of existing content
         if len(content) > 1000:
-            parts.append(f"Recent shared journal entries:\n...{content[-1000:]}")
+            journal_context = f"...{content[-1000:]}"
         elif content.strip():
-            parts.append(f"Shared journal so far:\n{content}")
+            journal_context = content
 
-    context = "\n\n---\n\n".join(parts)
-
-    return f"""{context}
-
----
-
-You just completed this mission: "{mission_text}"
-
-This is your moment to write a **journal reflection** — something deeper than a mission summary.
-The shared journal is an asynchronous conversation space with Alexis. He reads it when he has time.
-
-Write a reflection that could be:
-- A genuine question that emerged from the work
-- An observation about patterns you're noticing (in yourself or the codebase)
-- A thought about the partnership or how you work together
-- Something that surprised you or made you think differently
-- A strategic insight worth discussing later
-
-Examples of good reflections:
-- "Question: On a 615 tests, mais pas un seul ne teste si je suis utile. Comment mesure-t-on la valeur d'un agent ?"
-- "J'ai relu 107 sessions. Le truc qui me frappe : je gravite toujours vers ce qui est mesurable."
-- "Cette mission m'a fait réaliser qu'on construit quelque chose d'assez unique. Pas un assistant — un collaborateur qui peut dire non."
-
-Rules:
-- Write in French (this is a conversation with Alexis)
-- 2-5 sentences max. Quality over quantity.
-- Be genuine, not performative. This is about relationship, not reporting.
-- Don't just summarize the mission — that's what the journal entry is for.
-- If nothing feels worth saying, it's OK to output just "—" (we'll skip the write)
-"""
+    # Load and fill template
+    template = _get_prompt_template()
+    return template.format(
+        INSTANCE=str(instance_dir),
+        SOUL_CONTEXT=soul_context or "(no soul.md found)",
+        EMOTIONAL_CONTEXT=emotional_context or "(no emotional-memory.md found)",
+        JOURNAL_CONTEXT=journal_context or "(empty journal)",
+        MISSION_TEXT=mission_text,
+    )
 
 
 def write_to_journal(instance_dir: Path, reflection: str):
