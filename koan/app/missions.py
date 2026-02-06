@@ -8,6 +8,7 @@ instead of reimplementing section detection and parsing.
 """
 
 import re
+from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
 
@@ -195,7 +196,6 @@ def group_by_project(content: str) -> Dict[str, Dict[str, List[str]]]:
 
     Returns {project: {"pending": [...], "in_progress": [...]}}.
     """
-    from collections import defaultdict
     result = defaultdict(lambda: {"pending": [], "in_progress": []})
 
     sections = parse_sections(content)

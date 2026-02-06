@@ -623,3 +623,73 @@ class TestGetKnownProjects:
         from app.utils import get_known_projects
         monkeypatch.setenv("KOAN_PROJECTS", "koan:/k;;:/empty;webapp:/w")
         assert get_known_projects() == ["koan", "webapp"]
+
+
+class TestGetFastReplyModel:
+    def test_returns_lightweight_model_when_enabled(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("fast_reply: true\nmodels:\n  lightweight: haiku\n")
+        from app.utils import get_fast_reply_model
+        assert get_fast_reply_model() == "haiku"
+
+    def test_returns_empty_when_disabled(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("fast_reply: false\n")
+        from app.utils import get_fast_reply_model
+        assert get_fast_reply_model() == ""
+
+    def test_returns_empty_when_missing(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("other_setting: value\n")
+        from app.utils import get_fast_reply_model
+        assert get_fast_reply_model() == ""
+
+    def test_returns_empty_when_no_config(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        from app.utils import get_fast_reply_model
+        assert get_fast_reply_model() == ""
+
+
+class TestGetContemplativeChance:
+    def test_returns_config_value(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("contemplative_chance: 25\n")
+        from app.utils import get_contemplative_chance
+        assert get_contemplative_chance() == 25
+
+    def test_returns_default_when_missing(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("other_setting: value\n")
+        from app.utils import get_contemplative_chance
+        assert get_contemplative_chance() == 10
+
+    def test_returns_default_when_no_config(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        from app.utils import get_contemplative_chance
+        assert get_contemplative_chance() == 10
+
+    def test_zero_disables_contemplative_mode(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        config_dir = tmp_path / "instance"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("contemplative_chance: 0\n")
+        from app.utils import get_contemplative_chance
+        assert get_contemplative_chance() == 0
