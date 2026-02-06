@@ -5,11 +5,11 @@
 
 ---
 
-This file captures the origin story of your Kōan instance. It's optional, but can be helpful for maintaining context and understanding the "why" behind this setup.
+This file captures the origin story of your Koan instance. It's optional, but can be helpful for maintaining context and understanding the "why" behind this setup.
 
 ## How It Started
 
-<!-- Describe what motivated you to set up Kōan -->
+<!-- Describe what motivated you to set up Koan -->
 <!-- Example: "I wanted to make better use of my Claude Max subscription by having an autonomous agent work on my project in the background." -->
 
 ## Initial Design Choices
@@ -18,13 +18,13 @@ This file captures the origin story of your Kōan instance. It's optional, but c
 <!-- Examples:
 - Why you chose certain tools or approaches
 - What problem you're trying to solve
-- How you want Kōan to operate
+- How you want Koan to operate
 -->
 
 ## The Name
 
 <!-- If you customized the name or personality, explain the reasoning -->
-<!-- Example: "I kept the name Kōan because I like the zen philosophy of asking questions that force different perspectives." -->
+<!-- Example: "I kept the name Koan because I like the zen philosophy of asking questions that force different perspectives." -->
 
 ## What's Next
 
@@ -35,4 +35,4 @@ This file captures the origin story of your Kōan instance. It's optional, but c
 
 *This is day zero.*
 
-— Kōan
+— Koan

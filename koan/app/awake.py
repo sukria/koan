@@ -31,6 +31,7 @@ from app.utils import (
     load_dotenv,
     parse_project as _parse_project,
     insert_pending_mission,
+    get_known_projects,
     save_telegram_message,
     load_recent_telegram_history,
     format_conversation_history,
@@ -110,8 +111,8 @@ def is_mission(text: str) -> bool:
     # Explicit prefix always wins
     if text.lower().startswith("mission:") or text.lower().startswith("mission :"):
         return True
-    # Long messages (>200 chars) with imperative verbs are likely missions
-    if len(text) > 200 and MISSION_RE.search(text):
+    # Long messages (>200 chars) that start with imperative verbs are likely missions
+    if len(text) > 200 and MISSION_RE.match(text):
         return True
     # Short imperative sentences
     if MISSION_RE.match(text):
@@ -135,6 +136,15 @@ def parse_project(text: str) -> Tuple[Optional[str], str]:
 def handle_command(text: str):
     """Handle /commands locally — no Claude needed."""
     cmd = text.strip().lower()
+
+    # /chat forces chat mode — bypass mission classification
+    if cmd.startswith("/chat"):
+        chat_text = text[5:].strip()
+        if not chat_text:
+            send_telegram("Usage: /chat <message>\nForces chat mode for messages that look like missions.")
+            return
+        _run_in_worker(handle_chat, chat_text)
+        return
 
     if cmd == "/stop":
         (KOAN_ROOT / ".koan-stop").write_text("STOP")
@@ -180,9 +190,19 @@ def handle_command(text: str):
 
     if cmd.startswith("/reflect "):
         _handle_reflect(text[9:].strip())
+        return
 
     if cmd == "/ping":
         _handle_ping()
+        return
+
+    if cmd.startswith("/log") or cmd.startswith("/journal"):
+        # Extract args after command name
+        if cmd.startswith("/journal"):
+            args = text[8:].strip()
+        else:
+            args = text[4:].strip()
+        _handle_log(args)
         return
 
     if cmd == "/help":
@@ -191,6 +211,10 @@ def handle_command(text: str):
 
     if cmd == "/usage":
         _run_in_worker(_handle_usage)
+        return
+
+    if cmd.startswith("/mission"):
+        _handle_mission_command(text)
         return
 
     # Unknown command — pass to Claude as chat
@@ -271,20 +295,80 @@ def _handle_ping():
         send_telegram("❌ Run loop is not running.\n\nTo restart:\n  make run &")
 
 
+def _handle_log(args: str):
+    """Show the latest journal entry for a project.
+
+    Usage:
+        /log              — today's journal (all projects)
+        /log koan         — today's journal for project koan
+        /log koan yesterday — yesterday's journal for koan
+        /log koan 2026-02-03 — specific date
+    """
+    from datetime import date as _date, timedelta
+    from app.utils import get_latest_journal
+
+    parts = args.split() if args else []
+    project = None
+    target_date = None
+
+    if len(parts) >= 1:
+        # First arg: project name (unless it looks like a date)
+        if re.match(r'^\d{4}-\d{2}-\d{2}$', parts[0]):
+            target_date = parts[0]
+        elif parts[0] == "yesterday":
+            target_date = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            project = parts[0]
+
+    if len(parts) >= 2 and target_date is None:
+        # Second arg: date
+        if parts[1] == "yesterday":
+            target_date = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        elif re.match(r'^\d{4}-\d{2}-\d{2}$', parts[1]):
+            target_date = parts[1]
+
+    result = get_latest_journal(INSTANCE_DIR, project=project, target_date=target_date)
+    send_telegram(result)
+
+
 def _handle_help():
     """Send the list of available commands."""
     help_text = (
-        "Available commands:\n\n"
-        "/help — this help\n"
-        "/ping — check if run loop is alive (✅/❌)\n"      
-        "/status — quick status (missions, pause, loop)\n"
-        "/usage — detailed status formatted by Claude (quota, missions, progress)\n"
-        "/stop — stop Kōan after current mission\n"
+        "Kōan — Commands\n"
+        "\n"
+        "CONTROL\n"
         "/pause — pause (no new missions)\n"
         "/resume — resume after pause or quota exhausted\n"
+        "/stop — stop Kōan after current mission\n"
         "\n"
-        "To send a mission: start with \"mission:\" or an action verb (implement, fix, add...)\n"
-        "Any other message = free conversation with Kōan."
+        "MONITORING\n"
+        "/status — quick status (missions, pause, loop)\n"
+        "/usage — detailed status (quota, progress)\n"
+        "/log [project] [date] — latest journal entry\n"
+        "/ping — check if run loop is alive (✅/❌)\n"
+        "/verbose — receive every progress update\n"
+        "/silent — mute updates (default mode)\n"
+        "\n"
+        "INTERACTION\n"
+        "/chat <msg> — force chat mode (bypass mission detection)\n"
+        "/sparring — start a strategic sparring session\n"
+        "/reflect <text> — note a reflection in the shared journal\n"
+        "/help — this help\n"
+        "\n"
+        "MISSIONS\n"
+        "/mission <desc> — create a mission (asks for project if ambiguous)\n"
+        '"mission:" prefix or an action verb:\n'
+        "  fix the login bug\n"
+        "  implement dark mode\n"
+        "  mission: refactor the auth module\n"
+        "\n"
+        "To target a project:\n"
+        "  /mission [project:koan] fix the login bug\n"
+        "  [project:koan] fix the login bug\n"
+        "\n"
+        "To force chat: /chat <message> (useful when your message looks like a mission)\n"
+        "\n"
+        "Any other message = free conversation."
     )
     send_telegram(help_text)
 
@@ -513,6 +597,50 @@ def _handle_reflect(message: str):
         f.write(entry)
 
     send_telegram("Noted in the shared journal. I'll reflect on it.")
+
+
+def _handle_mission_command(text: str):
+    """Handle /mission <text> command — parity with 'mission:' keyword.
+
+    Strips the /mission prefix, checks for project tag, and either queues
+    the mission directly or asks the user to specify a project.
+    """
+    raw = text.strip()
+    lower = raw.lower()
+    if lower.startswith("/mission:"):
+        mission_text = raw[9:].strip()
+    elif lower.startswith("/mission "):
+        mission_text = raw[9:].strip()
+    elif lower == "/mission":
+        mission_text = ""
+    else:
+        mission_text = raw[8:].strip()
+
+    if not mission_text:
+        send_telegram(
+            "Usage: /mission <description>\n\n"
+            "Examples:\n"
+            "  /mission fix the login bug\n"
+            "  /mission [project:koan] add retry logic\n"
+        )
+        return
+
+    # Check if the text already has a project tag
+    project, _ = parse_project(mission_text)
+
+    if not project:
+        known = get_known_projects()
+        if len(known) > 1:
+            project_list = "\n".join(f"  - {name}" for name in known)
+            send_telegram(
+                f"Which project for this mission?\n\n"
+                f"{project_list}\n\n"
+                f"Reply with the tag, e.g.:\n"
+                f"  /mission [project:{known[0]}] {mission_text[:80]}"
+            )
+            return
+
+    handle_mission(mission_text)
 
 
 def handle_mission(text: str):
@@ -864,7 +992,13 @@ def handle_message(text: str):
 
 
 def main():
+    from app.banners import print_bridge_banner
+
     check_config()
+
+    provider_name = "telegram" # about to become dynamic with provider abstraction
+    print_bridge_banner(f"messaging bridge — {provider_name.lower()}")
+
     # Compact old conversation history to avoid context bleed across sessions
     compacted = compact_telegram_history(TELEGRAM_HISTORY_FILE, TOPICS_FILE)
     if compacted:
@@ -880,20 +1014,24 @@ def main():
     print(f"[awake] Polling every {POLL_INTERVAL}s (chat mode: fast reply)")
     offset = None
 
-    while True:
-        updates = get_updates(offset)
-        for update in updates:
-            offset = update["update_id"] + 1
-            msg = update.get("message", {})
-            text = msg.get("text", "")
-            chat_id = str(msg.get("chat", {}).get("id", ""))
-            if chat_id == CHAT_ID and text:
-                print(f"[awake] Received: {text[:60]}")
-                handle_message(text)
+    try:
+        while True:
+            updates = get_updates(offset)
+            for update in updates:
+                offset = update["update_id"] + 1
+                msg = update.get("message", {})
+                text = msg.get("text", "")
+                chat_id = str(msg.get("chat", {}).get("id", ""))
+                if chat_id == CHAT_ID and text:
+                    print(f"[awake] Received: {text[:60]}")
+                    handle_message(text)
 
-        flush_outbox()
-        write_heartbeat(str(KOAN_ROOT))
-        time.sleep(POLL_INTERVAL)
+            flush_outbox()
+            write_heartbeat(str(KOAN_ROOT))
+            time.sleep(POLL_INTERVAL)
+    except KeyboardInterrupt:
+        print("\n[awake] Shutting down.")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

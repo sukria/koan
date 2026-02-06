@@ -8,21 +8,24 @@ Features:
 - Missions management (view, add, reorder)
 - Chat interface (writes to outbox, queues missions)
 - Journal viewer
+- Live progress (SSE stream of pending.md)
 
 Usage:
     python3 dashboard.py [--port 5001]
     make dashboard
 """
 
+import json
 import os
 import re
 import subprocess
 import sys
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
 from app.utils import (
     parse_project,
     insert_pending_mission,
@@ -46,6 +49,7 @@ OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
 SOUL_FILE = INSTANCE_DIR / "soul.md"
 SUMMARY_FILE = INSTANCE_DIR / "memory" / "summary.md"
 JOURNAL_DIR = INSTANCE_DIR / "journal"
+PENDING_FILE = JOURNAL_DIR / "pending.md"
 TELEGRAM_HISTORY_FILE = INSTANCE_DIR / "telegram-history.jsonl"
 CHAT_TIMEOUT = int(os.environ.get("KOAN_CHAT_TIMEOUT", "180"))
 
@@ -325,6 +329,80 @@ def chat_send():
                 return jsonify({"ok": False, "error": str(e)})
         except (OSError, ValueError) as e:
             return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/progress")
+def progress_page():
+    """Live progress page — tails pending.md via SSE."""
+    return render_template("progress.html")
+
+
+@app.route("/api/progress")
+def api_progress():
+    """JSON snapshot of pending.md content."""
+    content = read_file(PENDING_FILE)
+    return jsonify({
+        "active": PENDING_FILE.exists(),
+        "content": content,
+    })
+
+
+@app.route("/api/progress/stream")
+def api_progress_stream():
+    """SSE stream of pending.md changes.
+
+    Polls the file every second, sends an event when content changes.
+    Sends a heartbeat comment every 15s to keep the connection alive.
+    """
+    def generate():
+        last_content = None
+        last_mtime = 0.0
+        heartbeat_counter = 0
+
+        while True:
+            try:
+                if PENDING_FILE.exists():
+                    st = PENDING_FILE.stat()
+                    if st.st_mtime != last_mtime:
+                        last_mtime = st.st_mtime
+                        content = PENDING_FILE.read_text()
+                        if content != last_content:
+                            last_content = content
+                            payload = json.dumps({
+                                "active": True,
+                                "content": content,
+                            })
+                            yield f"data: {payload}\n\n"
+                            heartbeat_counter = 0
+                else:
+                    if last_content is not None:
+                        # File was deleted — mission completed
+                        payload = json.dumps({
+                            "active": False,
+                            "content": "",
+                        })
+                        yield f"data: {payload}\n\n"
+                        last_content = None
+                        last_mtime = 0.0
+                        heartbeat_counter = 0
+            except OSError:
+                pass
+
+            heartbeat_counter += 1
+            if heartbeat_counter >= 15:
+                yield ": heartbeat\n\n"
+                heartbeat_counter = 0
+
+            time.sleep(1)
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.route("/journal")

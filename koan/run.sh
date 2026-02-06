@@ -5,9 +5,50 @@
 
 set -euo pipefail
 
+# --- Colored log prefixes ---
+# Each category gets its own ANSI color for easy visual scanning.
+if [ -t 1 ]; then
+  # Terminal supports colors
+  _C_RESET='\033[0m'
+  _C_BOLD='\033[1m'
+  _C_DIM='\033[2m'
+  _C_RED='\033[31m'
+  _C_GREEN='\033[32m'
+  _C_YELLOW='\033[33m'
+  _C_BLUE='\033[34m'
+  _C_MAGENTA='\033[35m'
+  _C_CYAN='\033[36m'
+  _C_WHITE='\033[37m'
+else
+  # No color (piped output, CI, etc.)
+  _C_RESET='' _C_BOLD='' _C_DIM=''
+  _C_RED='' _C_GREEN='' _C_YELLOW=''
+  _C_BLUE='' _C_MAGENTA='' _C_CYAN='' _C_WHITE=''
+fi
+
+# log <category> <message>
+# Categories: koan (cyan), error (red+bold), init (blue), health (yellow),
+#             git (magenta), mission (green), quota (yellow+bold), pause (blue+dim)
+log() {
+  local cat="$1"; shift
+  local color
+  case "$cat" in
+    koan)    color="${_C_CYAN}" ;;
+    error)   color="${_C_BOLD}${_C_RED}" ;;
+    init)    color="${_C_BLUE}" ;;
+    health)  color="${_C_YELLOW}" ;;
+    git)     color="${_C_MAGENTA}" ;;
+    mission) color="${_C_GREEN}" ;;
+    quota)   color="${_C_BOLD}${_C_YELLOW}" ;;
+    pause)   color="${_C_DIM}${_C_BLUE}" ;;
+    *)       color="${_C_WHITE}" ;;
+  esac
+  echo -e "${color}[${cat}]${_C_RESET} $*"
+}
+
 # Ensure KOAN_ROOT is set - mandatory from config
 if [ -z "${KOAN_ROOT:-}" ]; then
-  echo "[koan] Error: KOAN_ROOT environment variable not set."
+  log error "KOAN_ROOT environment variable not set."
   exit 1
 fi
 
@@ -26,7 +67,7 @@ USAGE_ESTIMATOR="$APP_DIR/usage_estimator.py"
 USAGE_STATE="$INSTANCE/usage_state.json"
 
 if [ ! -d "$INSTANCE" ]; then
-  echo "[koan] No instance/ directory found. Run: cp -r instance.example instance"
+  log error "No instance/ directory found. Run: cp -r instance.example instance"
   exit 1
 fi
 
@@ -52,13 +93,13 @@ elif [ -n "$KOAN_PROJECT_PATH" ]; then
   PROJECT_NAMES=("default")
   PROJECT_PATHS=("$KOAN_PROJECT_PATH")
 else
-  echo "[koan] Error: Set KOAN_PROJECT_PATH or KOAN_PROJECTS env var."
+  log error "Set KOAN_PROJECT_PATH or KOAN_PROJECTS env var."
   exit 1
 fi
 
 # Validate project configuration
 if [ ${#PROJECT_NAMES[@]} -gt 5 ]; then
-  echo "[koan] Error: Max 5 projects allowed. You have ${#PROJECT_NAMES[@]}."
+  log error "Max 5 projects allowed. You have ${#PROJECT_NAMES[@]}."
   exit 1
 fi
 
@@ -66,7 +107,7 @@ for i in "${!PROJECT_NAMES[@]}"; do
   name="${PROJECT_NAMES[$i]}"
   path="${PROJECT_PATHS[$i]}"
   if [ ! -d "$path" ]; then
-    echo "[koan] Error: Project '$name' path does not exist: $path"
+    log error "Project '$name' path does not exist: $path"
     exit 1
   fi
 done
@@ -105,7 +146,7 @@ CLAUDE_OUT=""
 cleanup() {
   [ -n "$CLAUDE_OUT" ] && rm -f "$CLAUDE_OUT"
   [ -n "${CLAUDE_ERR:-}" ] && rm -f "$CLAUDE_ERR"
-  echo "[koan] Shutdown."
+  log koan "Shutdown."
   CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
   notify "Koan interrupted after $count runs. Last project: $CURRENT_PROJ."
   exit 0
@@ -115,32 +156,35 @@ trap cleanup INT TERM
 
 count=0
 
+# Print startup banner
+"$PYTHON" -c "from app.banners import print_agent_banner; print_agent_banner('agent loop — $CLI_PROVIDER')" 2>/dev/null || true
+
 # Crash recovery: move stale in-progress missions back to pending
 RECOVER="$APP_DIR/recover.py"
-echo "[koan] Checking for interrupted missions..."
+log health "Checking for interrupted missions..."
 "$PYTHON" "$RECOVER" "$INSTANCE" || true
 
 # Memory cleanup: compact summary, dedup learnings
 MEMORY_MGR="$APP_DIR/memory_manager.py"
-echo "[koan] Running memory cleanup..."
+log health "Running memory cleanup..."
 "$PYTHON" "$MEMORY_MGR" "$INSTANCE" cleanup 15 2>/dev/null || true
 
 # Health check: warn if Telegram bridge is not running
-echo "[koan] Checking Telegram bridge health..."
+log health "Checking Telegram bridge health..."
 "$PYTHON" "$HEALTH_CHECK" "$KOAN_ROOT" --max-age 120 || true
 
 # Self-reflection: every 10 sessions, trigger introspection
-echo "[koan] Checking self-reflection trigger..."
+log health "Checking self-reflection trigger..."
 "$PYTHON" "$SELF_REFLECTION" "$INSTANCE" --notify || true
 
 # Check start_on_pause config: create .koan-pause if true (boot into pause mode)
 START_ON_PAUSE=$("$PYTHON" -c "from app.utils import get_start_on_pause; print('true' if get_start_on_pause() else 'false')" 2>/dev/null || echo "false")
 if [ "$START_ON_PAUSE" = "true" ] && [ ! -f "$KOAN_ROOT/.koan-pause" ]; then
-  echo "[koan] start_on_pause=true in config. Entering pause mode."
+  log pause "start_on_pause=true in config. Entering pause mode."
   touch "$KOAN_ROOT/.koan-pause"
 fi
 
-echo "[koan] Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
+log init "Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
 STARTUP_PROJECTS=$(printf '%s\n' "${PROJECT_NAMES[@]}" | sort | sed 's/^/  • /')
 STARTUP_PAUSE=""
 if [ -f "$KOAN_ROOT/.koan-pause" ]; then
@@ -152,7 +196,7 @@ $STARTUP_PROJECTS
 Current: ${PROJECT_NAMES[0]}.$STARTUP_PAUSE"
 
 # Git sync: check what changed since last run (branches merged, new commits)
-echo "[koan] Running git sync..."
+log git "Running git sync..."
 for i in "${!PROJECT_NAMES[@]}"; do
   "$PYTHON" "$GIT_SYNC" "$INSTANCE" "${PROJECT_NAMES[$i]}" "${PROJECT_PATHS[$i]}" 2>/dev/null || true
 done
@@ -161,7 +205,7 @@ done
 "$PYTHON" "$DAILY_REPORT" 2>/dev/null || true
 
 # Morning ritual: run at first iteration (before main loop starts)
-echo "[koan] Running morning ritual..."
+log init "Running morning ritual..."
 "$PYTHON" "$RITUALS" morning "$INSTANCE" || true
 
 ##
@@ -171,7 +215,7 @@ while true; do
 
   # Check for stop request - graceful shutdown (ONLY way to exit the loop)
   if [ -f "$KOAN_ROOT/.koan-stop" ]; then
-    echo "[koan] Stop requested."
+    log koan "Stop requested."
     rm -f "$KOAN_ROOT/.koan-stop"
     CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
     notify "Koan stopped on request after $count runs. Last project: $CURRENT_PROJ."
@@ -180,7 +224,7 @@ while true; do
 
   # Check for pause — contemplative mode
   if [ -f "$KOAN_ROOT/.koan-pause" ]; then
-    echo "[koan] Paused. Contemplative mode. ($(date '+%H:%M'))"
+    log pause "Paused. Contemplative mode. ($(date '+%H:%M'))"
 
     # Check auto-resume: if paused due to quota, resume when reset time is reached
     if [ -f "$KOAN_ROOT/.koan-pause-reason" ]; then
@@ -196,7 +240,7 @@ while true; do
         # For quota: resume when current time >= reset timestamp
         if [ -n "$RESET_OR_PAUSE_TS" ] && [ "$CURRENT_TIMESTAMP" -ge "$RESET_OR_PAUSE_TS" ]; then
           SHOULD_RESUME=true
-          echo "[koan] Auto-resume: quota reset time reached ($RESET_DISPLAY)"
+          log pause "Auto-resume: quota reset time reached ($RESET_DISPLAY)"
         fi
       else
         # For max_runs and other reasons: use old 5h cooldown
@@ -204,7 +248,7 @@ while true; do
         FIVE_HOURS=$((5 * 60 * 60))
         if [ $TIME_ELAPSED -ge $FIVE_HOURS ]; then
           SHOULD_RESUME=true
-          echo "[koan] Auto-resume: 5h have passed since pause ($PAUSE_REASON)"
+          log pause "Auto-resume: 5h have passed since pause ($PAUSE_REASON)"
         fi
       fi
 
@@ -224,7 +268,7 @@ while true; do
     # This shouldn't normally happen since the continue at end of sleep loop would catch it,
     # but if we reach here with no pause file, we've been manually resumed
     if [ ! -f "$KOAN_ROOT/.koan-pause" ]; then
-      echo "[koan] Manual resume detected"
+      log pause "Manual resume detected"
       count=0  # Reset run counter on manual resume too
       continue
     fi
@@ -233,7 +277,7 @@ while true; do
     STEP_IN_PROBABILITY=50
     ROLL=$((RANDOM % 100))
     if [ $ROLL -lt $STEP_IN_PROBABILITY ]; then
-      echo "[koan] A thought stirs..."
+      log pause "A thought stirs..."
       PROJECT_NAME="${PROJECT_NAMES[0]}"
       PROJECT_PATH="${PROJECT_PATHS[0]}"
       echo "$PROJECT_NAME" > "$KOAN_ROOT/.koan-project"
@@ -251,9 +295,9 @@ while true; do
       CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
       set +e
       # shellcheck disable=SC2086
-      echo "[koan] Running contemplative session..."
+      log pause "Running contemplative session..."
       claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 5 $CONTEMPLATE_FLAGS 2>/dev/null
-      echo "[koan] Contemplative session ended."
+      log pause "Contemplative session ended."
       set -e
     fi
 
@@ -267,7 +311,7 @@ while true; do
 
   RUN_NUM=$((count + 1))
   echo ""
-  echo "=== Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S') ==="
+  echo -e "${_C_BOLD}${_C_CYAN}=== Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S') ===${_C_RESET}"
 
   # Refresh usage.md from accumulated token state (handles session/weekly resets)
   # On first run, trust existing usage.md as source of truth (don't reset counters)
@@ -280,7 +324,7 @@ while true; do
   IFS=':' read -r AUTONOMOUS_MODE AVAILABLE_PCT DECISION_REASON RECOMMENDED_PROJECT_IDX <<< "$USAGE_DECISION"
 
   # Display usage status (verbose logging)
-  echo "Usage Status:"
+  log quota "Usage Status:"
   if [ -f "$INSTANCE/usage.md" ]; then
     # Extract and display session/weekly lines
     SESSION_LINE=$(grep -i "Session" "$INSTANCE/usage.md" | head -1 || echo "Session: unknown")
@@ -299,11 +343,11 @@ while true; do
   PICK_STDERR=$(mktemp)
   PICK_RESULT=$("$PYTHON" "$PICK_MISSION" "$INSTANCE" "$KOAN_PROJECTS" "$RUN_NUM" "$AUTONOMOUS_MODE" "$LAST_PROJECT" 2>"$PICK_STDERR" || echo "")
   if [ -s "$PICK_STDERR" ]; then
-    echo "[koan] Mission picker stderr:"
+    log mission "Mission picker stderr:"
     cat "$PICK_STDERR"
   fi
   rm -f "$PICK_STDERR"
-  echo "[koan] Picker result: '${PICK_RESULT:-<empty>}'"
+  log mission "Picker result: '${PICK_RESULT:-<empty>}'"
 
   # Parse picker output: "project_name:mission title" or empty
   MISSION_TITLE=""
@@ -323,8 +367,8 @@ while true; do
     # Validate mission project exists
     if [ -z "$PROJECT_PATH" ]; then
       KNOWN_PROJECTS=$(printf '%s\n' "${PROJECT_NAMES[@]}" | sort | sed 's/^/  • /')
-      echo "[koan] Error: Mission references unknown project: $PROJECT_NAME"
-      echo "[koan] Known projects:"
+      log error "Mission references unknown project: $PROJECT_NAME"
+      log error "Known projects:"
       echo "$KNOWN_PROJECTS"
       notify "Mission error: Unknown project '$PROJECT_NAME'.
 Known projects:
@@ -352,7 +396,7 @@ $KNOWN_PROJECTS"
       CONTEMPLATIVE_CHANCE=$("$PYTHON" -c "from app.utils import get_contemplative_chance; print(get_contemplative_chance())" 2>/dev/null || echo "10")
       CONTEMPLATE_ROLL=$((RANDOM % 100))
       if [ "$CONTEMPLATE_ROLL" -lt "$CONTEMPLATIVE_CHANCE" ]; then
-        echo "Decision: CONTEMPLATIVE mode (random reflection)"
+        log pause "Decision: CONTEMPLATIVE mode (random reflection)"
         echo "  Roll: $CONTEMPLATE_ROLL < $CONTEMPLATIVE_CHANCE (threshold)"
         echo "  Action: Running contemplative session instead of autonomous work"
         echo ""
@@ -370,14 +414,14 @@ $KNOWN_PROJECTS"
         CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
         set +e
         # shellcheck disable=SC2086
-        echo "[koan] Running contemplative session..."
+        log pause "Running contemplative session..."
         claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 5 $CONTEMPLATE_FLAGS 2>/dev/null
-        echo "[koan] Contemplative session ended."
+        log pause "Contemplative session ended."
         set -e
 
         # Contemplative session done — increment counter and loop
         count=$((count + 1))
-        echo "[koan] Sleeping ${INTERVAL}s..."
+        log pause "Contemplative session complete. Sleeping ${INTERVAL}s..."
         sleep "$INTERVAL"
         continue
       fi
@@ -385,7 +429,7 @@ $KNOWN_PROJECTS"
 
     case "$AUTONOMOUS_MODE" in
       wait)
-        echo "Decision: WAIT mode (budget exhausted)"
+        log quota "Decision: WAIT mode (budget exhausted)"
         echo "  Reason: $DECISION_REASON"
         echo "  Action: Entering pause mode (will auto-resume after 5h)"
         echo ""
@@ -420,12 +464,12 @@ $KNOWN_PROJECTS"
   export KOAN_CURRENT_PROJECT="$PROJECT_NAME"
   export KOAN_CURRENT_PROJECT_PATH="$PROJECT_PATH"
 
-  echo ">>> Current project: $PROJECT_NAME ($PROJECT_PATH)"
+  echo -e "${_C_BOLD}${_C_GREEN}>>> Current project: $PROJECT_NAME${_C_RESET} ($PROJECT_PATH)"
   echo ""
 
   # Mission lifecycle notification: taken or autonomous
   if [ -n "$MISSION_TITLE" ]; then
-    echo "Decision: MISSION mode (assigned)"
+    log mission "Decision: MISSION mode (assigned)"
     echo "  Mission: $MISSION_TITLE"
     echo "  Project: $PROJECT_NAME"
     echo ""
@@ -434,7 +478,7 @@ $KNOWN_PROJECTS"
     ESTIMATED_COST="5.0"
     # Uppercase mode for display (bash 3.2 compatible)
     MODE_UPPER=$(echo "$AUTONOMOUS_MODE" | tr '[:lower:]' '[:upper:]')
-    echo "Decision: $MODE_UPPER mode (estimated cost: ${ESTIMATED_COST}% session)"
+    log mission "Decision: $MODE_UPPER mode (estimated cost: ${ESTIMATED_COST}% session)"
     echo "  Reason: $DECISION_REASON"
     echo "  Project: $PROJECT_NAME"
     echo "  Focus: $FOCUS_AREA"
@@ -583,7 +627,7 @@ EOF
   CLAUDE_COMBINED="$(cat "$CLAUDE_ERR" 2>/dev/null; echo "$CLAUDE_TEXT")"
   if echo "$CLAUDE_COMBINED" | grep -q "out of extra usage\|quota.*reached\|rate limit"; then
     RESET_INFO=$(echo "$CLAUDE_COMBINED" | grep -o "resets.*" | head -1 || echo "")
-    echo "[koan] Quota reached. $RESET_INFO"
+    log quota "Quota reached. $RESET_INFO"
 
     # Parse reset time to get actual timestamp
     RESET_PARSER="$APP_DIR/reset_parser.py"
@@ -649,7 +693,7 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
     echo "" >> "$JOURNAL_FILE"
     cat "$PENDING_FILE" >> "$JOURNAL_FILE"
     rm -f "$PENDING_FILE"
-    echo "[koan] pending.md archived to journal (Claude didn't clean up)"
+    log health "pending.md archived to journal (Claude didn't clean up)"
   fi
 
   # Report result
@@ -657,18 +701,18 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
   # (summary + koan). No need for notify() or mission_summary.py here —
   # those caused triple-repeated conclusions on Telegram.
   if [ $CLAUDE_EXIT -eq 0 ]; then
-    echo "[koan] Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] completed successfully"
+    log mission "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] completed successfully"
 
     # Auto-merge logic (if on koan/* branch)
     cd "$PROJECT_PATH"
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     if [[ "$CURRENT_BRANCH" == koan/* ]]; then
-      echo "[koan] Checking auto-merge for $CURRENT_BRANCH..."
+      log git "Checking auto-merge for $CURRENT_BRANCH..."
       GIT_AUTO_MERGE="$APP_DIR/git_auto_merge.py"
       if "$PYTHON" "$GIT_AUTO_MERGE" "$INSTANCE" "$PROJECT_NAME" "$PROJECT_PATH" "$CURRENT_BRANCH" 2>&1; then
-        echo "[koan] Auto-merge completed for $CURRENT_BRANCH"
+        log git "Auto-merge completed for $CURRENT_BRANCH"
       else
-        echo "[koan] Auto-merge skipped or failed for $CURRENT_BRANCH (see journal)"
+        log git "Auto-merge skipped or failed for $CURRENT_BRANCH (see journal)"
       fi
     fi
   else
@@ -690,7 +734,7 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
 
   # Periodic git sync (every GIT_SYNC_INTERVAL runs)
   if [ $((count % GIT_SYNC_INTERVAL)) -eq 0 ]; then
-    echo "[koan] Periodic git sync (run $count)..."
+    log git "Periodic git sync (run $count)..."
     for i in "${!PROJECT_NAMES[@]}"; do
       "$PYTHON" "$GIT_SYNC" "$INSTANCE" "${PROJECT_NAMES[$i]}" "${PROJECT_PATHS[$i]}" 2>/dev/null || true
     done
@@ -698,9 +742,9 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
 
   # Check if max runs reached — enter pause mode instead of exiting
   if [ $count -ge $MAX_RUNS ]; then
-    echo "[koan] Max runs ($MAX_RUNS) reached. Running evening ritual before pause."
+    log koan "Max runs ($MAX_RUNS) reached. Running evening ritual before pause."
     "$PYTHON" "$RITUALS" evening "$INSTANCE" || true
-    echo "[koan] Entering pause mode (auto-resume in 5h)."
+    log pause "Entering pause mode (auto-resume in 5h)."
     touch "$KOAN_ROOT/.koan-pause"
     echo "max_runs" > "$KOAN_ROOT/.koan-pause-reason"
     echo "$(date +%s)" >> "$KOAN_ROOT/.koan-pause-reason"
@@ -709,12 +753,12 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
     continue  # Go back to start of loop (will enter pause mode)
   fi
 
-  echo "[koan] Sleeping ${INTERVAL}s..."
+  log koan "Sleeping ${INTERVAL}s..."
   sleep $INTERVAL
 done
 
 # This point is only reached via /stop command
-echo "[koan] Session ended. $count runs executed."
+log koan "Session ended. $count runs executed."
 
 # End-of-session daily report check
 "$PYTHON" "$DAILY_REPORT" 2>/dev/null || true

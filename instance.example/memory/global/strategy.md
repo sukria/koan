@@ -19,5 +19,5 @@ for the target project.
 ## Context
 
 Customize this file with your project's strategic context.
-Kōan loads this at the start of each run to align missions
+Koan loads this at the start of each run to align missions
 with business priorities.

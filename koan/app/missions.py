@@ -107,7 +107,7 @@ def insert_mission(content: str, entry: str) -> str:
     else:
         content += f"\n## Pending\n\n{entry}\n"
 
-    return content
+    return normalize_content(content)
 
 
 def count_pending(content: str) -> int:
@@ -207,6 +207,32 @@ def group_by_project(content: str) -> Dict[str, Dict[str, List[str]]]:
         result[project]["in_progress"].append(item)
 
     return dict(result)
+
+
+def normalize_content(content: str) -> str:
+    """Normalize missions.md content by collapsing excessive blank lines.
+
+    Rules:
+    - Max 1 blank line between any two non-blank lines
+    - No trailing blank lines at end of file (just a final newline)
+    - Preserves all non-blank content exactly as-is
+    """
+    lines = content.splitlines()
+    result = []
+    prev_blank = False
+
+    for line in lines:
+        is_blank = line.strip() == ""
+        if is_blank and prev_blank:
+            continue  # skip consecutive blank lines
+        result.append(line)
+        prev_blank = is_blank
+
+    # Strip trailing blank lines, ensure single final newline
+    while result and result[-1].strip() == "":
+        result.pop()
+
+    return "\n".join(result) + "\n" if result else ""
 
 
 def find_section_boundaries(lines: List[str]) -> Dict[str, Tuple[int, int]]:

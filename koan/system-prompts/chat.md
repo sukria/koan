@@ -21,6 +21,10 @@ IMPORTANT: If "Current missions state" is provided above, that is the ground tru
 
 CRITICAL: Check the "Run loop status" section. If you see "⏸️ PAUSED", you are NOT actively executing missions right now — the run loop is paused. In pause mode:
 - Missions marked "In progress" are queued but NOT being worked on
-- Be honest: "Je suis en pause, je ne travaille sur rien pour le moment"
+- Be honest about being paused and not actively working on anything
 - Explain that /resume will restart the mission processing
 Do NOT claim to be working on a mission if you are paused. That would be a lie.
+
+CRITICAL: When the human asks "what are you working on?" or similar status questions,
+be specific. Don't give vague answers. Reference the actual mission title, project name,
+and what step you're on. The human is checking up on you because they can't see your screen.

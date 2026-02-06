@@ -21,7 +21,9 @@ from app.awake import (
     _clean_chat_response,
     _build_status,
     _handle_help,
+    _handle_log,
     _handle_usage,
+    _handle_mission_command,
     _run_in_worker,
     get_updates,
     check_config,
@@ -76,6 +78,70 @@ class TestIsMission:
 
     def test_empty_string(self):
         assert is_mission("") is False
+
+    def test_long_message_with_verb_only_at_start(self):
+        """Long messages should only match verbs at the start, not mid-text."""
+        # Verb at start — IS a mission
+        long_mission = "implement " + "x " * 150
+        assert is_mission(long_mission) is True
+        # Verb buried mid-text — NOT a mission
+        long_chat = "I was thinking about how we should " + "x " * 100 + " and then implement something"
+        assert is_mission(long_chat) is False
+
+    def test_conversational_with_action_verb(self):
+        """Short messages starting with action verbs but clearly conversational."""
+        # These are correctly classified as missions by the current heuristic.
+        # Users should use /chat to override when needed.
+        assert is_mission("add me to the list") is True  # starts with "add"
+        assert is_mission("run me through the pipeline") is True  # starts with "run"
+
+    def test_long_conversational_not_mission(self):
+        """Long conversational messages without leading verbs are not missions."""
+        long_chat = "Hey, I wanted to discuss something with you. " + "blah " * 60
+        assert is_mission(long_chat) is False
+
+
+# ---------------------------------------------------------------------------
+# /chat command (force chat mode)
+# ---------------------------------------------------------------------------
+
+class TestHandleChatCommand:
+    """Test /chat prefix to force chat mode."""
+
+    @patch("app.awake._run_in_worker")
+    def test_chat_command_routes_to_chat(self, mock_worker):
+        """'/chat fix the bug' should route to chat, not mission."""
+        handle_command("/chat fix the bug")
+        mock_worker.assert_called_once_with(handle_chat, "fix the bug")
+
+    @patch("app.awake._run_in_worker")
+    def test_chat_command_strips_prefix(self, mock_worker):
+        """/chat should strip the prefix and pass the rest as chat text."""
+        handle_command("/chat implement dark mode for the dashboard")
+        mock_worker.assert_called_once_with(
+            handle_chat, "implement dark mode for the dashboard"
+        )
+
+    @patch("app.awake.send_telegram")
+    def test_chat_command_empty_shows_usage(self, mock_send):
+        """/chat with no text should show usage help."""
+        handle_command("/chat")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+        assert "/chat" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_chat_command_whitespace_only_shows_usage(self, mock_send):
+        """/chat followed by only whitespace shows usage."""
+        handle_command("/chat   ")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+
+    @patch("app.awake._run_in_worker")
+    def test_chat_via_handle_message(self, mock_worker):
+        """/chat goes through handle_message -> handle_command -> chat."""
+        handle_message("/chat add me to the list of testers")
+        mock_worker.assert_called_once_with(handle_chat, "add me to the list of testers")
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +792,41 @@ class TestMainLoop:
             main()
         mock_handle.assert_not_called()
 
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates", side_effect=KeyboardInterrupt)
+    @patch("app.awake.check_config")
+    def test_main_ctrl_c_exits_gracefully(self, mock_config, mock_updates,
+                                           mock_handle, mock_flush, mock_heartbeat,
+                                           capsys):
+        """CTRL-C (KeyboardInterrupt) exits cleanly without traceback."""
+        from app.awake import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "Shutting down" in captured.out
+
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates", return_value=[])
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    @patch("app.awake.time.sleep", side_effect=KeyboardInterrupt)
+    def test_main_ctrl_c_during_sleep_exits_gracefully(self, mock_sleep, mock_config,
+                                                        mock_updates, mock_handle,
+                                                        mock_flush, mock_heartbeat,
+                                                        capsys):
+        """CTRL-C during sleep between polls also exits cleanly."""
+        from app.awake import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "Shutting down" in captured.out
+
 
 # ---------------------------------------------------------------------------
 # /pause command
@@ -924,6 +1025,12 @@ class TestHandleHelp:
         _handle_help()
         msg = mock_send.call_args[0][0]
         assert "mission" in msg.lower()
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_chat_command(self, mock_send):
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/chat" in msg
 
     @patch("app.awake._handle_help")
     def test_handle_command_routes_help(self, mock_help):
@@ -1168,3 +1275,183 @@ class TestChatToolsSecurity:
         tools_arg = call_args[allowed_idx + 1]
         assert tools_arg == "Read,Glob,Grep"
         assert "Bash" not in tools_arg
+# ---------------------------------------------------------------------------
+# /mission command
+# ---------------------------------------------------------------------------
+
+class TestHandleMissionCommand:
+    """Test /mission command — parity with 'mission:' keyword."""
+
+    @patch("app.awake.send_telegram")
+    def test_bare_mission_shows_usage(self, mock_send):
+        _handle_mission_command("/mission")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+
+    @patch("app.awake.handle_mission")
+    @patch("app.awake.get_known_projects", return_value=["koan"])
+    def test_single_project_auto_proceeds(self, mock_projects, mock_mission):
+        _handle_mission_command("/mission fix the login bug")
+        mock_mission.assert_called_once_with("fix the login bug")
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake.get_known_projects", return_value=["koan", "webapp"])
+    def test_multi_project_asks_user(self, mock_projects, mock_send):
+        _handle_mission_command("/mission fix the login bug")
+        msg = mock_send.call_args[0][0]
+        assert "Which project" in msg
+        assert "koan" in msg
+        assert "webapp" in msg
+
+    @patch("app.awake.handle_mission")
+    @patch("app.awake.get_known_projects", return_value=["koan", "webapp"])
+    def test_project_tag_bypasses_ask(self, mock_projects, mock_mission):
+        _handle_mission_command("/mission [project:koan] fix the login bug")
+        mock_mission.assert_called_once_with("[project:koan] fix the login bug")
+
+    @patch("app.awake.handle_mission")
+    def test_mission_colon_format(self, mock_mission):
+        _handle_mission_command("/mission: fix the login bug")
+        mock_mission.assert_called_once_with("fix the login bug")
+
+    @patch("app.awake._handle_mission_command")
+    def test_handle_command_routes_mission(self, mock_handler):
+        handle_command("/mission fix the bug")
+        mock_handler.assert_called_once_with("/mission fix the bug")
+
+    @patch("app.awake.send_telegram")
+    def test_whitespace_only_shows_usage(self, mock_send):
+        _handle_mission_command("/mission   ")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+
+    @patch("app.awake.handle_mission")
+    @patch("app.awake.get_known_projects", return_value=[])
+    def test_no_known_projects_proceeds(self, mock_projects, mock_mission):
+        _handle_mission_command("/mission fix the login bug")
+        mock_mission.assert_called_once_with("fix the login bug")
+
+
+class TestHandleHelpIncludesMission:
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_mission_command(self, mock_send):
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/mission" in msg
+# /log command
+# ---------------------------------------------------------------------------
+
+class TestHandleLog:
+    """Test /log and /journal command handler."""
+
+    @patch("app.awake.send_telegram")
+    def test_log_project_today(self, mock_send, tmp_path):
+        """'/log koan' shows today's journal for koan."""
+        from datetime import date
+        d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("## Session 29\nDid work on /log command.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("koan")
+        msg = mock_send.call_args[0][0]
+        assert "koan" in msg
+        assert "Did work" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_no_args_all_projects(self, mock_send, tmp_path):
+        """'/log' shows today's journal for all projects."""
+        from datetime import date
+        d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("koan stuff")
+        (d / "web-app.md").write_text("web-app stuff")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("")
+        msg = mock_send.call_args[0][0]
+        assert "koan" in msg
+        assert "web-app" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_yesterday(self, mock_send, tmp_path):
+        """'/log koan yesterday' shows yesterday's journal."""
+        from datetime import date, timedelta
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        d = tmp_path / "journal" / yesterday
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("Yesterday's work.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("koan yesterday")
+        msg = mock_send.call_args[0][0]
+        assert "Yesterday's work" in msg
+        assert yesterday in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_specific_date(self, mock_send, tmp_path):
+        """'/log koan 2026-01-15' shows that date's journal."""
+        d = tmp_path / "journal" / "2026-01-15"
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("Old entry from Jan.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("koan 2026-01-15")
+        msg = mock_send.call_args[0][0]
+        assert "Old entry" in msg
+        assert "2026-01-15" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_no_journal_found(self, mock_send, tmp_path):
+        """Shows 'no journal' when nothing exists."""
+        (tmp_path / "journal").mkdir()
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("koan")
+        msg = mock_send.call_args[0][0]
+        assert "No journal" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_date_only_no_project(self, mock_send, tmp_path):
+        """'/log 2026-01-15' shows all projects for that date."""
+        d = tmp_path / "journal" / "2026-01-15"
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("koan stuff")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("2026-01-15")
+        msg = mock_send.call_args[0][0]
+        assert "koan" in msg
+        assert "2026-01-15" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_log_yesterday_no_project(self, mock_send, tmp_path):
+        """'/log yesterday' shows all projects for yesterday."""
+        from datetime import date, timedelta
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        d = tmp_path / "journal" / yesterday
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("yesterday stuff")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_log("yesterday")
+        msg = mock_send.call_args[0][0]
+        assert "yesterday stuff" in msg
+
+    @patch("app.awake._handle_log")
+    def test_handle_command_routes_log(self, mock_log):
+        """handle_command routes /log to _handle_log."""
+        handle_command("/log koan")
+        mock_log.assert_called_once_with("koan")
+
+    @patch("app.awake._handle_log")
+    def test_handle_command_routes_journal(self, mock_log):
+        """handle_command routes /journal to _handle_log."""
+        handle_command("/journal koan")
+        mock_log.assert_called_once_with("koan")
+
+    @patch("app.awake._handle_log")
+    def test_handle_command_routes_log_bare(self, mock_log):
+        """handle_command routes bare /log to _handle_log."""
+        handle_command("/log")
+        mock_log.assert_called_once_with("")
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_log(self, mock_send):
+        """/help output includes /log."""
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/log" in msg

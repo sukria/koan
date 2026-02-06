@@ -10,6 +10,7 @@ from app.missions import (
     extract_project_tag,
     group_by_project,
     find_section_boundaries,
+    normalize_content,
     DEFAULT_SKELETON,
 )
 
@@ -438,3 +439,80 @@ class TestSubHeaderProjectGrouping:
         assert len(result["koan"]["pending"]) >= 1
         assert "anantys" in result
         assert len(result["anantys"]["pending"]) >= 1
+
+
+# --- normalize_content ---
+
+class TestNormalizeContent:
+    def test_collapses_consecutive_blank_lines(self):
+        content = "# Missions\n\n## En attente\n\n\n\n\n- Task\n\n## En cours\n"
+        result = normalize_content(content)
+        assert "\n\n\n" not in result
+        assert "- Task" in result
+
+    def test_preserves_single_blank_lines(self):
+        content = "# Missions\n\n## En attente\n\n- Task 1\n\n- Task 2\n"
+        result = normalize_content(content)
+        assert result == content
+
+    def test_many_blank_lines_in_pending(self):
+        """Real-world case: 40+ blank lines accumulated in pending section."""
+        content = "# Missions\n\n## En attente\n" + "\n" * 40 + "- Fix bug\n\n## En cours\n"
+        result = normalize_content(content)
+        lines = result.splitlines()
+        # Should have at most 1 blank line between header and item
+        header_idx = lines.index("## En attente")
+        item_idx = next(i for i, l in enumerate(lines) if l.startswith("- Fix"))
+        assert item_idx - header_idx <= 2  # header, blank, item
+
+    def test_empty_content(self):
+        assert normalize_content("") == ""
+
+    def test_only_blank_lines(self):
+        assert normalize_content("\n\n\n\n") == ""
+
+    def test_no_trailing_blank_lines(self):
+        content = "# Missions\n\n## En attente\n\n- Task\n\n\n\n"
+        result = normalize_content(content)
+        assert result.endswith("- Task\n")
+
+    def test_preserves_content_between_items(self):
+        content = (
+            "## Terminées\n\n"
+            "- Done 1\n\n"
+            "- Done 2\n\n"
+            "- Done 3\n"
+        )
+        result = normalize_content(content)
+        assert result.count("- Done") == 3
+        # Single blank line between items preserved
+        assert "- Done 1\n\n- Done 2" in result
+
+    def test_multiple_sections_all_cleaned(self):
+        content = (
+            "# Missions\n\n"
+            "## En attente\n\n\n\n\n"
+            "- Pending task\n\n\n"
+            "## En cours\n\n\n\n"
+            "## Terminées\n\n\n"
+            "- Done task\n"
+        )
+        result = normalize_content(content)
+        # No triple newlines anywhere
+        assert "\n\n\n" not in result
+        assert "- Pending task" in result
+        assert "- Done task" in result
+
+    def test_preserves_indentation(self):
+        content = "## En attente\n\n- Task\n  sub-detail\n  more detail\n"
+        result = normalize_content(content)
+        assert "  sub-detail" in result
+        assert "  more detail" in result
+
+    def test_insert_mission_returns_normalized(self):
+        """insert_mission should return normalized content (no excessive blanks)."""
+        content = "# Missions\n\n## En attente\n" + "\n" * 20 + "- Old task\n\n## En cours\n"
+        result = insert_mission(content, "- New task")
+        assert "\n\n\n" not in result
+        assert "- New task" in result
+        assert "- Old task" in result

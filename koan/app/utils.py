@@ -99,6 +99,50 @@ def read_all_journals(instance_dir: Path, target_date) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def get_latest_journal(instance_dir: Path, project: Optional[str] = None,
+                       target_date=None, max_chars: int = 500) -> str:
+    """Read the latest journal entry, optionally filtered by project.
+
+    Args:
+        instance_dir: Path to instance directory
+        project: Project name filter (None = all projects)
+        target_date: date object or "YYYY-MM-DD" string (None = today)
+        max_chars: Maximum characters to return (tail)
+
+    Returns:
+        Formatted journal excerpt or informative "nothing found" message
+    """
+    from datetime import date as _date
+
+    if target_date is None:
+        target_date = _date.today()
+
+    if hasattr(target_date, 'strftime'):
+        date_str = target_date.strftime("%Y-%m-%d")
+    else:
+        date_str = str(target_date)
+
+    if project:
+        journal_path = get_journal_file(instance_dir, target_date, project)
+        if not journal_path.exists():
+            return f"No journal for {project} on {date_str}."
+        content = journal_path.read_text().strip()
+        if not content:
+            return f"Empty journal for {project} on {date_str}."
+        header = f"📓 {project} — {date_str}"
+    else:
+        content = read_all_journals(instance_dir, target_date)
+        if not content:
+            return f"No journal for {date_str}."
+        header = f"📓 Journal — {date_str}"
+
+    # Tail: keep last max_chars
+    if len(content) > max_chars:
+        content = "...\n" + content[-(max_chars - 4):]
+
+    return f"{header}\n\n{content}"
+
+
 def append_to_journal(instance_dir: Path, project_name: str, content: str):
     """Append content to today's journal file for a project.
 
@@ -399,6 +443,31 @@ def atomic_write(path: Path, content: str):
         raise
 
 
+def get_known_projects() -> List[str]:
+    """Return list of known project names from KOAN_PROJECTS or KOAN_PROJECT_PATH.
+
+    Parses the KOAN_PROJECTS env var (format: 'name:path;name2:path2').
+    Falls back to KOAN_PROJECT_PATH with name 'default'.
+    Returns empty list if neither is set.
+    """
+    projects_env = os.environ.get("KOAN_PROJECTS", "")
+    if projects_env:
+        names = []
+        for pair in projects_env.split(";"):
+            pair = pair.strip()
+            if ":" in pair:
+                name = pair.split(":")[0].strip()
+                if name:
+                    names.append(name)
+        return sorted(names)
+
+    project_path = os.environ.get("KOAN_PROJECT_PATH", "")
+    if project_path:
+        return ["default"]
+
+    return []
+
+
 def insert_pending_mission(missions_path: Path, entry: str):
     """Insert a mission entry into the pending section of missions.md.
 
@@ -430,6 +499,9 @@ def insert_pending_mission(missions_path: Path, entry: str):
                 content = content[:idx] + f"\n{entry}\n" + content[idx:]
             else:
                 content += f"\n## Pending\n\n{entry}\n"
+
+            from app.missions import normalize_content
+            content = normalize_content(content)
 
             f.seek(0)
             f.truncate()

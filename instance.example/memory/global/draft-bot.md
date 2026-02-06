@@ -31,13 +31,13 @@ Shared via git. Bot pulls every 5 min, human pushes from anywhere.
 
 ```markdown
 ## Pending
-- [ ] Audit sécurité des routes nextapi
+- [ ] Security audit of nextapi routes
 
 ## In Progress
-- [~] Review du modèle StockAccountHolding
+- [~] Review of the StockAccountHolding model
 
 ## Done
-- [x] 2026-01-30 - Documentation des webhooks Bridge
+- [x] 2026-01-30 - Bridge webhooks documentation
 ```
 
 Flow: bot pulls → takes first Pending → marks In Progress → executes against anantys-back → writes report in journal/ → marks Done → commit+push.

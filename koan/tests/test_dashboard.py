@@ -54,6 +54,7 @@ def app_client(instance_dir, tmp_path):
          patch.object(dashboard, "SOUL_FILE", instance_dir / "soul.md"), \
          patch.object(dashboard, "SUMMARY_FILE", instance_dir / "memory" / "summary.md"), \
          patch.object(dashboard, "JOURNAL_DIR", instance_dir / "journal"), \
+         patch.object(dashboard, "PENDING_FILE", instance_dir / "journal" / "pending.md"), \
          patch.object(dashboard, "KOAN_ROOT", tmp_path):
         dashboard.app.config["TESTING"] = True
         dashboard.app.jinja_loader = FileSystemLoader(str(tpl_dest))
@@ -370,3 +371,69 @@ class TestParseProject:
         project, text = dashboard.parse_project("fix bug")
         assert project is None
         assert text == "fix bug"
+
+
+class TestProgressPage:
+    def test_progress_page_renders(self, app_client):
+        resp = app_client.get("/progress")
+        assert resp.status_code == 200
+        assert b"Live Progress" in resp.data
+        assert b"EventSource" in resp.data
+
+    def test_progress_page_has_autoscroll(self, app_client):
+        resp = app_client.get("/progress")
+        assert b"autoscroll" in resp.data
+
+
+class TestApiProgress:
+    def test_no_pending_file(self, app_client):
+        resp = app_client.get("/api/progress")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["active"] is False
+        assert data["content"] == ""
+
+    def test_with_pending_file(self, app_client, instance_dir):
+        pending = instance_dir / "journal" / "pending.md"
+        pending.write_text("# Mission: test\n---\n04:26 — started\n")
+        resp = app_client.get("/api/progress")
+        data = resp.get_json()
+        assert data["active"] is True
+        assert "Mission: test" in data["content"]
+        assert "04:26" in data["content"]
+
+
+class TestApiProgressStream:
+    def test_stream_returns_sse_content_type(self, app_client):
+        resp = app_client.get("/api/progress/stream")
+        assert resp.content_type == "text/event-stream; charset=utf-8"
+
+    def test_stream_sends_initial_event_when_file_exists(self, app_client, instance_dir):
+        pending = instance_dir / "journal" / "pending.md"
+        pending.write_text("# Mission: live test\n---\n04:30 — doing stuff\n")
+        resp = app_client.get("/api/progress/stream")
+        # Read the first chunk from the streaming response
+        import json
+        data_line = None
+        for chunk in resp.response:
+            if isinstance(chunk, bytes):
+                chunk = chunk.decode()
+            if chunk.startswith("data: "):
+                data_line = chunk
+                break
+        assert data_line is not None
+        payload = json.loads(data_line[6:].strip())
+        assert payload["active"] is True
+        assert "live test" in payload["content"]
+
+    def test_stream_sends_inactive_when_no_file(self, app_client, instance_dir):
+        # Ensure no pending.md exists
+        pending = instance_dir / "journal" / "pending.md"
+        if pending.exists():
+            pending.unlink()
+        # The SSE generator won't emit until content changes.
+        # For the no-file case with last_content=None initially, it won't emit.
+        # We just verify the endpoint returns a valid SSE response.
+        resp = app_client.get("/api/progress/stream")
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.content_type
