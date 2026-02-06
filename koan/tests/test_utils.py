@@ -219,6 +219,79 @@ class TestReadAllJournals:
         assert "content" in result
 
 
+class TestGetLatestJournal:
+    def test_project_today(self, tmp_path):
+        from datetime import date
+        from app.utils import get_latest_journal
+        d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("## Session 29\n\nDid some work.")
+        result = get_latest_journal(tmp_path, project="koan")
+        assert "koan" in result
+        assert "Did some work" in result
+
+    def test_project_specific_date(self, tmp_path):
+        from app.utils import get_latest_journal
+        d = tmp_path / "journal" / "2026-01-15"
+        d.mkdir(parents=True)
+        (d / "myproj.md").write_text("Old entry.")
+        result = get_latest_journal(tmp_path, project="myproj", target_date="2026-01-15")
+        assert "myproj" in result
+        assert "2026-01-15" in result
+        assert "Old entry." in result
+
+    def test_all_projects(self, tmp_path):
+        from datetime import date
+        from app.utils import get_latest_journal
+        d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("koan entry")
+        (d / "web-app.md").write_text("web-app entry")
+        result = get_latest_journal(tmp_path)
+        assert "koan" in result
+        assert "web-app" in result
+
+    def test_no_journal_found(self, tmp_path):
+        from app.utils import get_latest_journal
+        (tmp_path / "journal").mkdir()
+        result = get_latest_journal(tmp_path, project="koan")
+        assert "No journal" in result
+
+    def test_truncation(self, tmp_path):
+        from datetime import date
+        from app.utils import get_latest_journal
+        d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("x" * 1000)
+        result = get_latest_journal(tmp_path, project="koan", max_chars=200)
+        assert len(result) < 300  # header + truncated content
+        assert "..." in result
+
+    def test_empty_journal(self, tmp_path):
+        from datetime import date
+        from app.utils import get_latest_journal
+        d = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("")
+        result = get_latest_journal(tmp_path, project="koan")
+        assert "empty" in result.lower()
+
+    def test_no_journal_all_projects(self, tmp_path):
+        from app.utils import get_latest_journal
+        (tmp_path / "journal").mkdir()
+        result = get_latest_journal(tmp_path)
+        assert "No journal" in result
+
+    def test_accepts_date_object(self, tmp_path):
+        from datetime import date
+        from app.utils import get_latest_journal
+        d = tmp_path / "journal" / "2026-02-01"
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("entry content")
+        result = get_latest_journal(tmp_path, project="koan", target_date=date(2026, 2, 1))
+        assert "entry content" in result
+
+
 class TestAppendToJournal:
     def test_creates_and_appends(self, tmp_path):
         from app.utils import append_to_journal
