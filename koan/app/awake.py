@@ -11,7 +11,6 @@ Fast-response architecture:
 """
 
 import fcntl
-import json
 import os
 import re
 import subprocess
@@ -20,7 +19,7 @@ import threading
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple
 
 import requests
 

@@ -19,10 +19,10 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
 from app.utils import (

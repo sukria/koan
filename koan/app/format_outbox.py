@@ -14,7 +14,6 @@ Usage: python format_outbox.py <instance_dir> [project_name] < raw_message
 Reads raw content from stdin, formats it via Claude, outputs to stdout.
 """
 
-import os
 import re
 import subprocess
 import sys

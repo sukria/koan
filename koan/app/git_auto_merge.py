@@ -11,14 +11,13 @@ Supports:
 - Safety checks (clean working tree, branch pushed, conflict detection)
 """
 
-import fcntl
 import fnmatch
 import os
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple, Dict, List
+from typing import Dict, Optional, Tuple, List
 
 # Import config utilities
 from app.utils import load_config, get_auto_merge_config
