@@ -1034,8 +1034,10 @@ def handle_message(text: str):
 
 def main():
     from app.banners import print_bridge_banner
+    from app.github_auth import setup_github_auth
 
     check_config()
+    setup_github_auth()
 
     provider_name = "telegram" # about to become dynamic with provider abstraction
     print_bridge_banner(f"messaging bridge — {provider_name.lower()}")
