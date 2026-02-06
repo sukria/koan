@@ -21,6 +21,7 @@ from app.awake import (
     _clean_chat_response,
     _build_status,
     _handle_help,
+    _handle_language,
     _handle_log,
     _handle_usage,
     _handle_mission_command,
@@ -1455,3 +1456,63 @@ class TestHandleLog:
         _handle_help()
         msg = mock_send.call_args[0][0]
         assert "/log" in msg
+
+
+# ---------------------------------------------------------------------------
+# /language
+# ---------------------------------------------------------------------------
+
+class TestHandleLanguage:
+    """Tests for /language command."""
+
+    @patch("app.awake._handle_language")
+    def test_handle_command_routes_language(self, mock_lang):
+        """handle_command routes /language to _handle_language."""
+        handle_command("/language english")
+        mock_lang.assert_called_once_with("english")
+
+    @patch("app.awake._handle_language")
+    def test_handle_command_routes_language_bare(self, mock_lang):
+        """handle_command routes bare /language to _handle_language."""
+        handle_command("/language")
+        mock_lang.assert_called_once_with("")
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake.get_language", return_value="")
+    def test_bare_language_shows_usage(self, mock_get, mock_send):
+        """Bare /language shows current state and usage."""
+        _handle_language("")
+        msg = mock_send.call_args[0][0]
+        assert "No language override" in msg
+        assert "Usage" in msg
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake.get_language", return_value="french")
+    def test_bare_language_shows_current(self, mock_get, mock_send):
+        """Bare /language shows current language when set."""
+        _handle_language("")
+        msg = mock_send.call_args[0][0]
+        assert "french" in msg
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake.set_language")
+    def test_set_language(self, mock_set, mock_send):
+        """Setting a language calls set_language."""
+        _handle_language("english")
+        mock_set.assert_called_once_with("english")
+        assert "english" in mock_send.call_args[0][0]
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake.reset_language")
+    def test_reset_language(self, mock_reset, mock_send):
+        """'reset' arg calls reset_language."""
+        _handle_language("reset")
+        mock_reset.assert_called_once()
+        assert "reset" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_language(self, mock_send):
+        """/help output includes /language."""
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/language" in msg
