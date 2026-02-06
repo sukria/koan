@@ -25,8 +25,9 @@ import requests
 
 from app.format_outbox import format_for_telegram, load_soul, load_human_prefs, load_memory_context
 from app.health_check import write_heartbeat
-from app.language_preference import get_language, set_language, reset_language, get_language_instruction
+from app.language_preference import get_language_instruction
 from app.notify import send_telegram
+from app.skills import SkillRegistry, SkillContext, execute_skill, build_registry
 from app.utils import (
     load_dotenv,
     parse_project as _parse_project,
@@ -41,7 +42,6 @@ from app.utils import (
     get_model_config,
     build_claude_flags,
     get_fast_reply_model,
-    get_known_projects,
 )
 
 load_dotenv()
@@ -71,6 +71,34 @@ SUMMARY = ""
 summary_path = INSTANCE_DIR / "memory" / "summary.md"
 if summary_path.exists():
     SUMMARY = summary_path.read_text()
+
+# Skills registry — loaded once at import time
+_skill_registry: Optional[SkillRegistry] = None
+
+
+def _get_registry() -> SkillRegistry:
+    """Get or initialize the skill registry (lazy singleton)."""
+    global _skill_registry
+    if _skill_registry is None:
+        extra_dirs = []
+        instance_skills = INSTANCE_DIR / "skills"
+        if instance_skills.is_dir():
+            extra_dirs.append(instance_skills)
+        _skill_registry = build_registry(extra_dirs)
+    return _skill_registry
+
+
+def _reset_registry():
+    """Reset the registry (for testing)."""
+    global _skill_registry
+    _skill_registry = None
+
+
+# Core commands that remain hardcoded (safety-critical or bootstrap)
+CORE_COMMANDS = frozenset({"help", "stop", "pause", "resume", "skill"})
+
+# Commands that block (call Claude) and must run in a worker thread
+WORKER_COMMANDS = frozenset({"sparring", "usage"})
 
 
 def check_config():
@@ -135,17 +163,10 @@ def parse_project(text: str) -> Tuple[Optional[str], str]:
 # ---------------------------------------------------------------------------
 
 def handle_command(text: str):
-    """Handle /commands locally — no Claude needed."""
+    """Handle /commands — core commands hardcoded, rest via skills."""
     cmd = text.strip().lower()
 
-    # /chat forces chat mode — bypass mission classification
-    if cmd.startswith("/chat"):
-        chat_text = text[5:].strip()
-        if not chat_text:
-            send_telegram("Usage: /chat <message>\nForces chat mode for messages that look like missions.")
-            return
-        _run_in_worker(handle_chat, chat_text)
-        return
+    # --- Core hardcoded commands (safety-critical / bootstrap) ---
 
     if cmd == "/stop":
         (KOAN_ROOT / ".koan-stop").write_text("STOP")
@@ -161,65 +182,66 @@ def handle_command(text: str):
             send_telegram("Paused. No missions will run. /resume to unpause.")
         return
 
-    if cmd == "/status":
-        status = _build_status()
-        send_telegram(status)
-        return
-
     if cmd == "/resume":
         handle_resume()
-        return
-
-    if cmd == "/verbose":
-        verbose_file = KOAN_ROOT / ".koan-verbose"
-        verbose_file.write_text("VERBOSE")
-        send_telegram("Verbose mode ON. I'll send you each progress update.")
-        return
-
-    if cmd == "/silent":
-        verbose_file = KOAN_ROOT / ".koan-verbose"
-        if verbose_file.exists():
-            verbose_file.unlink()
-            send_telegram("Verbose mode OFF. Silent until conclusion.")
-        else:
-            send_telegram("Already in silent mode.")
-        return
-
-    if cmd == "/sparring":
-        _handle_sparring()
-        return
-
-    if cmd.startswith("/reflect "):
-        _handle_reflect(text[9:].strip())
-        return
-
-    if cmd == "/ping":
-        _handle_ping()
-        return
-
-    if cmd.startswith("/log") or cmd.startswith("/journal"):
-        # Extract args after command name
-        if cmd.startswith("/journal"):
-            args = text[8:].strip()
-        else:
-            args = text[4:].strip()
-        _handle_log(args)
-        return
-
-    if cmd.startswith("/language"):
-        _handle_language(text[9:].strip())
         return
 
     if cmd == "/help":
         _handle_help()
         return
 
-    if cmd == "/usage":
-        _run_in_worker(_handle_usage)
+    if cmd.startswith("/skill"):
+        _handle_skill_command(text[6:].strip())
         return
 
-    if cmd.startswith("/mission"):
-        _handle_mission_command(text)
+    # --- Skill-based dispatch ---
+
+    # Extract command name and args from /command_name args
+    parts = text.strip().split(None, 1)
+    command_name = parts[0][1:].lower()  # strip the /
+    command_args = parts[1] if len(parts) > 1 else ""
+
+    # Special case: /journal is an alias for /log
+    if command_name == "journal":
+        command_name = "log"
+        command_args = text[8:].strip()
+
+    registry = _get_registry()
+    skill = registry.find_by_command(command_name)
+
+    if skill is not None:
+        ctx = SkillContext(
+            koan_root=KOAN_ROOT,
+            instance_dir=INSTANCE_DIR,
+            command_name=command_name,
+            args=command_args,
+            send_message=send_telegram,
+        )
+
+        # Special handling for commands that need worker threads
+        # (sparring and usage call Claude, so they block)
+        if command_name in WORKER_COMMANDS:
+            def _run_skill():
+                result = execute_skill(skill, ctx)
+                if result:
+                    send_telegram(result)
+                    if command_name == "sparring":
+                        save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", result)
+            _run_in_worker(_run_skill)
+            return
+
+        # Special handling for /chat — routes to handle_chat
+        if command_name == "chat":
+            if not command_args:
+                send_telegram("Usage: /chat <message>\nForces chat mode for messages that look like missions.")
+                return
+            _run_in_worker(handle_chat, command_args)
+            return
+
+        # Standard skill execution
+        result = execute_skill(skill, ctx)
+        if result is not None:
+            send_telegram(result)
         return
 
     if cmd.startswith("/pr"):
@@ -280,206 +302,147 @@ def _build_status() -> str:
 
     return "\n".join(parts)
 
-def _handle_ping():
-    """Check if the run loop (make run) is alive and report status."""
-    # Check if run.sh process is running
-    try:
-        result = subprocess.run(
-            ["pgrep", "-f", "run\\.sh"],
-            capture_output=True, text=True, timeout=5,
-        )
-        run_loop_alive = result.returncode == 0
-    except Exception:
-        run_loop_alive = False
-
-    pause_file = KOAN_ROOT / ".koan-pause"
-    stop_file = KOAN_ROOT / ".koan-stop"
-
-    if run_loop_alive and stop_file.exists():
-        send_telegram("⛔ Run loop is stopping after current mission.")
-    elif run_loop_alive and pause_file.exists():
-        send_telegram("⏸️ Run loop is paused. /resume to unpause.")
-    elif run_loop_alive:
-        send_telegram("✅")
-    else:
-        send_telegram("❌ Run loop is not running.\n\nTo restart:\n  make run &")
-
-
-def _handle_log(args: str):
-    """Show the latest journal entry for a project.
+def _handle_skill_command(args: str):
+    """Handle /skill — list skills or invoke a specific one.
 
     Usage:
-        /log              — today's journal (all projects)
-        /log koan         — today's journal for project koan
-        /log koan yesterday — yesterday's journal for koan
-        /log koan 2026-02-03 — specific date
+        /skill                    — list all skills
+        /skill core               — list skills in scope 'core'
+        /skill core.status        — invoke core/status skill
+        /skill core.status.ping   — invoke subcommand 'ping' of core/status
     """
-    from datetime import date as _date, timedelta
-    from app.utils import get_latest_journal
+    registry = _get_registry()
 
-    parts = args.split() if args else []
-    project = None
-    target_date = None
+    if not args:
+        # List non-core skills grouped by scope (core skills are in /help)
+        non_core = [s for s in registry.list_all() if s.scope != "core"]
+        if not non_core:
+            send_telegram("No extra skills loaded. Core skills are listed in /help.")
+            return
 
-    if len(parts) >= 1:
-        # First arg: project name (unless it looks like a date)
-        if re.match(r'^\d{4}-\d{2}-\d{2}$', parts[0]):
-            target_date = parts[0]
-        elif parts[0] == "yesterday":
-            target_date = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-        else:
-            project = parts[0]
+        parts = ["Available Skills\n"]
+        non_core_scopes = sorted(set(s.scope for s in non_core))
+        for scope in non_core_scopes:
+            parts.append(f"{scope}")
+            for skill in registry.list_by_scope(scope):
+                parts.append(f"  - {skill.name} -- {skill.description}")
+                for cmd in skill.commands:
+                    if cmd.name != skill.name:
+                        parts.append(f"      .{cmd.name} -- {cmd.description}")
+            parts.append("")
 
-    if len(parts) >= 2 and target_date is None:
-        # Second arg: date
-        if parts[1] == "yesterday":
-            target_date = (_date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-        elif re.match(r'^\d{4}-\d{2}-\d{2}$', parts[1]):
-            target_date = parts[1]
-
-    result = get_latest_journal(INSTANCE_DIR, project=project, target_date=target_date)
-    send_telegram(result)
-
-
-def _handle_language(arg: str):
-    """Handle /language command — set or reset reply language preference."""
-    if not arg:
-        usage = "\n\nUsage:\n/language <language> — set reply language\n/language reset — use input language"
-        current = get_language()
-        if current:
-            send_telegram(f"Current language: {current}{usage}")
-        else:
-            send_telegram(f"No language override set (replying in input language).{usage}")
+        parts.append("Use: /skill <scope>.<name> [args]")
+        parts.append("Core skills are listed in /help.")
+        send_telegram("\n".join(parts))
         return
 
-    if arg.lower() == "reset":
-        reset_language()
-        send_telegram("Language preference reset. I'll reply in the same language as your messages.")
+    # Parse skill reference: scope.name[.subcommand] [args]
+    ref_parts = args.split(None, 1)
+    ref = ref_parts[0]
+    skill_args = ref_parts[1] if len(ref_parts) > 1 else ""
+
+    segments = ref.split(".")
+
+    if len(segments) == 1:
+        # Just a scope — list skills in that scope
+        scope_skills = registry.list_by_scope(segments[0])
+        if not scope_skills:
+            send_telegram(f"No skills found in scope '{segments[0]}'.")
+            return
+        parts = [f"Skills in {segments[0]}\n"]
+        for skill in scope_skills:
+            parts.append(f"  - {skill.name} -- {skill.description}")
+        send_telegram("\n".join(parts))
         return
 
-    set_language(arg)
-    send_telegram(f"Language set to {arg.lower()}. All my replies will now be in {arg.lower()}.")
+    scope = segments[0]
+    skill_name = segments[1]
+    subcommand = segments[2] if len(segments) > 2 else skill_name
+
+    skill = registry.get(scope, skill_name)
+    if skill is None:
+        send_telegram(f"Skill '{scope}.{skill_name}' not found. /skill to list available skills.")
+        return
+
+    ctx = SkillContext(
+        koan_root=KOAN_ROOT,
+        instance_dir=INSTANCE_DIR,
+        command_name=subcommand,
+        args=skill_args,
+        send_message=send_telegram,
+    )
+
+    # Worker thread for blocking skills
+    if subcommand in WORKER_COMMANDS:
+        def _run():
+            result = execute_skill(skill, ctx)
+            if result:
+                send_telegram(result)
+        _run_in_worker(_run)
+        return
+
+    result = execute_skill(skill, ctx)
+    if result is not None:
+        send_telegram(result)
 
 
 def _handle_help():
-    """Send the list of available commands."""
-    help_text = (
-        "Kōan — Commands\n"
-        "\n"
-        "CONTROL\n"
-        "/pause — pause (no new missions)\n"
-        "/resume — resume after pause or quota exhausted\n"
-        "/stop — stop Kōan after current mission\n"
-        "\n"
-        "MONITORING\n"
-        "/status — quick status (missions, pause, loop)\n"
-        "/usage — detailed status (quota, progress)\n"
-        "/log [project] [date] — latest journal entry\n"
-        "/ping — check if run loop is alive (✅/❌)\n"
-        "/verbose — receive every progress update\n"
-        "/silent — mute updates (default mode)\n"
-        "\n"
-        "INTERACTION\n"
-        "/chat <msg> — force chat mode (bypass mission detection)\n"
-        "/sparring — start a strategic sparring session\n"
-        "/language <lang> — set reply language (e.g. /language english)\n"
-        "/language reset — reply in same language as input\n"
-        "/reflect <text> — note a reflection in the shared journal\n"
-        "/pr <url> — review and update a GitHub PR (full pipeline)\n"
-        "/help — this help\n"
-        "\n"
-        "MISSIONS\n"
-        "/mission <desc> — create a mission (asks for project if ambiguous)\n"
-        '"mission:" prefix or an action verb:\n'
-        "  fix the login bug\n"
-        "  implement dark mode\n"
-        "  mission: refactor the auth module\n"
-        "\n"
-        "To target a project:\n"
-        "  /mission [project:koan] fix the login bug\n"
-        "  [project:koan] fix the login bug\n"
-        "\n"
-        "To force chat: /chat <message> (useful when your message looks like a mission)\n"
-        "\n"
-        "Any other message = free conversation."
-    )
-    send_telegram(help_text)
+    """Send the list of available commands — core + dynamic skills."""
+    registry = _get_registry()
 
+    parts = [
+        "Koan -- Commands\n",
+        "CORE",
+        "/pause -- pause (no new missions)",
+        "/resume -- resume after pause or quota exhausted",
+        "/stop -- stop Koan after current mission",
+        "/help -- this help",
+        "/skill -- list available skills",
+    ]
 
-def _handle_usage():
-    """Build a rich status from usage.md + missions.md + pending.md, formatted by Claude."""
-    # Gather raw data
-    usage_text = "No quota data available."
-    usage_path = INSTANCE_DIR / "usage.md"
-    if usage_path.exists():
-        usage_text = usage_path.read_text().strip() or usage_text
+    # Add core skill commands inline (core scope = built-in features)
+    core_skills = registry.list_by_scope("core")
+    if core_skills:
+        for skill in core_skills:
+            for cmd in skill.commands:
+                desc = cmd.description or skill.description
+                aliases = ""
+                if cmd.aliases:
+                    aliases = f" (alias: /{', /'.join(cmd.aliases)})"
+                parts.append(f"/{cmd.name} -- {desc}{aliases}")
+    parts.append("")
 
-    missions_text = "No missions."
-    if MISSIONS_FILE.exists():
-        from app.missions import parse_sections
-        sections = parse_sections(MISSIONS_FILE.read_text())
-        parts = []
-        in_progress = sections.get("in_progress", [])
-        pending = sections.get("pending", [])
-        done = sections.get("done", [])
-        if in_progress:
-            parts.append("In progress:\n" + "\n".join(in_progress[:5]))
-        if pending:
-            parts.append(f"Pending ({len(pending)}):\n" + "\n".join(pending[:5]))
-        if done:
-            parts.append(f"Done: {len(done)}")
-        if parts:
-            missions_text = "\n\n".join(parts)
+    # Add non-core skill commands under SKILLS section
+    non_core_skills = [s for s in registry.list_all() if s.scope != "core"]
+    if non_core_skills:
+        parts.append("SKILLS")
+        for skill in non_core_skills:
+            for cmd in skill.commands:
+                desc = cmd.description or skill.description
+                aliases = ""
+                if cmd.aliases:
+                    aliases = f" (alias: /{', /'.join(cmd.aliases)})"
+                parts.append(f"/{cmd.name} -- {desc}{aliases}")
+        parts.append("")
 
-    pending_text = "No run in progress."
-    pending_path = INSTANCE_DIR / "journal" / "pending.md"
-    if pending_path.exists():
-        content = pending_path.read_text().strip()
-        if content:
-            # Keep last 1500 chars
-            if len(content) > 1500:
-                pending_text = "...\n" + content[-1500:]
-            else:
-                pending_text = content
-
-    from app.prompts import load_prompt
-    prompt = load_prompt(
-        "usage-status",
-        SOUL=SOUL,
-        USAGE=usage_text,
-        MISSIONS=missions_text,
-        PENDING=pending_text,
-    )
-
-    try:
-        # Use fast_reply model (lightweight/Haiku) if configured
-        fast_model = get_fast_reply_model()
-        cmd = ["claude", "-p", prompt, "--max-turns", "1"]
-        if fast_model:
-            cmd.extend(["--model", fast_model])
-        result = subprocess.run(
-            cmd,
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            response = result.stdout.strip()
-            # Clean markdown artifacts
-            response = response.replace("**", "").replace("```", "").replace("##", "")
-            response = re.sub(r'^#{1,6}\s+', '', response, flags=re.MULTILINE)
-            send_telegram(response)
-        else:
-            if result.stderr:
-                print(f"[awake] /usage Claude stderr: {result.stderr[:500]}")
-            # Fallback: send raw data
-            if result.returncode != 0:
-                print(f"[awake] /usage Claude error (exit {result.returncode}): {result.stderr[:200]}")
-            fallback = f"Quota: {usage_text[:200]}\n\nMissions: {missions_text[:300]}"
-            send_telegram(fallback)
-    except subprocess.TimeoutExpired:
-        send_telegram("Timeout formatting /usage. Try again.")
-    except Exception as e:
-        print(f"[awake] Usage error: {e}")
-        send_telegram("Error formatting /usage.")
+    parts.extend([
+        "OTHER",
+        "/pr <url> -- review and update a GitHub PR (full pipeline)",
+        "",
+        "MISSIONS",
+        "/mission <desc> -- create a mission (asks for project if ambiguous)",
+        '"mission:" prefix or an action verb:',
+        "  fix the login bug",
+        "  implement dark mode",
+        "  mission: refactor the auth module",
+        "",
+        "To target a project:",
+        "  /mission [project:koan] fix the login bug",
+        "  [project:koan] fix the login bug",
+        "",
+        "Any other message = free conversation.",
+    ])
+    send_telegram("\n".join(parts))
 
 
 def handle_resume():
@@ -545,145 +508,8 @@ def handle_resume():
         send_telegram("Error checking quota. /status or check manually.")
 
 
-def _handle_sparring():
-    """Launch a sparring session — strategic challenge, not code talk."""
-    send_telegram("Sparring mode activated. I'm thinking...")
-
-    from app.prompts import load_prompt
-
-    # Load context for strategic sparring
-    strategy = ""
-    strategy_file = INSTANCE_DIR / "memory" / "global" / "strategy.md"
-    if strategy_file.exists():
-        strategy = strategy_file.read_text()
-
-    emotional = ""
-    emotional_file = INSTANCE_DIR / "memory" / "global" / "emotional-memory.md"
-    if emotional_file.exists():
-        emotional = emotional_file.read_text()[:1000]
-
-    prefs = ""
-    prefs_file = INSTANCE_DIR / "memory" / "global" / "human-preferences.md"
-    if prefs_file.exists():
-        prefs = prefs_file.read_text()
-
-    # Recent missions for context
-    recent_missions = ""
-    if MISSIONS_FILE.exists():
-        from app.missions import parse_sections
-        sections = parse_sections(MISSIONS_FILE.read_text())
-        in_progress = sections.get("in_progress", [])
-        pending = sections.get("pending", [])
-        parts = []
-        if in_progress:
-            parts.append("In progress:\n" + "\n".join(in_progress[:5]))
-        if pending:
-            parts.append("Pending:\n" + "\n".join(pending[:5]))
-        recent_missions = "\n".join(parts)
-
-    hour = datetime.now().hour
-    time_hint = "It's late night." if hour >= 22 else "It's evening." if hour >= 18 else "It's afternoon." if hour >= 12 else "It's morning."
-
-    prompt = load_prompt(
-        "sparring",
-        SOUL=SOUL,
-        PREFS=prefs,
-        STRATEGY=strategy,
-        EMOTIONAL_MEMORY=emotional,
-        RECENT_MISSIONS=recent_missions,
-        TIME_HINT=time_hint,
-    )
-
-    try:
-        # Use fast_reply model (lightweight/Haiku) if configured
-        fast_model = get_fast_reply_model()
-        cmd = ["claude", "-p", prompt, "--max-turns", "1"]
-        if fast_model:
-            cmd.extend(["--model", fast_model])
-        result = subprocess.run(
-            cmd,
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            response = result.stdout.strip()
-            # Clean markdown
-            response = response.replace("**", "").replace("```", "")
-            send_telegram(response)
-            save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", response)
-        else:
-            if result.returncode != 0:
-                print(f"[awake] /sparring Claude error (exit {result.returncode}): {result.stderr[:200]}")
-            elif result.stderr:
-                print(f"[awake] /sparring Claude stderr: {result.stderr[:500]}")
-            send_telegram("Nothing compelling to say right now. Come back later.")
-    except subprocess.TimeoutExpired:
-        send_telegram("Timeout — my brain needs more time. Try again.")
-    except Exception as e:
-        print(f"[awake] Sparring error: {e}")
-        send_telegram("Error during sparring. Try again.")
 
 
-def _handle_reflect(message: str):
-    """Handle /reflect command — write human's reflection to shared journal."""
-    shared_journal = INSTANCE_DIR / "shared-journal.md"
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    entry = f"\n## Alexis — {timestamp}\n\n{message}\n"
-
-    # Append to shared journal
-    import fcntl as _fcntl
-    shared_journal.parent.mkdir(parents=True, exist_ok=True)
-    with open(shared_journal, "a") as f:
-        _fcntl.flock(f, _fcntl.LOCK_EX)
-        f.write(entry)
-
-    send_telegram("Noted in the shared journal. I'll reflect on it.")
-
-
-def _handle_mission_command(text: str):
-    """Handle /mission <text> command — parity with 'mission:' keyword.
-
-    Strips the /mission prefix, checks for project tag, and either queues
-    the mission directly or asks the user to specify a project.
-    """
-    raw = text.strip()
-    lower = raw.lower()
-    if lower.startswith("/mission:"):
-        mission_text = raw[9:].strip()
-    elif lower.startswith("/mission "):
-        mission_text = raw[9:].strip()
-    elif lower == "/mission":
-        mission_text = ""
-    else:
-        mission_text = raw[8:].strip()
-
-    if not mission_text:
-        send_telegram(
-            "Usage: /mission <description>\n\n"
-            "Examples:\n"
-            "  /mission fix the login bug\n"
-            "  /mission [project:koan] add retry logic\n"
-        )
-        return
-
-    # Check if the text already has a project tag
-    project, _ = parse_project(mission_text)
-
-    if not project:
-        known = get_known_projects()
-        if len(known) > 1:
-            # get_known_projects returns [(name, path), ...] tuples
-            project_list = "\n".join(f"  - {name}" for name, _ in known)
-            first_name = known[0][0]
-            send_telegram(
-                f"Which project for this mission?\n\n"
-                f"{project_list}\n\n"
-                f"Reply with the tag, e.g.:\n"
-                f"  /mission [project:{first_name}] {mission_text[:80]}"
-            )
-            return
-
-    handle_mission(mission_text)
 
 
 def _resolve_project_path(repo_name: str) -> Optional[str]:
