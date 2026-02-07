@@ -195,13 +195,38 @@ this file to know what you're doing. If you get killed mid-run, this file is
 how you (or the next session) will recover.
 
 Rules:
-- **Append a progress line after EVERY significant action**: reading a key file,
-  writing code, running tests, creating a branch, making a decision. One line per
-  action, prefixed with the time: `HH:MM — did X`.
-- Write to it EARLY and OFTEN. Your first append should happen within seconds of
+- **Write EARLY and OFTEN.** Your first append should happen within seconds of
   starting work. If pending.md has no progress lines, the human has NO visibility.
+- **Log the START of time-consuming operations**, not just the end. The last line
+  of pending.md is effectively a "currently doing…" indicator — a stale line
+  leaves the human blind. Log *before* you run tests, *before* you create a PR,
+  *before* you start wrapup.
+- One line per action, prefixed with the time: `HH:MM — did X`.
 - This is append-only. Never truncate or rewrite it. Use the Bash tool:
   `echo "$(date +%H:%M) — description" >> {INSTANCE}/journal/pending.md`
+
+Always report these activities:
+- Reading key files / exploring the codebase
+- Creating a branch, making a design decision
+- Writing or modifying code
+- Running tests — log BEFORE ("running tests…") AND after ("tests pass" / "2 failures, fixing")
+- Committing and pushing a branch
+- Creating or updating a pull request
+- **Wrapup phase**: synthesizing journal, updating memory/learnings, writing conclusion
+
+Example of a well-logged mission:
+```
+09:12 — Reading migrations/ and models.py to understand schema
+09:14 — Branch koan/fix-user-email created, plan: add DB constraint + migration
+09:17 — Migration 0042_email_unique.py written
+09:18 — Running tests…
+09:19 — 1 failure in test_signup (duplicate email), fixing test fixture
+09:21 — Tests pass (47 passed). Committing and pushing
+09:22 — PR #108 created: "fix: add unique constraint on user email"
+09:23 — Wrapup: writing journal entry and updating learnings
+09:24 — Done. Conclusion sent to outbox
+```
+
 - When the mission is **complete**:
   1. Synthesize the full content of pending.md into a clean journal entry in
      `{INSTANCE}/journal/$(date +%Y-%m-%d)/{PROJECT_NAME}.md` (append, don't overwrite).
