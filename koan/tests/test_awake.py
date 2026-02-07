@@ -23,6 +23,7 @@ from app.awake import (
     _clean_chat_response,
     _dispatch_skill,
     _handle_help,
+    _handle_help_command,
     _handle_skill_command,
     _get_registry,
     _reset_registry,
@@ -1741,3 +1742,108 @@ class TestSkillListingFormat:
         assert "/status" in msg
         assert "/core.status" not in msg
         _reset_registry()
+
+
+# ---------------------------------------------------------------------------
+# /help <command>
+# ---------------------------------------------------------------------------
+
+class TestHandleHelpCommand:
+    """Tests for /help <command> — show usage for a specific command."""
+
+    @patch("app.awake.send_telegram")
+    def test_help_command_with_usage(self, mock_send):
+        """/help mission should show usage from SKILL.md."""
+        _handle_help_command("mission")
+        msg = mock_send.call_args[0][0]
+        assert "/mission" in msg
+        assert "Usage:" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_help_command_without_usage(self, mock_send):
+        """/help status should show 'No usage defined'."""
+        _handle_help_command("status")
+        msg = mock_send.call_args[0][0]
+        assert "/status" in msg
+        assert "No usage defined" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_help_command_unknown(self, mock_send):
+        """/help nonexistent should show unknown command."""
+        _handle_help_command("nonexistent")
+        msg = mock_send.call_args[0][0]
+        assert "Unknown command" in msg
+        assert "/nonexistent" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_help_command_with_slash_prefix(self, mock_send):
+        """/help /mission should work (strip leading /)."""
+        _handle_help_command("/mission")
+        msg = mock_send.call_args[0][0]
+        assert "/mission" in msg
+        assert "Usage:" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_help_command_alias(self, mock_send):
+        """/help st should resolve to /status via alias."""
+        _handle_help_command("st")
+        msg = mock_send.call_args[0][0]
+        assert "/status" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_help_command_shows_description(self, mock_send):
+        """/help mission should include the command description."""
+        _handle_help_command("mission")
+        msg = mock_send.call_args[0][0]
+        # The description should be present
+        assert "mission" in msg.lower()
+
+    @patch("app.awake.send_telegram")
+    def test_help_command_shows_aliases(self, mock_send):
+        """/help cancel should show aliases if any."""
+        _handle_help_command("cancel")
+        msg = mock_send.call_args[0][0]
+        assert "/cancel" in msg
+
+    @patch("app.awake.send_telegram")
+    def test_help_command_case_insensitive(self, mock_send):
+        """/help MISSION should work case-insensitively."""
+        _handle_help_command("MISSION")
+        msg = mock_send.call_args[0][0]
+        assert "/mission" in msg
+        assert "Usage:" in msg
+
+    def test_handle_command_routes_help_with_args(self):
+        """handle_command('/help mission') should call _handle_help_command."""
+        with patch("app.awake._handle_help_command") as mock_help_cmd:
+            handle_command("/help mission")
+            mock_help_cmd.assert_called_once_with("mission")
+
+    def test_handle_command_routes_help_without_args(self):
+        """handle_command('/help') should call _handle_help, not _handle_help_command."""
+        with patch("app.awake._handle_help") as mock_help:
+            handle_command("/help")
+            mock_help.assert_called_once()
+
+
+class TestHelpNoInlineUsage:
+    """Tests that /help list no longer shows inline usage lines."""
+
+    @patch("app.awake.send_telegram")
+    def test_help_does_not_show_inline_usage(self, mock_send):
+        """/help should not show 'Usage:' lines inline (moved to /help <cmd>)."""
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        # The main help list should mention /help <command> as a hint
+        assert "/help <command>" in msg
+        # Inline usage lines like "  /mission <description>..." should not appear
+        lines = msg.split("\n")
+        usage_lines = [l for l in lines if l.startswith("  /")]
+        assert len(usage_lines) == 0, f"Found inline usage lines: {usage_lines}"
+
+    @patch("app.awake.send_telegram")
+    def test_help_mentions_help_command_hint(self, mock_send):
+        """/help should suggest using /help <command> for details."""
+        _handle_help()
+        msg = mock_send.call_args[0][0]
+        assert "/help <command>" in msg
