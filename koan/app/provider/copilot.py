@@ -34,15 +34,18 @@ class CopilotProvider(CLIProvider):
         return "gh"
 
     def shell_command(self) -> str:
-        if self._has_copilot:
-            return "copilot"
-        return "gh copilot"
+        return "gh copilot" if self._is_gh_mode else "copilot"
 
     def is_available(self) -> bool:
         return self._has_copilot or self._has_gh
 
+    @property
+    def _is_gh_mode(self) -> bool:
+        """True when using 'gh copilot' instead of standalone 'copilot'."""
+        return not self._has_copilot and self._has_gh
+
     def build_prompt_args(self, prompt: str) -> List[str]:
-        prefix = ["copilot"] if not self._has_copilot and self._has_gh else []
+        prefix = ["copilot"] if self._is_gh_mode else []
         return prefix + ["-p", prompt]
 
     def build_tool_args(

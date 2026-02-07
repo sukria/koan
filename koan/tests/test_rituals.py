@@ -114,7 +114,6 @@ class TestRunRitual:
 
     @patch("app.rituals.subprocess.run")
     def test_handles_timeout(self, mock_run, prompt_dir, instance_dir):
-        import subprocess
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=90)
 
         result = run_ritual("morning", instance_dir)

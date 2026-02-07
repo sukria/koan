@@ -17,7 +17,6 @@ When focus mode is active:
 """
 
 import json
-import os
 import sys
 import time
 from dataclasses import dataclass
@@ -64,8 +63,8 @@ class FocusState:
         return f"{minutes}m"
 
 
-def _focus_path(koan_root: str) -> str:
-    return os.path.join(koan_root, FOCUS_FILE)
+def _focus_path(koan_root: str) -> Path:
+    return Path(koan_root) / FOCUS_FILE
 
 
 def get_focus_state(koan_root: str) -> Optional[FocusState]:
@@ -74,12 +73,11 @@ def get_focus_state(koan_root: str) -> Optional[FocusState]:
     Returns None if not focused or file doesn't exist.
     """
     path = _focus_path(koan_root)
-    if not os.path.isfile(path):
+    if not path.is_file():
         return None
 
     try:
-        with open(path) as f:
-            data = json.load(f)
+        data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -118,19 +116,14 @@ def create_focus(
 
     from app.utils import atomic_write
 
-    path = _focus_path(koan_root)
-    atomic_write(Path(path), json.dumps(data))
+    atomic_write(_focus_path(koan_root), json.dumps(data))
 
     return state
 
 
 def remove_focus(koan_root: str) -> None:
     """Deactivate focus mode."""
-    path = _focus_path(koan_root)
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
+    _focus_path(koan_root).unlink(missing_ok=True)
 
 
 def check_focus(koan_root: str) -> Optional[FocusState]:

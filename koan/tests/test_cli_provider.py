@@ -10,7 +10,7 @@ from app.cli_provider import (
     get_provider,
     get_provider_name,
     get_cli_binary,
-    _reset_provider,
+    reset_provider,
     build_cli_flags,
     build_tool_flags,
     build_prompt_flags,
@@ -322,10 +322,10 @@ class TestProviderResolution:
     """Tests for get_provider_name() and get_provider()."""
 
     def setup_method(self):
-        _reset_provider()
+        reset_provider()
 
     def teardown_method(self):
-        _reset_provider()
+        reset_provider()
 
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "copilot"})
     def test_env_var_override(self):
@@ -376,7 +376,7 @@ class TestProviderResolution:
         """Changing provider name returns a new instance."""
         monkeypatch.setenv("KOAN_CLI_PROVIDER", "claude")
         p1 = get_provider()
-        _reset_provider()
+        reset_provider()
         monkeypatch.setenv("KOAN_CLI_PROVIDER", "copilot")
         p2 = get_provider()
         assert type(p1) is not type(p2)
@@ -390,10 +390,10 @@ class TestConvenienceFunctions:
     """Tests for module-level helper functions."""
 
     def setup_method(self):
-        _reset_provider()
+        reset_provider()
 
     def teardown_method(self):
-        _reset_provider()
+        reset_provider()
 
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
     def test_get_cli_binary_claude(self):

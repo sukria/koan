@@ -40,12 +40,12 @@ _PROVIDERS = {
     "copilot": CopilotProvider,
 }
 
-# Cached provider instance (reset with _reset_provider() in tests)
-_cached_provider: CLIProvider | None = None
+# Cached provider instance (reset with reset_provider() in tests)
+_cached_provider: Optional[CLIProvider] = None
 _cached_provider_name: str = ""
 
 
-def _reset_provider():
+def reset_provider():
     """Reset the cached provider (for testing)."""
     global _cached_provider, _cached_provider_name
     _cached_provider = None

@@ -23,7 +23,7 @@ from app.provider import (  # noqa: F401
     get_provider_name,
     get_provider,
     get_cli_binary,
-    _reset_provider,
+    reset_provider,
     # Convenience functions
     build_cli_flags,
     build_tool_flags,
