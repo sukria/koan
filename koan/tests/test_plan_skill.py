@@ -177,48 +177,23 @@ class TestResolveProjectPath:
 
 class TestGetRepoInfo:
     def test_successful_gh_call(self, handler):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({"owner": {"login": "sukria"}, "name": "koan"})
-        with patch("subprocess.run", return_value=mock_result):
+        gh_output = json.dumps({"owner": {"login": "sukria"}, "name": "koan"})
+        with patch("app.github.subprocess.run", return_value=MagicMock(returncode=0, stdout=gh_output)):
             owner, repo = handler._get_repo_info("/path/to/project")
             assert owner == "sukria"
             assert repo == "koan"
 
     def test_gh_failure_returns_none(self, handler):
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("app.github.subprocess.run", return_value=MagicMock(returncode=1, stderr="err")):
             owner, repo = handler._get_repo_info("/path")
             assert owner is None
             assert repo is None
 
     def test_timeout_returns_none(self, handler):
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=15)):
+        with patch("app.github.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=15)):
             owner, repo = handler._get_repo_info("/path")
             assert owner is None
             assert repo is None
-
-
-# ---------------------------------------------------------------------------
-# _gh helper
-# ---------------------------------------------------------------------------
-
-class TestGhHelper:
-    def test_returns_stdout(self, handler):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "  some output  "
-        with patch("subprocess.run", return_value=mock_result):
-            assert handler._gh(["gh", "api", "..."]) == "some output"
-
-    def test_raises_on_failure(self, handler):
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = "not found"
-        with patch("subprocess.run", return_value=mock_result):
-            with pytest.raises(RuntimeError, match="gh failed"):
-                handler._gh(["gh", "api", "..."])
 
 
 # ---------------------------------------------------------------------------
@@ -337,13 +312,11 @@ class TestHandleNewPlan:
             result = handler._handle_new_plan(ctx, "unknown", "some idea")
             assert "not found" in result
 
-    @patch("subprocess.run")
-    def test_successful_plan_with_issue(self, mock_run, handler, ctx):
-        # Mock _resolve_project_path
+    def test_successful_plan_with_issue(self, handler, ctx):
         with patch.object(handler, "_resolve_project_path", return_value="/project"), \
              patch.object(handler, "_get_repo_info", return_value=("sukria", "koan")), \
              patch.object(handler, "_generate_plan", return_value="## Plan\n\nStep 1: Do X"), \
-             patch.object(handler, "_create_issue", return_value="https://github.com/sukria/koan/issues/99"):
+             patch("app.github.subprocess.run", return_value=MagicMock(returncode=0, stdout="https://github.com/sukria/koan/issues/99\n")):
             result = handler._handle_new_plan(ctx, "koan", "Add dark mode")
             assert result is None  # sent via send_message
             ctx.send_message.assert_called()
@@ -377,7 +350,7 @@ class TestHandleNewPlan:
         with patch.object(handler, "_resolve_project_path", return_value="/project"), \
              patch.object(handler, "_get_repo_info", return_value=("owner", "repo")), \
              patch.object(handler, "_generate_plan", return_value="## Plan"), \
-             patch.object(handler, "_create_issue", side_effect=RuntimeError("no permissions")):
+             patch("app.github.subprocess.run", return_value=MagicMock(returncode=1, stderr="no permissions")):
             result = handler._handle_new_plan(ctx, None, "idea")
             assert result is None
             # Should have sent the plan inline
@@ -524,34 +497,20 @@ class TestGeneratePlan:
 
 
 # ---------------------------------------------------------------------------
-# _create_issue
+# issue_create (via app.github)
 # ---------------------------------------------------------------------------
 
-class TestCreateIssue:
-    @patch("subprocess.run")
-    def test_returns_issue_url(self, mock_run, handler):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="https://github.com/sukria/koan/issues/99\n",
-        )
-        url = handler._create_issue("/project", "Title", "Body")
-        assert "issues/99" in url
+class TestIssueCreateIntegration:
+    """Tests that handler calls issue_create correctly (tested in test_github.py)."""
 
-    @patch("subprocess.run")
-    def test_passes_title_and_body(self, mock_run, handler):
-        mock_run.return_value = MagicMock(returncode=0, stdout="url")
-        handler._create_issue("/project", "My Title", "My Body")
-        cmd = mock_run.call_args[0][0]
-        assert "--title" in cmd
-        assert "My Title" in cmd
-        assert "--body" in cmd
-        assert "My Body" in cmd
-
-    @patch("subprocess.run")
-    def test_raises_on_failure(self, mock_run, handler):
-        mock_run.return_value = MagicMock(returncode=1, stderr="no perms")
-        with pytest.raises(RuntimeError, match="gh issue create failed"):
-            handler._create_issue("/project", "Title", "Body")
+    def test_handle_new_plan_calls_issue_create(self, handler, ctx):
+        with patch.object(handler, "_resolve_project_path", return_value="/project"), \
+             patch.object(handler, "_get_repo_info", return_value=("sukria", "koan")), \
+             patch.object(handler, "_generate_plan", return_value="## Plan\n\nStep 1"), \
+             patch("app.github.subprocess.run", return_value=MagicMock(returncode=0, stdout="https://github.com/sukria/koan/issues/99\n")):
+            handler._handle_new_plan(ctx, "koan", "Add feature")
+            last_call = ctx.send_message.call_args_list[-1]
+            assert "issues/99" in last_call[0][0]
 
 
 # ---------------------------------------------------------------------------
@@ -559,7 +518,7 @@ class TestCreateIssue:
 # ---------------------------------------------------------------------------
 
 class TestFetchIssueContext:
-    @patch("subprocess.run")
+    @patch("app.github.subprocess.run")
     def test_returns_title_body_and_comments(self, mock_run, handler):
         # Two calls: issue (title+body) then comments (JSON with author/date)
         comments_data = json.dumps([
@@ -577,7 +536,7 @@ class TestFetchIssueContext:
         assert "Looks good" in comments
         assert "bob" in comments
 
-    @patch("subprocess.run")
+    @patch("app.github.subprocess.run")
     def test_handles_non_json_issue_response(self, mock_run, handler):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="plain text body"),
@@ -587,7 +546,7 @@ class TestFetchIssueContext:
         assert title == ""
         assert body == "plain text body"
 
-    @patch("subprocess.run")
+    @patch("app.github.subprocess.run")
     def test_comments_preserve_authorship(self, mock_run, handler):
         comments_data = json.dumps([
             {"author": "sukria", "date": "2026-02-05T09:00:00Z", "body": "Please also handle edge case X"},
@@ -607,7 +566,7 @@ class TestFetchIssueContext:
 # ---------------------------------------------------------------------------
 
 class TestCommentOnIssue:
-    @patch("subprocess.run")
+    @patch("app.github.subprocess.run")
     def test_posts_comment_via_stdin(self, mock_run, handler):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         body = "## Plan\n\nStep 1: Do X\nStep 2: Do Y"
@@ -619,13 +578,13 @@ class TestCommentOnIssue:
         assert "-F" in cmd
         assert "body=@-" in cmd
 
-    @patch("subprocess.run")
+    @patch("app.github.subprocess.run")
     def test_raises_on_failure(self, mock_run, handler):
         mock_run.return_value = MagicMock(returncode=1, stderr="not authorized")
-        with pytest.raises(RuntimeError, match="gh comment failed"):
+        with pytest.raises(RuntimeError, match="gh failed"):
             handler._comment_on_issue("owner", "repo", "1", "body")
 
-    @patch("subprocess.run")
+    @patch("app.github.subprocess.run")
     def test_multiline_body_preserved(self, mock_run, handler):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         body = "Line 1\n\n## Section\n\n- bullet\n- bullet 2\n\n```python\ndef foo():\n    pass\n```"

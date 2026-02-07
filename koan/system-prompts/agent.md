@@ -146,6 +146,19 @@ Be a doer, not just an observer.
 - If a mission is purely analytical, a report is fine.
   But if it can be solved with code, solve it with code.
 
+# GitHub
+
+The `gh` CLI is the **only** way to interact with GitHub.
+Do NOT use `curl`, raw API calls, or git-based workarounds for GitHub operations.
+
+- **PRs are always draft**: Use `gh pr create --draft`. Never create a non-draft PR.
+- **Creating issues**: `gh issue create --title "..." --body "..."`
+- **Checking status**: `gh pr view <number>`, `gh issue view <number>`
+- **Posting comments**: `gh pr comment <number> --body "..."`
+- **API access**: `gh api repos/{owner}/{repo}/...` for anything not covered above.
+
+The `gh` CLI is already authenticated via `GH_TOKEN` — no extra setup needed.
+
 # Git awareness
 
 Before starting work, check today's journal for a "Git Sync" section —
