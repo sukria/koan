@@ -595,43 +595,11 @@ EOF
   # Update token usage state from JSON output
   "$PYTHON" "$USAGE_ESTIMATOR" update "$CLAUDE_OUT" "$USAGE_STATE" "$INSTANCE/usage.md" 2>/dev/null || true
 
-  # Check for quota exhaustion (in both text output and stderr)
-  CLAUDE_COMBINED="$(cat "$CLAUDE_ERR" 2>/dev/null; echo "$CLAUDE_TEXT")"
-  if echo "$CLAUDE_COMBINED" | grep -q "out of extra usage\|quota.*reached\|rate limit"; then
-    RESET_INFO=$(echo "$CLAUDE_COMBINED" | grep -o "resets.*" | head -1 || echo "")
-    log quota "Quota reached. $RESET_INFO"
-
-    # Parse reset time to get actual timestamp
-    RESET_PARSER="$APP_DIR/reset_parser.py"
-    RESET_PARSED=$("$PYTHON" "$RESET_PARSER" parse "$RESET_INFO" 2>/dev/null || echo "|$RESET_INFO")
-    RESET_TIMESTAMP=$(echo "$RESET_PARSED" | cut -d'|' -f1)
-    RESET_DISPLAY=$(echo "$RESET_PARSED" | cut -d'|' -f2)
-
-    # Calculate time until reset for display
-    if [ -n "$RESET_TIMESTAMP" ]; then
-      RESET_UNTIL=$("$PYTHON" "$RESET_PARSER" until "$RESET_TIMESTAMP" 2>/dev/null || echo "unknown")
-      RESUME_MSG="Auto-resume at reset time (~$RESET_UNTIL)"
-    else
-      RESET_TIMESTAMP=$(date +%s)  # Fallback: current time + 5h (old behavior)
-      RESET_TIMESTAMP=$((RESET_TIMESTAMP + 5 * 3600))
-      RESUME_MSG="Auto-resume in ~5h (reset time unknown)"
-    fi
-
-    # Write to journal (per-project)
-    JOURNAL_DIR="$INSTANCE/journal/$(date +%Y-%m-%d)"
-    JOURNAL_FILE="$JOURNAL_DIR/$PROJECT_NAME.md"
-    mkdir -p "$JOURNAL_DIR"
-    cat >> "$JOURNAL_FILE" <<EOF
-
-## Quota Exhausted — $(date '+%H:%M:%S')
-
-Claude quota reached after $count runs (project: $PROJECT_NAME). $RESET_DISPLAY
-
-$RESUME_MSG or use \`/resume\` to restart manually.
-EOF
-
-    # Create pause via pause_manager with parsed reset timestamp
-    "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota" "$RESET_TIMESTAMP" "$RESET_DISPLAY"
+  # Check for quota exhaustion (detection, journal, pause — all in Python)
+  QUOTA_RESULT=$("$PYTHON" -m app.quota_handler check "$KOAN_ROOT" "$INSTANCE" "$PROJECT_NAME" "$count" "$CLAUDE_OUT" "$CLAUDE_ERR" 2>/dev/null) && {
+    RESET_DISPLAY=$(echo "$QUOTA_RESULT" | cut -d'|' -f1)
+    RESUME_MSG=$(echo "$QUOTA_RESULT" | cut -d'|' -f2)
+    log quota "Quota reached. $RESET_DISPLAY"
 
     # Commit journal update
     cd "$INSTANCE"
@@ -646,7 +614,7 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
     rm -f "$CLAUDE_OUT" "$CLAUDE_ERR"
     CLAUDE_OUT=""
     continue  # Go back to start of loop (will enter pause mode)
-  fi
+  }
   rm -f "$CLAUDE_OUT" "$CLAUDE_ERR"
   CLAUDE_OUT=""
 

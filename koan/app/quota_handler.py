@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""
+Koan -- Quota Exhaustion Handler
+
+Detects quota exhaustion from Claude CLI output, parses reset times,
+writes journal entries, and creates pause state. Replaces the fragile
+bash block in run.sh (grep + sed + multiple Python CLI calls) with a
+single testable Python module.
+
+Usage:
+    python -m app.quota_handler check <koan_root> <instance> <project_name> <run_count> <stdout_file> <stderr_file>
+
+Exit codes:
+    0 = quota exhausted, pause created
+    1 = no quota issue detected
+"""
+
+import os
+import re
+import sys
+from datetime import date, datetime
+from pathlib import Path
+from typing import Optional, Tuple
+
+# Patterns that indicate quota exhaustion in Claude CLI output
+QUOTA_PATTERNS = [
+    r"out of extra usage",
+    r"quota.*reached",
+    r"rate limit",
+]
+
+# Compiled regex for performance
+_QUOTA_RE = re.compile("|".join(QUOTA_PATTERNS), re.IGNORECASE)
+
+# Pattern to extract reset info from output (must start with "resets" or "reset ")
+_RESET_RE = re.compile(r"resets\s+.+", re.IGNORECASE)
+
+
+def detect_quota_exhaustion(text: str) -> bool:
+    """Check if text contains quota exhaustion signals.
+
+    Args:
+        text: Combined stdout + stderr from Claude CLI
+
+    Returns:
+        True if quota exhaustion detected
+    """
+    return bool(_QUOTA_RE.search(text))
+
+
+def extract_reset_info(text: str) -> str:
+    """Extract the reset info string from Claude output.
+
+    Args:
+        text: Combined output text
+
+    Returns:
+        Reset info string (e.g., "resets 10am (Europe/Paris)") or empty string
+    """
+    match = _RESET_RE.search(text)
+    if match:
+        return match.group(0).strip()
+    return ""
+
+
+def parse_reset_time(reset_info: str) -> Tuple[Optional[int], str]:
+    """Parse reset time from extracted info.
+
+    Delegates to reset_parser.py for the actual parsing.
+
+    Args:
+        reset_info: Raw reset string from Claude output
+
+    Returns:
+        (unix_timestamp, display_string) — timestamp is None if parsing fails
+    """
+    from app.reset_parser import parse_reset_time as _parse
+
+    return _parse(reset_info)
+
+
+def compute_resume_info(
+    reset_timestamp: Optional[int],
+    reset_display: str,
+) -> Tuple[int, str]:
+    """Compute the resume timestamp and message.
+
+    Args:
+        reset_timestamp: Parsed UNIX timestamp (or None if parsing failed)
+        reset_display: Human-readable reset info
+
+    Returns:
+        (effective_timestamp, resume_message)
+    """
+    if reset_timestamp is not None:
+        from app.reset_parser import time_until_reset
+
+        until = time_until_reset(reset_timestamp)
+        return reset_timestamp, f"Auto-resume at reset time (~{until})"
+
+    # Fallback: current time + 5h
+    fallback_ts = int(datetime.now().timestamp()) + 5 * 3600
+    return fallback_ts, "Auto-resume in ~5h (reset time unknown)"
+
+
+def write_quota_journal(
+    instance_dir: str,
+    project_name: str,
+    run_count: int,
+    reset_display: str,
+    resume_message: str,
+) -> None:
+    """Write a quota exhaustion entry to the project journal.
+
+    Args:
+        instance_dir: Path to instance directory
+        project_name: Current project name
+        run_count: Number of runs completed
+        reset_display: Human-readable reset info
+        resume_message: Auto-resume message
+    """
+    journal_dir = os.path.join(instance_dir, "journal", date.today().strftime("%Y-%m-%d"))
+    os.makedirs(journal_dir, exist_ok=True)
+    journal_file = os.path.join(journal_dir, f"{project_name}.md")
+
+    now = datetime.now().strftime("%H:%M:%S")
+    entry = f"""
+## Quota Exhausted — {now}
+
+Claude quota reached after {run_count} runs (project: {project_name}). {reset_display}
+
+{resume_message} or use `/resume` to restart manually.
+"""
+
+    with open(journal_file, "a") as f:
+        f.write(entry)
+
+
+def handle_quota_exhaustion(
+    koan_root: str,
+    instance_dir: str,
+    project_name: str,
+    run_count: int,
+    stdout_file: str,
+    stderr_file: str,
+) -> Optional[Tuple[str, str]]:
+    """Full quota exhaustion handler.
+
+    Checks Claude output for quota signals, parses reset time,
+    writes journal, and creates pause state.
+
+    Args:
+        koan_root: Path to koan root directory
+        instance_dir: Path to instance directory
+        project_name: Current project name
+        run_count: Number of completed runs
+        stdout_file: Path to Claude stdout capture file
+        stderr_file: Path to Claude stderr capture file
+
+    Returns:
+        (reset_display, resume_message) if quota exhausted, None otherwise
+    """
+    # Read output files (stderr first, then stdout — matches original bash order)
+    parts = []
+    for filepath in [stderr_file, stdout_file]:
+        try:
+            parts.append(Path(filepath).read_text())
+        except OSError:
+            pass
+    combined = "\n".join(parts)
+
+    if not detect_quota_exhaustion(combined):
+        return None
+
+    # Extract and parse reset info
+    reset_info = extract_reset_info(combined)
+    reset_timestamp, reset_display = parse_reset_time(reset_info)
+    effective_ts, resume_message = compute_resume_info(reset_timestamp, reset_display)
+
+    # Write journal entry
+    write_quota_journal(
+        instance_dir, project_name, run_count, reset_display, resume_message
+    )
+
+    # Create pause state
+    from app.pause_manager import create_pause
+
+    create_pause(koan_root, "quota", effective_ts, reset_display)
+
+    return reset_display, resume_message
+
+
+_CLI_USAGE = "Usage: quota_handler.py check <koan_root> <instance> <project_name> <run_count> <stdout_file> <stderr_file>"
+
+
+# CLI interface for run.sh
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or sys.argv[1] != "check":
+        print(_CLI_USAGE, file=sys.stderr)
+        sys.exit(1)
+
+    if len(sys.argv) < 8:
+        print(_CLI_USAGE, file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        run_count = int(sys.argv[5])
+    except ValueError:
+        run_count = 0
+
+    result = handle_quota_exhaustion(
+        koan_root=sys.argv[2],
+        instance_dir=sys.argv[3],
+        project_name=sys.argv[4],
+        run_count=run_count,
+        stdout_file=sys.argv[6],
+        stderr_file=sys.argv[7],
+    )
+    if result:
+        reset_display, resume_message = result
+        # Output for bash: RESET_DISPLAY|RESUME_MSG
+        print(f"{reset_display}|{resume_message}")
+        sys.exit(0)
+    else:
+        sys.exit(1)
