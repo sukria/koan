@@ -28,9 +28,9 @@ def instance_dir(tmp_path):
     missions = inst / "missions.md"
     missions.write_text(
         "# Missions\n\n"
-        "## En attente\n\n"
-        "(aucune)\n\n"
-        "## En cours\n\n"
-        "## Terminées\n\n"
+        "## Pending\n\n"
+        "(none)\n\n"
+        "## In Progress\n\n"
+        "## Done\n\n"
     )
     return inst

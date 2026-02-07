@@ -2,7 +2,7 @@
 """
 Koan — Mission extraction
 
-Extracts the next pending mission from missions.md, scoped to the "En attente" / "Pending"
+Extracts the next pending mission from missions.md, scoped to the "Pending"
 section only. Prints the mission line to stdout (empty if none found).
 
 This replaces the naive `grep -m1 "^- "` which could match lines from any section.

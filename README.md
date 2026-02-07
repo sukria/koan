@@ -107,7 +107,7 @@ koan/
     requirements.txt            #   Python dependencies
   instance.example/             # Template — copy to instance/ to start
     soul.md                     #   Agent personality definition
-    missions.md                 #   Task queue (En attente / En cours / Terminées)
+    missions.md                 #   Task queue (Pending / In Progress / Done)
     outbox.md                   #   Bot → Telegram message queue
     config.yaml                 #   Per-instance config (models, auto-merge, tools)
     memory/                     #   Persistent context

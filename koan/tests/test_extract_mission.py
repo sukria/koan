@@ -13,11 +13,11 @@ class TestExtractNextMission:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- Fix the bug\n"
             "- Add feature\n\n"
-            "## En cours\n\n"
-            "## Terminées\n\n"
+            "## In Progress\n\n"
+            "## Done\n\n"
         )
         result = extract_next_mission(str(missions_file))
         assert result == "- Fix the bug"
@@ -27,9 +27,9 @@ class TestExtractNextMission:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
-            "## En cours\n\n"
-            "## Terminées\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "## Done\n\n"
             "- Old task\n"
         )
         result = extract_next_mission(str(missions_file))
@@ -45,10 +45,10 @@ class TestExtractNextMission:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- [project:backend] Deploy fix\n"
             "- [project:koan] Write tests\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
         )
         result = extract_next_mission(str(missions_file), "koan")
         assert "Write tests" in result
@@ -58,9 +58,9 @@ class TestExtractNextMission:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- Untagged task\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
         )
         result = extract_next_mission(str(missions_file), "koan")
         assert result == "- Untagged task"
@@ -70,9 +70,9 @@ class TestExtractNextMission:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- [project:backend] Not for koan\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
         )
         result = extract_next_mission(str(missions_file), "koan")
         assert result == ""
@@ -90,14 +90,14 @@ class TestExtractNextMission:
         assert result == "- English task"
 
     def test_does_not_match_in_progress_section(self, tmp_path):
-        """Missions in 'En cours' are NOT returned."""
+        """Missions in 'In Progress' are NOT returned."""
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
-            "## En cours\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
             "- In progress task\n\n"
-            "## Terminées\n\n"
+            "## Done\n\n"
         )
         result = extract_next_mission(str(missions_file))
         assert result == ""
@@ -114,9 +114,9 @@ class TestExtractNextMission:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- [projet:koan] French tag task\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
         )
         result = extract_next_mission(str(missions_file), "koan")
         assert "French tag task" in result
@@ -129,7 +129,7 @@ class TestExtractMissionCLI:
         from tests._helpers import run_module
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
-            "# Missions\n\n## En attente\n\n- CLI task\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n- CLI task\n\n## In Progress\n\n"
         )
         monkeypatch.setattr("sys.argv", ["extract_mission.py", str(missions_file)])
         # Capture stdout
@@ -143,7 +143,7 @@ class TestExtractMissionCLI:
         from tests._helpers import run_module; import io, contextlib
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
-            "# Missions\n\n## En attente\n\n- [project:koan] Tagged\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n- [project:koan] Tagged\n\n## In Progress\n\n"
         )
         monkeypatch.setattr("sys.argv", ["extract_mission.py", str(missions_file), "koan"])
         f = io.StringIO()

@@ -94,7 +94,7 @@ class TestParseCompletedMissions:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## Terminées\n\n"
+            "## Done\n\n"
             "- **Fix IDOR** (session 22)\n"
             "- **Dunning emails** — session 20\n"
             "- Old plain entry\n"
@@ -107,7 +107,7 @@ class TestParseCompletedMissions:
 
     def test_empty_done_section(self, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Done\n\n")
         with patch("app.daily_report.MISSIONS_FILE", missions_file):
             result = _parse_completed_missions()
         assert result == []
@@ -122,17 +122,17 @@ class TestCountPendingMissions:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- task 1\n"
             "- task 2\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
         )
         with patch("app.daily_report.MISSIONS_FILE", missions_file):
             assert _count_pending_missions() == 2
 
     def test_no_pending(self, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n(aucune)\n\n## En cours\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n(none)\n\n## In Progress\n\n")
         with patch("app.daily_report.MISSIONS_FILE", missions_file):
             assert _count_pending_missions() == 0
 
@@ -146,12 +146,12 @@ class TestGenerateReport:
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- task 1\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "### Big project (PRIO)\n"
             "- sub-item\n\n"
-            "## Terminées\n\n"
+            "## Done\n\n"
             "- **Done thing** (session 1)\n"
         )
         with patch("app.daily_report.MISSIONS_FILE", missions_file), \
@@ -166,7 +166,7 @@ class TestGenerateReport:
 
     def test_evening_report(self, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         with patch("app.daily_report.MISSIONS_FILE", missions_file), \
              patch("app.daily_report.INSTANCE_DIR", tmp_path):
             report = generate_report("evening")
@@ -177,7 +177,7 @@ class TestGenerateReport:
     def test_journal_activities_extracted(self, tmp_path):
         """Journal ## headers should appear as activities in the report."""
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         journal_dir = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
         journal_dir.mkdir(parents=True)
         (journal_dir / "koan.md").write_text(
@@ -193,7 +193,7 @@ class TestGenerateReport:
     def test_journal_timestamps_stripped(self, tmp_path):
         """Timestamps like '-- 15:30' should be stripped from activity lines."""
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         journal_dir = tmp_path / "journal" / date.today().strftime("%Y-%m-%d")
         journal_dir.mkdir(parents=True)
         (journal_dir / "koan.md").write_text("## Git Sync — 15:30\n\nStuff.\n")
@@ -234,7 +234,7 @@ class TestMarkReportSent:
 class TestSendDailyReport:
     def test_send_success(self, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         marker = tmp_path / ".marker"
         with patch("app.daily_report.format_and_send", return_value=True) as mock_send, \
              patch("app.daily_report.MISSIONS_FILE", missions_file), \
@@ -247,7 +247,7 @@ class TestSendDailyReport:
 
     def test_send_failure(self, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         marker = tmp_path / ".marker"
         with patch("app.daily_report.format_and_send", return_value=False), \
              patch("app.daily_report.MISSIONS_FILE", missions_file), \
@@ -266,7 +266,7 @@ class TestSendDailyReport:
     def test_auto_detect_morning(self, tmp_path):
         """Auto-detect morning report."""
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         marker = tmp_path / ".marker"
         with patch("app.daily_report.should_send_report", return_value="morning"), \
              patch("app.daily_report.format_and_send", return_value=True), \
@@ -284,7 +284,7 @@ class TestSendDailyReport:
 class TestDailyReportCLI:
     def test_cli_morning_flag(self, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         marker = tmp_path / ".marker"
         with patch("sys.argv", ["daily_report.py", "--morning"]), \
              patch("app.notify.format_and_send", return_value=True), \
@@ -298,7 +298,7 @@ class TestDailyReportCLI:
 
     def test_cli_evening_flag(self, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         marker = tmp_path / ".marker"
         with patch("sys.argv", ["daily_report.py", "--evening"]), \
              patch("app.notify.format_and_send", return_value=True), \
@@ -320,7 +320,7 @@ class TestDailyReportCLI:
 
     def test_cli_send_failure_exits_1(self, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n")
         with patch("sys.argv", ["daily_report.py", "--morning"]), \
              patch("app.notify.format_and_send", return_value=False), \
              patch("app.daily_report.format_and_send", return_value=False), \

@@ -49,15 +49,15 @@ class TestListHandler:
         missions = textwrap.dedent("""\
             # Missions
 
-            ## En attente
+            ## Pending
 
             - fix the login bug
             - add dark mode
             - refactor auth module
 
-            ## En cours
+            ## In Progress
 
-            ## Terminées
+            ## Done
         """)
         ctx = self._make_ctx(tmp_path, missions)
         result = handle(ctx)

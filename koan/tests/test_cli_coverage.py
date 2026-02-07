@@ -195,10 +195,10 @@ class TestRecoverCLI:
         missions = instance_dir / "missions.md"
         missions.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
-            "## En cours\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
             "- Stale task\n\n"
-            "## Terminées\n\n"
+            "## Done\n\n"
         )
         with patch("app.notify.format_and_send") as mock_send:
             with patch.object(sys, "argv", ["recover.py", str(instance_dir)]):
@@ -217,14 +217,14 @@ class TestRecoverComplexMissionFallback:
         missions = instance_dir / "missions.md"
         missions.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
-            "## En cours\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
             "### Complex project\n"
             "- ~~done step~~ done\n"
             "- Still working\n"
             "Simple stale mission\n"  # This triggers L74 (in_complex_mission = False, then falls through)
             "- Another stale\n\n"
-            "## Terminées\n\n"
+            "## Done\n\n"
         )
         count = recover_missions(str(instance_dir))
         # "- Another stale" should be recovered; "Simple stale mission" is not a "- " item

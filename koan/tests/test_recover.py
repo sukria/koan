@@ -11,9 +11,9 @@ def _missions(pending="", in_progress="", done=""):
     """Build a missions.md content string."""
     return (
         f"# Missions\n\n"
-        f"## En attente\n\n{pending}\n\n"
-        f"## En cours\n\n{in_progress}\n\n"
-        f"## Terminées\n\n{done}\n"
+        f"## Pending\n\n{pending}\n\n"
+        f"## In Progress\n\n{in_progress}\n\n"
+        f"## Done\n\n{done}\n"
     )
 
 
@@ -29,7 +29,7 @@ class TestRecoverMissions:
         assert recover_missions(str(tmp_path / "nonexistent")) == 0
 
     def test_recover_simple_mission(self, instance_dir):
-        """Simple - item in 'En cours' moves back to 'En attente'."""
+        """Simple - item in 'In Progress' moves back to 'Pending'."""
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
@@ -39,8 +39,8 @@ class TestRecoverMissions:
         content = missions.read_text()
         # Should be in pending now
         lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "en attente" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "en cours" in l.lower())
+        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
         # The mission should appear between pending header and in-progress header
         between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
         assert "Fix the bug" in between
@@ -72,8 +72,8 @@ class TestRecoverMissions:
 
         content = missions.read_text()
         lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "en attente" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "en cours" in l.lower())
+        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
         between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
         assert "Still active" in between
         assert "Already done" not in between
@@ -100,26 +100,26 @@ class TestRecoverMissions:
 
         content = missions.read_text()
         lines = content.splitlines()
-        in_prog_idx = next(i for i, l in enumerate(lines) if "en cours" in l.lower())
-        done_idx = next(i for i, l in enumerate(lines) if "terminées" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
+        done_idx = next(i for i, l in enumerate(lines) if "done" == l.lstrip("#").strip().lower())
         in_progress_section = "\n".join(lines[in_prog_idx + 1 : done_idx])
         # Complex mission should still be in-progress
         assert "Complex Project" in in_progress_section
         assert "Step 2" in in_progress_section
 
-    def test_removes_aucune_placeholder(self, instance_dir):
-        """The (aucune) placeholder is removed from pending when missions are added."""
+    def test_removes_none_placeholder(self, instance_dir):
+        """The (none) placeholder is removed from pending when missions are added."""
         missions = instance_dir / "missions.md"
-        missions.write_text(_missions(pending="(aucune)", in_progress="- Recover me"))
+        missions.write_text(_missions(pending="(none)", in_progress="- Recover me"))
 
         recover_missions(str(instance_dir))
 
         content = missions.read_text()
         lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "en attente" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "en cours" in l.lower())
+        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
         between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
-        assert "(aucune)" not in between
+        assert "(none)" not in between
         assert "Recover me" in between
 
     def test_english_section_names(self, instance_dir):
@@ -172,11 +172,11 @@ class TestRecoverMissions:
         missions = instance_dir / "missions.md"
         missions.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- Existing task\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "- Stale task\n\n"
-            "## Terminées\n\n"
+            "## Done\n\n"
         )
 
         recover_missions(str(instance_dir))
@@ -195,9 +195,9 @@ class TestRecoverMissions:
         recover_missions(str(instance_dir))
         content = missions.read_text()
 
-        assert content.count("## En attente") == 1
-        assert content.count("## En cours") == 1
-        assert content.count("## Terminées") == 1
+        assert content.count("## Pending") == 1
+        assert content.count("## In Progress") == 1
+        assert content.count("## Done") == 1
 
 
 class TestRecoverCLI:

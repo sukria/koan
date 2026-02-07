@@ -2,8 +2,8 @@
 """
 Kōan — Crash recovery
 
-Detects missions left in "In Progress" / "En cours" from a previous interrupted run.
-Moves simple mission items (- lines) back to "Pending" / "En attente".
+Detects missions left in "In Progress" from a previous interrupted run.
+Moves simple mission items (- lines) back to "Pending".
 Skips complex multi-step missions (### headers with sub-items) — those are long-running
 and should not be auto-recovered.
 

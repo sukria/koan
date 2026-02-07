@@ -26,14 +26,14 @@ def instance_dir(tmp_path):
     (inst / "memory" / "summary.md").write_text("Session 1: bootstrapped.")
     (inst / "missions.md").write_text(
         "# Missions\n\n"
-        "## En attente\n\n"
+        "## Pending\n\n"
         "- [project:koan] Build dashboard\n"
         "- Fix something\n\n"
-        "## En cours\n\n"
+        "## In Progress\n\n"
         "### Admin Dashboard\n"
         "- ~~Phase 1~~ done\n"
         "- Phase 2 pending\n\n"
-        "## Terminées\n\n"
+        "## Done\n\n"
         "- ~~Exploration~~ (session 3)\n"
     )
     (inst / "journal" / "2026-02-01" / "koan.md").write_text(

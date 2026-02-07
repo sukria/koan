@@ -19,35 +19,35 @@ class TestExtractMission:
     def test_basic_extraction(self, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n- Fix the bug\n- Another task\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n- Fix the bug\n- Another task\n\n## In Progress\n\n## Done\n"
         )
         assert extract_next_mission(str(missions)) == "- Fix the bug"
 
     def test_skips_other_sections(self, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n\n## En cours\n\n- In progress task\n\n## Terminées\n\n- Done task\n"
+            "# Missions\n\n## Pending\n\n\n## In Progress\n\n- In progress task\n\n## Done\n\n- Done task\n"
         )
         assert extract_next_mission(str(missions)) == ""
 
     def test_project_filter_match(self, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n- [projet:anantys] Fix stripe\n- [projet:koan] Fix memory\n\n## En cours\n"
+            "# Missions\n\n## Pending\n\n- [projet:anantys] Fix stripe\n- [projet:koan] Fix memory\n\n## In Progress\n"
         )
         assert extract_next_mission(str(missions), "koan") == "- [projet:koan] Fix memory"
 
     def test_project_filter_untagged_matches(self, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n- Untagged task\n\n## En cours\n"
+            "# Missions\n\n## Pending\n\n- Untagged task\n\n## In Progress\n"
         )
         assert extract_next_mission(str(missions), "koan") == "- Untagged task"
 
     def test_project_filter_skips_other_project(self, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n- [projet:anantys] Fix stripe\n\n## En cours\n"
+            "# Missions\n\n## Pending\n\n- [projet:anantys] Fix stripe\n\n## In Progress\n"
         )
         assert extract_next_mission(str(missions), "koan") == ""
 
@@ -63,7 +63,7 @@ class TestExtractMission:
 
     def test_empty_pending(self, tmp_path):
         missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## En attente\n\n\n## En cours\n")
+        missions.write_text("# Missions\n\n## Pending\n\n\n## In Progress\n")
         assert extract_next_mission(str(missions)) == ""
 
 
