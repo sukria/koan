@@ -5,6 +5,7 @@ description: Reorder pending missions in the queue
 version: 1.0.0
 commands:
   - name: priority
-    description: Move a pending mission to a new position (/priority 3 or /priority 3 1)
+    description: Move a pending mission to a new position
+    usage: /priority <n>, /priority <n> <position>
 handler: handler.py
 ---

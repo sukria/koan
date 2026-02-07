@@ -7,6 +7,7 @@ worker: true
 commands:
   - name: chat
     description: Force chat mode for messages that look like missions
+    usage: /chat <message>
     aliases: []
 handler: handler.py
 ---

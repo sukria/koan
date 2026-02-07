@@ -73,6 +73,18 @@ class TestParseYamlLite:
         assert result["commands"][0]["aliases"] == ["st"]
         assert result["commands"][1]["name"] == "ping"
 
+    def test_commands_with_usage(self):
+        yaml = textwrap.dedent("""\
+            name: cancel
+            commands:
+              - name: cancel
+                description: Cancel a pending mission
+                usage: /cancel <n>, /cancel <keyword>
+        """)
+        result = _parse_yaml_lite(yaml)
+        assert len(result["commands"]) == 1
+        assert result["commands"][0]["usage"] == "/cancel <n>, /cancel <keyword>"
+
     def test_empty_string(self):
         assert _parse_yaml_lite("") == {}
 
@@ -154,6 +166,45 @@ class TestParseSkillMd:
         skill = parse_skill_md(skill_md)
         assert skill is not None
         assert not skill.has_handler()
+
+    def test_usage_field_parsed(self, tmp_path):
+        skill_dir = tmp_path / "core" / "cancel"
+        skill_dir.mkdir(parents=True)
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(textwrap.dedent("""\
+            ---
+            name: cancel
+            scope: core
+            description: Cancel a pending mission
+            commands:
+              - name: cancel
+                description: Cancel a pending mission
+                usage: /cancel <n>, /cancel <keyword>
+            handler: handler.py
+            ---
+        """))
+
+        skill = parse_skill_md(skill_md)
+        assert skill is not None
+        assert skill.commands[0].usage == "/cancel <n>, /cancel <keyword>"
+
+    def test_usage_absent_defaults_empty(self, tmp_path):
+        skill_dir = tmp_path / "core" / "status"
+        skill_dir.mkdir(parents=True)
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(textwrap.dedent("""\
+            ---
+            name: status
+            scope: core
+            commands:
+              - name: status
+                description: Quick status
+            ---
+        """))
+
+        skill = parse_skill_md(skill_md)
+        assert skill is not None
+        assert skill.commands[0].usage == ""
 
     def test_scope_inferred_from_parent(self, tmp_path):
         skill_dir = tmp_path / "myproject" / "myskill"
@@ -730,6 +781,19 @@ class TestCoreSkillsComplete:
         skill = registry.find_by_command("log")
         assert skill is not None
         assert skill.name == "journal"
+
+    def test_core_skills_with_args_have_usage(self):
+        """Core skills that take arguments should have usage set."""
+        registry = build_registry()
+        commands_with_usage = {
+            "chat", "idea", "log", "mission", "pr",
+            "reflect", "cancel", "plan", "language", "priority",
+        }
+        for cmd_name in commands_with_usage:
+            skill = registry.find_by_command(cmd_name)
+            assert skill is not None, f"Command '{cmd_name}' not found"
+            cmd = next(c for c in skill.commands if c.name == cmd_name)
+            assert cmd.usage, f"Command '/{cmd_name}' should have usage set"
 
 
 # ---------------------------------------------------------------------------

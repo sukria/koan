@@ -40,6 +40,7 @@ class SkillCommand:
     name: str
     description: str = ""
     aliases: List[str] = field(default_factory=list)
+    usage: str = ""
 
 
 @dataclass
@@ -118,6 +119,8 @@ def _parse_yaml_lite(text: str) -> Dict[str, Any]:
                     current_cmd = {"name": cline[7:].strip()}
                 elif cline.startswith("description:"):
                     current_cmd["description"] = cline[12:].strip()
+                elif cline.startswith("usage:"):
+                    current_cmd["usage"] = cline[6:].strip()
                 elif cline.startswith("aliases:"):
                     aliases_str = cline[8:].strip()
                     current_cmd["aliases"] = _parse_inline_list(aliases_str)
@@ -181,6 +184,7 @@ def parse_skill_md(path: Path) -> Optional[Skill]:
                     name=cmd_data["name"],
                     description=cmd_data.get("description", ""),
                     aliases=cmd_data.get("aliases", []),
+                    usage=cmd_data.get("usage", ""),
                 )
             )
 

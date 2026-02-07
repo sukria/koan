@@ -7,5 +7,6 @@ worker: true
 commands:
   - name: plan
     description: Plan an idea or iterate on an existing GitHub issue
+    usage: /plan <idea>, /plan <project> <idea>, /plan <issue-url>
 handler: handler.py
 ---

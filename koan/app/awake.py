@@ -345,6 +345,8 @@ def _handle_help():
                 if cmd.aliases:
                     aliases = f" (alias: /{', /'.join(cmd.aliases)})"
                 parts.append(f"/{cmd.name} -- {desc}{aliases}")
+                if cmd.usage:
+                    parts.append(f"  {cmd.usage}")
     parts.append("")
 
     # Add non-core skill commands under SKILLS section
@@ -358,6 +360,8 @@ def _handle_help():
                 if cmd.aliases:
                     aliases = f" (alias: /{', /'.join(cmd.aliases)})"
                 parts.append(f"/{cmd.name} -- {desc}{aliases}")
+                if cmd.usage:
+                    parts.append(f"  {cmd.usage}")
         parts.append("")
 
     parts.extend([
