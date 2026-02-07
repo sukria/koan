@@ -439,14 +439,22 @@ while true; do
       log error "Mission references unknown project: $PROJECT_NAME"
       log error "Known projects:"
       echo "$KNOWN_PROJECTS"
-      notify "Mission error: Unknown project '$PROJECT_NAME'.
+      notify "⚠️ Mission skipped: Unknown project '$PROJECT_NAME'.
 Known projects:
 $KNOWN_PROJECTS"
-      exit 1
+      # Don't exit — skip this mission and continue the loop
+      count=$((count + 1))
+      continue
     fi
   else
     # No mission picked: autonomous mode
-    PROJECT_IDX=$RECOMMENDED_PROJECT_IDX
+    # Validate recommended index is numeric and within bounds
+    if [[ "$RECOMMENDED_PROJECT_IDX" =~ ^[0-9]+$ ]] && [ "$RECOMMENDED_PROJECT_IDX" -lt ${#PROJECT_NAMES[@]} ]; then
+      PROJECT_IDX=$RECOMMENDED_PROJECT_IDX
+    else
+      log error "Invalid project index '$RECOMMENDED_PROJECT_IDX' from usage tracker — falling back to 0"
+      PROJECT_IDX=0
+    fi
     PROJECT_NAME="${PROJECT_NAMES[$PROJECT_IDX]}"
     PROJECT_PATH="${PROJECT_PATHS[$PROJECT_IDX]}"
   fi
@@ -631,8 +639,7 @@ EOF
 
   # Check for quota exhaustion (detection, journal, pause — all in Python)
   QUOTA_RESULT=$("$PYTHON" -m app.quota_handler check "$KOAN_ROOT" "$INSTANCE" "$PROJECT_NAME" "$count" "$CLAUDE_OUT" "$CLAUDE_ERR" 2>/dev/null) && {
-    RESET_DISPLAY=$(echo "$QUOTA_RESULT" | cut -d'|' -f1)
-    RESUME_MSG=$(echo "$QUOTA_RESULT" | cut -d'|' -f2)
+    IFS='|' read -r RESET_DISPLAY RESUME_MSG <<< "$QUOTA_RESULT"
     log quota "Quota reached. $RESET_DISPLAY"
 
     # Commit journal update
