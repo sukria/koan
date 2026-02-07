@@ -54,7 +54,6 @@ from app.command_handlers import (
     _handle_skill_command,
     handle_command,
     handle_mission,
-    handle_restart,
     handle_resume,
     set_callbacks,
 )
@@ -538,7 +537,7 @@ def main():
             # file left from a previous incarnation.  During the first
             # poll the file acts as a dedup guard: if Telegram re-delivers
             # the /restart message that triggered our re-exec,
-            # handle_restart() sees the file and skips.  Once that batch
+            # the skill handler sees the file and skips.  Once that batch
             # is processed we remove the guard so future /restart commands
             # are honored.
             if first_poll:

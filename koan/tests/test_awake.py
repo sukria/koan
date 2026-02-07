@@ -31,7 +31,6 @@ from app.command_handlers import (
     handle_command,
     handle_mission,
     handle_resume,
-    handle_restart,
     _dispatch_skill,
     _handle_help,
     _handle_help_command,
@@ -424,10 +423,10 @@ class TestHandleCommand:
         handle_command("/awake")
         mock_resume.assert_called_once()
 
-    @patch("app.command_handlers.handle_restart")
-    def test_restart_delegates_to_restart(self, mock_restart):
+    @patch("app.command_handlers._dispatch_skill")
+    def test_restart_routes_to_skill(self, mock_dispatch):
         handle_command("/restart")
-        mock_restart.assert_called_once()
+        mock_dispatch.assert_called_once()
 
     @patch("app.command_handlers.handle_resume")
     def test_start_delegates_to_resume(self, mock_resume):

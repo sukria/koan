@@ -112,66 +112,100 @@ class TestRestartExitCode:
 # ---------------------------------------------------------------------------
 
 
-class TestHandleRestartCommand:
-    """Test that /restart triggers restart flow, not resume."""
+class TestRestartSkillHandler:
+    """Test /restart behavior via the skill handler (moved from command_handlers)."""
 
-    @patch("app.command_handlers.send_telegram")
-    def test_restart_creates_signal_file(self, mock_send, tmp_path):
-        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
-            from app.command_handlers import handle_restart
-            handle_restart()
+    def test_restart_creates_signal_file(self, tmp_path):
+        from skills.core.update.handler import _handle_restart
+        from app.skills import SkillContext
+        from unittest.mock import MagicMock
+
+        ctx = SkillContext(
+            koan_root=tmp_path,
+            instance_dir=tmp_path / "instance",
+            command_name="restart",
+            args="",
+            send_message=MagicMock(),
+            handle_chat=MagicMock(),
+        )
+        result = _handle_restart(ctx)
         assert (tmp_path / RESTART_FILE).exists()
-        mock_send.assert_called_once()
-        assert "Restart" in mock_send.call_args[0][0]
+        assert "Restart" in result
 
-    @patch("app.command_handlers.send_telegram")
-    def test_restart_clears_pause_state(self, mock_send, tmp_path):
+    def test_restart_clears_pause_state(self, tmp_path):
+        from skills.core.update.handler import _handle_restart
+        from app.skills import SkillContext
+        from unittest.mock import MagicMock
+
         pause_file = tmp_path / ".koan-pause"
         reason_file = tmp_path / ".koan-pause-reason"
         pause_file.write_text("PAUSE")
         reason_file.write_text("manual")
 
-        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
-            from app.command_handlers import handle_restart
-            handle_restart()
+        ctx = SkillContext(
+            koan_root=tmp_path,
+            instance_dir=tmp_path / "instance",
+            command_name="restart",
+            args="",
+            send_message=MagicMock(),
+            handle_chat=MagicMock(),
+        )
+        _handle_restart(ctx)
 
         assert not pause_file.exists()
         assert not reason_file.exists()
 
-    @patch("app.command_handlers.send_telegram")
-    def test_restart_dedup_skips_when_file_exists(self, mock_send, tmp_path):
+    def test_restart_dedup_skips_when_file_exists(self, tmp_path):
         """Second /restart call is a no-op when file already exists (dedup)."""
+        from skills.core.update.handler import _handle_restart
+        from app.skills import SkillContext
+        from unittest.mock import MagicMock
+
         (tmp_path / RESTART_FILE).write_text("already pending")
-        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
-            from app.command_handlers import handle_restart
-            handle_restart()
-        # Should not send telegram (dedup — already pending)
-        mock_send.assert_not_called()
+        ctx = SkillContext(
+            koan_root=tmp_path,
+            instance_dir=tmp_path / "instance",
+            command_name="restart",
+            args="",
+            send_message=MagicMock(),
+            handle_chat=MagicMock(),
+        )
+        result = _handle_restart(ctx)
+        assert "pending" in result.lower()
 
-    @patch("app.command_handlers.send_telegram")
-    def test_restart_works_after_stale_file_cleared(self, mock_send, tmp_path):
-        """After main() clears the stale file, new /restart is honored."""
-        # Simulate: stale file was cleared by main() after first poll
-        # (no file present)
-        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
-            from app.command_handlers import handle_restart
-            handle_restart()
-        assert (tmp_path / RESTART_FILE).exists()
-        mock_send.assert_called_once()
-        assert "Restart" in mock_send.call_args[0][0]
-
-    @patch("app.command_handlers.handle_restart")
-    def test_command_routes_restart_to_handler(self, mock_restart):
+    @patch("app.command_handlers._dispatch_skill")
+    def test_command_routes_restart_to_skill(self, mock_dispatch):
         from app.command_handlers import handle_command
         handle_command("/restart")
-        mock_restart.assert_called_once()
+        mock_dispatch.assert_called_once()
+
+    @patch("app.command_handlers.send_telegram")
+    def test_handle_command_restart_creates_file_end_to_end(self, mock_send, tmp_path):
+        """End-to-end: handle_command('/restart') → skill dispatch → handler → file created.
+
+        This test does NOT mock _dispatch_skill — it verifies the full path
+        from command routing through skill execution to .koan-restart creation.
+        """
+        from unittest.mock import MagicMock
+        import app.command_handlers as ch
+        from app.bridge_state import _reset_registry
+
+        _reset_registry()
+        with patch.object(ch, "KOAN_ROOT", tmp_path), \
+             patch.object(ch, "INSTANCE_DIR", tmp_path / "instance"):
+            ch.handle_command("/restart")
+
+        assert (tmp_path / RESTART_FILE).exists(), \
+            "/restart should create .koan-restart via skill dispatch"
+        assert mock_send.called
+        assert "Restart" in mock_send.call_args[0][0]
+        _reset_registry()
 
     @patch("app.command_handlers.handle_resume")
-    def test_restart_does_not_call_resume(self, mock_resume, tmp_path):
-        with patch("app.command_handlers.send_telegram"):
-            with patch("app.command_handlers.KOAN_ROOT", tmp_path):
-                from app.command_handlers import handle_command
-                handle_command("/restart")
+    def test_restart_does_not_call_resume(self, mock_resume):
+        with patch("app.command_handlers._dispatch_skill"):
+            from app.command_handlers import handle_command
+            handle_command("/restart")
         mock_resume.assert_not_called()
 
     @patch("app.command_handlers.handle_resume")
@@ -187,71 +221,65 @@ class TestHandleRestartCommand:
 class TestRestartLoopPrevention:
     """Verify the dedup mechanism that prevents infinite restart loops."""
 
-    @patch("app.command_handlers.send_telegram")
-    def test_stale_file_does_not_trigger_restart(self, mock_send, tmp_path):
+    def test_stale_file_does_not_trigger_restart(self, tmp_path):
         """A .koan-restart file from a previous incarnation is ignored."""
-        # Create file in the past (previous incarnation)
         restart_file = tmp_path / RESTART_FILE
         restart_file.write_text("old restart")
         past = time.time() - 10
         os.utime(restart_file, (past, past))
 
-        # New process starts now
         startup_time = time.time()
         assert check_restart(tmp_path, since=startup_time) is False
 
-    @patch("app.command_handlers.send_telegram")
-    def test_fresh_file_triggers_restart(self, mock_send, tmp_path):
+    def test_fresh_file_triggers_restart(self, tmp_path):
         """A new .koan-restart file (after startup) triggers restart."""
         startup_time = time.time() - 10
-
-        # File created after startup
         request_restart(tmp_path)
         assert check_restart(tmp_path, since=startup_time) is True
 
-    @patch("app.command_handlers.send_telegram")
-    def test_redelivered_restart_is_deduplicated(self, mock_send, tmp_path):
+    def test_redelivered_restart_is_deduplicated(self, tmp_path):
         """Simulates the restart loop scenario:
-        1. /restart creates file
+        1. /restart creates file (via skill handler)
         2. Process re-execs (file still exists as dedup guard)
         3. Telegram re-delivers /restart in first poll
-        4. handle_restart() sees file exists → no-op
+        4. skill handler sees file exists → returns "already pending"
         5. main() clears file after first poll
         6. Future /restart works normally
         """
+        from skills.core.update.handler import _handle_restart
+        from app.skills import SkillContext
+        from unittest.mock import MagicMock
+
+        ctx = SkillContext(
+            koan_root=tmp_path,
+            instance_dir=tmp_path / "instance",
+            command_name="restart",
+            args="",
+            send_message=MagicMock(),
+            handle_chat=MagicMock(),
+        )
+
         # Step 1: First /restart
-        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
-            from app.command_handlers import handle_restart
-            handle_restart()
+        result = _handle_restart(ctx)
         assert (tmp_path / RESTART_FILE).exists()
-        assert mock_send.call_count == 1
+        assert "Restart" in result
 
         # Step 3-4: Re-delivered /restart — file still exists → dedup
-        mock_send.reset_mock()
-        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
-            handle_restart()
-        mock_send.assert_not_called()
+        result = _handle_restart(ctx)
+        assert "pending" in result.lower()
 
         # Step 5: main() clears the file after first poll
         clear_restart(tmp_path)
         assert not (tmp_path / RESTART_FILE).exists()
 
         # Step 6: New /restart is now honored
-        mock_send.reset_mock()
-        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
-            handle_restart()
+        result = _handle_restart(ctx)
         assert (tmp_path / RESTART_FILE).exists()
-        mock_send.assert_called_once()
+        assert "Restart" in result
 
 
-class TestHelpIncludesRestart:
-    @patch("app.command_handlers.send_telegram")
-    def test_help_lists_restart_command(self, mock_send):
-        from app.command_handlers import _handle_help
-        _handle_help()
-        help_text = mock_send.call_args[0][0]
-        assert "/restart" in help_text
-        assert "restart both" in help_text.lower()
+class TestHelpExcludesRestartFromCore:
+    """Verify /restart is no longer listed as a core command in help."""
 
     @patch("app.command_handlers.send_telegram")
     def test_help_resume_aliases_exclude_restart(self, mock_send):
