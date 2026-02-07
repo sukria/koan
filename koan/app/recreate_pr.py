@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.claude_step import _run_git, _truncate, commit_if_changes, run_claude_step
+from app.claude_step import _run_git, run_claude_step
 from app.github import run_gh
 from app.rebase_pr import (
     _get_current_branch,

@@ -35,7 +35,6 @@ from app.utils import (
     parse_project as _parse_project,
     detect_project_from_text,
     insert_pending_mission,
-    get_known_projects,
     save_telegram_message,
     load_recent_telegram_history,
     format_conversation_history,
@@ -43,7 +42,6 @@ from app.utils import (
     get_chat_tools,
     get_tools_description,
     get_model_config,
-    get_fast_reply_model,
 )
 
 load_dotenv()

@@ -8,7 +8,6 @@ a deeper reflection to the shared-journal.md — asynchronous conversation space
 Usage: python -m app.post_mission_reflection <instance_dir> <mission_text> <duration_minutes>
 """
 
-import re
 import subprocess
 import sys
 from datetime import datetime

@@ -27,7 +27,6 @@ SKILL.md format:
 
 import importlib.util
 import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple

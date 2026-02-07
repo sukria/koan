@@ -22,9 +22,6 @@ from typing import Optional, Tuple, List
 from app.claude_step import (
     _run_git,
     _rebase_onto_target,
-    _truncate,
-    run_claude as _run_claude,
-    commit_if_changes as _commit_if_changes,
     run_claude_step as _run_claude_step,
 )
 from app.github import run_gh

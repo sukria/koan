@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, url_for

@@ -8,6 +8,14 @@ from unittest.mock import patch, MagicMock, call
 
 import pytest
 
+from app.claude_step import (
+    _run_git,
+    _truncate,
+    run_claude as _run_claude,
+    commit_if_changes as _commit_if_changes,
+    run_claude_step as _run_claude_step,
+    _rebase_onto_target,
+)
 from app.github import run_gh
 from app.pr_review import (
     parse_pr_url,
@@ -19,13 +27,7 @@ from app.pr_review import (
     detect_skills,
     run_pr_review,
     _build_pr_comment,
-    _commit_if_changes,
-    _rebase_onto_target,
-    _run_claude,
-    _run_claude_step,
     _run_tests,
-    _run_git,
-    _truncate,
 )
 
 
