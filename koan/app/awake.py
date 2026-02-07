@@ -335,18 +335,18 @@ def _handle_help():
         "/skill -- list available skills",
     ]
 
+    def _fmt(cmd, skill):
+        desc = cmd.description or skill.description
+        aliases = f" (alias: /{', /'.join(cmd.aliases)})" if cmd.aliases else ""
+        lines = [f"/{cmd.name} -- {desc}{aliases}"]
+        if cmd.usage:
+            lines.append(f"  {cmd.usage}")
+        return lines
+
     # Add core skill commands inline (core scope = built-in features)
-    core_skills = registry.list_by_scope("core")
-    if core_skills:
-        for skill in core_skills:
-            for cmd in skill.commands:
-                desc = cmd.description or skill.description
-                aliases = ""
-                if cmd.aliases:
-                    aliases = f" (alias: /{', /'.join(cmd.aliases)})"
-                parts.append(f"/{cmd.name} -- {desc}{aliases}")
-                if cmd.usage:
-                    parts.append(f"  {cmd.usage}")
+    for skill in registry.list_by_scope("core"):
+        for cmd in skill.commands:
+            parts.extend(_fmt(cmd, skill))
     parts.append("")
 
     # Add non-core skill commands under SKILLS section
@@ -355,13 +355,7 @@ def _handle_help():
         parts.append("SKILLS")
         for skill in non_core_skills:
             for cmd in skill.commands:
-                desc = cmd.description or skill.description
-                aliases = ""
-                if cmd.aliases:
-                    aliases = f" (alias: /{', /'.join(cmd.aliases)})"
-                parts.append(f"/{cmd.name} -- {desc}{aliases}")
-                if cmd.usage:
-                    parts.append(f"  {cmd.usage}")
+                parts.extend(_fmt(cmd, skill))
         parts.append("")
 
     parts.extend([
