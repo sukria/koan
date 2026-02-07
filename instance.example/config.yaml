@@ -55,6 +55,11 @@ tools:
     - Search: Glob (find files), Grep (search content)
     - Shell: Bash (run git, gh, make, and other commands)
 
+# CLI provider — which AI CLI to use as the backend
+# Options: "claude" (default), "copilot" (GitHub Copilot CLI)
+# Can also be set via KOAN_CLI_PROVIDER env var (overrides this)
+cli_provider: "claude"
+
 # Claude model configuration
 # Controls which models are used for different types of Claude calls
 # Empty string = use default model (subscription default or ANTHROPIC_MODEL)

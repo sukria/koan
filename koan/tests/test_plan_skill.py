@@ -452,7 +452,7 @@ class TestGeneratePlan:
         )
         with patch("app.prompts.load_skill_prompt", return_value="Plan this: idea"), \
              patch("app.utils.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"}), \
-             patch("app.utils.build_claude_flags", return_value=[]):
+             patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"]):
             result = handler._generate_plan("/project", "Add feature")
             assert "Step 1" in result
 
@@ -461,7 +461,7 @@ class TestGeneratePlan:
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_skill_prompt", return_value="prompt with previous discussion") as mock_load, \
              patch("app.utils.get_model_config", return_value={"chat": "", "fallback": ""}), \
-             patch("app.utils.build_claude_flags", return_value=[]):
+             patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"]):
             handler._generate_plan("/project", "idea", context="previous discussion")
             mock_load.assert_called_once()
             args, kwargs = mock_load.call_args
@@ -473,7 +473,7 @@ class TestGeneratePlan:
         mock_run.return_value = MagicMock(returncode=1, stderr="rate limited")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
              patch("app.utils.get_model_config", return_value={"chat": "", "fallback": ""}), \
-             patch("app.utils.build_claude_flags", return_value=[]):
+             patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"]):
             with pytest.raises(RuntimeError, match="plan generation failed"):
                 handler._generate_plan("/project", "idea")
 
@@ -481,8 +481,7 @@ class TestGeneratePlan:
     def test_uses_read_only_tools(self, mock_run, handler):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
-             patch("app.utils.get_model_config", return_value={"chat": "", "fallback": ""}), \
-             patch("app.utils.build_claude_flags", return_value=[]):
+             patch("app.utils.get_model_config", return_value={"chat": "", "fallback": ""}):
             handler._generate_plan("/project", "idea")
             cmd = mock_run.call_args[0][0]
             tools_idx = cmd.index("--allowedTools")

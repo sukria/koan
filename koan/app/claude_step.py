@@ -8,7 +8,8 @@ used by pr_review.py, rebase_pr.py, and other pipeline modules.
 import subprocess
 from typing import List, Optional
 
-from app.utils import get_model_config, build_claude_flags
+from app.cli_provider import build_full_command
+from app.utils import get_model_config
 
 
 def _run_git(cmd: list, cwd: str = None, timeout: int = 60) -> str:
@@ -119,19 +120,17 @@ def run_claude_step(
     Returns True if the step produced a commit.
     """
     models = get_model_config()
-    flags = build_claude_flags(
-        model=models["mission"], fallback=models["fallback"]
-    )
 
-    tools = "Bash,Read,Write,Glob,Grep,Edit"
+    tools = ["Bash", "Read", "Write", "Glob", "Grep", "Edit"]
     if use_skill:
-        tools += ",Skill"
+        tools.append("Skill")
 
-    cmd = (
-        ["claude", "-p", prompt,
-         "--allowedTools", tools,
-         "--max-turns", str(max_turns)]
-        + flags
+    cmd = build_full_command(
+        prompt=prompt,
+        allowed_tools=tools,
+        model=models["mission"],
+        fallback=models["fallback"],
+        max_turns=max_turns,
     )
 
     result = run_claude(cmd, project_path, timeout=timeout)

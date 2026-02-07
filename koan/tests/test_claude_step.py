@@ -241,7 +241,7 @@ class TestRunClaudeStep:
 
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=["--model", "opus"])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "fix bug", "--allowedTools", "Bash,Read,Write,Glob,Grep,Edit", "--model", "opus"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "opus", "fallback": "sonnet", "chat": "", "lightweight": "", "review_mode": ""},
@@ -262,7 +262,7 @@ class TestRunClaudeStep:
 
     @patch("app.claude_step.commit_if_changes", return_value=False)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "", "fallback": "", "chat": "", "lightweight": "", "review_mode": ""},
@@ -282,7 +282,7 @@ class TestRunClaudeStep:
         assert actions == []
 
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "", "fallback": "", "chat": "", "lightweight": "", "review_mode": ""},
@@ -308,7 +308,7 @@ class TestRunClaudeStep:
         assert "crash" in actions[0]
 
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "", "fallback": "", "chat": "", "lightweight": "", "review_mode": ""},
@@ -333,12 +333,12 @@ class TestRunClaudeStep:
 
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "", "fallback": "", "chat": "", "lightweight": "", "review_mode": ""},
     )
-    def test_use_skill_adds_skill_tool(self, mock_config, mock_flags, mock_claude, mock_commit):
+    def test_use_skill_adds_skill_tool(self, mock_config, mock_cmd, mock_claude, mock_commit):
         mock_claude.return_value = {"success": True, "output": "done", "error": ""}
         run_claude_step(
             prompt="refactor",
@@ -349,19 +349,19 @@ class TestRunClaudeStep:
             actions_log=[],
             use_skill=True,
         )
-        cmd = mock_claude.call_args[0][0]
-        # Find the --allowedTools value
-        tools_idx = cmd.index("--allowedTools") + 1
-        assert "Skill" in cmd[tools_idx]
+        # Verify build_full_command was called with Skill in allowed_tools
+        call_kwargs = mock_cmd.call_args
+        allowed = call_kwargs.kwargs.get("allowed_tools", [])
+        assert "Skill" in allowed
 
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "", "fallback": "", "chat": "", "lightweight": "", "review_mode": ""},
     )
-    def test_no_skill_by_default(self, mock_config, mock_flags, mock_claude, mock_commit):
+    def test_no_skill_by_default(self, mock_config, mock_cmd, mock_claude, mock_commit):
         mock_claude.return_value = {"success": True, "output": "done", "error": ""}
         run_claude_step(
             prompt="fix",
@@ -371,18 +371,19 @@ class TestRunClaudeStep:
             failure_label="Fail",
             actions_log=[],
         )
-        cmd = mock_claude.call_args[0][0]
-        tools_idx = cmd.index("--allowedTools") + 1
-        assert "Skill" not in cmd[tools_idx]
+        # Verify build_full_command was called without Skill in allowed_tools
+        call_kwargs = mock_cmd.call_args
+        allowed = call_kwargs.kwargs.get("allowed_tools", [])
+        assert "Skill" not in allowed
 
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "", "fallback": "", "chat": "", "lightweight": "", "review_mode": ""},
     )
-    def test_custom_max_turns_and_timeout(self, mock_config, mock_flags, mock_claude, mock_commit):
+    def test_custom_max_turns_and_timeout(self, mock_config, mock_cmd, mock_claude, mock_commit):
         mock_claude.return_value = {"success": True, "output": "ok", "error": ""}
         run_claude_step(
             prompt="deep work",
@@ -394,21 +395,20 @@ class TestRunClaudeStep:
             max_turns=5,
             timeout=120,
         )
-        cmd = mock_claude.call_args[0][0]
-        assert "--max-turns" in cmd
-        turns_idx = cmd.index("--max-turns") + 1
-        assert cmd[turns_idx] == "5"
+        # Verify build_full_command was called with max_turns=5
+        call_kwargs = mock_cmd.call_args
+        assert call_kwargs.kwargs.get("max_turns") == 5
         # Timeout passed to run_claude
         assert mock_claude.call_args[1]["timeout"] == 120
 
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=["--model", "opus"])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "fix bug", "--allowedTools", "Bash,Read,Write,Glob,Grep,Edit", "--model", "opus"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "opus", "fallback": "sonnet", "chat": "", "lightweight": "", "review_mode": ""},
     )
-    def test_model_config_passed_to_flags(self, mock_config, mock_flags, mock_claude, mock_commit):
+    def test_model_config_passed_to_flags(self, mock_config, mock_cmd, mock_claude, mock_commit):
         mock_claude.return_value = {"success": True, "output": "ok", "error": ""}
         run_claude_step(
             prompt="test",
@@ -418,11 +418,14 @@ class TestRunClaudeStep:
             failure_label="Fail",
             actions_log=[],
         )
-        mock_flags.assert_called_once_with(model="opus", fallback="sonnet")
+        # Verify model and fallback passed to build_full_command
+        call_kwargs = mock_cmd.call_args.kwargs
+        assert call_kwargs["model"] == "opus"
+        assert call_kwargs["fallback"] == "sonnet"
 
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch(
         "app.claude_step.get_model_config",
         return_value={"mission": "", "fallback": "", "chat": "", "lightweight": "", "review_mode": ""},

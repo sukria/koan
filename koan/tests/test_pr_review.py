@@ -189,7 +189,7 @@ class TestBuildPrComment:
 class TestRunClaudeStep:
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.claude_step.get_model_config", return_value={"mission": "", "fallback": "sonnet"})
     def test_success_with_commit(self, mock_models, mock_flags, mock_claude, mock_commit):
         mock_claude.return_value = {"success": True, "output": "Done", "error": ""}
@@ -204,7 +204,7 @@ class TestRunClaudeStep:
 
     @patch("app.claude_step.commit_if_changes", return_value=False)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.claude_step.get_model_config", return_value={"mission": "", "fallback": "sonnet"})
     def test_success_no_changes(self, mock_models, mock_flags, mock_claude, mock_commit):
         mock_claude.return_value = {"success": True, "output": "Done", "error": ""}
@@ -218,7 +218,7 @@ class TestRunClaudeStep:
         assert len(actions) == 0
 
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.claude_step.get_model_config", return_value={"mission": "", "fallback": "sonnet"})
     def test_failure_logs_error(self, mock_models, mock_flags, mock_claude):
         mock_claude.return_value = {"success": False, "output": "", "error": "timeout"}
@@ -233,9 +233,9 @@ class TestRunClaudeStep:
 
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.claude_step.get_model_config", return_value={"mission": "", "fallback": "sonnet"})
-    def test_use_skill_includes_skill_tool(self, mock_models, mock_flags, mock_claude, mock_commit):
+    def test_use_skill_includes_skill_tool(self, mock_models, mock_cmd, mock_claude, mock_commit):
         """When use_skill=True, the Skill tool should be in allowedTools."""
         mock_claude.return_value = {"success": True, "output": "Done", "error": ""}
         _run_claude_step(
@@ -244,15 +244,15 @@ class TestRunClaudeStep:
             failure_label="FAIL", actions_log=[],
             use_skill=True,
         )
-        cmd = mock_claude.call_args[0][0]
-        tools_idx = cmd.index("--allowedTools") + 1
-        assert "Skill" in cmd[tools_idx]
+        call_kwargs = mock_cmd.call_args.kwargs
+        allowed = call_kwargs.get("allowed_tools", [])
+        assert "Skill" in allowed
 
     @patch("app.claude_step.commit_if_changes", return_value=True)
     @patch("app.claude_step.run_claude")
-    @patch("app.claude_step.build_claude_flags", return_value=[])
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.claude_step.get_model_config", return_value={"mission": "", "fallback": "sonnet"})
-    def test_default_no_skill_tool(self, mock_models, mock_flags, mock_claude, mock_commit):
+    def test_default_no_skill_tool(self, mock_models, mock_cmd, mock_claude, mock_commit):
         """By default, Skill tool should NOT be in allowedTools."""
         mock_claude.return_value = {"success": True, "output": "Done", "error": ""}
         _run_claude_step(
@@ -260,9 +260,9 @@ class TestRunClaudeStep:
             commit_msg="msg", success_label="OK",
             failure_label="FAIL", actions_log=[],
         )
-        cmd = mock_claude.call_args[0][0]
-        tools_idx = cmd.index("--allowedTools") + 1
-        assert "Skill" not in cmd[tools_idx]
+        call_kwargs = mock_cmd.call_args.kwargs
+        allowed = call_kwargs.get("allowed_tools", [])
+        assert "Skill" not in allowed
 
 
 # ---------------------------------------------------------------------------
@@ -628,13 +628,12 @@ class TestRunPrReview:
     @patch("app.claude_step.commit_if_changes")
     @patch("app.claude_step._run_git")
     @patch("app.claude_step.get_model_config")
-    @patch("app.claude_step.build_claude_flags")
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.rebase_pr.run_gh")
     def test_basic_workflow(
         self, mock_rebase_gh, mock_flags, mock_models, mock_cs_git, mock_commit,
         mock_claude, mock_git, mock_gh, mock_test_cmd, mock_skills
     ):
-        mock_flags.return_value = []
         mock_models.return_value = {"mission": "", "fallback": "sonnet"}
 
         mock_rebase_gh.side_effect = [
@@ -677,13 +676,12 @@ class TestRunPrReview:
     @patch("app.claude_step.commit_if_changes")
     @patch("app.claude_step._run_git")
     @patch("app.claude_step.get_model_config")
-    @patch("app.claude_step.build_claude_flags")
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.rebase_pr.run_gh")
     def test_full_pipeline_with_skills_and_tests(
         self, mock_rebase_gh, mock_flags, mock_models, mock_cs_git, mock_commit,
         mock_claude, mock_git, mock_gh, mock_tests, mock_test_cmd, mock_skills
     ):
-        mock_flags.return_value = []
         mock_models.return_value = {"mission": "", "fallback": "sonnet"}
 
         mock_rebase_gh.side_effect = [
@@ -709,14 +707,13 @@ class TestRunPrReview:
     @patch("app.claude_step.commit_if_changes")
     @patch("app.claude_step._run_git")
     @patch("app.claude_step.get_model_config")
-    @patch("app.claude_step.build_claude_flags")
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.rebase_pr.run_gh")
     def test_no_review_feedback_skips_claude(
         self, mock_rebase_gh, mock_flags, mock_models, mock_cs_git, mock_commit,
         mock_claude, mock_git, mock_gh, mock_test_cmd, mock_skills
     ):
         """When PR has no review comments, skip the Claude feedback step."""
-        mock_flags.return_value = []
         mock_models.return_value = {"mission": "", "fallback": "sonnet"}
 
         pr_meta = json.dumps({
@@ -747,13 +744,12 @@ class TestRunPrReview:
     @patch("app.claude_step.commit_if_changes")
     @patch("app.claude_step._run_git")
     @patch("app.claude_step.get_model_config")
-    @patch("app.claude_step.build_claude_flags")
+    @patch("app.claude_step.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.rebase_pr.run_gh")
     def test_failing_tests_trigger_fix_attempt(
         self, mock_rebase_gh, mock_flags, mock_models, mock_cs_git, mock_commit,
         mock_claude, mock_git, mock_gh, mock_tests, mock_test_cmd, mock_skills
     ):
-        mock_flags.return_value = []
         mock_models.return_value = {"mission": "", "fallback": "sonnet"}
 
         mock_rebase_gh.side_effect = [

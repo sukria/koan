@@ -203,7 +203,7 @@ class TestPickMission:
 
 class TestCallClaude:
     @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
-    @patch("app.pick_mission.build_claude_flags", return_value=["--model", "haiku"])
+    @patch("app.pick_mission.build_full_command", return_value=["claude", "-p", "test", "--model", "haiku"])
     @patch("app.pick_mission.subprocess.run")
     def test_successful_json_result(self, mock_run, mock_flags, mock_models):
         mock_run.return_value = MagicMock(
@@ -214,7 +214,7 @@ class TestCallClaude:
         assert result == "mission:koan:fix tests"
 
     @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
-    @patch("app.pick_mission.build_claude_flags", return_value=[])
+    @patch("app.pick_mission.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.pick_mission.subprocess.run")
     def test_nonzero_exit_code(self, mock_run, mock_flags, mock_models):
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
@@ -222,7 +222,7 @@ class TestCallClaude:
         assert result == ""
 
     @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
-    @patch("app.pick_mission.build_claude_flags", return_value=[])
+    @patch("app.pick_mission.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.pick_mission.subprocess.run")
     def test_nonzero_exit_code_logs_stderr(self, mock_run, mock_flags, mock_models, capsys):
         """Verify that Claude errors are logged to stderr (M4 security finding)."""
@@ -233,7 +233,7 @@ class TestCallClaude:
         assert "Rate limit exceeded" in captured.err
 
     @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
-    @patch("app.pick_mission.build_claude_flags", return_value=[])
+    @patch("app.pick_mission.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.pick_mission.subprocess.run")
     def test_json_with_content_field(self, mock_run, mock_flags, mock_models):
         mock_run.return_value = MagicMock(
@@ -244,7 +244,7 @@ class TestCallClaude:
         assert result == "mission:koan:audit"
 
     @patch("app.pick_mission.get_model_config", return_value={"lightweight": "haiku"})
-    @patch("app.pick_mission.build_claude_flags", return_value=[])
+    @patch("app.pick_mission.build_full_command", return_value=["claude", "-p", "test"])
     @patch("app.pick_mission.subprocess.run")
     def test_non_json_output(self, mock_run, mock_flags, mock_models):
         mock_run.return_value = MagicMock(

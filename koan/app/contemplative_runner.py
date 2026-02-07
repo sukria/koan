@@ -55,11 +55,13 @@ def build_contemplative_command(
         session_info=session_info,
     )
 
-    cmd = [
-        "claude", "-p", prompt,
-        "--allowedTools", "Read,Write,Glob,Grep",
-        "--max-turns", "5",
-    ]
+    from app.cli_provider import build_full_command
+
+    cmd = build_full_command(
+        prompt=prompt,
+        allowed_tools=["Read", "Write", "Glob", "Grep"],
+        max_turns=5,
+    )
     if extra_flags:
         cmd.extend(extra_flags)
 

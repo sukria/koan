@@ -14,6 +14,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from app.cli_provider import build_full_command
 from app.utils import atomic_write
 
 
@@ -136,8 +137,9 @@ def run_reflection(instance_dir: Path, mission_text: str) -> str:
     prompt = build_reflection_prompt(instance_dir, mission_text)
 
     try:
+        cmd = build_full_command(prompt=prompt, max_turns=1)
         result = subprocess.run(
-            ["claude", "-p", prompt, "--max-turns", "1"],
+            cmd,
             capture_output=True,
             text=True,
             timeout=60,

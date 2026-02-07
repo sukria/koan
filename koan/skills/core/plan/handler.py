@@ -187,15 +187,20 @@ def _generate_plan(project_path, idea, context=""):
 
     prompt = load_skill_prompt(Path(__file__).parent, "plan", IDEA=idea, CONTEXT=context)
 
-    from app.utils import get_model_config, build_claude_flags
+    from app.cli_provider import build_full_command
+    from app.utils import get_model_config
 
     models = get_model_config()
-    flags = build_claude_flags(model=models.get("chat", ""), fallback=models.get("fallback", ""))
+    cmd = build_full_command(
+        prompt=prompt,
+        allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
+        model=models.get("chat", ""),
+        fallback=models.get("fallback", ""),
+        max_turns=3,
+    )
 
     result = subprocess.run(
-        ["claude", "-p", prompt,
-         "--allowedTools", "Read,Glob,Grep,WebFetch",
-         "--max-turns", "3"] + flags,
+        cmd,
         capture_output=True, text=True, timeout=300,
         cwd=project_path,
     )

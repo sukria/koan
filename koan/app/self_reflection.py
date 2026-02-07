@@ -14,6 +14,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from app.cli_provider import build_full_command
 from app.utils import atomic_write
 
 
@@ -111,15 +112,17 @@ def run_reflection(instance_dir: Path) -> str:
     prompt = build_reflection_prompt(instance_dir)
 
     try:
+        cmd = build_full_command(prompt=prompt, max_turns=1)
         result = subprocess.run(
-            ["claude", "-p", prompt, "--max-turns", "1"],
+            cmd,
             capture_output=True, text=True, timeout=60,
             check=False
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-        else:
-            print(f"[self_reflection] Claude error (exit {result.returncode}): {result.stderr[:200]}", file=sys.stderr)
+        if result.returncode != 0:
+            print(f"[self_reflection] Claude error (rc={result.returncode}): "
+                  f"{result.stderr[:200]}", file=sys.stderr)
     except subprocess.TimeoutExpired:
         print("[self_reflection] Claude timeout", file=sys.stderr)
     except Exception as e:

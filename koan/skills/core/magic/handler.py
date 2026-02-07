@@ -41,10 +41,13 @@ def handle(ctx):
 
     try:
         from app.utils import get_fast_reply_model
+        from app.cli_provider import build_full_command
         fast_model = get_fast_reply_model()
-        cmd = ["claude", "-p", prompt, "--max-turns", "1"]
-        if fast_model:
-            cmd.extend(["--model", fast_model])
+        cmd = build_full_command(
+            prompt=prompt,
+            max_turns=1,
+            model=fast_model or "",
+        )
         result = subprocess.run(
             cmd,
             capture_output=True, text=True, timeout=90,

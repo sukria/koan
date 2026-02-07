@@ -28,6 +28,7 @@ from app.format_outbox import format_for_telegram, load_soul, load_human_prefs, 
 from app.health_check import write_heartbeat
 from app.language_preference import get_language_instruction
 from app.notify import send_telegram
+from app.cli_provider import build_full_command
 from app.skills import Skill, SkillRegistry, SkillContext, execute_skill, build_registry
 from app.utils import (
     load_dotenv,
@@ -42,7 +43,6 @@ from app.utils import (
     get_chat_tools,
     get_tools_description,
     get_model_config,
-    build_claude_flags,
     get_fast_reply_model,
 )
 
@@ -691,13 +691,20 @@ def handle_chat(text: str):
     save_telegram_message(TELEGRAM_HISTORY_FILE, "user", text)
 
     prompt = _build_chat_prompt(text)
-    chat_tools = get_chat_tools()  # Read-only tools for security
+    chat_tools_list = get_chat_tools().split(",")
     models = get_model_config()
-    chat_flags = build_claude_flags(model=models["chat"], fallback=models["fallback"])
+
+    cmd = build_full_command(
+        prompt=prompt,
+        allowed_tools=chat_tools_list,
+        model=models["chat"],
+        fallback=models["fallback"],
+        max_turns=1,
+    )
 
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt, "--allowedTools", chat_tools, "--max-turns", "1"] + chat_flags,
+            cmd,
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )
@@ -718,9 +725,16 @@ def handle_chat(text: str):
         log("error", f"Claude timed out ({CHAT_TIMEOUT}s). Retrying with lite context...")
         # Retry with reduced context
         lite_prompt = _build_chat_prompt(text, lite=True)
+        lite_cmd = build_full_command(
+            prompt=lite_prompt,
+            allowed_tools=chat_tools_list,
+            model=models["chat"],
+            fallback=models["fallback"],
+            max_turns=1,
+        )
         try:
             result = subprocess.run(
-                ["claude", "-p", lite_prompt, "--allowedTools", chat_tools, "--max-turns", "1"] + chat_flags,
+                lite_cmd,
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=PROJECT_PATH or str(KOAN_ROOT),
             )
