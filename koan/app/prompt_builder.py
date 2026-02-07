@@ -83,6 +83,34 @@ def _get_deep_research(instance: str, project_name: str, project_path: str) -> s
     return ""
 
 
+def _get_focus_section(instance: str) -> str:
+    """Build the focus mode section if .koan-focus is active."""
+    koan_root = str(Path(instance).parent)
+    try:
+        from app.focus_manager import check_focus
+        state = check_focus(koan_root)
+    except Exception:
+        return ""
+
+    if state is None:
+        return ""
+
+    remaining = state.remaining_display()
+    return f"""
+
+# Focus Mode (ACTIVE — {remaining} remaining)
+
+The human has activated focus mode. This means:
+- Do NOT enter free exploration or autonomous mode
+- Do NOT write reflections or contemplative entries
+- Focus EXCLUSIVELY on the assigned mission
+- If no mission is assigned, check missions.md carefully for pending work
+- When the mission is done, write your conclusion and stop — do not start new autonomous work
+
+Focus mode expires automatically. The human is feeding you missions — stay ready.
+"""
+
+
 def _get_verbose_section(instance: str) -> str:
     """Build the verbose mode section if .koan-verbose exists."""
     koan_root = str(Path(instance).parent)
@@ -171,6 +199,9 @@ def build_agent_prompt(
     # Append deep research suggestions (DEEP mode, autonomous only)
     if autonomous_mode == "deep" and not mission_title:
         prompt += _get_deep_research(instance, project_name, project_path)
+
+    # Append focus mode section if active
+    prompt += _get_focus_section(instance)
 
     # Append verbose mode section if active
     prompt += _get_verbose_section(instance)
