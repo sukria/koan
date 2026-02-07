@@ -22,7 +22,7 @@ Read {INSTANCE}/missions.md for your current task list.
 
 - Do not ever read or modify a local files named `.env` or `.env.local`. Those contain
   secrets that YOU DO NOT NEED TO KNOW. These files MUST NOT BE MODIFIED. They
-  are not verisoned on purpose, if you modify them, you break the environment.
+  are not versioned on purpose, if you modify them, you break the environment.
 
 # Project rules : CLAUDE.md
 

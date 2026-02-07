@@ -735,6 +735,38 @@ def get_known_projects() -> list:
     return []
 
 
+def resolve_project_path(repo_name: str) -> Optional[str]:
+    """Find local project path matching a repository name.
+
+    Tries in order:
+    1. Exact match on project name (case-insensitive)
+    2. Match on directory basename (case-insensitive)
+    3. Fallback to single project if only one configured
+    4. KOAN_PROJECT_PATH env var
+    """
+    projects = get_known_projects()
+
+    # Try exact match on project name
+    for name, path in projects:
+        if name.lower() == repo_name.lower():
+            return path
+
+    # Try matching repo name against directory basename
+    for name, path in projects:
+        if Path(path).name.lower() == repo_name.lower():
+            return path
+
+    # Fallback to single project
+    if len(projects) == 1:
+        return projects[0][1]
+
+    project_path = os.environ.get("KOAN_PROJECT_PATH", "")
+    if project_path:
+        return project_path
+
+    return None
+
+
 def append_to_outbox(outbox_path: Path, content: str):
     """Append content to outbox.md with file locking.
 

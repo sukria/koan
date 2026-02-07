@@ -34,7 +34,9 @@ def handle(ctx):
 
     pr_url = url_match.group(0).split("#")[0]
 
-    from app.pr_review import parse_pr_url, run_pr_review
+    from app.pr_review import parse_pr_url
+    from app.utils import resolve_project_path
+    from app.pr_review import run_pr_review
 
     try:
         owner, repo, pr_number = parse_pr_url(pr_url)
@@ -42,7 +44,7 @@ def handle(ctx):
         return str(e)
 
     # Determine project path
-    project_path = _resolve_project_path(ctx, repo)
+    project_path = resolve_project_path(repo)
     if not project_path:
         from app.utils import get_known_projects
         known = ", ".join(n for n, _ in get_known_projects()) or "none"
@@ -67,26 +69,3 @@ def handle(ctx):
             return f"❌ PR #{pr_number} review failed: {summary[:400]}"
     except Exception as e:
         return f"⚠️ PR review error: {str(e)[:300]}"
-
-
-def _resolve_project_path(ctx, repo_name):
-    """Find local project path matching a repository name."""
-    import os
-    from app.utils import get_known_projects
-
-    projects = get_known_projects()
-    # Try exact match on project name
-    for name, path in projects:
-        if name.lower() == repo_name.lower():
-            return path
-    # Try matching repo name against directory basename
-    for name, path in projects:
-        if Path(path).name.lower() == repo_name.lower():
-            return path
-    # Fallback to PROJECT_PATH if only one project
-    if len(projects) == 1:
-        return projects[0][1]
-    project_path = os.environ.get("KOAN_PROJECT_PATH", "")
-    if project_path:
-        return project_path
-    return None
