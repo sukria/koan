@@ -187,8 +187,12 @@ def handle_command(text: str):
         handle_resume()
         return
 
-    if cmd == "/help":
-        _handle_help()
+    if cmd == "/help" or cmd.startswith("/help "):
+        help_args = text.strip()[5:].strip()  # everything after "/help"
+        if help_args:
+            _handle_help_command(help_args)
+        else:
+            _handle_help()
         return
 
     if cmd.startswith("/skill"):
@@ -322,6 +326,38 @@ def _handle_skill_command(args: str):
     _dispatch_skill(skill, subcommand, skill_args)
 
 
+def _handle_help_command(command_name: str):
+    """Show help for a specific command: /help <command>."""
+    # Strip leading / if user wrote /help /mission
+    command_name = command_name.lstrip("/").lower()
+
+    registry = _get_registry()
+    skill = registry.find_by_command(command_name)
+
+    if skill is None:
+        send_telegram(f"Unknown command: /{command_name}\nUse /help to see all commands.")
+        return
+
+    # find_by_command maps both names and aliases, so the match is guaranteed
+    cmd = next(
+        c for c in skill.commands
+        if c.name == command_name or command_name in c.aliases
+    )
+
+    parts = [f"/{cmd.name}"]
+    desc = cmd.description or skill.description
+    if desc:
+        parts.append(desc)
+    if cmd.aliases:
+        parts.append(f"Aliases: /{', /'.join(cmd.aliases)}")
+    if cmd.usage:
+        parts.append(f"Usage: {cmd.usage}")
+    else:
+        parts.append("No usage defined.")
+
+    send_telegram("\n".join(parts))
+
+
 def _handle_help():
     """Send the list of available commands — core + dynamic skills."""
     registry = _get_registry()
@@ -332,22 +368,19 @@ def _handle_help():
         "⏸️ /pause -- pause (alias: /sleep)",
         "▶️ /resume -- resume after pause (alias: /work, /awake, /start, /restart)",
         "⏹️ /stop -- stop Koan after current mission",
-        "/help -- this help",
+        "/help -- this help (use /help <command> for details)",
         "/skill -- list available skills",
     ]
 
     def _fmt(cmd, skill):
         desc = cmd.description or skill.description
         aliases = f" (alias: /{', /'.join(cmd.aliases)})" if cmd.aliases else ""
-        lines = [f"/{cmd.name} -- {desc}{aliases}"]
-        if cmd.usage:
-            lines.append(f"  {cmd.usage}")
-        return lines
+        return f"/{cmd.name} -- {desc}{aliases}"
 
     # Add core skill commands inline (core scope = built-in features)
     for skill in registry.list_by_scope("core"):
         for cmd in skill.commands:
-            parts.extend(_fmt(cmd, skill))
+            parts.append(_fmt(cmd, skill))
     parts.append("")
 
     # Add non-core skill commands under SKILLS section
@@ -356,11 +389,12 @@ def _handle_help():
         parts.append("SKILLS")
         for skill in non_core_skills:
             for cmd in skill.commands:
-                parts.extend(_fmt(cmd, skill))
+                parts.append(_fmt(cmd, skill))
         parts.append("")
 
     parts.extend([
         "TIPS",
+        "/help <command> -- show usage for a specific command",
         'Prefix with "mission:" or use an action verb to create a mission:',
         "  fix the login bug",
         "  mission: refactor the auth module",
