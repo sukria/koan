@@ -167,16 +167,16 @@ def handle_command(text: str):
 
     if cmd == "/stop":
         (KOAN_ROOT / ".koan-stop").write_text("STOP")
-        send_telegram("Stop requested. Current mission will complete, then Kōan will stop.")
+        send_telegram("⏹ Stop requested. Current mission will complete, then Kōan will stop.")
         return
 
     if cmd == "/pause":
         pause_file = KOAN_ROOT / ".koan-pause"
         if pause_file.exists():
-            send_telegram("Already paused. /resume to unpause.")
+            send_telegram("⏸ Already paused. /resume to unpause.")
         else:
             pause_file.write_text("PAUSE")
-            send_telegram("Paused. No missions will run. /resume to unpause.")
+            send_telegram("⏸ Paused. No missions will run. /resume to unpause.")
         return
 
     if cmd == "/resume":
@@ -264,7 +264,7 @@ def _handle_skill_command(args: str):
         # List non-core skills grouped by scope (core skills are in /help)
         non_core = [s for s in registry.list_all() if s.scope != "core"]
         if not non_core:
-            send_telegram("No extra skills loaded. Core skills are listed in /help.")
+            send_telegram("ℹ️ No extra skills loaded. Core skills are listed in /help.")
             return
 
         parts = ["Available Skills\n"]
@@ -294,7 +294,7 @@ def _handle_skill_command(args: str):
         scope_name = segments[0]
         scope_skills = registry.list_by_scope(scope_name)
         if not scope_skills:
-            send_telegram(f"No skills found in scope '{scope_name}'.")
+            send_telegram(f"ℹ️ No skills found in scope '{scope_name}'.")
             return
         # Use /command for core skills, /<scope>.<command> for others
         prefix = "" if scope_name == "core" else f"{scope_name}."
@@ -312,7 +312,7 @@ def _handle_skill_command(args: str):
 
     skill = registry.get(scope, skill_name)
     if skill is None:
-        send_telegram(f"Skill '{scope}.{skill_name}' not found. /skill to list available skills.")
+        send_telegram(f"❌ Skill '{scope}.{skill_name}' not found. /skill to list available skills.")
         return
 
     _dispatch_skill(skill, subcommand, skill_args)
@@ -400,18 +400,18 @@ def handle_resume():
             if reset_timestamp and time.time() < reset_timestamp:
                 from app.reset_parser import time_until_reset
                 remaining = time_until_reset(reset_timestamp)
-                send_telegram(f"Unpaused (was: quota exhausted). Note: reset is in ~{remaining}. Run loop continues anyway.")
+                send_telegram(f"▶️ Unpaused (was: quota exhausted). Note: reset is in ~{remaining}. Run loop continues anyway.")
             else:
-                send_telegram("Unpaused (was: quota exhausted). Quota should be reset. Run loop continues.")
+                send_telegram("▶️ Unpaused (was: quota exhausted). Quota should be reset. Run loop continues.")
         elif reason == "max_runs":
-            send_telegram("Unpaused (was: max_runs). Run counter reset, loop continues.")
+            send_telegram("▶️ Unpaused (was: max_runs). Run counter reset, loop continues.")
         else:
-            send_telegram("Unpaused. Missions resume next cycle.")
+            send_telegram("▶️ Unpaused. Missions resume next cycle.")
         return
 
     # Legacy fallback: old .koan-quota-reset file (can be removed in future)
     if not quota_file.exists():
-        send_telegram("No pause or quota hold detected. /status to check.")
+        send_telegram("ℹ️ No pause or quota hold detected. /status to check.")
         return
 
     try:
@@ -424,12 +424,12 @@ def handle_resume():
 
         if likely_reset:
             quota_file.unlink(missing_ok=True)
-            send_telegram(f"Quota likely reset ({reset_info}, paused {hours_since_pause:.1f}h ago). Restart with: make run")
+            send_telegram(f"▶️ Quota likely reset ({reset_info}, paused {hours_since_pause:.1f}h ago). Restart with: make run")
         else:
-            send_telegram(f"Quota not reset yet ({reset_info}). Paused {hours_since_pause:.1f}h ago. Check back later.")
+            send_telegram(f"⏳ Quota not reset yet ({reset_info}). Paused {hours_since_pause:.1f}h ago. Check back later.")
     except Exception as e:
         print(f"[awake] Error checking quota reset: {e}")
-        send_telegram("Error checking quota. /status or check manually.")
+        send_telegram("⚠️ Error checking quota. /status or check manually.")
 
 
 def handle_mission(text: str):
@@ -659,7 +659,7 @@ def handle_chat(text: str):
             print(f"[awake] Chat reply: {response[:80]}...")
         elif result.returncode != 0:
             print(f"[awake] Claude error: {result.stderr[:200]}")
-            error_msg = "Hmm, I couldn't formulate a response. Try again?"
+            error_msg = "⚠️ Hmm, I couldn't formulate a response. Try again?"
             send_telegram(error_msg)
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", error_msg)
         else:
@@ -682,7 +682,7 @@ def handle_chat(text: str):
             else:
                 if result.stderr:
                     print(f"[awake] Lite retry stderr: {result.stderr[:500]}")
-                timeout_msg = f"Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks."
+                timeout_msg = f"⏱ Timeout after {CHAT_TIMEOUT}s — try a shorter question, or send 'mission: ...' for complex tasks."
                 send_telegram(timeout_msg)
                 save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
         except subprocess.TimeoutExpired:
@@ -691,7 +691,7 @@ def handle_chat(text: str):
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", timeout_msg)
         except Exception as e:
             print(f"[awake] Lite retry error: {e}")
-            error_msg = "Something went wrong — try again?"
+            error_msg = "⚠️ Something went wrong — try again?"
             send_telegram(error_msg)
             save_telegram_message(TELEGRAM_HISTORY_FILE, "assistant", error_msg)
     except Exception as e:
@@ -768,7 +768,7 @@ def _run_in_worker(fn, *args):
     global _worker_thread
     with _worker_lock:
         if _worker_thread is not None and _worker_thread.is_alive():
-            send_telegram("Busy with a previous message. Try again in a moment.")
+            send_telegram("⏳ Busy with a previous message. Try again in a moment.")
             return
         _worker_thread = threading.Thread(target=fn, args=args, daemon=True)
         _worker_thread.start()

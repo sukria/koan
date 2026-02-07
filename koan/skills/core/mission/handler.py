@@ -49,7 +49,7 @@ def handle(ctx):
     missions_file = ctx.instance_dir / "missions.md"
     insert_pending_mission(missions_file, mission_entry)
 
-    ack = "Mission received"
+    ack = "✅ Mission received"
     if project:
         ack += f" (project: {project})"
     ack += f":\n\n{mission_text[:500]}"

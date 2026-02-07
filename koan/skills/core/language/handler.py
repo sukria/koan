@@ -11,12 +11,12 @@ def handle(ctx):
         usage = "\n\nUsage:\n/language <language> -- set reply language\n/language reset -- use input language"
         current = get_language()
         if current:
-            return f"Current language: {current}{usage}"
-        return f"No language override set (replying in input language).{usage}"
+            return f"🌐 Current language: {current}{usage}"
+        return f"🌐 No language override set (replying in input language).{usage}"
 
     if arg.lower() == "reset":
         reset_language()
-        return "Language preference reset. I'll reply in the same language as your messages."
+        return "🌐 Language preference reset. I'll reply in the same language as your messages."
 
     set_language(arg)
-    return f"Language set to {arg.lower()}. All my replies will now be in {arg.lower()}."
+    return f"🌐 Language set to {arg.lower()}. All my replies will now be in {arg.lower()}."

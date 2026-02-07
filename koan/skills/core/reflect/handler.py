@@ -20,4 +20,4 @@ def handle(ctx):
         fcntl.flock(f, fcntl.LOCK_EX)
         f.write(entry)
 
-    return "Noted in the shared journal. I'll reflect on it."
+    return "📝 Noted in the shared journal. I'll reflect on it."
