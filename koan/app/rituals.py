@@ -8,12 +8,12 @@ messages that make Koan feel like a collaborator, not just a tool.
 Usage: python -m app.rituals <morning|evening> <instance_dir>
 """
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 from app.cli_provider import build_full_command
+from app.prompts import get_prompt_path
 
 
 def load_template(template_name: str, instance_dir: Path) -> str:
@@ -26,8 +26,7 @@ def load_template(template_name: str, instance_dir: Path) -> str:
     Returns:
         Template content with placeholders resolved
     """
-    koan_root = Path(os.environ.get("KOAN_ROOT", instance_dir.parent))
-    template_path = koan_root / "koan" / "system-prompts" / f"{template_name}.md"
+    template_path = get_prompt_path(template_name)
 
     if not template_path.exists():
         raise FileNotFoundError(f"Template not found: {template_path}")

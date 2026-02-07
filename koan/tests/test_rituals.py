@@ -1,9 +1,7 @@
 """Tests for rituals module."""
 
-import os
 import subprocess
 import sys
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -21,20 +19,23 @@ def instance_dir(tmp_path):
 
 
 @pytest.fixture
-def koan_root(tmp_path, instance_dir):
-    """Create a minimal koan root with templates."""
-    koan_dir = tmp_path / "koan" / "system-prompts"
-    koan_dir.mkdir(parents=True)
+def prompt_dir(tmp_path):
+    """Create a minimal prompt directory with ritual templates."""
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
 
-    # Create templates
-    (koan_dir / "morning-brief.md").write_text(
+    (prompts / "morning-brief.md").write_text(
         "Morning brief template. Instance: {INSTANCE}"
     )
-    (koan_dir / "evening-debrief.md").write_text(
+    (prompts / "evening-debrief.md").write_text(
         "Evening debrief template. Instance: {INSTANCE}"
     )
 
-    return tmp_path
+    def _get_prompt_path(name):
+        return prompts / f"{name}.md"
+
+    with patch("app.rituals.get_prompt_path", side_effect=_get_prompt_path):
+        yield prompts
 
 
 class TestShouldRunMorning:
@@ -61,34 +62,29 @@ class TestShouldRunEvening:
 
 
 class TestLoadTemplate:
-    def test_loads_morning_template(self, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_loads_morning_template(self, prompt_dir, instance_dir):
         template = load_template("morning-brief", instance_dir)
         assert "Morning brief template" in template
         assert str(instance_dir) in template
 
-    def test_loads_evening_template(self, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_loads_evening_template(self, prompt_dir, instance_dir):
         template = load_template("evening-debrief", instance_dir)
         assert "Evening debrief template" in template
         assert str(instance_dir) in template
 
-    def test_replaces_instance_placeholder(self, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_replaces_instance_placeholder(self, prompt_dir, instance_dir):
         template = load_template("morning-brief", instance_dir)
         assert "{INSTANCE}" not in template
         assert str(instance_dir) in template
 
-    def test_raises_for_missing_template(self, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_raises_for_missing_template(self, prompt_dir, instance_dir):
         with pytest.raises(FileNotFoundError):
             load_template("nonexistent", instance_dir)
 
 
 class TestRunRitual:
     @patch("app.rituals.subprocess.run")
-    def test_morning_calls_claude(self, mock_run, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_morning_calls_claude(self, mock_run, prompt_dir, instance_dir):
         mock_run.return_value = MagicMock(returncode=0, stdout="Morning message", stderr="")
 
         result = run_ritual("morning", instance_dir)
@@ -100,8 +96,7 @@ class TestRunRitual:
         assert "-p" in call_args
 
     @patch("app.rituals.subprocess.run")
-    def test_evening_calls_claude(self, mock_run, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_evening_calls_claude(self, mock_run, prompt_dir, instance_dir):
         mock_run.return_value = MagicMock(returncode=0, stdout="Evening message", stderr="")
 
         result = run_ritual("evening", instance_dir)
@@ -110,8 +105,7 @@ class TestRunRitual:
         mock_run.assert_called_once()
 
     @patch("app.rituals.subprocess.run")
-    def test_handles_claude_failure(self, mock_run, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_handles_claude_failure(self, mock_run, prompt_dir, instance_dir):
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="Error")
 
         result = run_ritual("morning", instance_dir)
@@ -119,34 +113,30 @@ class TestRunRitual:
         assert result is False
 
     @patch("app.rituals.subprocess.run")
-    def test_handles_timeout(self, mock_run, koan_root, instance_dir, monkeypatch):
+    def test_handles_timeout(self, mock_run, prompt_dir, instance_dir):
         import subprocess
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=90)
 
         result = run_ritual("morning", instance_dir)
 
         assert result is False
 
-    def test_returns_false_for_missing_template(self, tmp_path, instance_dir, monkeypatch):
-        # Point to a koan_root without templates
-        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
-
-        result = run_ritual("morning", instance_dir)
+    def test_returns_false_for_missing_template(self, tmp_path, instance_dir):
+        # Point get_prompt_path to a directory without templates
+        with patch("app.rituals.get_prompt_path", side_effect=lambda n: tmp_path / f"{n}.md"):
+            result = run_ritual("morning", instance_dir)
 
         assert result is False
 
     @patch("app.rituals.subprocess.run")
-    def test_handles_generic_exception(self, mock_run, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_handles_generic_exception(self, mock_run, prompt_dir, instance_dir):
         mock_run.side_effect = OSError("Permission denied")
 
         result = run_ritual("morning", instance_dir)
         assert result is False
 
     @patch("app.rituals.subprocess.run")
-    def test_empty_stdout(self, mock_run, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_empty_stdout(self, mock_run, prompt_dir, instance_dir):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         result = run_ritual("morning", instance_dir)
@@ -157,8 +147,7 @@ class TestRitualsCLI:
     """CLI tests call main() directly to avoid runpy re-import issues."""
 
     @patch("app.rituals.subprocess.run")
-    def test_main_morning(self, mock_subprocess, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_main_morning(self, mock_subprocess, prompt_dir, instance_dir):
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="Morning!", stderr="")
 
         from app.rituals import main
@@ -168,8 +157,7 @@ class TestRitualsCLI:
             assert exc_info.value.code == 0
 
     @patch("app.rituals.subprocess.run")
-    def test_main_evening(self, mock_subprocess, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_main_evening(self, mock_subprocess, prompt_dir, instance_dir):
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="Evening!", stderr="")
 
         from app.rituals import main
@@ -200,8 +188,7 @@ class TestRitualsCLI:
             assert exc_info.value.code == 1
 
     @patch("app.rituals.subprocess.run")
-    def test_main_failure_exits_1(self, mock_subprocess, koan_root, instance_dir, monkeypatch):
-        monkeypatch.setenv("KOAN_ROOT", str(koan_root))
+    def test_main_failure_exits_1(self, mock_subprocess, prompt_dir, instance_dir):
         mock_subprocess.return_value = MagicMock(returncode=1, stdout="", stderr="Error")
 
         from app.rituals import main

@@ -37,7 +37,7 @@ def load_prompt(name: str, **kwargs: str) -> str:
     Returns:
         The prompt string with placeholders replaced.
     """
-    template = (PROMPT_DIR / f"{name}.md").read_text()
+    template = get_prompt_path(name).read_text()
     return _substitute(template, kwargs)
 
 
@@ -59,5 +59,5 @@ def load_skill_prompt(skill_dir: Path, name: str, **kwargs: str) -> str:
     if skill_prompt.exists():
         template = skill_prompt.read_text()
     else:
-        template = (PROMPT_DIR / f"{name}.md").read_text()
+        template = get_prompt_path(name).read_text()
     return _substitute(template, kwargs)
