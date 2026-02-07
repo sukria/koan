@@ -172,8 +172,35 @@ class TestInsertIdea:
         result = insert_idea(content, "- new idea")
         ideas = parse_ideas(result)
         assert len(ideas) == 2
-        assert "- new idea" in ideas
-        assert "- existing" in ideas
+        assert ideas[0] == "- existing"
+        assert ideas[1] == "- new idea"
+
+    def test_insert_appends_at_bottom(self):
+        """New ideas are added at the bottom, not the top."""
+        content = "# Missions\n\n## Ideas\n\n- first\n- second\n\n## Pending\n"
+        result = insert_idea(content, "- third")
+        ideas = parse_ideas(result)
+        assert ideas == ["- first", "- second", "- third"]
+
+    def test_insert_multiple_preserves_order(self):
+        """Successive inserts maintain chronological order (oldest first)."""
+        content = "# Missions\n\n## Ideas\n\n## Pending\n"
+        content = insert_idea(content, "- idea A")
+        content = insert_idea(content, "- idea B")
+        content = insert_idea(content, "- idea C")
+        ideas = parse_ideas(content)
+        assert ideas == ["- idea A", "- idea B", "- idea C"]
+
+    def test_insert_after_multiline_idea(self):
+        """New idea goes after multi-line continuation lines."""
+        content = (
+            "# Missions\n\n## Ideas\n\n"
+            "- multi-line idea\n  continuation line\n\n## Pending\n"
+        )
+        result = insert_idea(content, "- new idea")
+        ideas = parse_ideas(result)
+        assert len(ideas) == 2
+        assert ideas[1] == "- new idea"
 
     def test_insert_creates_section(self):
         content = "# Missions\n\n## Pending\n\n## Done\n"

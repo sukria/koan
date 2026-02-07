@@ -268,7 +268,7 @@ def parse_ideas(content: str) -> List[str]:
 
 
 def insert_idea(content: str, entry: str) -> str:
-    """Insert an idea entry into the Ideas section of missions.md.
+    """Insert an idea entry at the bottom of the Ideas section of missions.md.
 
     Creates the section if it doesn't exist (right after # Missions header).
     Returns the updated content string.
@@ -276,15 +276,29 @@ def insert_idea(content: str, entry: str) -> str:
     if not content:
         content = DEFAULT_SKELETON
 
-    # Find ## Ideas marker
-    for line in content.splitlines():
-        if line.strip().lower() == "## ideas":
-            marker = line.strip()
-            idx = content.index(marker) + len(marker)
-            while idx < len(content) and content[idx] == "\n":
-                idx += 1
-            content = content[:idx] + f"\n{entry}\n" + content[idx:]
-            return normalize_content(content)
+    # Find ## Ideas section and insert at the bottom
+    lines = content.splitlines()
+    in_ideas = False
+    last_idea_line = None
+    ideas_header_line = None
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.lower() == "## ideas":
+            in_ideas = True
+            ideas_header_line = i
+            continue
+        if in_ideas and stripped.startswith("## "):
+            break  # Next section
+        if in_ideas and (stripped.startswith("- ") or
+                         (stripped and not stripped.startswith("#") and last_idea_line is not None)):
+            last_idea_line = i
+
+    if ideas_header_line is not None:
+        # Insert after the last idea, or after the header if section is empty
+        insert_after = last_idea_line if last_idea_line is not None else ideas_header_line
+        lines.insert(insert_after + 1, entry)
+        return normalize_content("\n".join(lines))
 
     # No Ideas section — create one after # Missions
     if "# Missions" in content:
