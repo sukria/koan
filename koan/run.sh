@@ -341,10 +341,10 @@ while true; do
       continue
     fi
 
-    # ~50% chance of a contemplative session
+    # ~50% chance of a contemplative session (skipped in focus mode)
     STEP_IN_PROBABILITY=50
     ROLL=$((RANDOM % 100))
-    if [ $ROLL -lt $STEP_IN_PROBABILITY ]; then
+    if [ $ROLL -lt $STEP_IN_PROBABILITY ] && ! "$PYTHON" -m app.focus_manager check "$KOAN_ROOT" >/dev/null 2>&1; then
       log pause "A thought stirs..."
       PROJECT_NAME="${PROJECT_NAMES[0]}"
       PROJECT_PATH="${PROJECT_PATHS[0]}"
@@ -460,9 +460,10 @@ $KNOWN_PROJECTS"
   if [ -z "$MISSION_LINE" ]; then
     # Contemplative mode check: random chance to reflect instead of autonomous work
     # Only triggers when there's no mission and not in WAIT/REVIEW mode (need budget)
+    # Skipped entirely when focus mode is active
     if [ "$AUTONOMOUS_MODE" = "deep" ] || [ "$AUTONOMOUS_MODE" = "implement" ]; then
       CONTEMPLATIVE_CHANCE=$("$PYTHON" -c "from app.utils import get_contemplative_chance; print(get_contemplative_chance())" 2>/dev/null || echo "10")
-      if "$PYTHON" -m app.contemplative_runner should-run "$CONTEMPLATIVE_CHANCE" 2>/dev/null; then
+      if ! "$PYTHON" -m app.focus_manager check "$KOAN_ROOT" >/dev/null 2>&1 && "$PYTHON" -m app.contemplative_runner should-run "$CONTEMPLATIVE_CHANCE" 2>/dev/null; then
         log pause "Decision: CONTEMPLATIVE mode (random reflection, chance: ${CONTEMPLATIVE_CHANCE}%)"
         echo "  Action: Running contemplative session instead of autonomous work"
         echo ""
@@ -501,6 +502,24 @@ $KNOWN_PROJECTS"
         continue
       fi
     fi
+
+    # Focus mode: skip autonomous work entirely — wait for missions
+    FOCUS_REMAINING=$("$PYTHON" -m app.focus_manager check "$KOAN_ROOT" 2>/dev/null) && {
+      log koan "Focus mode active ($FOCUS_REMAINING remaining) — no missions pending, sleeping"
+      set_status "Focus mode — waiting for missions ($FOCUS_REMAINING remaining)"
+      SLEEP_ELAPSED=0
+      while [ $SLEEP_ELAPSED -lt $INTERVAL ]; do
+        sleep 10
+        SLEEP_ELAPSED=$((SLEEP_ELAPSED + 10))
+        if has_pending_missions; then
+          log koan "New mission detected during focus sleep — waking up"
+          break
+        fi
+        [ -f "$KOAN_ROOT/.koan-stop" ] && break
+        [ -f "$KOAN_ROOT/.koan-pause" ] && break
+      done
+      continue
+    }
 
     case "$AUTONOMOUS_MODE" in
       wait)

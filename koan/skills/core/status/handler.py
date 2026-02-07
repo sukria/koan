@@ -46,6 +46,15 @@ def _handle_status(ctx) -> str:
     else:
         parts.append("\n🟢 Mode: Working")
 
+    # Show focus mode if active
+    try:
+        from app.focus_manager import check_focus
+        focus_state = check_focus(str(koan_root))
+        if focus_state:
+            parts.append(f"  🎯 Focus: missions only ({focus_state.remaining_display()} remaining)")
+    except Exception:
+        pass
+
     status_file = koan_root / ".koan-status"
     if status_file.exists():
         loop_status = status_file.read_text().strip()
