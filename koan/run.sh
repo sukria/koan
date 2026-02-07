@@ -46,6 +46,25 @@ log() {
   echo -e "${color}[${cat}]${_C_RESET} $*"
 }
 
+# set_status <message>
+# Writes to .koan-status so /status and dashboard can display loop state.
+# This file is the primary way the human knows what the loop is doing.
+set_status() {
+  echo "$*" > "$KOAN_ROOT/.koan-status"
+}
+
+# has_pending_missions
+# Quick check for pending missions in missions.md (no Claude call).
+# Returns 0 if pending missions exist, 1 otherwise.
+has_pending_missions() {
+  "$PYTHON" -c "
+from app.missions import count_pending
+from pathlib import Path
+p = Path('$INSTANCE/missions.md')
+print(count_pending(p.read_text()) if p.exists() else 0)
+" 2>/dev/null | grep -qv '^0$'
+}
+
 # Ensure KOAN_ROOT is set - mandatory from config
 if [ -z "${KOAN_ROOT:-}" ]; then
   log error "KOAN_ROOT environment variable not set."
@@ -172,6 +191,7 @@ cleanup() {
     kill "$CLAUDE_PID" 2>/dev/null
     wait "$CLAUDE_PID" 2>/dev/null
   fi
+  rm -f "$KOAN_ROOT/.koan-status"
   log koan "Shutdown."
   CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
   notify "Koan interrupted after $count runs. Last project: $CURRENT_PROJ."
@@ -261,6 +281,7 @@ if [ "$START_ON_PAUSE" = "true" ] && [ ! -f "$KOAN_ROOT/.koan-pause" ]; then
   touch "$KOAN_ROOT/.koan-pause"
 fi
 
+set_status "Starting up"
 log init "Starting. Max runs: $MAX_RUNS, interval: ${INTERVAL}s"
 STARTUP_PROJECTS=$(printf '%s\n' "${PROJECT_NAMES[@]}" | sort | sed 's/^/  • /')
 STARTUP_PAUSE=""
@@ -301,6 +322,7 @@ while true; do
 
   # Check for pause — contemplative mode
   if [ -f "$KOAN_ROOT/.koan-pause" ]; then
+    set_status "Paused ($(date '+%H:%M'))"
     log pause "Paused. Contemplative mode. ($(date '+%H:%M'))"
 
     # Check auto-resume via pause_manager (handles quota reset + 5h cooldown)
@@ -355,6 +377,7 @@ while true; do
   fi
 
   RUN_NUM=$((count + 1))
+  set_status "Run $RUN_NUM/$MAX_RUNS — preparing"
   echo ""
   echo -e "${_C_BOLD}${_C_CYAN}=== Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S') ===${_C_RESET}"
 
@@ -469,8 +492,24 @@ $KNOWN_PROJECTS"
 
         # Contemplative session done — increment counter and loop
         count=$((count + 1))
-        log pause "Contemplative session complete. Sleeping ${INTERVAL}s..."
-        sleep "$INTERVAL"
+        # Check for pending missions before sleeping
+        if has_pending_missions; then
+          log koan "Pending missions found after contemplation — skipping sleep"
+        else
+          set_status "Idle — post-contemplation sleep ($(date '+%H:%M'))"
+          log pause "Contemplative session complete. Sleeping ${INTERVAL}s..."
+          SLEEP_ELAPSED=0
+          while [ $SLEEP_ELAPSED -lt $INTERVAL ]; do
+            sleep 10
+            SLEEP_ELAPSED=$((SLEEP_ELAPSED + 10))
+            if has_pending_missions; then
+              log koan "New mission detected during sleep — waking up early"
+              break
+            fi
+            [ -f "$KOAN_ROOT/.koan-stop" ] && break
+            [ -f "$KOAN_ROOT/.koan-pause" ] && break
+          done
+        fi
         continue
       fi
     fi
@@ -571,6 +610,12 @@ EOF
   fi
 
   # Execute next mission, capture JSON output for token tracking
+  if [ -n "$MISSION_TITLE" ]; then
+    set_status "Run $RUN_NUM/$MAX_RUNS — executing mission on $PROJECT_NAME"
+  else
+    MODE_UPPER_STATUS=$(echo "$AUTONOMOUS_MODE" | tr '[:lower:]' '[:upper:]')
+    set_status "Run $RUN_NUM/$MAX_RUNS — $MODE_UPPER_STATUS on $PROJECT_NAME"
+  fi
   cd "$PROJECT_PATH"
   MISSION_START_TIME=$(date +%s)
   CLAUDE_OUT="$(mktemp)"
@@ -637,6 +682,7 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
   # (summary + koan). No need for notify() or mission_summary.py here —
   # those caused triple-repeated conclusions on Telegram.
   if [ $CLAUDE_EXIT -eq 0 ]; then
+    set_status "Run $RUN_NUM/$MAX_RUNS — post-mission processing"
     log mission "Run $RUN_NUM/$MAX_RUNS — [$PROJECT_NAME] completed successfully"
 
     # Post-mission reflection for significant missions (writes to shared-journal.md)
@@ -698,11 +744,33 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
     continue  # Go back to start of loop (will enter pause mode)
   fi
 
-  log koan "Sleeping ${INTERVAL}s..."
-  sleep $INTERVAL
+  # Check for pending missions before sleeping — skip sleep if work is waiting
+  if has_pending_missions; then
+    log koan "Pending missions found — skipping sleep, starting next run immediately"
+    set_status "Run $RUN_NUM/$MAX_RUNS — done, next run starting"
+  else
+    set_status "Idle — sleeping ${INTERVAL}s ($(date '+%H:%M'))"
+    log koan "Sleeping ${INTERVAL}s (checking for new missions every 10s)..."
+    # Interruptible sleep: check for new missions every 10s instead of blocking
+    SLEEP_ELAPSED=0
+    while [ $SLEEP_ELAPSED -lt $INTERVAL ]; do
+      sleep 10
+      SLEEP_ELAPSED=$((SLEEP_ELAPSED + 10))
+      # Wake up early if a new mission appeared
+      if has_pending_missions; then
+        log koan "New mission detected during sleep — waking up early"
+        set_status "Run $RUN_NUM/$MAX_RUNS — done, new mission detected"
+        break
+      fi
+      # Also wake up on stop/pause requests
+      [ -f "$KOAN_ROOT/.koan-stop" ] && break
+      [ -f "$KOAN_ROOT/.koan-pause" ] && break
+    done
+  fi
 done
 
 # This point is only reached via /stop command
+rm -f "$KOAN_ROOT/.koan-status"
 log koan "Session ended. $count runs executed."
 
 # End-of-session daily report check

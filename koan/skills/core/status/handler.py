@@ -48,7 +48,9 @@ def _handle_status(ctx) -> str:
 
     status_file = koan_root / ".koan-status"
     if status_file.exists():
-        parts.append(f"   Loop: {status_file.read_text().strip()}")
+        loop_status = status_file.read_text().strip()
+        if loop_status:
+            parts.append(f"  Loop: {loop_status}")
 
     if missions_file.exists():
         content = missions_file.read_text()
@@ -97,6 +99,11 @@ def _handle_ping(ctx) -> str:
     elif run_loop_alive and pause_file.exists():
         return "⏸️ Run loop is paused. /resume to unpause."
     elif run_loop_alive:
+        status_file = koan_root / ".koan-status"
+        if status_file.exists():
+            loop_status = status_file.read_text().strip()
+            if loop_status:
+                return f"✅ OK — {loop_status}"
         return "✅ OK"
     else:
         return "❌ Run loop is not running.\n\nTo restart:\n  make run &"
