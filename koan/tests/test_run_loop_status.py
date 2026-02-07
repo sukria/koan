@@ -1,10 +1,11 @@
-"""Tests for run loop status tracking and interruptible sleep.
+"""Tests for run loop status tracking, interruptible sleep, and loop resilience.
 
 Covers:
 - .koan-status file lifecycle (written by run.sh, read by /status and /ping)
 - has_pending_missions helper (used for sleep-skip logic)
 - Status handler improvements (loop status in /status, /ping)
 - Run.sh structure validation (set_status, has_pending_missions, interruptible sleep)
+- Run.sh resilience (error recovery, input validation, safe parsing)
 """
 
 import importlib.util
@@ -13,6 +14,16 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def run_sh_content():
+    """Load run.sh content for structural validation tests."""
+    return (Path(__file__).parent.parent / "run.sh").read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -232,10 +243,6 @@ class TestPendingMissionDetection:
 class TestRunShStructure:
     """Validate run.sh has the expected functions and patterns."""
 
-    @pytest.fixture
-    def run_sh_content(self):
-        return (Path(__file__).parent.parent / "run.sh").read_text()
-
     def test_set_status_function_exists(self, run_sh_content):
         """run.sh must define set_status()."""
         assert "set_status()" in run_sh_content
@@ -357,3 +364,145 @@ class TestStatusHandlerIntegration:
         assert "Working" in status
         assert "preparing" in status
         assert "audit security" in status
+
+
+# ---------------------------------------------------------------------------
+# run.sh resilience fixes
+# ---------------------------------------------------------------------------
+
+class TestRunShResilience:
+    """Tests for run.sh error-handling and resilience patterns."""
+
+    def test_unknown_project_does_not_exit(self, run_sh_content):
+        """Unknown project mission should continue the loop, not exit.
+
+        Bug: prior code used 'exit 1' on unknown project name, killing
+        the entire agent loop. Fix uses 'continue' to skip and move on.
+        """
+        # Find the block that handles unknown project
+        lines = run_sh_content.splitlines()
+        in_unknown_project_block = False
+        found_continue = False
+        found_exit = False
+        for line in lines:
+            stripped = line.strip()
+            if "Mission references unknown project" in line:
+                in_unknown_project_block = True
+            if in_unknown_project_block:
+                if stripped == "continue":
+                    found_continue = True
+                    break
+                if stripped.startswith("exit "):
+                    found_exit = True
+                    break
+                # Block ends at 'fi'
+                if stripped == "fi":
+                    break
+        assert found_continue, (
+            "Unknown project block should use 'continue', not 'exit'. "
+            "Exiting kills the entire agent loop on a recoverable error."
+        )
+        assert not found_exit, (
+            "Unknown project block still contains 'exit 1' — "
+            "this kills the loop on a recoverable error."
+        )
+
+    def test_project_index_validated_before_use(self, run_sh_content):
+        """RECOMMENDED_PROJECT_IDX must be validated before array access.
+
+        Bug: usage tracker output was used directly as array index without
+        checking if it's numeric or within bounds.
+        """
+        # Look for validation pattern near the autonomous mode project selection
+        assert "Invalid project index" in run_sh_content, (
+            "run.sh should log a warning when RECOMMENDED_PROJECT_IDX is invalid"
+        )
+        # Check for numeric validation regex
+        assert "^[0-9]+$" in run_sh_content, (
+            "run.sh should validate RECOMMENDED_PROJECT_IDX is numeric"
+        )
+        # Check for bounds check
+        assert "PROJECT_NAMES[@]}" in run_sh_content, (
+            "run.sh should check index against PROJECT_NAMES array length"
+        )
+
+    def test_quota_result_parsing_uses_ifs(self, run_sh_content):
+        """Quota result pipe-delimited parsing should use IFS read, not cut.
+
+        Bug: 'cut -d|' silently returns wrong fields if the delimiter is
+        missing. IFS read is safer — empty fields stay empty.
+        """
+        # Should NOT use 'cut -d' for quota result parsing
+        lines = run_sh_content.splitlines()
+        for i, line in enumerate(lines):
+            if "RESET_DISPLAY" in line and "cut -d" in line:
+                pytest.fail(
+                    f"Line {i+1}: quota result parsing uses 'cut -d' which is fragile. "
+                    "Should use 'IFS=| read -r' instead."
+                )
+            if "RESUME_MSG" in line and "cut -d" in line:
+                pytest.fail(
+                    f"Line {i+1}: quota result parsing uses 'cut -d' which is fragile. "
+                    "Should use 'IFS=| read -r' instead."
+                )
+        # Verify IFS-based parsing is used
+        assert "IFS='|' read -r RESET_DISPLAY RESUME_MSG" in run_sh_content, (
+            "Quota result should be parsed with IFS='|' read -r"
+        )
+
+    def test_unknown_project_increments_counter(self, run_sh_content):
+        """When skipping unknown project, run counter should be incremented.
+
+        Without this, the loop could retry the same broken mission forever
+        in certain edge cases.
+        """
+        lines = run_sh_content.splitlines()
+        in_unknown_block = False
+        found_increment = False
+        for line in lines:
+            if "Mission references unknown project" in line:
+                in_unknown_block = True
+            if in_unknown_block:
+                if "count=$((count + 1))" in line:
+                    found_increment = True
+                    break
+                if line.strip() == "fi":
+                    break
+        assert found_increment, (
+            "Unknown project block should increment the run counter "
+            "to prevent infinite retry loops."
+        )
+
+    def test_unknown_project_notification_not_error_exit(self, run_sh_content):
+        """Notification for unknown project should be a warning, not fatal."""
+        # Find the notify line in the unknown project block
+        lines = run_sh_content.splitlines()
+        in_unknown_block = False
+        for line in lines:
+            if "Mission references unknown project" in line:
+                in_unknown_block = True
+            if in_unknown_block and "notify" in line:
+                # Should use warning emoji, not error emoji
+                assert "⚠️" in line or "warning" in line.lower() or "skipped" in line.lower(), (
+                    "Unknown project notification should indicate a warning/skip, "
+                    "not a fatal error."
+                )
+                break
+
+    def test_fallback_project_index_is_zero(self, run_sh_content):
+        """Invalid project index should fall back to index 0 (first project)."""
+        lines = run_sh_content.splitlines()
+        in_validation_block = False
+        found_fallback = False
+        for line in lines:
+            if "Invalid project index" in line:
+                in_validation_block = True
+            if in_validation_block:
+                if "PROJECT_IDX=0" in line:
+                    found_fallback = True
+                    break
+                if line.strip() == "fi":
+                    break
+        assert found_fallback, (
+            "Invalid project index should fall back to PROJECT_IDX=0"
+        )
