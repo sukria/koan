@@ -28,14 +28,23 @@ def _handle_status(ctx) -> str:
 
     pause_file = koan_root / ".koan-pause"
     stop_file = koan_root / ".koan-stop"
+    pause_reason_file = koan_root / ".koan-pause-reason"
 
-    if pause_file.exists():
-        parts.append("\nPAUSED -- No missions being executed")
-        parts.append("   /resume to continue")
-    elif stop_file.exists():
-        parts.append("\nSTOP REQUESTED -- Finishing current work")
+    if stop_file.exists():
+        parts.append("\n⛔ Mode: Stopping")
+    elif pause_file.exists():
+        reason = ""
+        if pause_reason_file.exists():
+            reason = pause_reason_file.read_text().strip().split("\n")[0]
+        if reason == "quota":
+            parts.append("\n⏸️ Mode: Paused (quota exhausted)")
+        elif reason == "max_runs":
+            parts.append("\n⏸️ Mode: Paused (max runs reached)")
+        else:
+            parts.append("\n⏸️ Mode: Paused")
+        parts.append("  /resume to unpause")
     else:
-        parts.append("\nACTIVE -- Run loop running")
+        parts.append("\n🟢 Mode: Working")
 
     status_file = koan_root / ".koan-status"
     if status_file.exists():

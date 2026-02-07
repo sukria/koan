@@ -336,7 +336,7 @@ class TestBuildStatus:
         )
         (tmp_path / ".koan-stop").write_text("STOP")
         status = _call_status_handler(tmp_path)
-        assert "STOP REQUESTED" in status or "stop" in status.lower()
+        assert "Stopping" in status
 
     def test_status_with_loop_status(self, tmp_path):
         (tmp_path / "instance").mkdir()
@@ -375,6 +375,26 @@ class TestHandleCommand:
     @patch("app.awake.handle_resume")
     def test_resume_delegates(self, mock_resume):
         handle_command("/resume")
+        mock_resume.assert_called_once()
+
+    @patch("app.awake.handle_resume")
+    def test_work_delegates_to_resume(self, mock_resume):
+        handle_command("/work")
+        mock_resume.assert_called_once()
+
+    @patch("app.awake.handle_resume")
+    def test_awake_delegates_to_resume(self, mock_resume):
+        handle_command("/awake")
+        mock_resume.assert_called_once()
+
+    @patch("app.awake.handle_resume")
+    def test_restart_delegates_to_resume(self, mock_resume):
+        handle_command("/restart")
+        mock_resume.assert_called_once()
+
+    @patch("app.awake.handle_resume")
+    def test_start_delegates_to_resume(self, mock_resume):
+        handle_command("/start")
         mock_resume.assert_called_once()
 
     @patch("app.awake.send_telegram")
@@ -881,10 +901,26 @@ class TestPauseCommand:
         assert "paused" in mock_send.call_args[0][0].lower()
 
     @patch("app.awake.send_telegram")
+    def test_sleep_creates_file(self, mock_send, tmp_path):
+        """The /sleep alias creates the pause file just like /pause."""
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_command("/sleep")
+        assert (tmp_path / ".koan-pause").exists()
+        mock_send.assert_called_once()
+        assert "paused" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.send_telegram")
     def test_pause_already_paused(self, mock_send, tmp_path):
         (tmp_path / ".koan-pause").write_text("PAUSE")
         with patch("app.awake.KOAN_ROOT", tmp_path):
             handle_command("/pause")
+        assert "already paused" in mock_send.call_args[0][0].lower()
+
+    @patch("app.awake.send_telegram")
+    def test_sleep_already_paused(self, mock_send, tmp_path):
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        with patch("app.awake.KOAN_ROOT", tmp_path):
+            handle_command("/sleep")
         assert "already paused" in mock_send.call_args[0][0].lower()
 
     @patch("app.awake.send_telegram")
@@ -938,15 +974,59 @@ class TestPauseCommand:
         # Should say "unpaused" without specific reason
         assert "unpaused" in mock_send.call_args[0][0].lower()
 
-    def test_status_shows_pause(self, tmp_path):
-        """Status skill handler shows pause state."""
+    def test_status_shows_paused(self, tmp_path):
+        """Status skill handler shows Paused when paused."""
         (tmp_path / ".koan-pause").write_text("PAUSE")
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
         )
         status = _call_status_handler(tmp_path)
-        assert "PAUSE" in status or "pause" in status.lower()
+        assert "Paused" in status
+        assert "/resume" in status
+
+    def test_status_shows_paused_with_quota_reason(self, tmp_path):
+        """Status shows Paused with quota reason."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("quota\n1234567890")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+        )
+        status = _call_status_handler(tmp_path)
+        assert "Paused" in status
+        assert "quota" in status.lower()
+
+    def test_status_shows_paused_with_max_runs_reason(self, tmp_path):
+        """Status shows Paused with max_runs reason."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("max_runs\n1234567890")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+        )
+        status = _call_status_handler(tmp_path)
+        assert "Paused" in status
+        assert "max runs" in status.lower()
+
+    def test_status_shows_working_when_active(self, tmp_path):
+        """Status shows Working when no pause/stop."""
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+        )
+        status = _call_status_handler(tmp_path)
+        assert "Working" in status
+
+    def test_status_shows_stopping(self, tmp_path):
+        """Status shows Stopping when stop file exists."""
+        (tmp_path / ".koan-stop").write_text("STOP")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "missions.md").write_text(
+            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+        )
+        status = _call_status_handler(tmp_path)
+        assert "Stopping" in status
 
 
 # ---------------------------------------------------------------------------
@@ -1099,8 +1179,8 @@ class TestHandleUsage:
 class TestPauseAwareness:
     """Tests for pause state visibility in chat and status."""
 
-    def test_status_shows_pause_at_top(self, tmp_path):
-        """When paused, status shows pause FIRST, not at the bottom."""
+    def test_status_shows_paused_at_top(self, tmp_path):
+        """When paused, status shows Paused FIRST, not at the bottom."""
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n"
@@ -1110,18 +1190,18 @@ class TestPauseAwareness:
         status = _call_status_handler(tmp_path)
 
         lines = status.split("\n")
-        pause_line_idx = next(i for i, l in enumerate(lines) if "PAUSE" in l or "pause" in l.lower())
+        paused_line_idx = next(i for i, l in enumerate(lines) if "Paused" in l)
         mission_line_idx = next((i for i, l in enumerate(lines) if "fix bug" in l), len(lines))
-        assert pause_line_idx < mission_line_idx, "Pause status should appear before mission details"
+        assert paused_line_idx < mission_line_idx, "Paused status should appear before mission details"
 
-    def test_status_shows_active_when_running(self, tmp_path):
-        """When not paused, status shows ACTIVE."""
+    def test_status_shows_working_when_running(self, tmp_path):
+        """When not paused, status shows Working."""
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n## En attente\n\n## En cours\n\n"
         )
         status = _call_status_handler(tmp_path)
-        assert "ACTIVE" in status
+        assert "Working" in status
 
     @patch("app.awake.save_telegram_message")
     @patch("app.awake.load_recent_telegram_history", return_value=[])

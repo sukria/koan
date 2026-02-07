@@ -95,7 +95,10 @@ def _reset_registry():
 
 
 # Core commands that remain hardcoded (safety-critical or bootstrap)
-CORE_COMMANDS = frozenset({"help", "stop", "pause", "resume", "skill"})
+CORE_COMMANDS = frozenset({
+    "help", "stop", "sleep", "resume", "skill",
+    "pause", "work", "awake", "start", "restart",  # aliases for sleep/resume
+})
 
 
 def check_config():
@@ -170,7 +173,7 @@ def handle_command(text: str):
         send_telegram("⏹️ Stop requested. Current mission will complete, then Kōan will stop.")
         return
 
-    if cmd == "/pause":
+    if cmd in ("/pause", "/sleep"):
         pause_file = KOAN_ROOT / ".koan-pause"
         if pause_file.exists():
             send_telegram("⏸️ Already paused. /resume to unpause.")
@@ -179,7 +182,7 @@ def handle_command(text: str):
             send_telegram("⏸️ Paused. No missions will run. /resume to unpause.")
         return
 
-    if cmd == "/resume":
+    if cmd in ("/resume", "/work", "/awake", "/start", "/restart"):
         handle_resume()
         return
 
@@ -325,8 +328,8 @@ def _handle_help():
     parts = [
         "Koan -- Commands\n",
         "CORE",
-        "⏸️ /pause -- pause (no new missions)",
-        "▶️ /resume -- resume after pause or quota exhausted",
+        "⏸️ /pause -- pause (alias: /sleep)",
+        "▶️ /resume -- resume after pause (alias: /work, /awake, /start, /restart)",
         "⏹️ /stop -- stop Koan after current mission",
         "/help -- this help",
         "/skill -- list available skills",
