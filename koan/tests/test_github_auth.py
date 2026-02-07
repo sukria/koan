@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from tests._helpers import run_module
 from app.github_auth import (
     get_github_user,
     get_gh_token,
@@ -140,8 +141,7 @@ class TestCLIEntryPoint:
         mock_run = MagicMock(return_value=MagicMock(returncode=0, stdout="ghp_token123\n"))
         monkeypatch.setattr(subprocess, "run", mock_run)
         with pytest.raises(SystemExit) as exc_info:
-            import runpy
-            runpy.run_module("app.github_auth", run_name="__main__")
+            run_module("app.github_auth", run_name="__main__")
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
         assert "GH_TOKEN=ghp_token123" in captured.out
@@ -149,8 +149,7 @@ class TestCLIEntryPoint:
     def test_exits_0_when_no_user(self, monkeypatch):
         monkeypatch.delenv("GITHUB_USER", raising=False)
         with pytest.raises(SystemExit) as exc_info:
-            import runpy
-            runpy.run_module("app.github_auth", run_name="__main__")
+            run_module("app.github_auth", run_name="__main__")
         assert exc_info.value.code == 0
 
     def test_exits_1_on_failure(self, monkeypatch):
@@ -160,6 +159,5 @@ class TestCLIEntryPoint:
         monkeypatch.setattr(subprocess, "run", mock_run)
         with patch("app.notify.send_telegram"):
             with pytest.raises(SystemExit) as exc_info:
-                import runpy
-                runpy.run_module("app.github_auth", run_name="__main__")
+                run_module("app.github_auth", run_name="__main__")
             assert exc_info.value.code == 1
