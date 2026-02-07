@@ -26,3 +26,4 @@ venv/
 # IDE
 .vscode/
 .idea/
+.last-review-sha
