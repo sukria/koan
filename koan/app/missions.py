@@ -387,6 +387,28 @@ def promote_idea(content: str, index: int) -> Tuple[str, Optional[str]]:
     return updated, deleted
 
 
+def promote_all_ideas(content: str) -> Tuple[str, List[str]]:
+    """Promote all ideas to the Pending section.
+
+    Returns (updated_content, list_of_promoted_texts).
+    If no ideas exist, returns (original_content, []).
+    """
+    ideas = parse_ideas(content)
+    if not ideas:
+        return content, []
+
+    # Promote from last to first so indices stay valid
+    promoted = []
+    updated = content
+    for i in range(len(ideas), 0, -1):
+        updated, text = promote_idea(updated, i)
+        if text is not None:
+            promoted.append(text)
+
+    promoted.reverse()  # restore original order
+    return updated, promoted
+
+
 def list_pending(content: str) -> List[str]:
     """Return all pending mission lines."""
     sections = parse_sections(content)

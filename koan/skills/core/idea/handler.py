@@ -23,6 +23,11 @@ def handle(ctx):
     if delete_match:
         return _delete_idea(missions_file, int(delete_match.group(1)))
 
+    # /idea promote all
+    promote_all_match = re.match(r"^(?:promote|push|activate)\s+all$", args, re.IGNORECASE)
+    if promote_all_match:
+        return _promote_all_ideas(missions_file)
+
     # /idea promote N
     promote_match = re.match(r"^(?:promote|push|activate)\s+(\d+)$", args, re.IGNORECASE)
     if promote_match:
@@ -50,7 +55,7 @@ def _list_ideas(missions_file):
         parts.append(f"  {i}. {display}")
 
     parts.append("")
-    parts.append("Commands: /idea delete N, /idea promote N")
+    parts.append("Commands: /idea delete N, /idea promote N, /idea promote all")
     return "\n".join(parts)
 
 
@@ -126,3 +131,28 @@ def _promote_idea(missions_file, index):
 
     display = clean_mission_display(promoted_text)
     return f"⬆️ Promoted to pending: {display}"
+
+
+def _promote_all_ideas(missions_file):
+    """Promote all ideas to the pending queue."""
+    from app.missions import promote_all_ideas, clean_mission_display
+    from app.utils import modify_missions_file
+
+    promoted_list = None
+
+    def _transform(content):
+        nonlocal promoted_list
+        updated, promoted_list = promote_all_ideas(content)
+        return updated
+
+    modify_missions_file(missions_file, _transform)
+
+    if not promoted_list:
+        return "ℹ️ No ideas to promote."
+
+    count = len(promoted_list)
+    lines = [f"⬆️ Promoted {count} idea{'s' if count > 1 else ''} to pending:"]
+    for idea in promoted_list:
+        display = clean_mission_display(idea)
+        lines.append(f"  - {display}")
+    return "\n".join(lines)

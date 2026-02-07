@@ -463,6 +463,110 @@ class TestPromoteIdea:
 
 
 # ---------------------------------------------------------------------------
+# promote_all_ideas() unit tests
+# ---------------------------------------------------------------------------
+
+class TestPromoteAllIdeas:
+    def test_promote_all_empty(self):
+        """Promoting all with no ideas returns empty list."""
+        from app.missions import promote_all_ideas
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        result, promoted = promote_all_ideas(content)
+        assert promoted == []
+        assert result == content
+
+    def test_promote_all_single(self):
+        """Promoting all with one idea moves it to pending."""
+        from app.missions import promote_all_ideas
+        content = "# Missions\n\n## Ideas\n\n- only idea\n\n## Pending\n\n## Done\n"
+        result, promoted = promote_all_ideas(content)
+        assert len(promoted) == 1
+        assert "only idea" in promoted[0]
+        assert len(parse_ideas(result)) == 0
+        from app.missions import parse_sections
+        sections = parse_sections(result)
+        assert any("only idea" in p for p in sections["pending"])
+
+    def test_promote_all_multiple(self):
+        """Promoting all moves every idea to pending in order."""
+        from app.missions import promote_all_ideas
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - idea A
+            - idea B
+            - idea C
+
+            ## Pending
+
+            ## Done
+        """)
+        result, promoted = promote_all_ideas(content)
+        assert len(promoted) == 3
+        assert "idea A" in promoted[0]
+        assert "idea B" in promoted[1]
+        assert "idea C" in promoted[2]
+        assert len(parse_ideas(result)) == 0
+        from app.missions import parse_sections
+        sections = parse_sections(result)
+        pending_text = "\n".join(sections["pending"])
+        assert "idea A" in pending_text
+        assert "idea B" in pending_text
+        assert "idea C" in pending_text
+
+    def test_promote_all_with_project_tags(self):
+        """Project tags are preserved when promoting all ideas."""
+        from app.missions import promote_all_ideas
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - [project:koan] fix tests
+            - [project:web] add auth
+
+            ## Pending
+
+            ## Done
+        """)
+        result, promoted = promote_all_ideas(content)
+        assert len(promoted) == 2
+        assert "[project:koan]" in promoted[0]
+        assert "[project:web]" in promoted[1]
+        from app.missions import parse_sections
+        sections = parse_sections(result)
+        pending_text = "\n".join(sections["pending"])
+        assert "[project:koan]" in pending_text
+        assert "[project:web]" in pending_text
+
+    def test_promote_all_with_existing_pending(self):
+        """Promoting all ideas preserves existing pending missions."""
+        from app.missions import promote_all_ideas
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - new idea
+
+            ## Pending
+
+            - existing task
+
+            ## Done
+        """)
+        result, promoted = promote_all_ideas(content)
+        assert len(promoted) == 1
+        from app.missions import parse_sections
+        sections = parse_sections(result)
+        pending_text = "\n".join(sections["pending"])
+        assert "existing task" in pending_text
+        assert "new idea" in pending_text
+
+
+# ---------------------------------------------------------------------------
 # Handler tests (direct handler invocation)
 # ---------------------------------------------------------------------------
 
@@ -706,6 +810,66 @@ class TestIdeaHandler:
         ctx = self._make_ctx(tmp_path, content, command="idea", args="promote 1")
         result = handle(ctx)
         assert "No ideas to promote" in result
+
+    def test_promote_all_via_handler(self, tmp_path):
+        """Handler promotes all ideas at once."""
+        from skills.core.idea.handler import handle
+
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - idea one
+            - idea two
+            - idea three
+
+            ## Pending
+
+            ## In Progress
+
+            ## Done
+        """)
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="promote all")
+        result = handle(ctx)
+        assert "Promoted 3 ideas" in result
+        assert "idea one" in result
+        assert "idea two" in result
+        assert "idea three" in result
+
+        written = (tmp_path / "instance" / "missions.md").read_text()
+        assert len(parse_ideas(written)) == 0
+        from app.missions import parse_sections
+        sections = parse_sections(written)
+        assert len(sections["pending"]) == 3
+
+    def test_promote_all_empty_via_handler(self, tmp_path):
+        """Handler returns informative message when no ideas to promote."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="promote all")
+        result = handle(ctx)
+        assert "No ideas to promote" in result
+
+    def test_promote_all_with_push_alias(self, tmp_path):
+        """Handler supports 'push all' alias."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n- single\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="push all")
+        result = handle(ctx)
+        assert "Promoted 1 idea" in result
+        assert "ideas" not in result  # singular
+
+    def test_promote_all_single_idea_singular(self, tmp_path):
+        """Singular form used when promoting exactly one idea."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n- lonely idea\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="activate all")
+        result = handle(ctx)
+        assert "Promoted 1 idea to" in result
 
     def test_delete_multiline_via_handler(self, tmp_path):
         """Handler deletes multi-line ideas completely."""
