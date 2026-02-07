@@ -48,6 +48,18 @@ Communication between processes happens through shared files in `instance/` with
 - **`recover.py`** — Crash recovery for stale in-progress missions
 - **`notify.py`** — Telegram notification helper
 
+### Skills system (`koan/skills/`)
+
+Extensible command plugin system. Each skill lives in `skills/<scope>/<skill-name>/` with a `SKILL.md` (YAML frontmatter defining commands, aliases, metadata) and an optional `handler.py`.
+
+- **`skills.py`** — Registry that discovers SKILL.md files, parses frontmatter (custom lite YAML parser, no PyYAML), maps commands/aliases to skills, and dispatches execution.
+- **Core skills** live in `koan/skills/core/` (status, idea, mission, journal, etc.)
+- **Custom skills** loaded from `instance/skills/<scope>/` — each scope directory can be a cloned Git repo for team sharing.
+- **Handler pattern**: `def handle(ctx: SkillContext) -> Optional[str]` — return string for Telegram reply, empty string for "already handled", None for no message.
+- **`worker: true`** flag in SKILL.md marks blocking skills (Claude calls, API requests) that run in a background thread.
+- **Prompt-only skills**: omit `handler`, put prompt text after the frontmatter — sent to Claude directly.
+- See `koan/skills/README.md` for the full authoring guide.
+
 ### Instance directory
 
 `instance/` (gitignored, copy from `instance.example/`) holds all runtime state:
