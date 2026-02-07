@@ -2,8 +2,27 @@
 # Kōan — Main run loop
 # Pulls missions, executes them via Claude Code CLI, commits results.
 # Sends Telegram notifications at each mission lifecycle step.
+#
+# Restart support: if the inner loop exits with code 42 (restart signal),
+# the script re-executes itself. Any other exit code is a real stop.
 
 set -euo pipefail
+
+# --- Restart wrapper ---
+# If invoked with _KOAN_INNER=1, skip the wrapper (we're already inside it).
+# Otherwise, run the script in a restart loop.
+if [ -z "${_KOAN_INNER:-}" ]; then
+  while true; do
+    exec_exit=0
+    _KOAN_INNER=1 "$0" "$@" || exec_exit=$?
+    if [ "$exec_exit" -eq 42 ]; then
+      echo "[koan] Restarting run loop..."
+      sleep 1  # Brief pause to let filesystem settle
+      continue
+    fi
+    exit "$exec_exit"
+  done
+fi
 
 # --- Colored log prefixes ---
 # Each category gets its own ANSI color for easy visual scanning.
@@ -70,6 +89,9 @@ if [ -z "${KOAN_ROOT:-}" ]; then
   log error "KOAN_ROOT environment variable not set."
   exit 1
 fi
+
+# Clear stale restart signal from previous run
+rm -f "$KOAN_ROOT/.koan-restart"
 
 INSTANCE="$KOAN_ROOT/instance"
 APP_DIR="$KOAN_ROOT/koan/app"
@@ -319,6 +341,13 @@ while true; do
     break
   fi
 
+  # Check for restart request — exit with code 42 so wrapper can re-launch
+  if [ -f "$KOAN_ROOT/.koan-restart" ]; then
+    log koan "Restart requested. Exiting for re-launch..."
+    rm -f "$KOAN_ROOT/.koan-restart"
+    exit 42
+  fi
+
   # Check for pause — contemplative mode
   if [ -f "$KOAN_ROOT/.koan-pause" ]; then
     set_status "Paused ($(date '+%H:%M'))"
@@ -363,9 +392,10 @@ while true; do
       log pause "Contemplative session ended."
     fi
 
-    # Sleep in 5s increments — allows /resume or auto-resume to take effect quickly
+    # Sleep in 5s increments — allows /resume, /restart, or auto-resume to take effect quickly
     for ((s=0; s<60; s++)); do
       [ ! -f "$KOAN_ROOT/.koan-pause" ] && break
+      [ -f "$KOAN_ROOT/.koan-restart" ] && break
       sleep 5
     done
     continue
@@ -744,9 +774,10 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
         set_status "Run $RUN_NUM/$MAX_RUNS — done, new mission detected"
         break
       fi
-      # Also wake up on stop/pause requests
+      # Also wake up on stop/pause/restart requests
       [ -f "$KOAN_ROOT/.koan-stop" ] && break
       [ -f "$KOAN_ROOT/.koan-pause" ] && break
+      [ -f "$KOAN_ROOT/.koan-restart" ] && break
     done
   fi
 done

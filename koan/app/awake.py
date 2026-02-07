@@ -99,7 +99,7 @@ def _reset_registry():
 # Core commands that remain hardcoded (safety-critical or bootstrap)
 CORE_COMMANDS = frozenset({
     "help", "stop", "sleep", "resume", "skill",
-    "pause", "work", "awake", "start", "restart",  # aliases for sleep/resume
+    "pause", "work", "awake", "start",  # aliases for sleep/resume
 })
 
 
@@ -184,7 +184,7 @@ def handle_command(text: str):
             send_telegram("⏸️ Paused. No missions will run. /resume to unpause.")
         return
 
-    if cmd in ("/resume", "/work", "/awake", "/start", "/restart"):
+    if cmd in ("/resume", "/work", "/awake", "/start"):
         handle_resume()
         return
 
@@ -367,7 +367,7 @@ def _handle_help():
         "Koan -- Commands\n",
         "CORE",
         "⏸️ /pause -- pause (alias: /sleep)",
-        "▶️ /resume -- resume after pause (alias: /work, /awake, /start, /restart)",
+        "▶️ /resume -- resume after pause (alias: /work, /awake, /start)",
         "⏹️ /stop -- stop Koan after current mission",
         "/help -- this help (use /help <command> for details)",
         "/skill -- list available skills",
@@ -854,6 +854,7 @@ def handle_message(text: str):
 def main():
     from app.banners import print_bridge_banner
     from app.github_auth import setup_github_auth
+    from app.restart_manager import clear_restart, check_restart, reexec_bridge
 
     check_config()
     setup_github_auth()
@@ -861,10 +862,14 @@ def main():
     provider_name = "telegram" # about to become dynamic with provider abstraction
     print_bridge_banner(f"messaging bridge — {provider_name.lower()}")
 
+    # Clear stale restart signal from previous run (prevent restart loop)
+    clear_restart(KOAN_ROOT)
+
     # Compact old conversation history to avoid context bleed across sessions
     compacted = compact_telegram_history(TELEGRAM_HISTORY_FILE, TOPICS_FILE)
     if compacted:
         log("health", f"Compacted {compacted} old messages at startup")
+
     # Purge stale heartbeat so health_check doesn't report STALE on restart
     heartbeat_file = KOAN_ROOT / ".koan-heartbeat"
     heartbeat_file.unlink(missing_ok=True)
@@ -897,6 +902,13 @@ def main():
 
             flush_outbox()
             write_heartbeat(str(KOAN_ROOT))
+
+            # Check for restart signal (set by /restart or /update command)
+            if check_restart(KOAN_ROOT):
+                log("init", "Restart signal detected. Re-executing...")
+                clear_restart(KOAN_ROOT)
+                reexec_bridge()
+
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
         log("init", "Shutting down.")

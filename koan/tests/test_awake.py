@@ -419,10 +419,11 @@ class TestHandleCommand:
         handle_command("/awake")
         mock_resume.assert_called_once()
 
-    @patch("app.awake.handle_resume")
-    def test_restart_delegates_to_resume(self, mock_resume):
+    @patch("app.awake._dispatch_skill")
+    def test_restart_dispatches_to_skill(self, mock_dispatch):
+        """Since /restart is now a skill (in update skill), it routes via skill dispatch."""
         handle_command("/restart")
-        mock_resume.assert_called_once()
+        mock_dispatch.assert_called_once()
 
     @patch("app.awake.handle_resume")
     def test_start_delegates_to_resume(self, mock_resume):
