@@ -1,0 +1,11 @@
+---
+name: shutdown
+scope: core
+description: Shutdown both the agent loop and the messaging bridge
+version: 1.0.0
+commands:
+  - name: shutdown
+    description: Shutdown both the agent loop and the messaging bridge
+    usage: /shutdown
+handler: handler.py
+---

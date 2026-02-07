@@ -28,6 +28,7 @@ from app.format_outbox import format_for_telegram, load_soul, load_human_prefs, 
 from app.health_check import write_heartbeat
 from app.language_preference import get_language_instruction
 from app.notify import send_telegram
+from app.shutdown_manager import is_shutdown_requested, clear_shutdown
 from app.cli_provider import build_full_command
 from app.skills import Skill, SkillRegistry, SkillContext, execute_skill, build_registry
 from app.utils import (
@@ -882,9 +883,16 @@ def main():
     log("init", f"Skills: {skills_info}")
     log("init", f"Polling every {POLL_INTERVAL}s (chat mode: fast reply)")
     offset = None
+    start_time = int(time.time())
 
     try:
         while True:
+            # Check for /shutdown signal (file-based, timestamp-validated)
+            if is_shutdown_requested(str(KOAN_ROOT), start_time):
+                log("init", "Shutdown requested. Exiting.")
+                clear_shutdown(str(KOAN_ROOT))
+                sys.exit(0)
+
             updates = get_updates(offset)
             for update in updates:
                 offset = update["update_id"] + 1
