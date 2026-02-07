@@ -152,9 +152,10 @@ echo "STILL_ALIVE"
         result = _run_script("""
 TASK_RUNNING=1
 # Send two SIGINTs in quick succession via background subshell
-(sleep 0.3; kill -INT $$ 2>/dev/null; sleep 0.5; kill -INT $$ 2>/dev/null) &
+# Use generous delays to avoid flakiness under load
+(sleep 0.5; kill -INT $$ 2>/dev/null; sleep 1; kill -INT $$ 2>/dev/null) &
 # Sleep in a loop so we survive between signals
-for i in $(seq 1 40); do sleep 0.1; done
+for i in $(seq 1 40); do sleep 0.2; done
 echo "SHOULD_NOT_REACH"
 """)
         assert "A task is running" in result.stdout
