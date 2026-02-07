@@ -24,6 +24,10 @@ from app.awake import (
     _dispatch_skill,
     _handle_help,
     _handle_skill_command,
+    _handle_skill_install,
+    _handle_skill_remove,
+    _handle_skill_sources,
+    _handle_skill_update,
     _get_registry,
     _reset_registry,
     _run_in_worker,
@@ -1740,4 +1744,141 @@ class TestSkillListingFormat:
         # Core commands should use bare /status not /core.status
         assert "/status" in msg
         assert "/core.status" not in msg
+        _reset_registry()
+
+
+# ---------------------------------------------------------------------------
+# Skill management commands
+# ---------------------------------------------------------------------------
+
+class TestSkillInstallCommand:
+    """Tests for /skill install integration in awake.py."""
+
+    @patch("app.awake.send_telegram")
+    def test_install_no_args_shows_usage(self, mock_send):
+        _handle_skill_install("")
+        msg = mock_send.call_args[0][0]
+        assert "Usage" in msg
+        assert "install" in msg
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake._reset_registry")
+    @patch("app.skill_manager.install_skill_source")
+    def test_install_success(self, mock_install, mock_reset, mock_send, tmp_path):
+        mock_install.return_value = (True, "Installed 3 skills as scope 'ops'.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_install("myorg/koan-skills-ops")
+        mock_install.assert_called_once()
+        mock_reset.assert_called_once()
+        assert "Installed" in mock_send.call_args[0][0]
+
+    @patch("app.awake.send_telegram")
+    @patch("app.skill_manager.install_skill_source")
+    def test_install_failure_no_reset(self, mock_install, mock_send, tmp_path):
+        mock_install.return_value = (False, "Scope 'core' is reserved.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_install("myorg/repo core")
+        assert "reserved" in mock_send.call_args[0][0]
+
+    @patch("app.awake.send_telegram")
+    @patch("app.skill_manager.install_skill_source")
+    def test_install_with_scope_and_ref(self, mock_install, mock_send, tmp_path):
+        mock_install.return_value = (True, "Installed 1 skill.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_install("myorg/repo myteam --ref=v1.0.0")
+        call_kwargs = mock_install.call_args
+        assert call_kwargs[1]["scope"] == "myteam"
+        assert call_kwargs[1]["ref"] == "v1.0.0"
+
+
+class TestSkillUpdateCommand:
+    """Tests for /skill update integration in awake.py."""
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake._reset_registry")
+    @patch("app.skill_manager.update_skill_source")
+    def test_update_specific_scope(self, mock_update, mock_reset, mock_send, tmp_path):
+        mock_update.return_value = (True, "Updated 'ops' (3 skills).")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_update("ops")
+        mock_update.assert_called_once_with(tmp_path, "ops")
+        mock_reset.assert_called_once()
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake._reset_registry")
+    @patch("app.skill_manager.update_all_sources")
+    def test_update_all(self, mock_update_all, mock_reset, mock_send, tmp_path):
+        mock_update_all.return_value = (True, "All updated.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_update("")
+        mock_update_all.assert_called_once()
+
+
+class TestSkillRemoveCommand:
+    """Tests for /skill remove integration in awake.py."""
+
+    @patch("app.awake.send_telegram")
+    def test_remove_no_args_shows_usage(self, mock_send):
+        _handle_skill_remove("")
+        assert "Usage" in mock_send.call_args[0][0]
+
+    @patch("app.awake.send_telegram")
+    @patch("app.awake._reset_registry")
+    @patch("app.skill_manager.remove_skill_source")
+    def test_remove_success(self, mock_remove, mock_reset, mock_send, tmp_path):
+        mock_remove.return_value = (True, "Removed skill source 'ops'.")
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_remove("ops")
+        mock_remove.assert_called_once()
+        mock_reset.assert_called_once()
+
+
+class TestSkillSourcesCommand:
+    """Tests for /skill sources integration in awake.py."""
+
+    @patch("app.awake.send_telegram")
+    @patch("app.skill_manager.list_sources")
+    def test_sources(self, mock_list, mock_send, tmp_path):
+        mock_list.return_value = "No external skill sources installed."
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_sources()
+        mock_list.assert_called_once()
+        mock_send.assert_called_once()
+
+
+class TestSkillCommandRouting:
+    """Tests that /skill routes to management subcommands."""
+
+    @patch("app.awake.send_telegram")
+    @patch("app.skill_manager.list_sources")
+    def test_skill_sources_routing(self, mock_list, mock_send, tmp_path):
+        """'/skill sources' routes to list_sources."""
+        mock_list.return_value = "No sources."
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_command("sources")
+        mock_list.assert_called_once()
+
+    @patch("app.awake.send_telegram")
+    def test_skill_install_routing(self, mock_send, tmp_path):
+        """'/skill install' with no args shows usage."""
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_command("install")
+        assert "Usage" in mock_send.call_args[0][0]
+
+    @patch("app.awake.send_telegram")
+    def test_skill_remove_routing(self, mock_send, tmp_path):
+        """'/skill remove' with no args shows usage."""
+        with patch("app.awake.INSTANCE_DIR", tmp_path):
+            _handle_skill_command("remove")
+        assert "Usage" in mock_send.call_args[0][0]
+
+    @patch("app.awake.send_telegram")
+    def test_skill_no_args_includes_install_hint(self, mock_send, tmp_path):
+        """'/skill' with no extra skills shows install hint."""
+        with patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.INSTANCE_DIR", tmp_path):
+            _reset_registry()
+            _handle_skill_command("")
+        msg = mock_send.call_args[0][0]
+        assert "install" in msg.lower()
         _reset_registry()
