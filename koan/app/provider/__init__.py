@@ -1,9 +1,10 @@
 """
-CLI provider abstraction for Koan.
+CLI provider abstraction for Kōan.
 
-Allows switching between Claude Code CLI and GitHub Copilot CLI
-as the underlying AI agent binary. Each provider knows how to
-translate Koan's generic command spec into provider-specific flags.
+Allows switching between Claude Code CLI, GitHub Copilot CLI,
+and local LLM servers as the underlying AI agent backend. Each
+provider knows how to translate Kōan's generic command spec into
+provider-specific flags.
 
 Configuration:
     config.yaml:  cli_provider: "claude"   (default)
@@ -13,10 +14,12 @@ Package structure:
     provider/base.py    — CLIProvider base class + tool constants
     provider/claude.py  — ClaudeProvider implementation
     provider/copilot.py — CopilotProvider implementation
+    provider/local.py   — LocalLLMProvider implementation
     provider/__init__.py — Registry, resolution, convenience functions
 """
 
 import os
+import sys
 from typing import List, Optional
 
 # Re-export base class and constants for convenience
@@ -29,6 +32,7 @@ from app.provider.base import (  # noqa: F401
 # Import concrete providers
 from app.provider.claude import ClaudeProvider  # noqa: F401
 from app.provider.copilot import CopilotProvider  # noqa: F401
+from app.provider.local import LocalLLMProvider  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +42,7 @@ from app.provider.copilot import CopilotProvider  # noqa: F401
 _PROVIDERS = {
     "claude": ClaudeProvider,
     "copilot": CopilotProvider,
+    "local": LocalLLMProvider,
 }
 
 
@@ -76,11 +81,14 @@ def get_cli_binary() -> str:
     """Get the CLI binary command for the configured provider.
 
     For shell scripts: returns the full command prefix needed to invoke
-    the provider (e.g., "claude" or "copilot" or "gh copilot").
+    the provider (e.g., "claude" or "copilot" or "gh copilot" or
+    "python3 -m app.local_llm_runner").
     """
     provider = get_provider()
     if isinstance(provider, CopilotProvider) and provider._is_gh_mode():
         return "gh copilot"
+    if isinstance(provider, LocalLLMProvider):
+        return f"{sys.executable} -m app.local_llm_runner"
     return provider.binary()
 
 
