@@ -103,6 +103,64 @@ class TestParseIdeas:
         assert len(sections["pending"]) == 1
         assert "idea item" not in str(sections["pending"])
 
+    def test_multiline_idea(self):
+        """Ideas with continuation lines are captured as single items."""
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - main idea line
+              continuation detail
+              more detail
+
+            ## Pending
+        """)
+        ideas = parse_ideas(content)
+        assert len(ideas) == 1
+        assert "main idea line" in ideas[0]
+        assert "continuation detail" in ideas[0]
+        assert "more detail" in ideas[0]
+
+    def test_multiline_mixed_with_simple(self):
+        """Multi-line and single-line ideas coexist."""
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - multi-line idea
+              with details
+            - simple idea
+            - another multi
+              also with details
+
+            ## Pending
+        """)
+        ideas = parse_ideas(content)
+        assert len(ideas) == 3
+        assert "\n" in ideas[0]  # multi-line
+        assert "\n" not in ideas[1]  # single-line
+        assert "\n" in ideas[2]  # multi-line
+
+    def test_multiline_idea_blank_line_separator(self):
+        """Blank lines between ideas don't become continuations."""
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - idea one
+
+            - idea two
+
+            ## Pending
+        """)
+        ideas = parse_ideas(content)
+        assert len(ideas) == 2
+        assert ideas[0] == "- idea one"
+        assert ideas[1] == "- idea two"
+
 
 # ---------------------------------------------------------------------------
 # missions.py — insert_idea
@@ -183,6 +241,50 @@ class TestDeleteIdea:
         result, deleted = delete_idea(content, -1)
         assert deleted is None
 
+    def test_delete_multiline_idea(self):
+        """Deleting a multi-line idea removes all continuation lines."""
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - multi-line idea
+              continuation line 1
+              continuation line 2
+            - keep this
+
+            ## Pending
+        """)
+        result, deleted = delete_idea(content, 1)
+        assert "multi-line idea" in deleted
+        assert "continuation line 1" in deleted
+        ideas = parse_ideas(result)
+        assert len(ideas) == 1
+        assert ideas[0] == "- keep this"
+        assert "continuation line" not in result
+
+    def test_delete_second_multiline_idea(self):
+        """Delete the second multi-line idea, keep the first."""
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - first idea
+              first details
+            - second idea
+              second details
+
+            ## Pending
+        """)
+        result, deleted = delete_idea(content, 2)
+        assert "second idea" in deleted
+        assert "second details" in deleted
+        ideas = parse_ideas(result)
+        assert len(ideas) == 1
+        assert "first idea" in ideas[0]
+        assert "first details" in ideas[0]
+
 
 # ---------------------------------------------------------------------------
 # missions.py — promote_idea
@@ -240,6 +342,97 @@ class TestPromoteIdea:
         from app.missions import parse_sections
         sections = parse_sections(result)
         assert "[project:koan]" in sections["pending"][0]
+
+    def test_promote_multiline_idea(self):
+        """Promoting a multi-line idea moves all lines to pending."""
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - [project:koan] implement feature X
+              Step 1: do this
+              Step 2: do that
+            - keep this idea
+
+            ## Pending
+
+            ## In Progress
+
+            ## Done
+        """)
+        result, promoted = promote_idea(content, 1)
+        assert "implement feature X" in promoted
+        assert "Step 1: do this" in promoted
+        assert "Step 2: do that" in promoted
+
+        ideas = parse_ideas(result)
+        assert len(ideas) == 1
+        assert "keep this idea" in ideas[0]
+
+        from app.missions import parse_sections
+        sections = parse_sections(result)
+        assert any("implement feature X" in p for p in sections["pending"])
+
+    def test_promote_with_french_section_headers(self):
+        """Promote works when missions.md uses French headers."""
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - my idea
+
+            ## En attente
+
+            - existing pending
+
+            ## En cours
+
+            ## Terminées
+        """)
+        result, promoted = promote_idea(content, 1)
+        assert promoted == "- my idea"
+
+        ideas = parse_ideas(result)
+        assert len(ideas) == 0
+
+        from app.missions import parse_sections
+        sections = parse_sections(result)
+        assert len(sections["pending"]) == 2
+        assert any("my idea" in p for p in sections["pending"])
+        assert any("existing pending" in p for p in sections["pending"])
+
+    def test_promote_preserves_other_ideas(self):
+        """Only the promoted idea is removed; others stay."""
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - idea A
+            - idea B
+            - idea C
+
+            ## Pending
+
+            ## Done
+        """)
+        result, promoted = promote_idea(content, 2)
+        assert promoted == "- idea B"
+        ideas = parse_ideas(result)
+        assert len(ideas) == 2
+        assert ideas[0] == "- idea A"
+        assert ideas[1] == "- idea C"
+
+    def test_promote_last_idea(self):
+        """Promoting the last idea empties the Ideas section."""
+        content = "# Missions\n\n## Ideas\n\n- sole idea\n\n## Pending\n\n## Done\n"
+        result, promoted = promote_idea(content, 1)
+        assert promoted == "- sole idea"
+        assert len(parse_ideas(result)) == 0
+        from app.missions import parse_sections
+        assert any("sole idea" in p for p in parse_sections(result)["pending"])
 
 
 # ---------------------------------------------------------------------------
@@ -415,9 +608,127 @@ class TestIdeaHandler:
         result = handle(ctx)
         assert "Invalid index" in result
 
+    def test_promote_multiline_via_handler(self, tmp_path):
+        """Handler correctly promotes multi-line ideas."""
+        from skills.core.idea.handler import handle
+
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - implement /plan skill
+              /plan can be used with one idea or a project
+              Like /plan This is an idea
+            - keep this idea
+
+            ## Pending
+
+            ## In Progress
+
+            ## Done
+        """)
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="promote 1")
+        result = handle(ctx)
+        assert "Promoted to pending" in result
+        assert "implement /plan skill" in result
+
+        written = (tmp_path / "instance" / "missions.md").read_text()
+        ideas = parse_ideas(written)
+        assert len(ideas) == 1
+        assert "keep this idea" in ideas[0]
+
+        from app.missions import parse_sections
+        sections = parse_sections(written)
+        assert any("implement /plan skill" in p for p in sections["pending"])
+
+    def test_promote_with_french_headers_via_handler(self, tmp_path):
+        """Handler works with French section headers (## En attente)."""
+        from skills.core.idea.handler import handle
+
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - idea for French layout
+
+            ## En attente
+
+            - existing mission
+
+            ## En cours
+
+            ## Terminées
+        """)
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="promote 1")
+        result = handle(ctx)
+        assert "Promoted to pending" in result
+
+        written = (tmp_path / "instance" / "missions.md").read_text()
+        assert len(parse_ideas(written)) == 0
+        from app.missions import parse_sections
+        sections = parse_sections(written)
+        assert len(sections["pending"]) == 2
+
+    def test_promote_no_ideas_via_handler(self, tmp_path):
+        """Promote on empty ideas section returns informative message."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="promote 1")
+        result = handle(ctx)
+        assert "No ideas to promote" in result
+
+    def test_delete_multiline_via_handler(self, tmp_path):
+        """Handler deletes multi-line ideas completely."""
+        from skills.core.idea.handler import handle
+
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - multi-line idea to delete
+              with continuation
+            - keep this
+
+            ## Pending
+
+            ## Done
+        """)
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="delete 1")
+        result = handle(ctx)
+        assert "Deleted" in result
+
+        written = (tmp_path / "instance" / "missions.md").read_text()
+        assert "continuation" not in written
+        assert "keep this" in written
+
+    def test_list_multiline_ideas_via_handler(self, tmp_path):
+        """Handler lists multi-line ideas showing only the first line."""
+        from skills.core.idea.handler import handle
+
+        content = textwrap.dedent("""\
+            # Missions
+
+            ## Ideas
+
+            - main idea
+              extra details here
+
+            ## Pending
+
+            ## Done
+        """)
+        ctx = self._make_ctx(tmp_path, content, command="idea")
+        result = handle(ctx)
+        assert "IDEAS" in result
+        assert "1. main idea" in result
+
 
 # ---------------------------------------------------------------------------
-# _clean_idea helper
+# clean_mission_display helper
 # ---------------------------------------------------------------------------
 
 class TestCleanIdea:
@@ -436,6 +747,18 @@ class TestCleanIdea:
         result = clean_mission_display(long)
         assert result.endswith("...")
         assert len(result) == 120
+
+    def test_multiline_shows_first_line_only(self):
+        from app.missions import clean_mission_display
+        result = clean_mission_display("- main idea\n  continuation line\n  more details")
+        assert result == "main idea"
+        assert "continuation" not in result
+
+    def test_multiline_with_project_tag(self):
+        from app.missions import clean_mission_display
+        result = clean_mission_display("- [project:koan] main idea\n  details here")
+        assert result == "[koan] main idea"
+        assert "details" not in result
 
 
 # ---------------------------------------------------------------------------

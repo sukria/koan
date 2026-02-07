@@ -238,7 +238,8 @@ def normalize_content(content: str) -> str:
 def parse_ideas(content: str) -> List[str]:
     """Parse the ## Ideas section and return a list of idea items.
 
-    Items are simple "- ..." lines. The Ideas section is intentionally
+    Items start with "- ..." and may include continuation lines (indented
+    or non-heading text that follows). The Ideas section is intentionally
     not part of _SECTION_MAP — ideas are never picked up by the agent loop.
     """
     ideas = []
@@ -259,6 +260,9 @@ def parse_ideas(content: str) -> List[str]:
 
         if stripped.startswith("- "):
             ideas.append(stripped)
+        elif stripped and not stripped.startswith("#") and ideas:
+            # Continuation line — append to last idea
+            ideas[-1] += "\n" + line
 
     return ideas
 
@@ -297,6 +301,7 @@ def insert_idea(content: str, entry: str) -> str:
 def delete_idea(content: str, index: int) -> Tuple[str, Optional[str]]:
     """Delete an idea by 1-based index from the Ideas section.
 
+    Handles multi-line ideas (continuation lines after the initial "- ..." line).
     Returns (updated_content, deleted_text) or (original_content, None) if
     the index is out of range.
     """
@@ -306,10 +311,11 @@ def delete_idea(content: str, index: int) -> Tuple[str, Optional[str]]:
 
     target = ideas[index - 1]
 
-    # Find and remove the line from content
+    # Find and remove all lines belonging to this idea
     lines = content.splitlines()
     idea_count = 0
     in_ideas = False
+    remove_start = None
 
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -322,10 +328,32 @@ def delete_idea(content: str, index: int) -> Tuple[str, Optional[str]]:
             continue
 
         if in_ideas and stripped.startswith("- "):
+            # If we were collecting lines for a previous match, stop
+            if remove_start is not None:
+                break
             idea_count += 1
             if idea_count == index:
-                lines.pop(i)
-                return normalize_content("\n".join(lines)), target
+                remove_start = i
+        elif in_ideas and remove_start is not None:
+            if stripped and not stripped.startswith("#"):
+                # Continuation line — include in removal
+                continue
+            else:
+                # Empty line or heading — stop collecting
+                break
+
+    if remove_start is not None:
+        # Determine how many lines to remove
+        remove_end = remove_start + 1
+        for j in range(remove_start + 1, len(lines)):
+            stripped = lines[j].strip()
+            if stripped.startswith("- ") or stripped.startswith("## "):
+                break
+            if stripped == "":
+                break
+            remove_end = j + 1
+        del lines[remove_start:remove_end]
+        return normalize_content("\n".join(lines)), target
 
     return content, None
 
@@ -428,9 +456,13 @@ def cancel_pending_mission(content: str, identifier: str) -> Tuple[str, str]:
 def clean_mission_display(text: str, max_length: int = 120) -> str:
     """Clean a mission or idea line for display.
 
-    Strips leading "- ", converts [project:X] tags to readable [X] prefix,
-    and truncates long lines.
+    For multi-line ideas, only the first line is shown. Strips leading "- ",
+    converts [project:X] tags to readable [X] prefix, and truncates long lines.
     """
+    # For multi-line ideas, use only the first line
+    if "\n" in text:
+        text = text.split("\n")[0]
+
     # Strip leading "- "
     if text.startswith("- "):
         text = text[2:]
