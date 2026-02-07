@@ -422,18 +422,18 @@ class TestIdeaHandler:
 
 class TestCleanIdea:
     def test_strip_dash(self):
-        from skills.core.idea.handler import _clean_idea
-        assert _clean_idea("- simple idea") == "simple idea"
+        from app.missions import clean_mission_display
+        assert clean_mission_display("- simple idea") == "simple idea"
 
     def test_strip_project_tag(self):
-        from skills.core.idea.handler import _clean_idea
-        result = _clean_idea("- [project:koan] fix parser")
+        from app.missions import clean_mission_display
+        result = clean_mission_display("- [project:koan] fix parser")
         assert result == "[koan] fix parser"
 
     def test_truncation(self):
-        from skills.core.idea.handler import _clean_idea
+        from app.missions import clean_mission_display
         long = "- " + "x" * 200
-        result = _clean_idea(long)
+        result = clean_mission_display(long)
         assert result.endswith("...")
         assert len(result) == 120
 

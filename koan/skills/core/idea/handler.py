@@ -37,7 +37,7 @@ def _list_ideas(missions_file):
     if not missions_file.exists():
         return "No missions file found."
 
-    from app.missions import parse_ideas
+    from app.missions import parse_ideas, clean_mission_display
 
     ideas = parse_ideas(missions_file.read_text())
 
@@ -46,7 +46,7 @@ def _list_ideas(missions_file):
 
     parts = ["IDEAS"]
     for i, idea in enumerate(ideas, 1):
-        display = _clean_idea(idea)
+        display = clean_mission_display(idea)
         parts.append(f"  {i}. {display}")
 
     parts.append("")
@@ -80,7 +80,7 @@ def _add_idea(missions_file, text):
 
 def _delete_idea(missions_file, index):
     """Delete an idea by index."""
-    from app.missions import delete_idea
+    from app.missions import delete_idea, clean_mission_display
     from app.utils import modify_missions_file
 
     deleted_text = None
@@ -99,13 +99,13 @@ def _delete_idea(missions_file, index):
             return "No ideas to delete."
         return f"Invalid index. Use 1-{count}."
 
-    display = _clean_idea(deleted_text)
+    display = clean_mission_display(deleted_text)
     return f"Deleted: {display}"
 
 
 def _promote_idea(missions_file, index):
     """Promote an idea to the pending queue."""
-    from app.missions import promote_idea
+    from app.missions import promote_idea, clean_mission_display
     from app.utils import modify_missions_file
 
     promoted_text = None
@@ -124,25 +124,5 @@ def _promote_idea(missions_file, index):
             return "No ideas to promote."
         return f"Invalid index. Use 1-{count}."
 
-    display = _clean_idea(promoted_text)
+    display = clean_mission_display(promoted_text)
     return f"Promoted to pending: {display}"
-
-
-def _clean_idea(text):
-    """Clean an idea line for display."""
-    # Strip leading "- "
-    if text.startswith("- "):
-        text = text[2:]
-
-    # Strip project tag but keep project name as prefix
-    tag_match = re.search(r'\[projec?t:([a-zA-Z0-9_-]+)\]\s*', text)
-    if tag_match:
-        project = tag_match.group(1)
-        text = re.sub(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*', '', text)
-        text = f"[{project}] {text}"
-
-    # Truncate for readability
-    if len(text) > 120:
-        text = text[:117] + "..."
-
-    return text

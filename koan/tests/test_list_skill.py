@@ -181,27 +181,27 @@ class TestListHandler:
 
 class TestCleanMission:
     def test_strip_dash_prefix(self):
-        from skills.core.list.handler import _clean_mission
-        assert _clean_mission("- fix the bug") == "fix the bug"
+        from app.missions import clean_mission_display
+        assert clean_mission_display("- fix the bug") == "fix the bug"
 
     def test_strip_project_tag(self):
-        from skills.core.list.handler import _clean_mission
-        result = _clean_mission("- [project:koan] fix parser")
+        from app.missions import clean_mission_display
+        result = clean_mission_display("- [project:koan] fix parser")
         assert result == "[koan] fix parser"
 
     def test_strip_projet_tag(self):
-        from skills.core.list.handler import _clean_mission
-        result = _clean_mission("- [projet:webapp] add feature")
+        from app.missions import clean_mission_display
+        result = clean_mission_display("- [projet:webapp] add feature")
         assert result == "[webapp] add feature"
 
     def test_no_tag(self):
-        from skills.core.list.handler import _clean_mission
-        assert _clean_mission("- simple task") == "simple task"
+        from app.missions import clean_mission_display
+        assert clean_mission_display("- simple task") == "simple task"
 
     def test_truncation(self):
-        from skills.core.list.handler import _clean_mission
+        from app.missions import clean_mission_display
         long = "- " + "a" * 200
-        result = _clean_mission(long)
+        result = clean_mission_display(long)
         assert result.endswith("...")
         assert len(result) == 120
 
