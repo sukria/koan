@@ -1,0 +1,181 @@
+"""Tests for the live progress skill handler (/live command)."""
+
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+
+def _load_handler():
+    """Load the live skill handler module."""
+    handler_path = (
+        Path(__file__).parent.parent / "skills" / "core" / "live" / "handler.py"
+    )
+    spec = importlib.util.spec_from_file_location("live_handler", str(handler_path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _make_ctx(tmp_path, args=""):
+    """Create a minimal SkillContext for testing."""
+    from app.skills import SkillContext
+
+    return SkillContext(koan_root=tmp_path, instance_dir=tmp_path, args=args)
+
+
+class TestReadLiveProgress:
+    """Tests for _read_live_progress helper."""
+
+    def test_no_pending_file(self, tmp_path):
+        mod = _load_handler()
+        (tmp_path / "journal").mkdir()
+        result = mod._read_live_progress(tmp_path)
+        assert result is None
+
+    def test_empty_pending_file(self, tmp_path):
+        mod = _load_handler()
+        pending = tmp_path / "journal" / "pending.md"
+        pending.parent.mkdir(parents=True)
+        pending.write_text("")
+        result = mod._read_live_progress(tmp_path)
+        assert result is None
+
+    def test_whitespace_only_pending(self, tmp_path):
+        mod = _load_handler()
+        pending = tmp_path / "journal" / "pending.md"
+        pending.parent.mkdir(parents=True)
+        pending.write_text("   \n  \n  ")
+        result = mod._read_live_progress(tmp_path)
+        assert result is None
+
+    def test_pending_with_header_only(self, tmp_path):
+        mod = _load_handler()
+        pending = tmp_path / "journal" / "pending.md"
+        pending.parent.mkdir(parents=True)
+        pending.write_text(
+            "# Mission: do stuff\nProject: koan\nStarted: 2026-02-07\n\n---\n"
+        )
+        result = mod._read_live_progress(tmp_path)
+        assert result is not None
+        assert "Mission: do stuff" in result
+
+    def test_pending_with_full_content(self, tmp_path):
+        mod = _load_handler()
+        pending = tmp_path / "journal" / "pending.md"
+        pending.parent.mkdir(parents=True)
+        content = (
+            "# Mission: add feature\n"
+            "Project: koan\n"
+            "Started: 2026-02-07 08:00:00\n"
+            "Run: 5/50\n"
+            "Mode: deep\n"
+            "\n"
+            "---\n"
+            "08:00 — Reading codebase\n"
+            "08:05 — Creating branch\n"
+            "08:10 — Writing handler\n"
+        )
+        pending.write_text(content)
+        result = mod._read_live_progress(tmp_path)
+        assert "Mission: add feature" in result
+        assert "Project: koan" in result
+        assert "08:00 — Reading codebase" in result
+        assert "08:10 — Writing handler" in result
+
+    def test_returns_all_progress_lines(self, tmp_path):
+        """Unlike /log which truncates to 5 lines, /live shows everything."""
+        mod = _load_handler()
+        pending = tmp_path / "journal" / "pending.md"
+        pending.parent.mkdir(parents=True)
+        lines = "\n".join(f"09:{i:02d} — Step {i}" for i in range(15))
+        pending.write_text(f"# Mission: test\n\n---\n{lines}")
+        result = mod._read_live_progress(tmp_path)
+        # All 15 steps should be present
+        for i in range(15):
+            assert f"Step {i}" in result
+
+
+class TestHandleLive:
+    """Tests for handle() — the /live command entry point."""
+
+    def test_no_mission_running(self, tmp_path):
+        mod = _load_handler()
+        (tmp_path / "journal").mkdir()
+        ctx = _make_ctx(tmp_path)
+        result = mod.handle(ctx)
+        assert result == "No mission running."
+
+    def test_no_journal_dir(self, tmp_path):
+        mod = _load_handler()
+        ctx = _make_ctx(tmp_path)
+        result = mod.handle(ctx)
+        assert result == "No mission running."
+
+    def test_shows_progress_when_running(self, tmp_path):
+        mod = _load_handler()
+        pending = tmp_path / "journal" / "pending.md"
+        pending.parent.mkdir(parents=True)
+        pending.write_text(
+            "# Mission: fix bug\nProject: koan\n\n---\n"
+            "10:00 — Investigating\n"
+            "10:05 — Found root cause\n"
+        )
+        ctx = _make_ctx(tmp_path)
+        result = mod.handle(ctx)
+        assert "Mission: fix bug" in result
+        assert "Investigating" in result
+        assert "Found root cause" in result
+
+    def test_args_are_ignored(self, tmp_path):
+        """/live takes no arguments — args are ignored gracefully."""
+        mod = _load_handler()
+        pending = tmp_path / "journal" / "pending.md"
+        pending.parent.mkdir(parents=True)
+        pending.write_text("# Mission: work\n\n---\n10:00 — doing stuff")
+        ctx = _make_ctx(tmp_path, args="some random args")
+        result = mod.handle(ctx)
+        assert "Mission: work" in result
+
+
+class TestSkillMetadata:
+    """Tests for SKILL.md metadata."""
+
+    def test_skill_md_exists(self):
+        skill_path = (
+            Path(__file__).parent.parent / "skills" / "core" / "live" / "SKILL.md"
+        )
+        assert skill_path.exists()
+
+    def test_skill_md_has_live_command(self):
+        skill_path = (
+            Path(__file__).parent.parent / "skills" / "core" / "live" / "SKILL.md"
+        )
+        content = skill_path.read_text()
+        assert "name: live" in content
+        assert "handler: handler.py" in content
+
+    def test_skill_md_has_progress_alias(self):
+        skill_path = (
+            Path(__file__).parent.parent / "skills" / "core" / "live" / "SKILL.md"
+        )
+        content = skill_path.read_text()
+        assert "progress" in content
+
+    def test_skill_discovered_by_registry(self):
+        """The skill should be auto-discovered by the skills registry."""
+        from app.skills import build_registry
+
+        registry = build_registry()
+        skill = registry.find_by_command("live")
+        assert skill is not None
+        assert skill.name == "live"
+
+    def test_progress_alias_discovered(self):
+        """The /progress alias should also resolve to the live skill."""
+        from app.skills import build_registry
+
+        registry = build_registry()
+        skill = registry.find_by_command("progress")
+        assert skill is not None
+        assert skill.name == "live"
