@@ -105,43 +105,43 @@ class TestProjectsHandler:
 class TestProjectsCommandRouting:
     """Test that /projects and /proj route to the skill via awake."""
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     @patch(
         "app.utils.get_known_projects",
         return_value=[("koan", "/home/koan")],
     )
     def test_projects_routes_via_skill(self, mock_projects, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path):
             handle_command("/projects")
         mock_send.assert_called_once()
         output = mock_send.call_args[0][0]
         assert "koan" in output
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     @patch(
         "app.utils.get_known_projects",
         return_value=[("koan", "/home/koan")],
     )
     def test_proj_alias_routes(self, mock_projects, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path):
             handle_command("/proj")
         mock_send.assert_called_once()
         output = mock_send.call_args[0][0]
         assert "koan" in output
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_projects_appears_in_help(self, mock_send, tmp_path):
         """Verify /projects is included in /help output via skill discovery."""
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path):
             handle_command("/help")
         mock_send.assert_called_once()
         help_text = mock_send.call_args[0][0]

@@ -957,59 +957,59 @@ class TestCleanIdea:
 # ---------------------------------------------------------------------------
 
 class TestIdeaCommandRouting:
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_idea_routes_via_skill(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Ideas\n\n- test idea\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/idea")
         mock_send.assert_called_once()
         output = mock_send.call_args[0][0]
         assert "IDEAS" in output
         assert "test idea" in output
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_ideas_routes_via_skill(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Ideas\n\n- listed idea\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/ideas")
         mock_send.assert_called_once()
         assert "listed idea" in mock_send.call_args[0][0]
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_buffer_routes_via_skill(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Ideas\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/buffer new buffered idea")
         mock_send.assert_called_once()
         assert "Idea saved" in mock_send.call_args[0][0]
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_idea_appears_in_help(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path):
             handle_command("/help")
         mock_send.assert_called_once()
         help_text = mock_send.call_args[0][0]

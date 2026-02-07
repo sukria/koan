@@ -150,8 +150,8 @@ class TestMissionHandlerNowFlag:
 class TestAwakeHandleMissionNowFlag:
     """Test handle_mission() in awake.py also respects --now."""
 
-    @patch("app.awake.send_telegram")
-    @patch("app.awake.MISSIONS_FILE")
+    @patch("app.command_handlers.send_telegram")
+    @patch("app.command_handlers.MISSIONS_FILE")
     def test_normal_mission_bottom(self, mock_file, mock_send, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
@@ -159,8 +159,8 @@ class TestAwakeHandleMissionNowFlag:
         )
         mock_file.__fspath__ = lambda s: str(missions)
         # Patch MISSIONS_FILE to be the real path
-        with patch("app.awake.MISSIONS_FILE", missions):
-            from app.awake import handle_mission
+        with patch("app.command_handlers.MISSIONS_FILE", missions):
+            from app.command_handlers import handle_mission
             handle_mission("fix something")
 
         content = missions.read_text()
@@ -168,14 +168,14 @@ class TestAwakeHandleMissionNowFlag:
         assert lines[0] == "- existing"
         assert lines[1] == "- fix something"
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_now_flag_top(self, mock_send, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
             "# Missions\n\n## Pending\n\n- existing\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.MISSIONS_FILE", missions):
-            from app.awake import handle_mission
+        with patch("app.command_handlers.MISSIONS_FILE", missions):
+            from app.command_handlers import handle_mission
             handle_mission("--now fix something")
 
         content = missions.read_text()
@@ -183,24 +183,24 @@ class TestAwakeHandleMissionNowFlag:
         assert lines[0] == "- fix something"
         assert lines[1] == "- existing"
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_now_flag_stripped_from_text(self, mock_send, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n")
-        with patch("app.awake.MISSIONS_FILE", missions):
-            from app.awake import handle_mission
+        with patch("app.command_handlers.MISSIONS_FILE", missions):
+            from app.command_handlers import handle_mission
             handle_mission("--now deploy hotfix")
 
         content = missions.read_text()
         assert "--now" not in content
         assert "- deploy hotfix" in content
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_ack_message_includes_priority(self, mock_send, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n")
-        with patch("app.awake.MISSIONS_FILE", missions):
-            from app.awake import handle_mission
+        with patch("app.command_handlers.MISSIONS_FILE", missions):
+            from app.command_handlers import handle_mission
             handle_mission("--now urgent fix")
 
         ack = mock_send.call_args[0][0]

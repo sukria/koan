@@ -69,17 +69,17 @@ class TestMagicSkillRegistry:
         assert skill is not None
         assert skill.name == "magic"
 
-    @patch("app.awake._run_in_worker")
+    @patch("app.command_handlers._run_in_worker_cb")
     def test_handle_command_dispatches_magic(self, mock_worker):
         """handle_command('/magic') should dispatch via worker thread."""
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
         handle_command("/magic")
         mock_worker.assert_called_once()
 
-    @patch("app.awake._run_in_worker")
+    @patch("app.command_handlers._run_in_worker_cb")
     def test_handle_command_dispatches_ai(self, mock_worker):
         """handle_command('/ai') should dispatch via worker thread."""
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
         handle_command("/ai")
         mock_worker.assert_called_once()
 
@@ -258,9 +258,9 @@ class TestCleanResponse:
 # ---------------------------------------------------------------------------
 
 class TestHelpIntegration:
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_help_mentions_magic(self, mock_send):
-        from app.awake import _handle_help
+        from app.command_handlers import _handle_help
         _handle_help()
         msg = mock_send.call_args[0][0]
         assert "/magic" in msg or "magic" in msg.lower()
