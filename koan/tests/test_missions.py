@@ -11,6 +11,7 @@ from app.missions import (
     group_by_project,
     find_section_boundaries,
     normalize_content,
+    reorder_mission,
     DEFAULT_SKELETON,
 )
 
@@ -516,3 +517,125 @@ class TestNormalizeContent:
         assert "\n\n\n" not in result
         assert "- New task" in result
         assert "- Old task" in result
+
+
+# ---------------------------------------------------------------------------
+# reorder_mission
+# ---------------------------------------------------------------------------
+
+class TestReorderMission:
+    SAMPLE = (
+        "## En attente\n\n"
+        "- first task\n"
+        "- second task\n"
+        "- third task\n\n"
+        "## En cours\n\n"
+        "## Terminées\n"
+    )
+
+    def test_move_to_top(self):
+        new_content, moved = reorder_mission(self.SAMPLE, 3, 1)
+        assert "third task" in moved
+        lines = [l for l in new_content.splitlines() if l.startswith("- ")]
+        assert lines[0] == "- third task"
+        assert lines[1] == "- first task"
+        assert lines[2] == "- second task"
+
+    def test_move_to_position(self):
+        new_content, moved = reorder_mission(self.SAMPLE, 3, 2)
+        assert "third task" in moved
+        lines = [l for l in new_content.splitlines() if l.startswith("- ")]
+        assert lines[0] == "- first task"
+        assert lines[1] == "- third task"
+        assert lines[2] == "- second task"
+
+    def test_move_to_last(self):
+        new_content, moved = reorder_mission(self.SAMPLE, 1, 3)
+        assert "first task" in moved
+        lines = [l for l in new_content.splitlines() if l.startswith("- ")]
+        assert lines[0] == "- second task"
+        assert lines[1] == "- third task"
+        assert lines[2] == "- first task"
+
+    def test_invalid_position_raises(self):
+        with pytest.raises(ValueError, match="Invalid position"):
+            reorder_mission(self.SAMPLE, 5, 1)
+
+    def test_zero_position_raises(self):
+        with pytest.raises(ValueError, match="Invalid position"):
+            reorder_mission(self.SAMPLE, 0, 1)
+
+    def test_invalid_target_raises(self):
+        with pytest.raises(ValueError, match="Invalid target"):
+            reorder_mission(self.SAMPLE, 1, 5)
+
+    def test_same_position_raises(self):
+        with pytest.raises(ValueError, match="already at"):
+            reorder_mission(self.SAMPLE, 2, 2)
+
+    def test_no_pending_raises(self):
+        content = "## En attente\n\n## En cours\n\n## Terminées\n"
+        with pytest.raises(ValueError, match="No pending"):
+            reorder_mission(content, 1, 1)
+
+    def test_no_pending_section_raises(self):
+        content = "## En cours\n\n- working\n\n## Terminées\n"
+        with pytest.raises(ValueError, match="No pending section"):
+            reorder_mission(content, 1, 1)
+
+    def test_preserves_project_tags(self):
+        content = (
+            "## En attente\n\n"
+            "- [project:koan] first\n"
+            "- [project:web] second\n"
+            "- third\n\n"
+            "## En cours\n\n"
+            "## Terminées\n"
+        )
+        new_content, moved = reorder_mission(content, 2, 1)
+        assert "second" in moved
+        assert "[project:web]" in new_content
+
+    def test_multiline_mission_moves_intact(self):
+        content = (
+            "## Pending\n\n"
+            "- first task\n"
+            "- second task\n"
+            "  with continuation\n"
+            "- third task\n\n"
+            "## In Progress\n\n"
+            "## Done\n"
+        )
+        new_content, moved = reorder_mission(content, 2, 1)
+        assert "second task" in moved
+        lines = new_content.splitlines()
+        # The continuation line should follow the moved item
+        idx = lines.index("- second task")
+        assert lines[idx + 1] == "  with continuation"
+
+    def test_english_section_headers(self):
+        content = (
+            "## Pending\n\n"
+            "- alpha\n"
+            "- beta\n\n"
+            "## In Progress\n\n"
+            "## Done\n"
+        )
+        new_content, moved = reorder_mission(content, 2, 1)
+        assert "beta" in moved
+        lines = [l for l in new_content.splitlines() if l.startswith("- ")]
+        assert lines[0] == "- beta"
+        assert lines[1] == "- alpha"
+
+    def test_display_uses_clean_format(self):
+        content = (
+            "## Pending\n\n"
+            "- [project:koan] fix the parser bug\n"
+            "- simple task\n\n"
+            "## In Progress\n\n"
+            "## Done\n"
+        )
+        _, moved = reorder_mission(content, 1, 2)
+        # clean_mission_display should convert [project:koan] to [koan]
+        assert "[koan]" in moved
+        assert "[project:koan]" not in moved
