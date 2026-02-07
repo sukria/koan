@@ -251,6 +251,17 @@ wait_for_claude_task() {
 }
 
 count=0
+PROCESS_START_TIME=$(date +%s)
+
+# is_shutdown_requested — check if a valid (non-stale) shutdown signal exists
+# Uses Python shutdown_manager for timestamp validation.
+is_shutdown_requested() {
+  "$PYTHON" -c "
+from app.shutdown_manager import is_shutdown_requested
+import sys
+sys.exit(0 if is_shutdown_requested('$KOAN_ROOT', $PROCESS_START_TIME) else 1)
+" 2>/dev/null
+}
 
 # Print startup banner
 "$PYTHON" -c "from app.banners import print_agent_banner; print_agent_banner('agent loop — $CLI_PROVIDER')" 2>/dev/null || true
@@ -319,6 +330,14 @@ while true; do
     break
   fi
 
+  # Check for /shutdown — stops both agent loop and bridge
+  if is_shutdown_requested; then
+    log koan "Shutdown requested. Exiting."
+    CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
+    notify "Koan shutdown after $count runs. Last project: $CURRENT_PROJ."
+    break
+  fi
+
   # Check for pause — contemplative mode
   if [ -f "$KOAN_ROOT/.koan-pause" ]; then
     set_status "Paused ($(date '+%H:%M'))"
@@ -363,9 +382,10 @@ while true; do
       log pause "Contemplative session ended."
     fi
 
-    # Sleep in 5s increments — allows /resume or auto-resume to take effect quickly
+    # Sleep in 5s increments — allows /resume, auto-resume, or /shutdown to take effect quickly
     for ((s=0; s<60; s++)); do
       [ ! -f "$KOAN_ROOT/.koan-pause" ] && break
+      is_shutdown_requested && break
       sleep 5
     done
     continue
@@ -497,6 +517,7 @@ $KNOWN_PROJECTS"
             fi
             [ -f "$KOAN_ROOT/.koan-stop" ] && break
             [ -f "$KOAN_ROOT/.koan-pause" ] && break
+            is_shutdown_requested && break
           done
         fi
         continue
@@ -517,6 +538,7 @@ $KNOWN_PROJECTS"
         fi
         [ -f "$KOAN_ROOT/.koan-stop" ] && break
         [ -f "$KOAN_ROOT/.koan-pause" ] && break
+        is_shutdown_requested && break
       done
       continue
     }
@@ -744,14 +766,15 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
         set_status "Run $RUN_NUM/$MAX_RUNS — done, new mission detected"
         break
       fi
-      # Also wake up on stop/pause requests
+      # Also wake up on stop/pause/shutdown requests
       [ -f "$KOAN_ROOT/.koan-stop" ] && break
       [ -f "$KOAN_ROOT/.koan-pause" ] && break
+      is_shutdown_requested && break
     done
   fi
 done
 
-# This point is only reached via /stop command
+# This point is reached via /stop or /shutdown command
 rm -f "$KOAN_ROOT/.koan-status"
 log koan "Session ended. $count runs executed."
 
