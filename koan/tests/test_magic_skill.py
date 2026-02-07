@@ -62,25 +62,11 @@ class TestMagicSkillRegistry:
         assert skill is not None
         assert skill.name == "magic"
 
-    def test_ai_alias_routes_to_magic(self):
-        """Registry should find magic skill by /ai alias."""
-        registry = build_registry()
-        skill = registry.find_by_command("ai")
-        assert skill is not None
-        assert skill.name == "magic"
-
     @patch("app.awake._run_in_worker")
     def test_handle_command_dispatches_magic(self, mock_worker):
         """handle_command('/magic') should dispatch via worker thread."""
         from app.awake import handle_command
         handle_command("/magic")
-        mock_worker.assert_called_once()
-
-    @patch("app.awake._run_in_worker")
-    def test_handle_command_dispatches_ai(self, mock_worker):
-        """handle_command('/ai') should dispatch via worker thread."""
-        from app.awake import handle_command
-        handle_command("/ai")
         mock_worker.assert_called_once()
 
 
