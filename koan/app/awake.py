@@ -97,7 +97,7 @@ def _reset_registry():
 # Core commands that remain hardcoded (safety-critical or bootstrap)
 CORE_COMMANDS = frozenset({
     "help", "stop", "sleep", "resume", "skill",
-    "pause", "work", "awake", "start", "restart",  # aliases for sleep/resume; /restart is process restart
+    "pause", "work", "awake", "start",  # aliases for sleep/resume
 })
 
 
@@ -180,10 +180,6 @@ def handle_command(text: str):
         else:
             pause_file.write_text("PAUSE")
             send_telegram("⏸️ Paused. No missions will run. /resume to unpause.")
-        return
-
-    if cmd == "/restart":
-        handle_restart()
         return
 
     if cmd in ("/resume", "/work", "/awake", "/start"):
@@ -370,7 +366,6 @@ def _handle_help():
         "CORE",
         "⏸️ /pause -- pause (alias: /sleep)",
         "▶️ /resume -- resume after pause (alias: /work, /awake, /start)",
-        "🔄 /restart -- restart both bridge and run loop",
         "⏹️ /stop -- stop Koan after current mission",
         "/help -- this help (use /help <command> for details)",
         "/skill -- list available skills",
@@ -470,32 +465,6 @@ def handle_resume():
     except Exception as e:
         log("error", f"Error checking quota reset: {e}")
         send_telegram("⚠️ Error checking quota. /status or check manually.")
-
-
-def handle_restart():
-    """Restart both bridge and run loop processes.
-
-    Creates .koan-restart signal file, then the main loop detects it
-    and triggers os.execv() to re-exec the bridge. run.sh detects the
-    same file and exits with code 42 to trigger a re-launch.
-    """
-    from app.restart_manager import request_restart, check_restart
-    from app.pause_manager import remove_pause
-
-    # Dedup: if restart file exists (any age), skip.  This prevents restart
-    # loops when Telegram re-delivers the /restart message after os.execv.
-    # The stale file is cleared by main() after the first poll cycle, so
-    # subsequent legitimate /restart commands will work.
-    if check_restart(KOAN_ROOT):
-        log("init", "Restart already pending — ignoring duplicate /restart")
-        return
-
-    # Clear any pause state — restart should start fresh
-    remove_pause(str(KOAN_ROOT))
-
-    request_restart(KOAN_ROOT)
-    send_telegram("🔄 Restart requested. Both processes will restart momentarily.")
-    log("init", "Restart requested — will re-exec on next poll cycle.")
 
 
 def handle_mission(text: str):
@@ -935,7 +904,7 @@ def main():
             # file left from a previous incarnation.  During the first
             # poll the file acts as a dedup guard: if Telegram re-delivers
             # the /restart message that triggered our re-exec,
-            # handle_restart() sees the file and skips.  Once that batch
+            # the skill handler sees the file and skips.  Once that batch
             # is processed we remove the guard so future /restart commands
             # are honored.
             if first_poll:
@@ -945,7 +914,7 @@ def main():
             flush_outbox()
             write_heartbeat(str(KOAN_ROOT))
 
-            # Check for restart signal (set by /restart command).
+            # Check for restart signal (set by /restart or /update command).
             # Only react to files created AFTER we started — stale files
             # were already cleared above after the first poll.
             if check_restart(KOAN_ROOT, since=startup_time):

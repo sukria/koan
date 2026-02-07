@@ -17,7 +17,6 @@ from app.awake import (
     handle_command,
     handle_chat,
     handle_resume,
-    handle_restart,
     handle_message,
     flush_outbox,
     _format_outbox_message,
@@ -420,10 +419,11 @@ class TestHandleCommand:
         handle_command("/awake")
         mock_resume.assert_called_once()
 
-    @patch("app.awake.handle_restart")
-    def test_restart_delegates_to_restart(self, mock_restart):
+    @patch("app.awake._dispatch_skill")
+    def test_restart_dispatches_to_skill(self, mock_dispatch):
+        """Since /restart is now a skill (in update skill), it routes via skill dispatch."""
         handle_command("/restart")
-        mock_restart.assert_called_once()
+        mock_dispatch.assert_called_once()
 
     @patch("app.awake.handle_resume")
     def test_start_delegates_to_resume(self, mock_resume):
