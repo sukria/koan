@@ -155,16 +155,81 @@ notify() {
 # Temp file for Claude output (set early so trap can clean it)
 CLAUDE_OUT=""
 
+# --- Graceful CTRL-C handling ---
+# When a task is running, first CTRL-C shows a warning.
+# Second CTRL-C within 10 seconds actually aborts.
+# If no second CTRL-C within 10s, the warning resets.
+TASK_RUNNING=0
+CTRL_C_FIRST_TIME=0
+CLAUDE_PID=""
+CTRL_C_TIMEOUT=10
+
 cleanup() {
   [ -n "$CLAUDE_OUT" ] && rm -f "$CLAUDE_OUT"
   [ -n "${CLAUDE_ERR:-}" ] && rm -f "$CLAUDE_ERR"
+  # Kill child process if still running, then wait for it to release pipes
+  if [ -n "$CLAUDE_PID" ]; then
+    kill "$CLAUDE_PID" 2>/dev/null
+    wait "$CLAUDE_PID" 2>/dev/null
+  fi
   log koan "Shutdown."
   CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
   notify "Koan interrupted after $count runs. Last project: $CURRENT_PROJ."
   exit 0
 }
 
-trap cleanup INT TERM
+on_sigint() {
+  if [ "$TASK_RUNNING" -eq 0 ]; then
+    # No task running — immediate cleanup
+    cleanup
+  fi
+
+  # Task is running — check if this is first or second CTRL-C
+  local now
+  now=$(date +%s)
+
+  if [ "$CTRL_C_FIRST_TIME" -gt 0 ]; then
+    local elapsed=$((now - CTRL_C_FIRST_TIME))
+    if [ "$elapsed" -le "$CTRL_C_TIMEOUT" ]; then
+      # Second CTRL-C within timeout — abort
+      echo ""
+      log koan "Confirmed. Aborting task..."
+      CTRL_C_FIRST_TIME=0
+      TASK_RUNNING=0
+      [ -n "$CLAUDE_PID" ] && kill "$CLAUDE_PID" 2>/dev/null
+      cleanup
+    fi
+  fi
+
+  # First CTRL-C (or timeout expired — treat as new first)
+  CTRL_C_FIRST_TIME=$now
+  echo ""
+  log koan "⚠️  A task is running. Press CTRL-C again within ${CTRL_C_TIMEOUT}s to abort."
+}
+
+trap on_sigint INT
+trap cleanup TERM
+
+# wait_for_claude_task
+# Waits for the background process $CLAUDE_PID with graceful CTRL-C protection.
+# Caller must set: CLAUDE_PID (background process ID)
+# Sets: CLAUDE_EXIT (child exit code)
+# Also sets TASK_RUNNING=1 on entry, resets to 0 on exit.
+wait_for_claude_task() {
+  TASK_RUNNING=1
+  CTRL_C_FIRST_TIME=0
+
+  # Wait for child, re-waiting if interrupted by CTRL-C
+  while kill -0 "$CLAUDE_PID" 2>/dev/null; do
+    wait "$CLAUDE_PID" 2>/dev/null || true
+  done
+
+  # Child is done — capture exit code (|| true prevents set -e from exiting)
+  wait "$CLAUDE_PID" 2>/dev/null && CLAUDE_EXIT=0 || CLAUDE_EXIT=$?
+  CLAUDE_PID=""
+  TASK_RUNNING=0
+  CTRL_C_FIRST_TIME=0
+}
 
 count=0
 
@@ -273,12 +338,12 @@ while true; do
 
       cd "$INSTANCE"
       CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
-      set +e
       # shellcheck disable=SC2086
       log pause "Running contemplative session..."
-      claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 5 $CONTEMPLATE_FLAGS 2>/dev/null
+      (trap '' INT; exec claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 5 $CONTEMPLATE_FLAGS) 2>/dev/null &
+      CLAUDE_PID=$!
+      wait_for_claude_task
       log pause "Contemplative session ended."
-      set -e
     fi
 
     # Sleep in 5s increments — allows /resume or auto-resume to take effect quickly
@@ -390,12 +455,12 @@ $KNOWN_PROJECTS"
 
         cd "$INSTANCE"
         CONTEMPLATE_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('contemplative'))" 2>/dev/null || echo "")
-        set +e
         # shellcheck disable=SC2086
         log pause "Running contemplative session..."
-        claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 5 $CONTEMPLATE_FLAGS 2>/dev/null
+        (trap '' INT; exec claude -p "$CONTEMPLATE_PROMPT" --allowedTools Read,Write,Glob,Grep --max-turns 5 $CONTEMPLATE_FLAGS) 2>/dev/null &
+        CLAUDE_PID=$!
+        wait_for_claude_task
         log pause "Contemplative session ended."
-        set -e
 
         # Contemplative session done — increment counter and loop
         count=$((count + 1))
@@ -506,11 +571,12 @@ EOF
   CLAUDE_OUT="$(mktemp)"
   CLAUDE_ERR="$(mktemp)"
   MISSION_FLAGS=$("$PYTHON" -c "from app.utils import get_claude_flags_for_role; print(get_claude_flags_for_role('mission', '$AUTONOMOUS_MODE'))" 2>/dev/null || echo "")
-  set +e  # Don't exit on error, we need to check the output
+  # Run claude with graceful CTRL-C protection (background + wait pattern)
+  # Child ignores SIGINT so first CTRL-C only warns; double CTRL-C sends SIGTERM via on_sigint
   # shellcheck disable=SC2086
-  claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit --output-format json $MISSION_FLAGS > "$CLAUDE_OUT" 2>"$CLAUDE_ERR"
-  CLAUDE_EXIT=$?
-  set -e
+  (trap '' INT; exec claude -p "$PROMPT" --allowedTools Bash,Read,Write,Glob,Grep,Edit --output-format json $MISSION_FLAGS) > "$CLAUDE_OUT" 2>"$CLAUDE_ERR" &
+  CLAUDE_PID=$!
+  wait_for_claude_task
 
   # Extract text from JSON for display and quota detection
   CLAUDE_TEXT=""
