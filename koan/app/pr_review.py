@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Tuple, List
 
+from app.github import run_gh
 from app.utils import get_model_config, build_claude_flags
 
 # Matches skill names like `atoomic.refactor` or my.review (with or without backticks)
@@ -56,35 +57,35 @@ def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
     full_repo = f"{owner}/{repo}"
 
     # Fetch PR metadata
-    pr_json = _gh(
-        ["gh", "pr", "view", pr_number, "--repo", full_repo, "--json",
-         "title,body,headRefName,baseRefName,state,author,url"]
+    pr_json = run_gh(
+        "pr", "view", pr_number, "--repo", full_repo, "--json",
+        "title,body,headRefName,baseRefName,state,author,url"
     )
 
     # Fetch PR diff
-    diff = _gh(
-        ["gh", "pr", "diff", pr_number, "--repo", full_repo]
+    diff = run_gh(
+        "pr", "diff", pr_number, "--repo", full_repo
     )
 
     # Fetch review comments (inline code comments)
-    comments_json = _gh(
-        ["gh", "api", f"repos/{full_repo}/pulls/{pr_number}/comments",
-         "--paginate", "--jq",
-         r'.[] | "[\(.path):\(.line // .original_line)] @\(.user.login): \(.body)"']
+    comments_json = run_gh(
+        "api", f"repos/{full_repo}/pulls/{pr_number}/comments",
+        "--paginate", "--jq",
+        r'.[] | "[\(.path):\(.line // .original_line)] @\(.user.login): \(.body)"'
     )
 
     # Fetch PR-level review comments (top-level reviews)
-    reviews_json = _gh(
-        ["gh", "api", f"repos/{full_repo}/pulls/{pr_number}/reviews",
-         "--paginate", "--jq",
-         r'.[] | select(.body != "") | "@\(.user.login) (\(.state)): \(.body)"']
+    reviews_json = run_gh(
+        "api", f"repos/{full_repo}/pulls/{pr_number}/reviews",
+        "--paginate", "--jq",
+        r'.[] | select(.body != "") | "@\(.user.login) (\(.state)): \(.body)"'
     )
 
     # Fetch issue-level comments (conversation thread)
-    issue_comments = _gh(
-        ["gh", "api", f"repos/{full_repo}/issues/{pr_number}/comments",
-         "--paginate", "--jq",
-         r'.[] | "@\(.user.login): \(.body)"']
+    issue_comments = run_gh(
+        "api", f"repos/{full_repo}/issues/{pr_number}/comments",
+        "--paginate", "--jq",
+        r'.[] | "@\(.user.login): \(.body)"'
     )
 
     try:
@@ -422,11 +423,11 @@ def run_pr_review(
     )
 
     try:
-        _gh([
-            "gh", "pr", "comment", pr_number,
+        run_gh(
+            "pr", "comment", pr_number,
             "--repo", full_repo,
             "--body", comment_body,
-        ])
+        )
         actions_log.append("Commented on PR")
     except Exception as e:
         # Non-fatal
@@ -662,19 +663,6 @@ def _build_pr_comment(
         f"---\n"
         f"_Automated by Kōan_"
     )
-
-
-def _gh(cmd: list, timeout: int = 30) -> str:
-    """Run a gh CLI command and return stdout."""
-    result = subprocess.run(
-        cmd,
-        capture_output=True, text=True, timeout=timeout,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"gh command failed: {' '.join(cmd[:4])}... — {result.stderr[:200]}"
-        )
-    return result.stdout.strip()
 
 
 def _run_git(cmd: list, cwd: str = None, timeout: int = 60) -> str:

@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock, call
 
 import pytest
 
+from app.github import run_gh
 from app.pr_review import (
     parse_pr_url,
     fetch_pr_context,
@@ -23,7 +24,6 @@ from app.pr_review import (
     _run_claude,
     _run_claude_step,
     _run_tests,
-    _gh,
     _run_git,
     _truncate,
 )
@@ -98,21 +98,21 @@ class TestTruncate:
 
 
 # ---------------------------------------------------------------------------
-# _gh
+# run_gh (via app.github) — detailed tests in test_github.py
 # ---------------------------------------------------------------------------
 
-class TestGh:
-    @patch("app.pr_review.subprocess.run")
+class TestRunGhIntegration:
+    @patch("app.github.subprocess.run")
     def test_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="output\n")
-        result = _gh(["gh", "pr", "view", "1"])
+        result = run_gh("pr", "view", "1")
         assert result == "output"
 
-    @patch("app.pr_review.subprocess.run")
+    @patch("app.github.subprocess.run")
     def test_failure_raises(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="not found")
-        with pytest.raises(RuntimeError, match="gh command failed"):
-            _gh(["gh", "pr", "view", "999"])
+        with pytest.raises(RuntimeError, match="gh failed"):
+            run_gh("pr", "view", "999")
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +512,7 @@ class TestDetectSkills:
 # ---------------------------------------------------------------------------
 
 class TestFetchPrContext:
-    @patch("app.pr_review._gh")
+    @patch("app.pr_review.run_gh")
     def test_fetches_all_data(self, mock_gh):
         pr_meta = json.dumps({
             "title": "Add feature",
@@ -541,7 +541,7 @@ class TestFetchPrContext:
         assert ctx["issue_comments"] == "discussion1"
         assert mock_gh.call_count == 5
 
-    @patch("app.pr_review._gh")
+    @patch("app.pr_review.run_gh")
     def test_handles_invalid_json(self, mock_gh):
         mock_gh.side_effect = ["not json", "", "", "", ""]
         ctx = fetch_pr_context("o", "r", "1")
@@ -622,7 +622,7 @@ class TestRunPrReview:
 
     @patch("app.pr_review.detect_skills", return_value=(None, None))
     @patch("app.pr_review.detect_test_command", return_value=None)
-    @patch("app.pr_review._gh")
+    @patch("app.pr_review.run_gh")
     @patch("app.pr_review._run_git")
     @patch("app.pr_review._run_claude")
     @patch("app.pr_review._commit_if_changes")
@@ -671,7 +671,7 @@ class TestRunPrReview:
     @patch("app.pr_review.detect_skills", return_value=("atoomic.refactor", "atoomic.review"))
     @patch("app.pr_review.detect_test_command", return_value="make test")
     @patch("app.pr_review._run_tests")
-    @patch("app.pr_review._gh")
+    @patch("app.pr_review.run_gh")
     @patch("app.pr_review._run_git")
     @patch("app.pr_review._run_claude")
     @patch("app.pr_review._commit_if_changes")
@@ -703,7 +703,7 @@ class TestRunPrReview:
 
     @patch("app.pr_review.detect_skills", return_value=(None, None))
     @patch("app.pr_review.detect_test_command", return_value=None)
-    @patch("app.pr_review._gh")
+    @patch("app.pr_review.run_gh")
     @patch("app.pr_review._run_git")
     @patch("app.pr_review._run_claude")
     @patch("app.pr_review._commit_if_changes")
@@ -740,7 +740,7 @@ class TestRunPrReview:
     @patch("app.pr_review.detect_skills", return_value=(None, None))
     @patch("app.pr_review.detect_test_command", return_value="make test")
     @patch("app.pr_review._run_tests")
-    @patch("app.pr_review._gh")
+    @patch("app.pr_review.run_gh")
     @patch("app.pr_review._run_git")
     @patch("app.pr_review._run_claude")
     @patch("app.pr_review._commit_if_changes")
