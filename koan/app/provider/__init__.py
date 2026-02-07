@@ -40,6 +40,17 @@ _PROVIDERS = {
     "copilot": CopilotProvider,
 }
 
+# Cached provider instance (reset with _reset_provider() in tests)
+_cached_provider: CLIProvider | None = None
+_cached_provider_name: str = ""
+
+
+def _reset_provider():
+    """Reset the cached provider (for testing)."""
+    global _cached_provider, _cached_provider_name
+    _cached_provider = None
+    _cached_provider_name = ""
+
 
 def get_provider_name() -> str:
     """Determine which CLI provider to use.
@@ -67,9 +78,13 @@ def get_provider_name() -> str:
 
 
 def get_provider() -> CLIProvider:
-    """Get the configured CLI provider instance."""
+    """Get the configured CLI provider instance (cached singleton)."""
+    global _cached_provider, _cached_provider_name
     name = get_provider_name()
-    return _PROVIDERS[name]()
+    if _cached_provider is None or name != _cached_provider_name:
+        _cached_provider = _PROVIDERS[name]()
+        _cached_provider_name = name
+    return _cached_provider
 
 
 def get_cli_binary() -> str:
@@ -78,10 +93,7 @@ def get_cli_binary() -> str:
     For shell scripts: returns the full command prefix needed to invoke
     the provider (e.g., "claude" or "copilot" or "gh copilot").
     """
-    provider = get_provider()
-    if isinstance(provider, CopilotProvider) and provider._is_gh_mode():
-        return "gh copilot"
-    return provider.binary()
+    return get_provider().shell_command()
 
 
 # ---------------------------------------------------------------------------

@@ -23,21 +23,26 @@ class CopilotProvider(CLIProvider):
 
     name = "copilot"
 
+    def __init__(self):
+        self._has_copilot = shutil.which("copilot") is not None
+        self._has_gh = shutil.which("gh") is not None
+
     def binary(self) -> str:
-        # Prefer standalone 'copilot' binary, fallback to 'gh copilot' via wrapper
-        if shutil.which("copilot"):
+        # Prefer standalone 'copilot' binary, fallback to 'gh'
+        if self._has_copilot:
             return "copilot"
         return "gh"
 
-    def _is_gh_mode(self) -> bool:
-        """Check if we need to use 'gh copilot' instead of standalone 'copilot'."""
-        return not shutil.which("copilot") and shutil.which("gh") is not None
+    def shell_command(self) -> str:
+        if self._has_copilot:
+            return "copilot"
+        return "gh copilot"
 
     def is_available(self) -> bool:
-        return shutil.which("copilot") is not None or shutil.which("gh") is not None
+        return self._has_copilot or self._has_gh
 
     def build_prompt_args(self, prompt: str) -> List[str]:
-        prefix = ["copilot"] if self._is_gh_mode() else []
+        prefix = ["copilot"] if not self._has_copilot and self._has_gh else []
         return prefix + ["-p", prompt]
 
     def build_tool_args(

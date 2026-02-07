@@ -318,63 +318,63 @@ class TestCleanMissionDisplay:
 class TestCancelCommandRouting:
     """Test that /cancel routes to the cancel skill via awake."""
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_cancel_routes_via_skill(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Pending\n\n- test mission\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/cancel")
         mock_send.assert_called_once()
         output = mock_send.call_args[0][0]
         assert "1." in output
         assert "test mission" in output
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_cancel_with_number_routes(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Pending\n\n- task A\n- task B\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/cancel 1")
         mock_send.assert_called_once()
         output = mock_send.call_args[0][0]
         assert "task A" in output
         assert "cancelled" in output.lower()
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_cancel_with_keyword_routes(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Pending\n\n- fix auth bug\n- add dark mode\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/cancel dark")
         mock_send.assert_called_once()
         output = mock_send.call_args[0][0]
         assert "dark mode" in output
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_cancel_appears_in_help(self, mock_send, tmp_path):
         """Verify /cancel is included in /help output via skill discovery."""
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path):
             handle_command("/help")
         mock_send.assert_called_once()
         help_text = mock_send.call_args[0][0]

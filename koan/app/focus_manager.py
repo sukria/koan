@@ -21,6 +21,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 # Default focus duration: 5 hours
@@ -115,9 +116,10 @@ def create_focus(
         "reason": state.reason,
     }
 
+    from app.utils import atomic_write
+
     path = _focus_path(koan_root)
-    with open(path, "w") as f:
-        json.dump(data, f)
+    atomic_write(Path(path), json.dumps(data))
 
     return state
 

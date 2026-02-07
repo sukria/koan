@@ -213,75 +213,75 @@ class TestCleanMission:
 class TestListCommandRouting:
     """Test that /list, /queue, /ls route to the list skill via awake."""
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_list_routes_via_skill(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Pending\n\n- test mission\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/list")
         mock_send.assert_called_once()
         output = mock_send.call_args[0][0]
         assert "PENDING" in output
         assert "test mission" in output
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_queue_alias_routes_to_list(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Pending\n\n- queued task\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/queue")
         mock_send.assert_called_once()
         assert "queued task" in mock_send.call_args[0][0]
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_ls_alias_routes_to_list(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Pending\n\n- ls task\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/ls")
         mock_send.assert_called_once()
         assert "ls task" in mock_send.call_args[0][0]
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_list_empty_queue(self, mock_send, tmp_path):
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path), \
-             patch("app.awake.MISSIONS_FILE", missions_file):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
+             patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_command("/list")
         mock_send.assert_called_once()
         assert "No missions" in mock_send.call_args[0][0]
 
-    @patch("app.awake.send_telegram")
+    @patch("app.command_handlers.send_telegram")
     def test_list_appears_in_help(self, mock_send, tmp_path):
         """Verify /list is included in /help output via skill discovery."""
-        from app.awake import handle_command
+        from app.command_handlers import handle_command
 
-        with patch("app.awake.KOAN_ROOT", tmp_path), \
-             patch("app.awake.INSTANCE_DIR", tmp_path):
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", tmp_path):
             handle_command("/help")
         mock_send.assert_called_once()
         help_text = mock_send.call_args[0][0]

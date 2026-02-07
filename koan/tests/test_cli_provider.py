@@ -10,6 +10,7 @@ from app.cli_provider import (
     get_provider,
     get_provider_name,
     get_cli_binary,
+    _reset_provider,
     build_cli_flags,
     build_tool_flags,
     build_prompt_flags,
@@ -158,98 +159,124 @@ class TestClaudeProvider:
 # ---------------------------------------------------------------------------
 
 class TestCopilotProvider:
-    """Tests for CopilotProvider flag translation."""
+    """Tests for CopilotProvider flag translation.
 
-    def setup_method(self):
-        self.provider = CopilotProvider()
+    CopilotProvider caches shutil.which() at __init__, so tests that need
+    specific which() results must create the provider inside the patch.
+    """
+
+    def _make(self, which_side_effect=None):
+        """Create a CopilotProvider with mocked shutil.which."""
+        if which_side_effect is None:
+            return CopilotProvider()
+        with patch("app.provider.copilot.shutil.which", side_effect=which_side_effect):
+            return CopilotProvider()
+
+    @staticmethod
+    def _standalone(x):
+        return "/usr/local/bin/copilot" if x == "copilot" else None
+
+    @staticmethod
+    def _gh_only(x):
+        return "/usr/bin/gh" if x == "gh" else None
 
     def test_name(self):
-        assert self.provider.name == "copilot"
+        assert CopilotProvider.name == "copilot"
 
-    @patch("shutil.which")
-    def test_binary_standalone(self, mock_which):
+    def test_binary_standalone(self):
         """Uses 'copilot' when standalone binary is available."""
-        mock_which.side_effect = lambda x: "/usr/local/bin/copilot" if x == "copilot" else None
-        assert self.provider.binary() == "copilot"
+        p = self._make(self._standalone)
+        assert p.binary() == "copilot"
 
-    @patch("shutil.which")
-    def test_binary_gh_fallback(self, mock_which):
+    def test_binary_gh_fallback(self):
         """Falls back to 'gh' when copilot binary not found."""
-        mock_which.side_effect = lambda x: "/usr/bin/gh" if x == "gh" else None
-        assert self.provider.binary() == "gh"
+        p = self._make(self._gh_only)
+        assert p.binary() == "gh"
 
-    @patch("shutil.which")
-    def test_is_available_copilot(self, mock_which):
-        mock_which.side_effect = lambda x: "/usr/local/bin/copilot" if x == "copilot" else None
-        assert self.provider.is_available()
+    def test_shell_command_standalone(self):
+        p = self._make(self._standalone)
+        assert p.shell_command() == "copilot"
 
-    @patch("shutil.which")
-    def test_is_available_gh(self, mock_which):
-        mock_which.side_effect = lambda x: "/usr/bin/gh" if x == "gh" else None
-        assert self.provider.is_available()
+    def test_shell_command_gh_mode(self):
+        p = self._make(self._gh_only)
+        assert p.shell_command() == "gh copilot"
 
-    @patch("shutil.which", return_value=None)
-    def test_not_available(self, mock_which):
-        assert not self.provider.is_available()
+    def test_is_available_copilot(self):
+        p = self._make(self._standalone)
+        assert p.is_available()
 
-    @patch("shutil.which")
-    def test_prompt_args_standalone(self, mock_which):
-        mock_which.side_effect = lambda x: "/usr/local/bin/copilot" if x == "copilot" else None
-        assert self.provider.build_prompt_args("test") == ["-p", "test"]
+    def test_is_available_gh(self):
+        p = self._make(self._gh_only)
+        assert p.is_available()
 
-    @patch("shutil.which")
-    def test_prompt_args_gh_mode(self, mock_which):
-        mock_which.side_effect = lambda x: "/usr/bin/gh" if x == "gh" else None
-        result = self.provider.build_prompt_args("test")
+    def test_not_available(self):
+        p = self._make(lambda x: None)
+        assert not p.is_available()
+
+    def test_prompt_args_standalone(self):
+        p = self._make(self._standalone)
+        assert p.build_prompt_args("test") == ["-p", "test"]
+
+    def test_prompt_args_gh_mode(self):
+        p = self._make(self._gh_only)
+        result = p.build_prompt_args("test")
         assert result == ["copilot", "-p", "test"]
 
     def test_tool_args_individual(self):
         """Maps Claude tool names to Copilot equivalents."""
-        result = self.provider.build_tool_args(allowed_tools=["Read", "Grep"])
+        p = self._make()
+        result = p.build_tool_args(allowed_tools=["Read", "Grep"])
         assert "--allow-tool" in result
         assert "read_file" in result
         assert "grep" in result
 
     def test_tool_args_all_tools(self):
         """Uses --allow-all-tools when all canonical tools are requested."""
+        p = self._make()
         all_tools = list(CLAUDE_TOOLS)
-        result = self.provider.build_tool_args(allowed_tools=all_tools)
+        result = p.build_tool_args(allowed_tools=all_tools)
         assert "--allow-all-tools" in result
 
     def test_tool_args_disallowed_inverse(self):
         """Computes inverse set when using disallowed_tools."""
-        result = self.provider.build_tool_args(disallowed_tools=["Bash", "Edit", "Write"])
+        p = self._make()
+        result = p.build_tool_args(disallowed_tools=["Bash", "Edit", "Write"])
         # Should allow the remaining tools: Read, Glob, Grep
         assert "--allow-tool" in result
         tool_names = [result[i + 1] for i in range(len(result)) if result[i] == "--allow-tool"]
         assert set(tool_names) == {"read_file", "glob", "grep"}
 
     def test_model_args(self):
-        result = self.provider.build_model_args(model="opus", fallback="sonnet")
+        p = self._make()
+        result = p.build_model_args(model="opus", fallback="sonnet")
         assert result == ["--model", "opus"]
         # No --fallback-model for copilot
 
     def test_model_args_empty(self):
-        assert self.provider.build_model_args() == []
+        p = self._make()
+        assert p.build_model_args() == []
 
     def test_output_args_json(self):
-        assert self.provider.build_output_args("json") == ["--json"]
+        p = self._make()
+        assert p.build_output_args("json") == ["--json"]
 
     def test_output_args_empty(self):
-        assert self.provider.build_output_args() == []
+        p = self._make()
+        assert p.build_output_args() == []
 
     def test_max_turns_args(self):
-        assert self.provider.build_max_turns_args(3) == ["--max-turns", "3"]
+        p = self._make()
+        assert p.build_max_turns_args(3) == ["--max-turns", "3"]
 
     def test_mcp_args(self):
-        result = self.provider.build_mcp_args(["config.json"])
+        p = self._make()
+        result = p.build_mcp_args(["config.json"])
         assert result == ["--mcp-config", "config.json"]
 
-    @patch("shutil.which")
-    def test_build_command_gh_mode(self, mock_which):
+    def test_build_command_gh_mode(self):
         """Full command in gh mode includes 'copilot' subcommand."""
-        mock_which.side_effect = lambda x: "/usr/bin/gh" if x == "gh" else None
-        cmd = self.provider.build_command(
+        p = self._make(self._gh_only)
+        cmd = p.build_command(
             prompt="hello",
             allowed_tools=["Read"],
             max_turns=1,
@@ -260,10 +287,9 @@ class TestCopilotProvider:
         assert "--allow-tool" in cmd
         assert "read_file" in cmd
 
-    @patch("shutil.which")
-    def test_build_command_standalone(self, mock_which):
-        mock_which.side_effect = lambda x: "/usr/local/bin/copilot" if x == "copilot" else None
-        cmd = self.provider.build_command(prompt="hello")
+    def test_build_command_standalone(self):
+        p = self._make(self._standalone)
+        cmd = p.build_command(prompt="hello")
         assert cmd[0] == "copilot"
         assert "copilot" not in cmd[1:]  # No redundant 'copilot' subcommand
 
@@ -294,6 +320,12 @@ class TestToolMapping:
 
 class TestProviderResolution:
     """Tests for get_provider_name() and get_provider()."""
+
+    def setup_method(self):
+        _reset_provider()
+
+    def teardown_method(self):
+        _reset_provider()
 
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "copilot"})
     def test_env_var_override(self):
@@ -333,6 +365,22 @@ class TestProviderResolution:
         provider = get_provider()
         assert isinstance(provider, CopilotProvider)
 
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    def test_get_provider_caches_instance(self):
+        """Same provider name returns the same cached instance."""
+        p1 = get_provider()
+        p2 = get_provider()
+        assert p1 is p2
+
+    def test_get_provider_invalidates_on_name_change(self, monkeypatch):
+        """Changing provider name returns a new instance."""
+        monkeypatch.setenv("KOAN_CLI_PROVIDER", "claude")
+        p1 = get_provider()
+        _reset_provider()
+        monkeypatch.setenv("KOAN_CLI_PROVIDER", "copilot")
+        p2 = get_provider()
+        assert type(p1) is not type(p2)
+
 
 # ---------------------------------------------------------------------------
 # Module-level convenience functions
@@ -341,18 +389,24 @@ class TestProviderResolution:
 class TestConvenienceFunctions:
     """Tests for module-level helper functions."""
 
+    def setup_method(self):
+        _reset_provider()
+
+    def teardown_method(self):
+        _reset_provider()
+
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
     def test_get_cli_binary_claude(self):
         assert get_cli_binary() == "claude"
 
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "copilot"})
-    @patch("shutil.which")
+    @patch("app.provider.copilot.shutil.which")
     def test_get_cli_binary_copilot_standalone(self, mock_which):
         mock_which.side_effect = lambda x: "/usr/local/bin/copilot" if x == "copilot" else None
         assert get_cli_binary() == "copilot"
 
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "copilot"})
-    @patch("shutil.which")
+    @patch("app.provider.copilot.shutil.which")
     def test_get_cli_binary_copilot_gh_mode(self, mock_which):
         mock_which.side_effect = lambda x: "/usr/bin/gh" if x == "gh" else None
         assert get_cli_binary() == "gh copilot"
@@ -402,7 +456,7 @@ class TestConvenienceFunctions:
         assert "--output-format" in cmd
 
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "copilot"})
-    @patch("shutil.which")
+    @patch("app.provider.copilot.shutil.which")
     def test_build_full_command_copilot(self, mock_which):
         mock_which.side_effect = lambda x: "/usr/local/bin/copilot" if x == "copilot" else None
         cmd = build_full_command(

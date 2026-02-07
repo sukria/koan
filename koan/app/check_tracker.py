@@ -32,9 +32,11 @@ def _load(instance_dir):
 
 
 def _save(instance_dir, data):
-    """Persist tracker data to disk."""
+    """Persist tracker data to disk (atomic write)."""
+    from app.utils import atomic_write
+
     path = _tracker_path(instance_dir)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    atomic_write(path, json.dumps(data, indent=2) + "\n")
 
 
 def get_last_checked(instance_dir, url):

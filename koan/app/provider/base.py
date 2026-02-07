@@ -43,6 +43,14 @@ class CLIProvider:
         """Return the CLI binary name or path."""
         raise NotImplementedError
 
+    def shell_command(self) -> str:
+        """Return the full command prefix for shell scripts.
+
+        Defaults to binary(), but providers that need a multi-word command
+        (e.g., "gh copilot") should override this.
+        """
+        return self.binary()
+
     def is_available(self) -> bool:
         """Check if the binary is installed and accessible."""
         return shutil.which(self.binary()) is not None
