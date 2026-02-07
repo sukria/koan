@@ -1,0 +1,70 @@
+"""Restart signal management for Kōan processes.
+
+Provides file-based restart signaling between bridge and run loop:
+- Bridge creates .koan-restart to signal both processes
+- run.sh checks at loop start and exits with code 42
+- Bridge detects the signal and re-execs itself via os.execv()
+
+The restart flow:
+1. User sends /restart on Telegram
+2. Bridge writes .koan-restart
+3. Bridge sends ack to Telegram
+4. Bridge re-execs itself (os.execv replaces process in-place)
+5. run.sh detects .koan-restart at next iteration, exits with code 42
+6. run.sh wrapper script re-launches run.sh
+
+Exit code 42 is the restart sentinel — any other exit is a real stop.
+"""
+
+import os
+import sys
+import time
+from pathlib import Path
+
+RESTART_FILE = ".koan-restart"
+RESTART_EXIT_CODE = 42
+
+
+def request_restart(koan_root: Path) -> None:
+    """Create the restart signal file.
+
+    Both processes check for this file:
+    - run.sh: at loop start, exits with code 42
+    - awake.py: in main loop, triggers os.execv()
+    """
+    restart_file = koan_root / RESTART_FILE
+    restart_file.write_text(f"restart requested at {time.strftime('%H:%M:%S')}\n")
+
+
+def check_restart(koan_root: Path, since: float = 0) -> bool:
+    """Check if a restart has been requested.
+
+    Args:
+        koan_root: Root path for the koan installation.
+        since: If > 0, only return True if the file was modified after this
+               timestamp.  Used to ignore stale restart signals left over
+               from a previous process incarnation (prevents restart loops
+               when Telegram re-delivers the /restart message).
+    """
+    restart_file = koan_root / RESTART_FILE
+    if not restart_file.exists():
+        return False
+    if since > 0 and restart_file.stat().st_mtime <= since:
+        return False
+    return True
+
+
+def clear_restart(koan_root: Path) -> None:
+    """Remove the restart signal file."""
+    (koan_root / RESTART_FILE).unlink(missing_ok=True)
+
+
+def reexec_bridge() -> None:
+    """Re-exec the current Python process (bridge self-restart).
+
+    Uses os.execv() to replace the current process with a fresh one.
+    Same PID, same terminal, same file descriptors — clean restart.
+    """
+    python = sys.executable
+    args = [python] + sys.argv
+    os.execv(python, args)
