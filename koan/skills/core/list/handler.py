@@ -6,7 +6,7 @@ def handle(ctx):
     missions_file = ctx.instance_dir / "missions.md"
 
     if not missions_file.exists():
-        return "No missions file found."
+        return "ℹ️ No missions file found."
 
     from app.missions import parse_sections, clean_mission_display
 
@@ -17,7 +17,7 @@ def handle(ctx):
     pending = sections.get("pending", [])
 
     if not in_progress and not pending:
-        return "No missions pending or in progress."
+        return "ℹ️ No missions pending or in progress."
 
     parts = []
 

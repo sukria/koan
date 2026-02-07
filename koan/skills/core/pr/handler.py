@@ -28,7 +28,7 @@ def handle(ctx):
     url_match = re.search(r'https?://github\.com/[^\s]+/pull/\d+', args)
     if not url_match:
         return (
-            "No valid GitHub PR URL found.\n"
+            "❌ No valid GitHub PR URL found.\n"
             "Ex: /pr https://github.com/owner/repo/pull/123"
         )
 
@@ -47,23 +47,23 @@ def handle(ctx):
         from app.utils import get_known_projects
         known = ", ".join(n for n, _ in get_known_projects()) or "none"
         return (
-            f"Could not find local project matching repo '{repo}'.\n"
+            f"❌ Could not find local project matching repo '{repo}'.\n"
             f"Known projects: {known}"
         )
 
     if send:
-        send(f"Starting PR review pipeline for #{pr_number} ({owner}/{repo})...")
+        send(f"🔄 Starting PR review pipeline for #{pr_number} ({owner}/{repo})...")
 
     try:
         success, summary = run_pr_review(owner, repo, pr_number, project_path)
         if success:
             if send:
-                send(f"PR #{pr_number} updated.\n\n{summary[:400]}")
+                send(f"✅ PR #{pr_number} updated.\n\n{summary[:400]}")
             return None  # already sent
         else:
-            return f"PR #{pr_number} review failed: {summary[:400]}"
+            return f"❌ PR #{pr_number} review failed: {summary[:400]}"
     except Exception as e:
-        return f"PR review error: {str(e)[:300]}"
+        return f"⚠️ PR review error: {str(e)[:300]}"
 
 
 def _resolve_project_path(ctx, repo_name):

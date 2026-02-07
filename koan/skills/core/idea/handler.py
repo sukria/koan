@@ -35,14 +35,14 @@ def handle(ctx):
 def _list_ideas(missions_file):
     """List all ideas with numbered index."""
     if not missions_file.exists():
-        return "No missions file found."
+        return "ℹ️ No missions file found."
 
     from app.missions import parse_ideas, clean_mission_display
 
     ideas = parse_ideas(missions_file.read_text())
 
     if not ideas:
-        return "No ideas in the backlog. Add one with /idea <description>"
+        return "ℹ️ No ideas in the backlog. Add one with /idea <description>"
 
     parts = ["IDEAS"]
     for i, idea in enumerate(ideas, 1):
@@ -75,7 +75,7 @@ def _add_idea(missions_file, text):
     if len(clean_text) > 100:
         display += "..."
 
-    return f"Idea saved: {display}"
+    return f"💡 Idea saved: {display}"
 
 
 def _delete_idea(missions_file, index):
@@ -100,7 +100,7 @@ def _delete_idea(missions_file, index):
         return f"Invalid index. Use 1-{count}."
 
     display = clean_mission_display(deleted_text)
-    return f"Deleted: {display}"
+    return f"🗑 Deleted: {display}"
 
 
 def _promote_idea(missions_file, index):
@@ -125,4 +125,4 @@ def _promote_idea(missions_file, index):
         return f"Invalid index. Use 1-{count}."
 
     display = clean_mission_display(promoted_text)
-    return f"Promoted to pending: {display}"
+    return f"⬆️ Promoted to pending: {display}"

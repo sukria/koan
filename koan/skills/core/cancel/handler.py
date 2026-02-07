@@ -20,14 +20,14 @@ def handle(ctx):
 def _list_pending(missions_file):
     """Show numbered list of pending missions for selection."""
     if not missions_file.exists():
-        return "No pending missions."
+        return "ℹ️ No pending missions."
 
     from app.missions import list_pending, clean_mission_display
 
     pending = list_pending(missions_file.read_text())
 
     if not pending:
-        return "No pending missions."
+        return "ℹ️ No pending missions."
 
     parts = ["Pending missions:\n"]
     for i, m in enumerate(pending, 1):
@@ -56,7 +56,7 @@ def _cancel_mission(missions_file, identifier):
         return str(e)
 
     if cancelled_text is None:
-        return "Error during cancellation."
+        return "⚠️ Error during cancellation."
 
     display = clean_mission_display(cancelled_text)
-    return f"Mission cancelled: {display}"
+    return f"🗑 Mission cancelled: {display}"

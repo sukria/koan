@@ -13,7 +13,7 @@ def handle(ctx):
 
     # Notify that we're thinking
     if ctx.send_message:
-        ctx.send_message("Sparring mode activated. I'm thinking...")
+        ctx.send_message("🧠 Sparring mode activated. I'm thinking...")
 
     soul = ""
     soul_path = instance_dir / "soul.md"
@@ -86,9 +86,9 @@ def handle(ctx):
         else:
             if result.returncode != 0:
                 print(f"[skill:sparring] Claude error (exit {result.returncode}): {result.stderr[:200]}")
-            return "Nothing compelling to say right now. Come back later."
+            return "🤷 Nothing compelling to say right now. Come back later."
     except subprocess.TimeoutExpired:
-        return "Timeout -- my brain needs more time. Try again."
+        return "⏱ Timeout -- my brain needs more time. Try again."
     except Exception as e:
         print(f"[skill:sparring] Error: {e}")
-        return "Error during sparring. Try again."
+        return "⚠️ Error during sparring. Try again."

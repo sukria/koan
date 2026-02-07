@@ -15,4 +15,4 @@ def handle(ctx):
         # Return empty string to signal "handled, don't send anything else"
         return ""
 
-    return "Chat handler not available."
+    return "⚠️ Chat handler not available."
