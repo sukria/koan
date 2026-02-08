@@ -512,6 +512,39 @@ class TestHandleResume:
 
 
 # ---------------------------------------------------------------------------
+# _reset_session_counters
+# ---------------------------------------------------------------------------
+
+class TestResetSessionCounters:
+    """Tests for _reset_session_counters — called by handle_resume on quota resume."""
+
+    @patch("app.command_handlers.log")
+    @patch("app.command_handlers.INSTANCE_DIR", "")
+    def test_calls_cmd_reset_session(self, mock_log, tmp_path):
+        """Should call cmd_reset_session with correct paths."""
+        from app.command_handlers import _reset_session_counters
+        with patch("app.command_handlers.INSTANCE_DIR", str(tmp_path)), \
+             patch("app.usage_estimator.cmd_reset_session") as mock_reset:
+            _reset_session_counters()
+        mock_reset.assert_called_once()
+        # Verify paths
+        args = mock_reset.call_args[0]
+        assert str(args[0]).endswith("usage_state.json")
+        assert str(args[1]).endswith("usage.md")
+
+    @patch("app.command_handlers.log")
+    def test_handles_import_error_gracefully(self, mock_log, tmp_path):
+        """Should not crash if usage_estimator is unavailable."""
+        from app.command_handlers import _reset_session_counters
+        with patch("app.command_handlers.INSTANCE_DIR", str(tmp_path)), \
+             patch.dict("sys.modules", {"app.usage_estimator": None}):
+            # Should not raise
+            _reset_session_counters()
+        # Should log an error
+        mock_log.assert_called()
+
+
+# ---------------------------------------------------------------------------
 # handle_chat
 # ---------------------------------------------------------------------------
 
@@ -1044,6 +1077,59 @@ class TestPauseCommand:
         assert not (tmp_path / ".koan-pause").exists()
         # Should say "unpaused" without specific reason
         assert "unpaused" in mock_send.call_args[0][0].lower()
+
+    @patch("app.command_handlers._reset_session_counters")
+    @patch("app.command_handlers.send_telegram")
+    def test_resume_quota_resets_session_counters(self, mock_send, mock_reset, tmp_path):
+        """Resume from quota pause should reset internal session counters."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("quota\n9999999999\nresets 7pm")
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            handle_resume()
+        mock_reset.assert_called_once()
+
+    @patch("app.command_handlers._reset_session_counters")
+    @patch("app.command_handlers.send_telegram")
+    def test_resume_max_runs_does_not_reset_session(self, mock_send, mock_reset, tmp_path):
+        """Resume from max_runs should NOT reset session counters."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("max_runs\n1234567890")
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            handle_resume()
+        mock_reset.assert_not_called()
+
+    @patch("app.command_handlers._reset_session_counters")
+    @patch("app.command_handlers.send_telegram")
+    def test_resume_manual_pause_does_not_reset_session(self, mock_send, mock_reset, tmp_path):
+        """Resume from manual pause (no reason file) should NOT reset session counters."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path):
+            handle_resume()
+        mock_reset.assert_not_called()
+
+    @patch("app.command_handlers.send_telegram")
+    def test_resume_quota_message_includes_counter_info(self, mock_send, tmp_path):
+        """Resume message from quota should mention that counters were cleared."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        future_ts = str(int(time.time()) + 3600)
+        (tmp_path / ".koan-pause-reason").write_text(f"quota\n{future_ts}\nresets 7pm")
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers._reset_session_counters"):
+            handle_resume()
+        msg = mock_send.call_args[0][0].lower()
+        assert "counter" in msg or "clear" in msg
+
+    @patch("app.command_handlers.send_telegram")
+    def test_resume_quota_past_reset_time(self, mock_send, tmp_path):
+        """Resume after reset time should confirm quota reset."""
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        past_ts = str(int(time.time()) - 3600)  # 1h ago
+        (tmp_path / ".koan-pause-reason").write_text(f"quota\n{past_ts}\nresets 7pm")
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers._reset_session_counters"):
+            handle_resume()
+        msg = mock_send.call_args[0][0].lower()
+        assert "reset" in msg
 
     def test_status_shows_paused(self, tmp_path):
         """Status skill handler shows Paused when paused."""

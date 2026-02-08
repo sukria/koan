@@ -17,6 +17,7 @@ from app.usage_estimator import (
     _get_limits,
     cmd_update,
     cmd_refresh,
+    cmd_reset_session,
     cmd_reset_time,
     SESSION_DURATION_HOURS,
 )
@@ -465,3 +466,133 @@ class TestCmdResetTime:
                 f"Reset time {ts} must be strictly in the future "
                 f"(now={now_ts}), state={state_data}"
             )
+
+
+class TestCmdResetSession:
+    """Tests for cmd_reset_session — force-reset session counters on quota resume."""
+
+    @patch("app.usage_estimator.load_config", return_value={
+        "usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}
+    })
+    def test_resets_session_tokens_to_zero(self, mock_config, state_file, usage_md):
+        """Session tokens and runs should be zeroed after reset."""
+        state = _fresh_state()
+        state["session_tokens"] = 450000  # 90% usage
+        state["weekly_tokens"] = 2000000
+        state["runs"] = 15
+        state_file.write_text(json.dumps(state))
+
+        cmd_reset_session(state_file, usage_md)
+
+        new_state = json.loads(state_file.read_text())
+        assert new_state["session_tokens"] == 0
+        assert new_state["runs"] == 0
+
+    @patch("app.usage_estimator.load_config", return_value={
+        "usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}
+    })
+    def test_preserves_weekly_tokens(self, mock_config, state_file, usage_md):
+        """Weekly tokens should NOT be reset — only session is cleared."""
+        state = _fresh_state()
+        state["session_tokens"] = 450000
+        state["weekly_tokens"] = 2000000
+        state["runs"] = 15
+        state_file.write_text(json.dumps(state))
+
+        cmd_reset_session(state_file, usage_md)
+
+        new_state = json.loads(state_file.read_text())
+        assert new_state["weekly_tokens"] == 2000000
+
+    @patch("app.usage_estimator.load_config", return_value={
+        "usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}
+    })
+    def test_updates_usage_md(self, mock_config, state_file, usage_md):
+        """usage.md should reflect the reset (session back to 0%)."""
+        state = _fresh_state()
+        state["session_tokens"] = 450000  # was 90%
+        state_file.write_text(json.dumps(state))
+
+        cmd_reset_session(state_file, usage_md)
+
+        content = usage_md.read_text()
+        assert "Session (5hr) : 0%" in content
+
+    @patch("app.usage_estimator.load_config", return_value={
+        "usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}
+    })
+    def test_resets_session_start_to_now(self, mock_config, state_file, usage_md):
+        """Session start should be refreshed to current time."""
+        state = _fresh_state()
+        old_start = (datetime.now() - timedelta(hours=4)).isoformat()
+        state["session_start"] = old_start
+        state["session_tokens"] = 400000
+        state_file.write_text(json.dumps(state))
+
+        cmd_reset_session(state_file, usage_md)
+
+        new_state = json.loads(state_file.read_text())
+        new_start = datetime.fromisoformat(new_state["session_start"])
+        # Should be within last 5 seconds (essentially "now")
+        assert (datetime.now() - new_start).total_seconds() < 5
+
+    @patch("app.usage_estimator.load_config", return_value={})
+    def test_works_with_missing_state_file(self, mock_config, state_file, usage_md):
+        """Should create fresh state if no file exists."""
+        assert not state_file.exists()
+        cmd_reset_session(state_file, usage_md)
+        assert state_file.exists()
+        assert usage_md.exists()
+        new_state = json.loads(state_file.read_text())
+        assert new_state["session_tokens"] == 0
+
+    @patch("app.usage_estimator.load_config", return_value={})
+    def test_prevents_immediate_repause(self, mock_config, state_file, usage_md):
+        """Core regression test: after reset, usage_tracker should NOT return 'wait'.
+
+        This is the exact bug from the mission — stale high session % caused
+        the run loop to re-pause immediately after /resume.
+        """
+        # Simulate exhausted session: 95% usage
+        state = _fresh_state()
+        state["session_tokens"] = 475000
+        state["weekly_tokens"] = 100000
+        state_file.write_text(json.dumps(state))
+
+        # Reset session (simulating what happens on /resume)
+        cmd_reset_session(state_file, usage_md)
+
+        # Now usage.md should show 0% session, which means mode != "wait"
+        content = usage_md.read_text()
+        assert "Session (5hr) : 0%" in content
+
+    @patch("app.usage_estimator.load_config", return_value={})
+    def test_cli_reset_session(self, mock_config, tmp_path):
+        """CLI entry point for reset-session should work."""
+        import sys
+        from app.usage_estimator import main
+
+        state_file = tmp_path / "state.json"
+        state = _fresh_state()
+        state["session_tokens"] = 400000
+        state_file.write_text(json.dumps(state))
+        usage_md = tmp_path / "usage.md"
+
+        with patch.object(sys, "argv", [
+            "usage_estimator.py", "reset-session",
+            str(state_file), str(usage_md),
+        ]):
+            main()
+
+        new_state = json.loads(state_file.read_text())
+        assert new_state["session_tokens"] == 0
+        assert usage_md.exists()
+
+    def test_cli_reset_session_missing_args(self):
+        """CLI reset-session with missing args should exit 1."""
+        import sys
+        from app.usage_estimator import main
+        with patch.object(sys, "argv", ["usage_estimator.py", "reset-session"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1

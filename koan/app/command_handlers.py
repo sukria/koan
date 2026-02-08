@@ -389,6 +389,28 @@ def _handle_help():
     send_telegram("\n".join(parts))
 
 
+def _reset_session_counters():
+    """Reset internal usage session counters after quota resume.
+
+    When the human hits /resume after a quota pause, they've verified
+    that API quota is available. The internal token counter (usage_state.json)
+    may still show a high percentage from the exhausted session. Resetting
+    it prevents the run loop from immediately re-pausing with stale data.
+
+    The real quota gate (quota_handler.py) will catch actual exhaustion
+    reactively from Claude CLI output if it occurs.
+    """
+    try:
+        from pathlib import Path
+        from app.usage_estimator import cmd_reset_session
+        usage_state = Path(INSTANCE_DIR, "usage_state.json")
+        usage_md = Path(INSTANCE_DIR, "usage.md")
+        cmd_reset_session(usage_state, usage_md)
+        log("health", "Session counters reset after quota resume")
+    except Exception as e:
+        log("error", f"Failed to reset session counters: {e}")
+
+
 def handle_resume():
     """Resume from pause or quota exhaustion."""
     pause_file = KOAN_ROOT / ".koan-pause"
@@ -416,13 +438,26 @@ def handle_resume():
         pause_reason_file.unlink(missing_ok=True)
 
         if reason == "quota":
+            # Reset internal session counters so the estimator doesn't
+            # immediately re-pause with stale high usage percentage
+            _reset_session_counters()
+
             # Check if we're resuming before the reset time
             if reset_timestamp and time.time() < reset_timestamp:
                 from app.reset_parser import time_until_reset
                 remaining = time_until_reset(reset_timestamp)
-                send_telegram(f"▶️ Unpaused (was: quota exhausted). Note: reset is in ~{remaining}. Run loop continues anyway.")
+                send_telegram(
+                    f"▶️ Unpaused (was: quota exhausted). "
+                    f"Note: estimated reset in ~{remaining}. "
+                    f"Internal counters cleared — will rely on real API feedback. "
+                    f"If quota is still exhausted, I'll detect it and pause again with details."
+                )
             else:
-                send_telegram("▶️ Unpaused (was: quota exhausted). Quota should be reset. Run loop continues.")
+                send_telegram(
+                    "▶️ Unpaused (was: quota exhausted). "
+                    "Quota should be reset. Internal counters cleared. "
+                    "Resuming main loop."
+                )
         elif reason == "max_runs":
             send_telegram("▶️ Unpaused (was: max_runs). Run counter reset, loop continues.")
         else:
