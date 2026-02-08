@@ -1,9 +1,10 @@
 """
 CLI provider abstraction for Kōan.
 
-Allows switching between Claude Code CLI and GitHub Copilot CLI
-as the underlying AI agent binary. Each provider knows how to
-translate Kōan's generic command spec into provider-specific flags.
+Allows switching between Claude Code CLI, GitHub Copilot CLI,
+or a local LLM server as the underlying AI agent binary. Each
+provider knows how to translate Kōan's generic command spec into
+provider-specific flags.
 
 Configuration:
     config.yaml:  cli_provider: "claude"   (default)
@@ -13,6 +14,7 @@ Package structure:
     provider/base.py    — CLIProvider base class + tool constants
     provider/claude.py  — ClaudeProvider implementation
     provider/copilot.py — CopilotProvider implementation
+    provider/local.py   — LocalLLMProvider implementation
     provider/__init__.py — Registry, resolution, convenience functions
 """
 
@@ -23,12 +25,13 @@ from typing import List, Optional
 from app.provider.base import (  # noqa: F401
     CLIProvider,
     CLAUDE_TOOLS,
-    _CLAUDE_TO_COPILOT_TOOLS,
+    TOOL_NAME_MAP,
 )
 
 # Import concrete providers
 from app.provider.claude import ClaudeProvider  # noqa: F401
 from app.provider.copilot import CopilotProvider  # noqa: F401
+from app.provider.local import LocalLLMProvider  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +41,7 @@ from app.provider.copilot import CopilotProvider  # noqa: F401
 _PROVIDERS = {
     "claude": ClaudeProvider,
     "copilot": CopilotProvider,
+    "local": LocalLLMProvider,
 }
 
 # Cached provider instance (reset with reset_provider() in tests)

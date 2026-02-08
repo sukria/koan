@@ -62,9 +62,21 @@ tools:
     - Shell: Bash (run git, gh, make, and other commands)
 
 # CLI provider — which AI CLI to use as the backend
-# Options: "claude" (default), "copilot" (GitHub Copilot CLI)
+# Options: "claude" (default), "copilot" (GitHub Copilot CLI), "local" (local LLM)
 # Can also be set via KOAN_CLI_PROVIDER env var (overrides this)
 cli_provider: "claude"
+
+# Local LLM configuration (used when cli_provider: "local")
+# Connects to any OpenAI-compatible API server:
+#   - Ollama:     http://localhost:11434/v1
+#   - llama.cpp:  http://localhost:8080/v1
+#   - LM Studio:  http://localhost:1234/v1
+#   - vLLM:       http://localhost:8000/v1
+# Can also be set via KOAN_LOCAL_LLM_* env vars (override config values)
+# local_llm:
+#   base_url: "http://localhost:11434/v1"
+#   model: "glm4"
+#   api_key: ""   # Usually empty for local servers
 
 # Claude model configuration
 # Controls which models are used for different types of Claude calls

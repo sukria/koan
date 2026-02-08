@@ -5,6 +5,7 @@ All implementation lives in the app.provider package:
     app/provider/base.py    — CLIProvider base class + tool constants
     app/provider/claude.py  — ClaudeProvider
     app/provider/copilot.py — CopilotProvider
+    app/provider/local.py   — LocalLLMProvider
     app/provider/__init__.py — Registry, resolution, convenience functions
 
 This module re-exports everything so existing imports from
@@ -15,10 +16,11 @@ from app.provider import (  # noqa: F401
     # Base class and constants
     CLIProvider,
     CLAUDE_TOOLS,
-    _CLAUDE_TO_COPILOT_TOOLS,
+    TOOL_NAME_MAP,
     # Concrete providers
     ClaudeProvider,
     CopilotProvider,
+    LocalLLMProvider,
     # Registry & resolution
     get_provider_name,
     get_provider,

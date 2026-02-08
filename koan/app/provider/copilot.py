@@ -3,7 +3,7 @@
 import shutil
 from typing import List, Optional
 
-from app.provider.base import CLIProvider, CLAUDE_TOOLS, _CLAUDE_TO_COPILOT_TOOLS
+from app.provider.base import CLIProvider, CLAUDE_TOOLS, TOOL_NAME_MAP
 
 
 class CopilotProvider(CLIProvider):
@@ -61,7 +61,7 @@ class CopilotProvider(CLIProvider):
                 flags.append("--allow-all-tools")
             else:
                 for tool in allowed_tools:
-                    copilot_name = _CLAUDE_TO_COPILOT_TOOLS.get(tool, tool.lower())
+                    copilot_name = TOOL_NAME_MAP.get(tool, tool.lower())
                     flags.extend(["--allow-tool", copilot_name])
 
         # Copilot doesn't have --disallowedTools.
@@ -70,7 +70,7 @@ class CopilotProvider(CLIProvider):
         if disallowed_tools and not allowed_tools:
             remaining = CLAUDE_TOOLS - set(disallowed_tools)
             for tool in sorted(remaining):
-                copilot_name = _CLAUDE_TO_COPILOT_TOOLS.get(tool, tool.lower())
+                copilot_name = TOOL_NAME_MAP.get(tool, tool.lower())
                 flags.extend(["--allow-tool", copilot_name])
 
         return flags
