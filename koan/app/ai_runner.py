@@ -10,7 +10,6 @@ CLI:
         --instance-dir <dir>
 """
 
-import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -60,7 +59,12 @@ def run_exploration(
 
     # Run Claude
     try:
-        result = _run_claude(prompt, project_path)
+        from app.claude_step import run_claude_command
+        result = run_claude_command(
+            prompt, project_path,
+            allowed_tools=["Read", "Glob", "Grep", "Bash"],
+            max_turns=5, timeout=600,
+        )
     except Exception as e:
         return False, f"Exploration failed: {str(e)[:300]}"
 
@@ -74,66 +78,27 @@ def run_exploration(
     return True, f"Exploration of {project_name} completed."
 
 
-def _run_claude(prompt: str, project_path: str) -> str:
-    """Run Claude to generate exploration ideas."""
-    from app.cli_provider import build_full_command
-    from app.config import get_model_config
-
-    models = get_model_config()
-    cmd = build_full_command(
-        prompt=prompt,
-        allowed_tools=["Read", "Glob", "Grep", "Bash"],
-        model=models.get("chat", ""),
-        fallback=models.get("fallback", ""),
-        max_turns=5,
-    )
-
-    result = subprocess.run(
-        cmd,
-        capture_output=True, text=True, timeout=600,
-        cwd=project_path,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Claude exploration failed: {result.stderr[:300]}"
-        )
-
-    return result.stdout.strip()
-
-
 def _gather_git_activity(project_path: str) -> str:
     """Gather recent git activity for a project."""
+    from app.git_sync import run_git
+
     parts = []
-    try:
-        result = subprocess.run(
-            ["git", "log", "--oneline", "-15", "--no-merges"],
-            capture_output=True, text=True, timeout=10,
-            cwd=project_path,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            parts.append("Recent commits:\n" + result.stdout.strip())
 
-        result = subprocess.run(
-            ["git", "branch", "-r", "--sort=-committerdate",
-             "--format=%(refname:short)"],
-            capture_output=True, text=True, timeout=10,
-            cwd=project_path,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            branches = result.stdout.strip().split("\n")[:10]
-            parts.append("Active branches:\n" + "\n".join(branches))
+    commits = run_git(project_path, "log", "--oneline", "-15", "--no-merges")
+    if commits:
+        parts.append("Recent commits:\n" + commits)
 
-        result = subprocess.run(
-            ["git", "diff", "--stat", "HEAD~10", "HEAD"],
-            capture_output=True, text=True, timeout=10,
-            cwd=project_path,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            parts.append("Recent changes:\n" + result.stdout.strip())
+    branches_out = run_git(
+        project_path, "branch", "-r", "--sort=-committerdate",
+        "--format=%(refname:short)",
+    )
+    if branches_out:
+        branches = branches_out.split("\n")[:10]
+        parts.append("Active branches:\n" + "\n".join(branches))
 
-    except (subprocess.TimeoutExpired, Exception) as e:
-        parts.append(f"(git activity unavailable: {e})")
+    diff_stat = run_git(project_path, "diff", "--stat", "HEAD~10", "HEAD")
+    if diff_stat:
+        parts.append("Recent changes:\n" + diff_stat)
 
     return "\n\n".join(parts) if parts else "No git activity available."
 

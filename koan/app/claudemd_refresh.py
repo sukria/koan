@@ -15,9 +15,10 @@ Pipeline:
 """
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
+
+from app.git_sync import run_git
 
 
 def _git_last_modified(project_path: str, filepath: str) -> str:
@@ -25,91 +26,39 @@ def _git_last_modified(project_path: str, filepath: str) -> str:
 
     Returns empty string if the file has never been committed.
     """
-    try:
-        result = subprocess.run(
-            ["git", "log", "-1", "--format=%aI", "--", filepath],
-            capture_output=True, text=True, cwd=project_path, timeout=30,
-        )
-        return result.stdout.strip()
-    except Exception:
-        return ""
+    return run_git(project_path, "log", "-1", "--format=%aI", "--", filepath)
 
 
 def _git_log_since(project_path: str, since_date: str, max_commits: int = 50) -> str:
-    """Get git log since a date, formatted for context.
-
-    Returns a concise log of commits with their short descriptions.
-    """
-    cmd = [
-        "git", "log",
-        f"--since={since_date}",
-        f"-n{max_commits}",
-        "--format=%h %s",
-        "--no-merges",
-    ]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=project_path, timeout=30,
-        )
-        return result.stdout.strip()
-    except Exception:
-        return ""
+    """Get git log since a date, formatted for context."""
+    return run_git(
+        project_path, "log",
+        f"--since={since_date}", f"-n{max_commits}",
+        "--format=%h %s", "--no-merges",
+    )
 
 
 def _git_diff_stat_since(project_path: str, since_date: str) -> str:
-    """Get diffstat of changes since a date (files changed, not content).
-
-    Returns the --stat output showing which files were touched.
-    """
+    """Get diffstat of changes since a date (files changed, not content)."""
     # Find the oldest commit since that date
-    cmd = [
-        "git", "log",
-        f"--since={since_date}",
-        "--format=%H",
-        "--reverse",
-    ]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=project_path, timeout=30,
-        )
-        commits = result.stdout.strip().splitlines()
-        if not commits:
-            return ""
-        oldest = commits[0]
-        # Check if oldest commit has a parent (fails on root commit)
-        has_parent = subprocess.run(
-            ["git", "rev-parse", "--verify", f"{oldest}^"],
-            capture_output=True, text=True, cwd=project_path, timeout=10,
-        ).returncode == 0
-        if not has_parent:
-            # Root commit — diff entire tree
-            diff_range = f"{oldest}..HEAD"
-        else:
-            diff_range = f"{oldest}~1..HEAD"
-        stat_result = subprocess.run(
-            ["git", "diff", "--stat", diff_range],
-            capture_output=True, text=True, cwd=project_path, timeout=30,
-        )
-        return stat_result.stdout.strip()
-    except Exception:
+    log_output = run_git(
+        project_path, "log", f"--since={since_date}", "--format=%H", "--reverse",
+    )
+    commits = log_output.splitlines()
+    if not commits:
         return ""
+    oldest = commits[0]
+    # Check if oldest commit has a parent (fails on root commit)
+    has_parent = bool(run_git(project_path, "rev-parse", "--verify", f"{oldest}^"))
+    diff_range = f"{oldest}..HEAD" if not has_parent else f"{oldest}~1..HEAD"
+    return run_git(project_path, "diff", "--stat", diff_range)
 
 
 def _git_log_full(project_path: str, max_commits: int = 30) -> str:
     """Get recent git log for INIT mode (no CLAUDE.md exists yet)."""
-    cmd = [
-        "git", "log",
-        f"-n{max_commits}",
-        "--format=%h %s",
-        "--no-merges",
-    ]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=project_path, timeout=30,
-        )
-        return result.stdout.strip()
-    except Exception:
-        return ""
+    return run_git(
+        project_path, "log", f"-n{max_commits}", "--format=%h %s", "--no-merges",
+    )
 
 
 def build_git_context(project_path: str, claude_md_exists: bool) -> str:

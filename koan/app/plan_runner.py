@@ -12,7 +12,6 @@ CLI:
 
 import json
 import re
-import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -42,7 +41,7 @@ def run_plan(
     """
     if notify_fn is None:
         from app.notify import send_telegram
-        notify_fn = notify_fn or send_telegram
+        notify_fn = send_telegram
 
     if issue_url:
         return _run_issue_plan(project_path, issue_url, notify_fn, skill_dir)
@@ -161,28 +160,12 @@ def _generate_plan(project_path, idea, context="", skill_dir=None):
         from app.prompts import load_prompt
         prompt = load_prompt("plan", IDEA=idea, CONTEXT=context)
 
-    from app.cli_provider import build_full_command
-    from app.config import get_model_config
-
-    models = get_model_config()
-    cmd = build_full_command(
-        prompt=prompt,
+    from app.claude_step import run_claude_command
+    return run_claude_command(
+        prompt, project_path,
         allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
-        model=models.get("chat", ""),
-        fallback=models.get("fallback", ""),
-        max_turns=3,
+        max_turns=3, timeout=300,
     )
-
-    result = subprocess.run(
-        cmd,
-        capture_output=True, text=True, timeout=300,
-        cwd=project_path,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Claude plan generation failed: {result.stderr[:300]}")
-
-    return result.stdout.strip()
 
 
 def _get_repo_info(project_path):

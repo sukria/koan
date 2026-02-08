@@ -23,7 +23,6 @@ Returns JSON with suggested topics and reasoning.
 
 import json
 import re
-import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -92,43 +91,31 @@ class DeepResearch:
     def get_open_issues(self, limit: int = 10) -> list[dict]:
         """Fetch open GitHub issues for the project."""
         try:
-            result = subprocess.run(
-                [
-                    "gh", "issue", "list",
-                    "--state", "open",
-                    "--limit", str(limit),
-                    "--json", "number,title,labels,createdAt",
-                ],
+            from app.github import run_gh
+            output = run_gh(
+                "issue", "list",
+                "--state", "open",
+                "--limit", str(limit),
+                "--json", "number,title,labels,createdAt",
                 cwd=self.project_path,
-                capture_output=True,
-                text=True,
-                timeout=30,
             )
-            if result.returncode == 0:
-                return json.loads(result.stdout)
-        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-            pass
-        return []
+            return json.loads(output)
+        except Exception:
+            return []
 
     def get_pending_prs(self) -> list[dict]:
         """Fetch open PRs that might need attention."""
         try:
-            result = subprocess.run(
-                [
-                    "gh", "pr", "list",
-                    "--state", "open",
-                    "--json", "number,title,createdAt,headRefName",
-                ],
+            from app.github import run_gh
+            output = run_gh(
+                "pr", "list",
+                "--state", "open",
+                "--json", "number,title,createdAt,headRefName",
                 cwd=self.project_path,
-                capture_output=True,
-                text=True,
-                timeout=30,
             )
-            if result.returncode == 0:
-                return json.loads(result.stdout)
-        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-            pass
-        return []
+            return json.loads(output)
+        except Exception:
+            return []
 
     def get_recent_journal_topics(self, days: int = 7) -> list[str]:
         """Extract topics from recent journal entries to avoid repetition."""
