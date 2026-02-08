@@ -10,12 +10,24 @@ from app.bridge_log import log
 
 
 def handle(ctx):
-    """Explore a random project and suggest creative improvement ideas."""
+    """Explore a project and suggest creative improvement ideas.
+
+    Picks a random project if no argument given, or targets a specific
+    project when called as /magic <project>.
+    """
     projects = _get_projects(ctx)
     if not projects:
         return "No projects configured."
 
-    name, path = random.choice(projects)
+    target = ctx.args.strip().lower() if ctx.args else ""
+    if target:
+        name, path = _resolve_project(projects, target)
+        if name is None:
+            known = ", ".join(n for n, _ in projects)
+            return f"Unknown project '{target}'. Known: {known}"
+    else:
+        name, path = random.choice(projects)
+
     if ctx.send_message:
         ctx.send_message(f"Exploring {name}...")
 
@@ -64,6 +76,16 @@ def handle(ctx):
     except Exception as e:
         log("error", f"Magic error: {e}")
         return "Error during exploration. Try again."
+
+
+def _resolve_project(
+    projects: List[Tuple[str, str]], target: str
+) -> Tuple[str, str]:
+    """Resolve a project by name. Returns (name, path) or (None, None)."""
+    for name, path in projects:
+        if name.lower() == target:
+            return name, path
+    return None, None
 
 
 def _get_projects(ctx) -> List[Tuple[str, str]]:
