@@ -19,6 +19,7 @@ Package structure:
 """
 
 import os
+import subprocess
 from typing import List, Optional
 
 # Re-export base class and constants for convenience
@@ -172,3 +173,45 @@ def build_full_command(
         max_turns=max_turns,
         mcp_configs=mcp_configs,
     )
+
+
+def run_command(
+    prompt: str,
+    project_path: str,
+    allowed_tools: List[str],
+    model_key: str = "chat",
+    max_turns: int = 3,
+    timeout: int = 300,
+) -> str:
+    """Build and run a CLI command, returning stripped stdout.
+
+    Higher-level helper for runner modules that need to invoke the
+    configured CLI provider with a prompt and get back text output.
+    Combines build_full_command + subprocess execution + error handling.
+
+    Raises:
+        RuntimeError: If the command exits with non-zero code.
+    """
+    from app.config import get_model_config
+
+    models = get_model_config()
+    cmd = build_full_command(
+        prompt=prompt,
+        allowed_tools=allowed_tools,
+        model=models.get(model_key, ""),
+        fallback=models.get("fallback", ""),
+        max_turns=max_turns,
+    )
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True, text=True, timeout=timeout,
+        cwd=project_path,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"CLI invocation failed: {result.stderr[:300]}"
+        )
+
+    return result.stdout.strip()

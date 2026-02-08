@@ -33,4 +33,5 @@ from app.provider import (  # noqa: F401
     build_output_flags,
     build_max_turns_flags,
     build_full_command,
+    run_command,
 )

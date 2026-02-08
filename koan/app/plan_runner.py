@@ -17,7 +17,6 @@ CLI:
 
 import json
 import re
-import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -50,7 +49,7 @@ def run_plan(
     """
     if notify_fn is None:
         from app.notify import send_telegram
-        notify_fn = notify_fn or send_telegram
+        notify_fn = send_telegram
 
     if issue_url:
         return _run_issue_plan(project_path, issue_url, notify_fn, skill_dir)
@@ -212,28 +211,12 @@ def _generate_iteration_plan(project_path, issue_context, skill_dir=None):
 
 def _run_claude_plan(prompt, project_path):
     """Execute Claude CLI with the given prompt and return the output."""
-    from app.cli_provider import build_full_command
-    from app.config import get_model_config
-
-    models = get_model_config()
-    cmd = build_full_command(
-        prompt=prompt,
+    from app.cli_provider import run_command
+    return run_command(
+        prompt, project_path,
         allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
-        model=models.get("chat", ""),
-        fallback=models.get("fallback", ""),
-        max_turns=3,
+        max_turns=3, timeout=300,
     )
-
-    result = subprocess.run(
-        cmd,
-        capture_output=True, text=True, timeout=300,
-        cwd=project_path,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Claude plan generation failed: {result.stderr[:300]}")
-
-    return result.stdout.strip()
 
 
 def _search_existing_issue(owner, repo, idea):

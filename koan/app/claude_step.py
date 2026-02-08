@@ -8,8 +8,11 @@ used by pr_review.py, rebase_pr.py, and other pipeline modules.
 import subprocess
 from typing import List, Optional
 
-from app.cli_provider import build_full_command
+from app.cli_provider import build_full_command, run_command
 from app.config import get_model_config
+
+# Backward-compatible alias — callers should import from app.cli_provider
+run_claude_command = run_command
 
 
 def _run_git(cmd: list, cwd: str = None, timeout: int = 60) -> str:
