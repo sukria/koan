@@ -5,6 +5,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import sanity
 from sanity import discover_checks, run_all
 
 
@@ -50,11 +51,16 @@ class TestRunAll:
     def test_skips_modules_without_run(self):
         """Modules without a run() function are silently skipped."""
         # This tests the getattr guard in run_all
+        # Use patch.object to avoid mock resolution issues with nested
+        # string-based patch targets on package modules
         mock_module = MagicMock(spec=[])  # no 'run' attribute
-        with patch("sanity.importlib.import_module", return_value=mock_module):
-            with patch("sanity.discover_checks", return_value=["fake_check"]):
-                results = run_all("/tmp/nonexistent")
-                assert results == []
+        with patch.object(
+            sanity, "discover_checks", return_value=["fake_check"]
+        ), patch.object(
+            sanity.importlib, "import_module", return_value=mock_module
+        ):
+            results = run_all("/tmp/nonexistent")
+            assert results == []
 
 
 class TestBackwardCompat:
