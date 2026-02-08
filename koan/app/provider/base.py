@@ -11,11 +11,9 @@ from typing import List, Optional
 # Claude Code tool names (canonical, used throughout koan codebase)
 CLAUDE_TOOLS = {"Bash", "Read", "Write", "Glob", "Grep", "Edit"}
 
-# Copilot CLI tool syntax uses a different convention:
-# --allow-tool 'shell(git)' or --allow-all-tools
-# Copilot's built-in tools: shell, read_file, edit_file, list_dir, grep, glob
-# Mapping from Claude tool names to Copilot tool names
-_CLAUDE_TO_COPILOT_TOOLS = {
+# Mapping from Kōan canonical tool names to OpenAI-style function names.
+# Used by Copilot provider (--allow-tool) and local LLM runner (function calling).
+TOOL_NAME_MAP = {
     "Bash": "shell",
     "Read": "read_file",
     "Write": "write_file",
