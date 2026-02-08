@@ -282,50 +282,58 @@ class TestSendDailyReport:
 # ---------------------------------------------------------------------------
 
 class TestDailyReportCLI:
-    def test_cli_morning_flag(self, tmp_path):
-        missions_file = tmp_path / "missions.md"
+    def test_cli_morning_flag(self, tmp_path, monkeypatch):
+        # Setup KOAN_ROOT before module reload
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+
+        missions_file = instance / "missions.md"
         missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
-        marker = tmp_path / ".marker"
         with patch("sys.argv", ["daily_report.py", "--morning"]), \
              patch("app.notify.format_and_send", return_value=True), \
              patch("app.daily_report.format_and_send", return_value=True), \
-             patch("app.daily_report.MISSIONS_FILE", missions_file), \
-             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
-             patch("app.daily_report.REPORT_MARKER", marker), \
              pytest.raises(SystemExit) as exc_info:
             run_module("app.daily_report", run_name="__main__")
         assert exc_info.value.code == 0
 
-    def test_cli_evening_flag(self, tmp_path):
-        missions_file = tmp_path / "missions.md"
+    def test_cli_evening_flag(self, tmp_path, monkeypatch):
+        # Setup KOAN_ROOT before module reload
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+
+        missions_file = instance / "missions.md"
         missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
-        marker = tmp_path / ".marker"
         with patch("sys.argv", ["daily_report.py", "--evening"]), \
              patch("app.notify.format_and_send", return_value=True), \
              patch("app.daily_report.format_and_send", return_value=True), \
-             patch("app.daily_report.MISSIONS_FILE", missions_file), \
-             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
-             patch("app.daily_report.REPORT_MARKER", marker), \
              pytest.raises(SystemExit) as exc_info:
             run_module("app.daily_report", run_name="__main__")
         assert exc_info.value.code == 0
 
-    def test_cli_no_flag_auto_detect(self, tmp_path):
+    def test_cli_no_flag_auto_detect(self, tmp_path, monkeypatch):
         """No flag → uses send_daily_report() auto-detect."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+
         with patch("sys.argv", ["daily_report.py"]), \
              patch("app.daily_report.should_send_report", return_value=None), \
              pytest.raises(SystemExit) as exc_info:
             run_module("app.daily_report", run_name="__main__")
         assert exc_info.value.code == 1
 
-    def test_cli_send_failure_exits_1(self, tmp_path):
-        missions_file = tmp_path / "missions.md"
+    def test_cli_send_failure_exits_1(self, tmp_path, monkeypatch):
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+
+        missions_file = instance / "missions.md"
         missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n\n")
         with patch("sys.argv", ["daily_report.py", "--morning"]), \
              patch("app.notify.format_and_send", return_value=False), \
              patch("app.daily_report.format_and_send", return_value=False), \
-             patch("app.daily_report.MISSIONS_FILE", missions_file), \
-             patch("app.daily_report.INSTANCE_DIR", tmp_path), \
              pytest.raises(SystemExit) as exc_info:
             run_module("app.daily_report", run_name="__main__")
         assert exc_info.value.code == 1
