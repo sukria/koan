@@ -24,7 +24,6 @@ CLI interface for run.sh:
 
 import json
 import os
-import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -215,11 +214,10 @@ def check_auto_merge(
         Branch name if auto-merge was attempted, None otherwise.
     """
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, cwd=project_path,
-        )
-        branch = result.stdout.strip()
+        from app.git_sync import run_git
+        branch = run_git(project_path, "rev-parse", "--abbrev-ref", "HEAD")
+        if not branch:
+            return None
         from app.config import get_branch_prefix
         if not branch.startswith(get_branch_prefix()):
             return None
@@ -337,26 +335,18 @@ def commit_instance(instance_dir: str) -> bool:
         True if a commit was created.
     """
     try:
-        subprocess.run(
-            ["git", "add", "-A"],
-            capture_output=True, cwd=instance_dir,
-        )
-        diff_result = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"],
-            capture_output=True, cwd=instance_dir,
-        )
-        if diff_result.returncode == 0:
+        from app.git_sync import run_git
+
+        run_git(instance_dir, "add", "-A")
+
+        # Check if there are staged changes
+        status = run_git(instance_dir, "diff", "--cached", "--name-only")
+        if not status:
             return False  # No changes
 
         now = datetime.now().strftime("%Y-%m-%d-%H:%M")
-        subprocess.run(
-            ["git", "commit", "-m", f"koan: {now}"],
-            capture_output=True, cwd=instance_dir,
-        )
-        subprocess.run(
-            ["git", "push", "origin", "main"],
-            capture_output=True, cwd=instance_dir,
-        )
+        run_git(instance_dir, "commit", "-m", f"koan: {now}")
+        run_git(instance_dir, "push", "origin", "main")
         return True
     except Exception:
         return False

@@ -2,10 +2,9 @@
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -253,25 +252,23 @@ class TestCheckAutoMerge:
     """Test check_auto_merge function."""
 
     @patch("app.git_auto_merge.auto_merge_branch")
-    @patch("subprocess.run")
-    def test_checks_koan_branch(self, mock_run, mock_merge, tmp_path):
+    @patch("app.git_sync.run_git", return_value="koan/my-feature")
+    def test_checks_koan_branch(self, mock_git, mock_merge, tmp_path):
         from app.mission_runner import check_auto_merge
 
-        mock_run.return_value = MagicMock(stdout="koan/my-feature\n")
         result = check_auto_merge(str(tmp_path), "project", str(tmp_path))
         assert result == "koan/my-feature"
         mock_merge.assert_called_once()
 
-    @patch("subprocess.run")
-    def test_skips_non_koan_branch(self, mock_run, tmp_path):
+    @patch("app.git_sync.run_git", return_value="main")
+    def test_skips_non_koan_branch(self, mock_git, tmp_path):
         from app.mission_runner import check_auto_merge
 
-        mock_run.return_value = MagicMock(stdout="main\n")
         result = check_auto_merge(str(tmp_path), "project", str(tmp_path))
         assert result is None
 
-    @patch("subprocess.run", side_effect=Exception("git not found"))
-    def test_returns_none_on_error(self, mock_run, tmp_path):
+    @patch("app.git_sync.run_git", return_value="")
+    def test_returns_none_on_empty_branch(self, mock_git, tmp_path):
         from app.mission_runner import check_auto_merge
 
         result = check_auto_merge(str(tmp_path), "project", str(tmp_path))
@@ -420,37 +417,34 @@ class TestRunPostMission:
 class TestCommitInstance:
     """Test commit_instance function."""
 
-    @patch("subprocess.run")
-    def test_commits_and_pushes_when_changes(self, mock_run, tmp_path):
+    @patch("app.git_sync.run_git")
+    def test_commits_and_pushes_when_changes(self, mock_git, tmp_path):
         from app.mission_runner import commit_instance
 
-        # First call: git add -A
-        # Second call: git diff --cached --quiet (returncode=1 = has changes)
-        # Third call: git commit
-        # Fourth call: git push
-        mock_run.side_effect = [
-            MagicMock(),  # git add
-            MagicMock(returncode=1),  # git diff (changes)
-            MagicMock(),  # git commit
-            MagicMock(),  # git push
+        # run_git calls: add -A, diff --cached --name-only, commit, push
+        mock_git.side_effect = [
+            "",                    # git add -A (no output)
+            "file1.md\nfile2.md",  # git diff --cached --name-only (has changes)
+            "",                    # git commit
+            "",                    # git push
         ]
 
         result = commit_instance(str(tmp_path))
         assert result is True
-        assert mock_run.call_count == 4
+        assert mock_git.call_count == 4
 
-    @patch("subprocess.run")
-    def test_returns_false_when_no_changes(self, mock_run, tmp_path):
+    @patch("app.git_sync.run_git")
+    def test_returns_false_when_no_changes(self, mock_git, tmp_path):
         from app.mission_runner import commit_instance
 
-        mock_run.side_effect = [
-            MagicMock(),  # git add
-            MagicMock(returncode=0),  # git diff (no changes)
+        mock_git.side_effect = [
+            "",   # git add -A
+            "",   # git diff --cached --name-only (no changes → empty string)
         ]
 
         result = commit_instance(str(tmp_path))
         assert result is False
-        assert mock_run.call_count == 2
+        assert mock_git.call_count == 2
 
 
 class TestCLIParseOutput:
