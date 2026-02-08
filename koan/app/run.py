@@ -510,16 +510,16 @@ def plan_iteration(
     usage_state = Path(instance, "usage_state.json").as_posix()
     usage_md = Path(instance, "usage.md")
 
-    # Refresh usage (skip on first run — trust existing usage.md)
-    if count > 0:
-        try:
-            subprocess.run(
-                [sys.executable, Path(koan_root, "koan/app/usage_estimator.py").as_posix(),
-                 "refresh", usage_state, usage_md.as_posix()],
-                capture_output=True, timeout=15,
-            )
-        except Exception:
-            pass
+    # Always refresh usage — critical after auto-resume so stale usage.md
+    # is cleared and session resets are detected.
+    try:
+        subprocess.run(
+            [sys.executable, Path(koan_root, "koan/app/usage_estimator.py").as_posix(),
+             "refresh", usage_state, usage_md.as_posix()],
+            capture_output=True, timeout=15,
+        )
+    except Exception:
+        pass
 
     # Parse usage and decide mode
     autonomous_mode = "implement"
@@ -869,7 +869,7 @@ def main_loop():
             if action == "wait_pause":
                 log("quota", "Decision: WAIT mode (budget exhausted)")
                 print(f"  Reason: {plan['decision_reason']}")
-                print("  Action: Entering pause mode (will auto-resume after 5h)")
+                print("  Action: Entering pause mode (will auto-resume when quota resets)")
                 print()
                 try:
                     subprocess.run(
@@ -879,10 +879,18 @@ def main_loop():
                     )
                 except Exception:
                     pass
-                subprocess.run(
-                    [sys.executable, "-m", "app.pause_manager", "create", koan_root, "quota"],
-                    capture_output=True, timeout=10,
-                )
+                # Compute a proper future reset timestamp to avoid instant auto-resume
+                reset_ts = None
+                try:
+                    from app.usage_estimator import cmd_reset_time
+                    usage_state_path = Path(instance, "usage_state.json")
+                    reset_ts = cmd_reset_time(usage_state_path)
+                except Exception:
+                    pass
+                if reset_ts is None:
+                    reset_ts = int(time.time()) + 5 * 3600  # fallback: now + 5h
+                from app.pause_manager import create_pause
+                create_pause(koan_root, "quota", reset_ts)
                 _notify(instance, (
                     f"⏸️ Kōan paused: budget exhausted after {count} runs on [{project_name}]. "
                     "Auto-resume in 5h or use /resume."
@@ -1005,9 +1013,12 @@ def main_loop():
                     log("git", f"Auto-merge checked for {post_result['auto_merge_branch']}")
 
                 if post_result.get("quota_exhausted"):
-                    info = post_result.get("quota_info", {})
-                    reset_display = info.get("reset_display", "")
-                    resume_msg = info.get("resume_msg", "")
+                    # quota_info is a (reset_display, resume_message) tuple
+                    quota_info = post_result.get("quota_info")
+                    if quota_info and isinstance(quota_info, (list, tuple)) and len(quota_info) >= 2:
+                        reset_display, resume_msg = quota_info[0], quota_info[1]
+                    else:
+                        reset_display, resume_msg = "", "Auto-resume in ~5h"
                     log("quota", f"Quota reached. {reset_display}")
                     _commit_instance(instance, f"koan: quota exhausted {time.strftime('%Y-%m-%d-%H:%M')}")
                     _notify(instance, (
