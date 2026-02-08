@@ -180,14 +180,14 @@ def run_reflection(
     prompt = build_reflection_prompt(instance_dir, mission_text, journal_content)
 
     try:
-        from app.claude_step import run_claude
+        from app.claude_step import run_claude, strip_cli_noise
         from app.cli_provider import build_full_command
 
         cmd = build_full_command(prompt=prompt, max_turns=1)
         result = run_claude(cmd, cwd=str(instance_dir), timeout=60)
 
         if result["success"]:
-            output = result["output"]
+            output = strip_cli_noise(result["output"])
             # Check for skip signal
             if output in ["—", "-", ""]:
                 return ""

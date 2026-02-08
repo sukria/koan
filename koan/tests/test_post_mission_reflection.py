@@ -292,6 +292,31 @@ class TestRunReflection:
         mock_run_claude.return_value = {"success": True, "output": "-", "error": ""}
         assert run_reflection(instance_dir, "Test mission") == ""
 
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
+    def test_strips_max_turns_error_from_output(self, mock_build, mock_run_claude, instance_dir):
+        """Regression: CLI 'max turns' error was polluting shared-journal.md."""
+        mock_run_claude.return_value = {
+            "success": True,
+            "output": "A genuine reflection.\nError: Reached max turns (1)",
+            "error": "",
+        }
+        result = run_reflection(instance_dir, "Audit mission")
+        assert result == "A genuine reflection."
+        assert "Error" not in result
+
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
+    def test_only_max_turns_error_returns_empty(self, mock_build, mock_run_claude, instance_dir):
+        """When Claude produces no content, only the error line, return empty."""
+        mock_run_claude.return_value = {
+            "success": True,
+            "output": "Error: Reached max turns (1)",
+            "error": "",
+        }
+        result = run_reflection(instance_dir, "Test mission")
+        assert result == ""
+
 
 # --- TestReadJournalFile ---
 

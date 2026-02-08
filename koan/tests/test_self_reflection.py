@@ -188,6 +188,26 @@ class TestRunReflection:
         result = run_reflection(instance_dir)
         assert result == ""
 
+    @patch("app.self_reflection.subprocess.run")
+    def test_strips_max_turns_error_from_output(self, mock_run, instance_dir):
+        """Regression: CLI 'max turns' error was polluting personality-evolution.md."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="- I notice patterns\n- I avoid fluff\nError: Reached max turns (1)\n",
+        )
+        result = run_reflection(instance_dir)
+        assert "I notice patterns" in result
+        assert "Error" not in result
+
+    @patch("app.self_reflection.subprocess.run")
+    def test_only_max_turns_error_returns_empty(self, mock_run, instance_dir):
+        """When Claude produces no content, only the error line, return empty."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="Error: Reached max turns (1)\n"
+        )
+        result = run_reflection(instance_dir)
+        assert result == ""
+
 
 class TestSelfReflectionCLI:
     """CLI tests use direct function calls instead of runpy to avoid re-import issues."""

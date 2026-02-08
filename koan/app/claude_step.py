@@ -5,6 +5,7 @@ Git operations, Claude Code CLI invocation, and text utilities
 used by pr_review.py, rebase_pr.py, and other pipeline modules.
 """
 
+import re
 import subprocess
 from typing import List, Optional
 
@@ -45,6 +46,21 @@ def _rebase_onto_target(base: str, project_path: str) -> Optional[str]:
                 capture_output=True, cwd=project_path,
             )
     return None
+
+
+def strip_cli_noise(text: str) -> str:
+    """Strip Claude CLI error artifacts from output.
+
+    The CLI appends lines like 'Error: Reached max turns (N)' to stdout
+    even on successful runs. These pollute journal entries and reflections
+    when the output is stored verbatim.
+
+    Returns:
+        Cleaned text with CLI noise removed.
+    """
+    lines = text.splitlines()
+    lines = [l for l in lines if not re.match(r"^Error:.*max turns", l, re.IGNORECASE)]
+    return "\n".join(lines).strip()
 
 
 def _truncate(text: str, max_chars: int) -> str:

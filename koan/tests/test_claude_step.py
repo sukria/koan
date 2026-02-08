@@ -16,6 +16,7 @@ from app.claude_step import (
     commit_if_changes,
     run_claude,
     run_claude_step,
+    strip_cli_noise,
 )
 
 
@@ -80,6 +81,47 @@ class TestTruncate:
 
     def test_empty_string(self):
         assert _truncate("", 10) == ""
+
+
+# ---------- strip_cli_noise ----------
+
+
+class TestStripCliNoise:
+    """Tests for strip_cli_noise helper."""
+
+    def test_removes_max_turns_error(self):
+        text = "Some reflection text.\nError: Reached max turns (1)"
+        assert strip_cli_noise(text) == "Some reflection text."
+
+    def test_removes_higher_turn_counts(self):
+        text = "Output\nError: Reached max turns (3)"
+        assert strip_cli_noise(text) == "Output"
+
+    def test_preserves_clean_text(self):
+        text = "A genuine reflection.\nWith multiple lines."
+        assert strip_cli_noise(text) == text
+
+    def test_empty_string(self):
+        assert strip_cli_noise("") == ""
+
+    def test_only_error_line_returns_empty(self):
+        assert strip_cli_noise("Error: Reached max turns (1)") == ""
+
+    def test_multiline_with_error_in_middle(self):
+        text = "Line 1\nError: Reached max turns (1)\nLine 3"
+        assert strip_cli_noise(text) == "Line 1\nLine 3"
+
+    def test_case_insensitive(self):
+        text = "Output\nerror: reached MAX TURNS (2)"
+        assert strip_cli_noise(text) == "Output"
+
+    def test_preserves_unrelated_error_lines(self):
+        text = "Output\nError: something else happened"
+        assert strip_cli_noise(text) == text
+
+    def test_multiple_error_lines(self):
+        text = "Line 1\nError: Reached max turns (1)\nLine 2\nError: Reached max turns (1)"
+        assert strip_cli_noise(text) == "Line 1\nLine 2"
 
 
 # ---------- _rebase_onto_target ----------

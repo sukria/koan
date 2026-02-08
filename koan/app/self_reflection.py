@@ -112,6 +112,8 @@ def run_reflection(instance_dir: Path) -> str:
     prompt = build_reflection_prompt(instance_dir)
 
     try:
+        from app.claude_step import strip_cli_noise
+
         cmd = build_full_command(prompt=prompt, max_turns=1)
         result = subprocess.run(
             cmd,
@@ -119,7 +121,7 @@ def run_reflection(instance_dir: Path) -> str:
             check=False
         )
         if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+            return strip_cli_noise(result.stdout.strip())
         if result.returncode != 0:
             print(f"[self_reflection] Claude error (rc={result.returncode}): "
                   f"{result.stderr[:200]}", file=sys.stderr)
