@@ -1,7 +1,9 @@
 -include .env
 export
 
-.PHONY: setup awake run clean say migrate test dashboard errand-awake install sync-instance
+.PHONY: install setup
+.PHONY: clean say migrate test sync-instance
+.PHONY: awake run errand-run errand-awake dashboard
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
@@ -32,6 +34,9 @@ migrate: setup
 
 dashboard: setup
 	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/dashboard.py
+
+errand-run: setup
+	caffeinate -i $(MAKE) run
 
 errand-awake: setup
 	caffeinate -i sh -c 'cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/awake.py'
