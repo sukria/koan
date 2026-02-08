@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: setup awake run clean say migrate test dashboard errand-run errand-awake install sync-instance
+.PHONY: setup awake run clean say migrate test dashboard errand-run errand-awake install sync-instance docker-build docker-run docker-test
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
@@ -58,3 +58,12 @@ sync-instance:
 		fi; \
 	done
 	@echo "✓ instance/ synced with instance.example/"
+
+docker-build:
+	docker build -t koan .
+
+docker-run: docker-build
+	docker compose up
+
+docker-test: docker-build
+	docker compose run --rm koan test
