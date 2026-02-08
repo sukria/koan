@@ -160,6 +160,9 @@ PYTHON="python3"
 # Set PYTHONPATH so Python scripts can import from app/
 export PYTHONPATH="$KOAN_ROOT/koan"
 
+# Enforce single instance — abort if another run process is alive
+"$PYTHON" -m app.pid_manager acquire-pid run "$KOAN_ROOT" $$
+
 # Load config from config.yaml (source of truth for behavioral settings)
 MAX_RUNS=$("$PYTHON" -c "from app.utils import get_max_runs; print(get_max_runs())" 2>/dev/null || echo "20")
 INTERVAL=$("$PYTHON" -c "from app.utils import get_interval_seconds; print(get_interval_seconds())" 2>/dev/null || echo "300")
@@ -215,6 +218,7 @@ cleanup() {
     wait "$CLAUDE_PID" 2>/dev/null
   fi
   rm -f "$KOAN_ROOT/.koan-status"
+  "$PYTHON" -m app.pid_manager release-pid run "$KOAN_ROOT" 2>/dev/null || true
   log koan "Shutdown."
   CURRENT_PROJ=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "unknown")
   notify "Koan interrupted after $count runs. Last project: $CURRENT_PROJ."
@@ -790,6 +794,7 @@ done
 
 # This point is only reached via /stop command
 rm -f "$KOAN_ROOT/.koan-status"
+"$PYTHON" -m app.pid_manager release-pid run "$KOAN_ROOT" 2>/dev/null || true
 log koan "Session ended. $count runs executed."
 
 # End-of-session daily report check

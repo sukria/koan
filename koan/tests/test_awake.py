@@ -790,6 +790,14 @@ class TestMainLoop:
 
     TEST_CHAT_ID = "123456789"
 
+    @pytest.fixture(autouse=True)
+    def mock_pid_manager(self):
+        """Auto-mock PID file management for all main() tests."""
+        with patch("app.pid_manager.acquire_pidfile") as mock_acquire, \
+             patch("app.pid_manager.release_pidfile"):
+            mock_acquire.return_value = MagicMock()
+            yield
+
     @patch("app.awake.write_heartbeat")
     @patch("app.awake.flush_outbox")
     @patch("app.awake.handle_message")
