@@ -103,8 +103,6 @@ GIT_SYNC_INTERVAL=${KOAN_GIT_SYNC_INTERVAL:-5}
 HEALTH_CHECK="$APP_DIR/health_check.py"
 SELF_REFLECTION="$APP_DIR/self_reflection.py"
 RITUALS="$APP_DIR/rituals.py"
-USAGE_TRACKER="$APP_DIR/usage_tracker.py"
-USAGE_ESTIMATOR="$APP_DIR/usage_estimator.py"
 USAGE_STATE="$INSTANCE/usage_state.json"
 
 if [ ! -d "$INSTANCE" ]; then
@@ -417,152 +415,118 @@ while true; do
   echo ""
   echo -e "${_C_BOLD}${_C_CYAN}=== Run $RUN_NUM/$MAX_RUNS — $(date '+%Y-%m-%d %H:%M:%S') ===${_C_RESET}"
 
-  # Refresh usage.md from accumulated token state (handles session/weekly resets)
-  # On first run, trust existing usage.md as source of truth (don't reset counters)
-  if [ $count -gt 0 ]; then
-    "$PYTHON" "$USAGE_ESTIMATOR" refresh "$USAGE_STATE" "$INSTANCE/usage.md" 2>/dev/null || true
+  # Plan iteration: usage refresh, mode decision, recurring injection, mission picking
+  LAST_PROJECT=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "")
+  ITER_STDERR=$(mktemp)
+  ITER_JSON=$("$PYTHON" -m app.iteration_manager plan-iteration \
+    --instance "$INSTANCE" \
+    --koan-root "$KOAN_ROOT" \
+    --run-num "$RUN_NUM" \
+    --count "$count" \
+    --projects "$KOAN_PROJECTS" \
+    --last-project "$LAST_PROJECT" \
+    --usage-state "$USAGE_STATE" \
+    2>"$ITER_STDERR")
+  if [ -s "$ITER_STDERR" ]; then
+    while IFS= read -r line; do
+      echo "[koan] $line"
+    done < "$ITER_STDERR"
   fi
+  rm -f "$ITER_STDERR"
 
-  # Parse usage.md and decide autonomous mode
-  USAGE_DECISION=$("$PYTHON" "$USAGE_TRACKER" "$INSTANCE/usage.md" "$count" "$KOAN_PROJECTS" 2>/dev/null || echo "implement:50:Tracker error:0")
-  IFS=':' read -r AUTONOMOUS_MODE AVAILABLE_PCT DECISION_REASON RECOMMENDED_PROJECT_IDX <<< "$USAGE_DECISION"
+  # Unpack iteration plan from JSON (jq -r outputs raw strings, null → empty)
+  ACTION=$(jq -r '.action // ""' <<< "$ITER_JSON")
+  PROJECT_NAME=$(jq -r '.project_name // ""' <<< "$ITER_JSON")
+  PROJECT_PATH=$(jq -r '.project_path // ""' <<< "$ITER_JSON")
+  MISSION_TITLE=$(jq -r '.mission_title // ""' <<< "$ITER_JSON")
+  AUTONOMOUS_MODE=$(jq -r '.autonomous_mode // ""' <<< "$ITER_JSON")
+  FOCUS_AREA=$(jq -r '.focus_area // ""' <<< "$ITER_JSON")
+  AVAILABLE_PCT=$(jq -r '.available_pct // 50' <<< "$ITER_JSON")
+  DECISION_REASON=$(jq -r '.decision_reason // ""' <<< "$ITER_JSON")
 
-  # Display usage status (verbose logging)
+  # Display usage status
   log quota "Usage Status:"
-  if [ -f "$INSTANCE/usage.md" ]; then
-    # Extract and display session/weekly lines
-    SESSION_LINE=$(grep -i "Session" "$INSTANCE/usage.md" | head -1 || echo "Session: unknown")
-    WEEKLY_LINE=$(grep -i "Weekly" "$INSTANCE/usage.md" | head -1 || echo "Weekly: unknown")
-    echo "  $SESSION_LINE"
-    echo "  $WEEKLY_LINE"
+  DISPLAY_LINES=$(jq -r '.display_lines[]' <<< "$ITER_JSON" 2>/dev/null)
+  if [ -n "$DISPLAY_LINES" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && echo "  $line"
+    done <<< "$DISPLAY_LINES"
   else
-    echo "  [No usage.md file - using fallback mode]"
+    echo "  [No usage data available - using fallback mode]"
   fi
   echo "  Safety margin: 10% → Available: ${AVAILABLE_PCT}%"
   echo ""
 
-  # Check recurring missions — inject due ones into pending queue
-  "$PYTHON" "$APP_DIR/recurring_scheduler.py" "$INSTANCE" 2>/dev/null | while IFS= read -r line; do
-    log mission "$line"
-  done
-
-  # Pick next mission using Claude-based intelligent picker
-  LAST_PROJECT=$(cat "$KOAN_ROOT/.koan-project" 2>/dev/null || echo "")
-  PICK_MISSION="$APP_DIR/pick_mission.py"
-  PICK_STDERR=$(mktemp)
-  PICK_RESULT=$("$PYTHON" "$PICK_MISSION" "$INSTANCE" "$KOAN_PROJECTS" "$RUN_NUM" "$AUTONOMOUS_MODE" "$LAST_PROJECT" 2>"$PICK_STDERR" || echo "")
-  if [ -s "$PICK_STDERR" ]; then
-    log mission "Mission picker stderr:"
-    cat "$PICK_STDERR"
-  fi
-  rm -f "$PICK_STDERR"
-  log mission "Picker result: '${PICK_RESULT:-<empty>}'"
-
-  # Parse picker output: "project_name:mission title" or empty
-  MISSION_TITLE=""
-  if [ -n "$PICK_RESULT" ]; then
-    PROJECT_NAME="${PICK_RESULT%%:*}"
-    MISSION_TITLE="${PICK_RESULT#*:}"
-
-    # Find project path from name
-    PROJECT_PATH=""
-    for i in "${!PROJECT_NAMES[@]}"; do
-      if [ "${PROJECT_NAMES[$i]}" = "$PROJECT_NAME" ]; then
-        PROJECT_PATH="${PROJECT_PATHS[$i]}"
-        break
-      fi
-    done
-
-    # Validate mission project exists
-    if [ -z "$PROJECT_PATH" ]; then
-      KNOWN_PROJECTS=$(printf '%s\n' "${PROJECT_NAMES[@]}" | sort | sed 's/^/  • /')
-      log error "Mission references unknown project: $PROJECT_NAME"
-      log error "Known projects:"
-      echo "$KNOWN_PROJECTS"
-      notify "Mission error: Unknown project '$PROJECT_NAME'.
-Known projects:
-$KNOWN_PROJECTS"
-      exit 1
-    fi
-  else
-    # No mission picked: autonomous mode
-    PROJECT_IDX=$RECOMMENDED_PROJECT_IDX
-    PROJECT_NAME="${PROJECT_NAMES[$PROJECT_IDX]}"
-    PROJECT_PATH="${PROJECT_PATHS[$PROJECT_IDX]}"
+  # Log recurring injections
+  RECURRING=$(jq -r '.recurring_injected[]' <<< "$ITER_JSON" 2>/dev/null)
+  if [ -n "$RECURRING" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && log mission "$line"
+    done <<< "$RECURRING"
   fi
 
-  # Set MISSION_LINE for downstream compatibility (empty = autonomous)
-  MISSION_LINE=""
-  if [ -n "$MISSION_TITLE" ]; then
-    MISSION_LINE="- $MISSION_TITLE"
+  # Handle error action (unknown project)
+  if [ "$ACTION" = "error" ]; then
+    ITER_ERROR=$(jq -r '.error // ""' <<< "$ITER_JSON")
+    log error "$ITER_ERROR"
+    notify "Mission error: $ITER_ERROR"
+    exit 1
   fi
 
-  # Define focus area based on autonomous mode
-  if [ -z "$MISSION_LINE" ]; then
-    # Contemplative mode check: random chance to reflect instead of autonomous work
-    # Only triggers when there's no mission and not in WAIT/REVIEW mode (need budget)
-    # Skipped entirely when focus mode is active
-    if [ "$AUTONOMOUS_MODE" = "deep" ] || [ "$AUTONOMOUS_MODE" = "implement" ]; then
-      CONTEMPLATIVE_CHANCE=$("$PYTHON" -c "from app.utils import get_contemplative_chance; print(get_contemplative_chance())" 2>/dev/null || echo "10")
-      if ! "$PYTHON" -m app.focus_manager check "$KOAN_ROOT" >/dev/null 2>&1 && "$PYTHON" -m app.contemplative_runner should-run "$CONTEMPLATIVE_CHANCE" 2>/dev/null; then
-        log pause "Decision: CONTEMPLATIVE mode (random reflection, chance: ${CONTEMPLATIVE_CHANCE}%)"
-        echo "  Action: Running contemplative session instead of autonomous work"
-        echo ""
-        notify "🪷 Run $RUN_NUM/$MAX_RUNS — Contemplative mode (chance: $CONTEMPLATIVE_CHANCE%)"
+  # Handle contemplative action
+  if [ "$ACTION" = "contemplative" ]; then
+    log pause "Decision: CONTEMPLATIVE mode (random reflection)"
+    echo "  Action: Running contemplative session instead of autonomous work"
+    echo ""
+    notify "🪷 Run $RUN_NUM/$MAX_RUNS — Contemplative mode on $PROJECT_NAME"
 
-        pushd "$INSTANCE" > /dev/null
-        log pause "Running contemplative session..."
-        (trap '' INT; exec "$PYTHON" -m app.contemplative_runner run \
-          --instance "$INSTANCE" \
-          --project-name "$PROJECT_NAME" \
-          --session-info "Run $RUN_NUM/$MAX_RUNS on $PROJECT_NAME. Mode: $AUTONOMOUS_MODE. Triggered by $CONTEMPLATIVE_CHANCE% contemplative chance.") 2>/dev/null &
-        CLAUDE_PID=$!
-        wait_for_claude_task
-        log pause "Contemplative session ended."
-        popd > /dev/null
+    pushd "$INSTANCE" > /dev/null
+    log pause "Running contemplative session..."
+    (trap '' INT; exec "$PYTHON" -m app.contemplative_runner run \
+      --instance "$INSTANCE" \
+      --project-name "$PROJECT_NAME" \
+      --session-info "Run $RUN_NUM/$MAX_RUNS on $PROJECT_NAME. Mode: $AUTONOMOUS_MODE. Contemplative reflection.") 2>/dev/null &
+    CLAUDE_PID=$!
+    wait_for_claude_task
+    log pause "Contemplative session ended."
+    popd > /dev/null
 
-        # Contemplative session done — increment counter and loop
-        count=$((count + 1))
-        # Check for pending missions before sleeping
-        if has_pending_missions; then
-          log koan "Pending missions found after contemplation — skipping sleep"
-        else
-          set_status "Idle — post-contemplation sleep ($(date '+%H:%M'))"
-          log pause "Contemplative session complete. Sleeping ${INTERVAL}s..."
-          WAKE_REASON=$("$PYTHON" -m app.loop_manager interruptible-sleep \
-            --interval "$INTERVAL" --koan-root "$KOAN_ROOT" --instance "$INSTANCE" 2>/dev/null || echo "timeout")
-          [ "$WAKE_REASON" = "mission" ] && log koan "New mission detected during sleep — waking up early"
-        fi
-        continue
-      fi
-    fi
-
-    # Focus mode: skip autonomous work entirely — wait for missions
-    FOCUS_REMAINING=$("$PYTHON" -m app.focus_manager check "$KOAN_ROOT" 2>/dev/null) && {
-      log koan "Focus mode active ($FOCUS_REMAINING remaining) — no missions pending, sleeping"
-      set_status "Focus mode — waiting for missions ($FOCUS_REMAINING remaining)"
+    # Contemplative session done — increment counter and loop
+    count=$((count + 1))
+    # Check for pending missions before sleeping
+    if has_pending_missions; then
+      log koan "Pending missions found after contemplation — skipping sleep"
+    else
+      set_status "Idle — post-contemplation sleep ($(date '+%H:%M'))"
+      log pause "Contemplative session complete. Sleeping ${INTERVAL}s..."
       WAKE_REASON=$("$PYTHON" -m app.loop_manager interruptible-sleep \
         --interval "$INTERVAL" --koan-root "$KOAN_ROOT" --instance "$INSTANCE" 2>/dev/null || echo "timeout")
-      [ "$WAKE_REASON" = "mission" ] && log koan "New mission detected during focus sleep — waking up"
-      continue
-    }
-
-    # Handle WAIT mode (budget exhausted) — enter pause
-    if [ "$AUTONOMOUS_MODE" = "wait" ]; then
-      log quota "Decision: WAIT mode (budget exhausted)"
-      echo "  Reason: $DECISION_REASON"
-      echo "  Action: Entering pause mode (will auto-resume after 5h)"
-      echo ""
-      "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
-      "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota"
-      notify "⏸️ Kōan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Auto-resume in 5h or use /resume."
-      continue
+      [ "$WAKE_REASON" = "mission" ] && log koan "New mission detected during sleep — waking up early"
     fi
+    continue
+  fi
 
-    # Resolve focus area from autonomous mode (Python handles the mapping)
-    FOCUS_AREA=$("$PYTHON" -m app.loop_manager resolve-focus --mode "$AUTONOMOUS_MODE" 2>/dev/null || echo "General autonomous work")
-  else
-    FOCUS_AREA=$("$PYTHON" -m app.loop_manager resolve-focus --mode "$AUTONOMOUS_MODE" --has-mission 2>/dev/null || echo "Execute assigned mission")
+  # Handle focus_wait action (focus mode active, no missions pending)
+  if [ "$ACTION" = "focus_wait" ]; then
+    FOCUS_REMAINING=$(jq -r '.focus_remaining // ""' <<< "$ITER_JSON")
+    log koan "Focus mode active ($FOCUS_REMAINING remaining) — no missions pending, sleeping"
+    set_status "Focus mode — waiting for missions ($FOCUS_REMAINING remaining)"
+    WAKE_REASON=$("$PYTHON" -m app.loop_manager interruptible-sleep \
+      --interval "$INTERVAL" --koan-root "$KOAN_ROOT" --instance "$INSTANCE" 2>/dev/null || echo "timeout")
+    [ "$WAKE_REASON" = "mission" ] && log koan "New mission detected during focus sleep — waking up"
+    continue
+  fi
+
+  # Handle wait_pause action (budget exhausted)
+  if [ "$ACTION" = "wait_pause" ]; then
+    log quota "Decision: WAIT mode (budget exhausted)"
+    echo "  Reason: $DECISION_REASON"
+    echo "  Action: Entering pause mode (will auto-resume after 5h)"
+    echo ""
+    "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
+    "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota"
+    notify "⏸️ Kōan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Auto-resume in 5h or use /resume."
+    continue
   fi
 
   # Enforce current project state

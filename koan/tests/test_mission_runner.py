@@ -611,13 +611,13 @@ class TestRunShIntegration:
         assert "app.mission_runner post-mission" in content
 
     def test_run_sh_no_direct_usage_estimator_update(self):
-        """run.sh should not call usage_estimator update directly anymore."""
+        """run.sh should not call usage_estimator directly — iteration_manager
+        handles refresh, mission_runner handles update."""
         run_sh = Path(__file__).parent.parent / "run.sh"
         content = run_sh.read_text()
-        # The refresh call should remain, but the update call is now in Python
-        assert "USAGE_ESTIMATOR" in content  # refresh still exists
-        lines = [l for l in content.splitlines() if "USAGE_ESTIMATOR" in l and "update" in l]
-        assert len(lines) == 0, f"Direct usage_estimator update calls remain: {lines}"
+        # Both refresh and update are now handled by Python modules
+        lines = [l for l in content.splitlines() if "usage_estimator" in l]
+        assert len(lines) == 0, f"Direct usage_estimator calls remain: {lines}"
 
     def test_run_sh_no_dead_mission_summary_var(self):
         """MISSION_SUMMARY variable should be removed (dead code)."""

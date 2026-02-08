@@ -1,4 +1,6 @@
-"""Koan claudemd skill -- queue a CLAUDE.md refresh mission."""
+"""Kōan claudemd skill -- queue a CLAUDE.md refresh mission."""
+
+import shlex
 
 
 def handle(ctx):
@@ -37,12 +39,12 @@ def handle(ctx):
         names = ", ".join(n for n, _ in known) or "none"
         return f"Project '{project_name}' not found. Known projects: {names}"
 
-    # Build CLI command
+    # Build CLI command (quote paths to prevent shell injection)
     koan_root = ctx.koan_root
     cmd = (
-        f"cd {koan_root}/koan && "
-        f"{koan_root}/.venv/bin/python3 -m app.claudemd_refresh "
-        f"{project_path} --project-name {matched_name}"
+        f"cd {shlex.quote(str(koan_root) + '/koan')} && "
+        f"{shlex.quote(str(koan_root) + '/.venv/bin/python3')} -m app.claudemd_refresh "
+        f"{shlex.quote(str(project_path))} --project-name {shlex.quote(matched_name)}"
     )
 
     # Queue the mission

@@ -90,13 +90,31 @@ class TestGitDiffStatSince:
     def test_returns_stat_output(self):
         with patch("app.claudemd_refresh.subprocess.run") as mock_run:
             # First call: find commits
-            # Second call: diff stat
+            # Second call: rev-parse --verify (has parent)
+            # Third call: diff stat
             mock_run.side_effect = [
                 MagicMock(stdout="abc123\ndef456\n"),
+                MagicMock(returncode=0),
                 MagicMock(stdout=" app/new.py | 50 ++++\n 2 files changed"),
             ]
             result = _git_diff_stat_since("/project", "2026-01-01")
             assert "app/new.py" in result
+
+    def test_root_commit_uses_oldest_to_head(self):
+        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
+            # First call: find commits (single root commit)
+            # Second call: rev-parse --verify (no parent — returncode=1)
+            # Third call: diff stat with oldest..HEAD
+            mock_run.side_effect = [
+                MagicMock(stdout="abc123\n"),
+                MagicMock(returncode=1),
+                MagicMock(stdout=" README.md | 10 ++++\n 1 file changed"),
+            ]
+            result = _git_diff_stat_since("/project", "2026-01-01")
+            assert "README.md" in result
+            # Verify the diff range used oldest..HEAD (not oldest~1..HEAD)
+            diff_call = mock_run.call_args_list[2]
+            assert "abc123..HEAD" in diff_call[0][0]
 
     def test_returns_empty_when_no_commits(self):
         with patch("app.claudemd_refresh.subprocess.run") as mock_run:

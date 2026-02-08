@@ -1,0 +1,424 @@
+"""
+Kōan -- Iteration planning for the main run loop.
+
+Consolidates per-iteration decision-making into a single Python call:
+1. Refresh usage from accumulated token state
+2. Decide autonomous mode (wait/review/implement/deep)
+3. Inject due recurring missions
+4. Pick next mission (or enter autonomous mode)
+5. Resolve project path from mission or round-robin
+6. Handle autonomous mode decisions (contemplative, focus, WAIT)
+7. Resolve focus area description
+
+CLI interface for run.sh:
+    python -m app.iteration_manager plan-iteration \\
+        --instance <dir> --koan-root <dir> \\
+        --run-num <int> --count <int> \\
+        --projects <semicolon-separated> \\
+        --last-project <name> \\
+        --usage-state <path>
+
+Output: JSON on stdout with iteration plan.
+"""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Optional
+
+
+def _refresh_usage(usage_state: Path, usage_md: Path, count: int):
+    """Refresh usage.md from accumulated token state (skip on first run)."""
+    if count <= 0:
+        return
+    try:
+        from app.usage_estimator import cmd_refresh
+        cmd_refresh(usage_state, usage_md)
+    except Exception as e:
+        print(f"[iteration] Usage refresh error: {e}", file=sys.stderr)
+
+
+def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
+    """Parse usage.md and decide autonomous mode.
+
+    Returns:
+        dict with keys: mode, available_pct, reason, project_idx
+    """
+    try:
+        from app.usage_tracker import UsageTracker
+        tracker = UsageTracker(usage_md, count)
+        mode = tracker.decide_mode()
+        project_idx = tracker.select_project(projects_str, mode, count + 1)
+        session_rem, weekly_rem = tracker.remaining_budget()
+        available_pct = int(min(session_rem, weekly_rem))
+        reason = tracker.get_decision_reason(mode)
+
+        # Get display lines for console output
+        display_lines = []
+        if usage_md.exists():
+            content = usage_md.read_text()
+            session_match = re.search(r'^.*Session.*$', content, re.MULTILINE | re.IGNORECASE)
+            weekly_match = re.search(r'^.*Weekly.*$', content, re.MULTILINE | re.IGNORECASE)
+            if session_match:
+                display_lines.append(session_match.group(0).strip())
+            if weekly_match:
+                display_lines.append(weekly_match.group(0).strip())
+
+        return {
+            "mode": mode,
+            "available_pct": available_pct,
+            "reason": reason,
+            "project_idx": project_idx,
+            "display_lines": display_lines,
+        }
+    except Exception as e:
+        print(f"[iteration] Usage tracker error: {e}", file=sys.stderr)
+        return {
+            "mode": "implement",
+            "available_pct": 50,
+            "reason": "Tracker error — fallback",
+            "project_idx": 0,
+            "display_lines": [],
+        }
+
+
+def _inject_recurring(instance_dir: Path):
+    """Inject due recurring missions into the pending queue.
+
+    Returns:
+        list of injection descriptions (for logging)
+    """
+    recurring_path = instance_dir / "recurring.json"
+    if not recurring_path.exists():
+        return []
+
+    try:
+        from app.recurring import check_and_inject
+        missions_path = instance_dir / "missions.md"
+        return check_and_inject(recurring_path, missions_path)
+    except Exception as e:
+        print(f"[iteration] Recurring injection error: {e}", file=sys.stderr)
+        return []
+
+
+def _pick_mission(instance_dir: Path, projects_str: str, run_num: int,
+                  autonomous_mode: str, last_project: str):
+    """Pick next mission from the queue.
+
+    Returns:
+        (project_name, mission_title) or (None, None) for autonomous mode
+    """
+    try:
+        from app.pick_mission import pick_mission
+        result = pick_mission(
+            str(instance_dir), projects_str,
+            str(run_num), autonomous_mode, last_project,
+        )
+        if result:
+            parts = result.split(":", 1)
+            if len(parts) == 2:
+                return parts[0], parts[1]
+        return None, None
+    except Exception as e:
+        print(f"[iteration] Mission picker error: {e}", file=sys.stderr)
+        return None, None
+
+
+def _resolve_project_path(project_name: str, projects_str: str) -> Optional[str]:
+    """Find the path for a project name from the projects string.
+
+    Args:
+        project_name: Name to look up
+        projects_str: Semicolon-separated "name:path" pairs
+
+    Returns:
+        Path string or None if not found
+    """
+    if not projects_str:
+        return None
+
+    for pair in projects_str.split(";"):
+        pair = pair.strip()
+        if not pair:
+            continue
+        parts = pair.split(":", 1)
+        if len(parts) == 2 and parts[0].strip() == project_name:
+            return parts[1].strip()
+
+    return None
+
+
+def _get_project_by_index(projects_str: str, idx: int):
+    """Get (name, path) for project at given index.
+
+    Returns:
+        (name, path) tuple
+    """
+    pairs = [p.strip() for p in projects_str.split(";") if p.strip()]
+    if not pairs:
+        return "default", ""
+
+    idx = max(0, min(idx, len(pairs) - 1))
+    parts = pairs[idx].split(":", 1)
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return parts[0].strip(), ""
+
+
+def _get_known_project_names(projects_str: str) -> list:
+    """Extract sorted list of project names from projects string."""
+    names = []
+    for pair in projects_str.split(";"):
+        pair = pair.strip()
+        if pair:
+            name = pair.split(":")[0].strip()
+            if name:
+                names.append(name)
+    return sorted(names)
+
+
+def _resolve_focus_area(autonomous_mode: str, has_mission: bool) -> str:
+    """Map autonomous mode to a focus area description.
+
+    Args:
+        autonomous_mode: One of wait/review/implement/deep
+        has_mission: Whether a mission is assigned
+
+    Returns:
+        Human-readable focus area description
+    """
+    if has_mission:
+        return "Execute assigned mission"
+
+    focus_areas = {
+        "review": "Low-cost review: audit code, find issues, suggest improvements (READ-ONLY)",
+        "implement": "Medium-cost implementation: prototype fixes, small improvements",
+        "deep": "High-cost deep work: refactoring, architectural changes",
+        "wait": "Budget exhausted — entering pause mode",
+    }
+    return focus_areas.get(autonomous_mode, "General autonomous work")
+
+
+def _should_contemplate(autonomous_mode: str, focus_active: bool,
+                        contemplative_chance: int) -> bool:
+    """Check if this iteration should be a contemplative session.
+
+    Contemplative sessions only trigger when:
+    - Mode is deep or implement (need budget for Claude call)
+    - Focus mode is NOT active
+    - Random roll succeeds
+
+    Returns:
+        True if should run a contemplative session
+    """
+    if autonomous_mode not in ("deep", "implement"):
+        return False
+
+    if focus_active:
+        return False
+
+    import random
+    return random.randint(0, 99) < contemplative_chance
+
+
+def _check_focus(koan_root: str):
+    """Check focus mode state.
+
+    Returns:
+        Focus state object if active, None if not active.
+        Gracefully returns None if focus_manager module is not available.
+    """
+    try:
+        from app.focus_manager import check_focus
+        return check_focus(koan_root)
+    except Exception:
+        return None
+
+
+def plan_iteration(
+    instance_dir: str,
+    koan_root: str,
+    run_num: int,
+    count: int,
+    projects_str: str,
+    last_project: str,
+    usage_state_path: str,
+) -> dict:
+    """Plan a single iteration of the run loop.
+
+    This is the main entry point. It consolidates all per-iteration
+    decision-making into a single call.
+
+    Returns:
+        dict with iteration plan:
+        {
+            "action": "mission" | "autonomous" | "contemplative" | "focus_wait" | "wait_pause" | "error",
+            "project_name": str,
+            "project_path": str,
+            "mission_title": str (empty for autonomous/contemplative),
+            "autonomous_mode": str (wait/review/implement/deep),
+            "focus_area": str,
+            "available_pct": int,
+            "decision_reason": str,
+            "display_lines": list[str] (usage status lines for console),
+            "recurring_injected": list[str] (injected recurring missions),
+            "focus_remaining": str | None (if focus mode active),
+            "error": str | None (project validation error),
+        }
+    """
+    instance = Path(instance_dir)
+    usage_state = Path(usage_state_path)
+    usage_md = instance / "usage.md"
+
+    # Step 1: Refresh usage
+    _refresh_usage(usage_state, usage_md, count)
+
+    # Step 2: Get usage decision (mode, available%, reason, project idx)
+    decision = _get_usage_decision(usage_md, count, projects_str)
+    autonomous_mode = decision["mode"]
+    available_pct = decision["available_pct"]
+    decision_reason = decision["reason"]
+    recommended_idx = decision["project_idx"]
+    display_lines = decision["display_lines"]
+
+    # Step 3: Inject recurring missions
+    recurring_injected = _inject_recurring(instance)
+
+    # Step 4: Pick mission
+    mission_project, mission_title = _pick_mission(
+        instance, projects_str, run_num, autonomous_mode, last_project,
+    )
+
+    # Step 5: Resolve project
+    if mission_project and mission_title:
+        # Mission picked — resolve project path
+        project_name = mission_project
+        project_path = _resolve_project_path(project_name, projects_str)
+
+        if project_path is None:
+            known = _get_known_project_names(projects_str)
+            return {
+                "action": "error",
+                "project_name": project_name,
+                "project_path": "",
+                "mission_title": mission_title,
+                "autonomous_mode": autonomous_mode,
+                "focus_area": "",
+                "available_pct": available_pct,
+                "decision_reason": decision_reason,
+                "display_lines": display_lines,
+                "recurring_injected": recurring_injected,
+                "focus_remaining": None,
+                "error": f"Unknown project '{project_name}'. Known: {', '.join(known)}",
+            }
+    else:
+        # No mission — autonomous mode
+        mission_title = ""
+        project_name, project_path = _get_project_by_index(projects_str, recommended_idx)
+
+    # Step 6: Determine action for autonomous mode
+    action = "mission" if mission_title else "autonomous"
+
+    if not mission_title:
+        # No mission — check autonomous mode decisions
+
+        # Check focus state once (used by both contemplative and focus_wait)
+        focus_state = _check_focus(koan_root)
+
+        # 6a: Contemplative chance (random reflection)
+        try:
+            from app.utils import get_contemplative_chance
+            contemplative_chance = get_contemplative_chance()
+        except Exception:
+            contemplative_chance = 10
+
+        if _should_contemplate(autonomous_mode, focus_state is not None, contemplative_chance):
+            action = "contemplative"
+        else:
+            # 6b: Focus mode — skip autonomous, wait for missions
+            if focus_state is not None:
+                action = "focus_wait"
+
+                focus_area = _resolve_focus_area(autonomous_mode, has_mission=False)
+
+                try:
+                    focus_remaining = focus_state.remaining_display()
+                except Exception:
+                    focus_remaining = "unknown"
+
+                return {
+                    "action": action,
+                    "project_name": project_name,
+                    "project_path": project_path or "",
+                    "mission_title": "",
+                    "autonomous_mode": autonomous_mode,
+                    "focus_area": focus_area,
+                    "available_pct": available_pct,
+                    "decision_reason": decision_reason,
+                    "display_lines": display_lines,
+                    "recurring_injected": recurring_injected,
+                    "focus_remaining": focus_remaining,
+                    "error": None,
+                }
+
+            # 6c: WAIT mode — budget exhausted
+            if autonomous_mode == "wait":
+                action = "wait_pause"
+
+    # Step 7: Resolve focus area
+    has_mission = bool(mission_title)
+    focus_area = _resolve_focus_area(autonomous_mode, has_mission=has_mission)
+
+    return {
+        "action": action,
+        "project_name": project_name,
+        "project_path": project_path or "",
+        "mission_title": mission_title,
+        "autonomous_mode": autonomous_mode,
+        "focus_area": focus_area,
+        "available_pct": available_pct,
+        "decision_reason": decision_reason,
+        "display_lines": display_lines,
+        "recurring_injected": recurring_injected,
+        "focus_remaining": None,
+        "error": None,
+    }
+
+
+def main():
+    """CLI entry point for iteration_manager."""
+    parser = argparse.ArgumentParser(description="Kōan iteration planner")
+    subparsers = parser.add_subparsers(dest="command")
+
+    plan_parser = subparsers.add_parser("plan-iteration",
+                                        help="Plan next loop iteration")
+    plan_parser.add_argument("--instance", required=True, help="Instance directory")
+    plan_parser.add_argument("--koan-root", required=True, help="KOAN_ROOT directory")
+    plan_parser.add_argument("--run-num", type=int, required=True, help="Current run number (1-based)")
+    plan_parser.add_argument("--count", type=int, required=True, help="Completed runs count")
+    plan_parser.add_argument("--projects", required=True, help="Projects string (name:path;...)")
+    plan_parser.add_argument("--last-project", default="", help="Last project name")
+    plan_parser.add_argument("--usage-state", required=True, help="Path to usage_state.json")
+
+    args = parser.parse_args()
+
+    if args.command == "plan-iteration":
+        result = plan_iteration(
+            instance_dir=args.instance,
+            koan_root=args.koan_root,
+            run_num=args.run_num,
+            count=args.count,
+            projects_str=args.projects,
+            last_project=args.last_project,
+            usage_state_path=args.usage_state,
+        )
+        print(json.dumps(result))
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

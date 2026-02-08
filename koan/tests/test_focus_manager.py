@@ -532,13 +532,11 @@ class TestRunShFocusIntegration:
             i for i, l in enumerate(lines)
             if "focus_manager check" in l
         ]
-        contemplative_lines = [
-            i for i, l in enumerate(lines)
-            if "contemplative_runner should-run" in l
-        ]
-        # Focus check should appear before contemplative runner
-        assert len(focus_check_lines) >= 2  # Two gates: pause + autonomous
-        assert len(contemplative_lines) >= 1
+        # Pause mode has focus gate in run.sh; autonomous mode focus gate
+        # is in iteration_manager.py (_should_contemplate + _check_focus)
+        assert len(focus_check_lines) >= 1  # Pause mode gate
+        # Contemplative runner is still invoked from run.sh
+        assert "contemplative_runner run" in content
 
     def test_focus_sleep_block_exists(self):
         content = self._read_run_sh()

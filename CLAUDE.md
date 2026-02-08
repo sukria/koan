@@ -46,6 +46,7 @@ Communication between processes happens through shared files in `instance/` with
 - **`utils.py`** — File locking (thread + file locks), config loading, atomic writes, `get_branch_prefix()`, `get_known_projects()`
 
 **Agent loop pipeline** (called from `run.sh`):
+- **`iteration_manager.py`** — Per-iteration decision-making: usage refresh, mode selection, recurring injection, mission picking, project resolution. CLI outputs JSON consumed by `run.sh` via `jq`.
 - **`mission_runner.py`** — Full mission lifecycle: build CLI command, execute, parse JSON output, usage tracking, archival, reflection, auto-merge
 - **`loop_manager.py`** — Focus area resolution, pending.md creation, interruptible sleep with wake-on-mission, project validation
 - **`contemplative_runner.py`** — Contemplative session runner (probability roll, prompt building, CLI invocation)

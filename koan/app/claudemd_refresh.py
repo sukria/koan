@@ -1,5 +1,5 @@
 """
-Koan -- CLAUDE.md refresh pipeline.
+Kōan -- CLAUDE.md refresh pipeline.
 
 Analyzes recent commits in a project and updates (or creates) the CLAUDE.md
 file with architecturally significant changes.
@@ -76,9 +76,18 @@ def _git_diff_stat_since(project_path: str, since_date: str) -> str:
         if not commits:
             return ""
         oldest = commits[0]
-        # Get diffstat from that commit's parent to HEAD
+        # Check if oldest commit has a parent (fails on root commit)
+        has_parent = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{oldest}^"],
+            capture_output=True, text=True, cwd=project_path, timeout=10,
+        ).returncode == 0
+        if not has_parent:
+            # Root commit — diff entire tree
+            diff_range = f"{oldest}..HEAD"
+        else:
+            diff_range = f"{oldest}~1..HEAD"
         stat_result = subprocess.run(
-            ["git", "diff", "--stat", f"{oldest}~1..HEAD"],
+            ["git", "diff", "--stat", diff_range],
             capture_output=True, text=True, cwd=project_path, timeout=30,
         )
         return stat_result.stdout.strip()
