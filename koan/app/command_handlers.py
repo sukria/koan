@@ -16,6 +16,7 @@ from app.bridge_state import (
     INSTANCE_DIR,
     MISSIONS_FILE,
     _get_registry,
+    _reset_registry,
 )
 from app.notify import send_telegram
 from app.skills import Skill, SkillContext, execute_skill
@@ -147,21 +148,47 @@ def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
 
 
 def _handle_skill_command(args: str):
-    """Handle /skill — list skills or invoke a specific one.
+    """Handle /skill — list skills, manage sources, or invoke a specific one.
 
     Usage:
-        /skill                    — list all skills
-        /skill core               — list skills in scope 'core'
-        /skill core.status        — invoke core/status skill
-        /skill core.status.ping   — invoke subcommand 'ping' of core/status
+        /skill                           — list all skills
+        /skill core                      — list skills in scope 'core'
+        /skill core.status               — invoke core/status skill
+        /skill core.status.ping          — invoke subcommand 'ping'
+        /skill install <url> [scope]     — install skills from a Git repo
+        /skill update [scope]            — update one or all sources
+        /skill remove <scope>            — remove an installed source
+        /skill sources                   — list installed sources
     """
     registry = _get_registry()
+
+    # --- Skill management subcommands ---
+    if args:
+        sub_parts = args.split(None, 1)
+        sub_cmd = sub_parts[0].lower()
+        sub_args = sub_parts[1] if len(sub_parts) > 1 else ""
+
+        if sub_cmd == "install":
+            _handle_skill_install(sub_args)
+            return
+
+        if sub_cmd == "update":
+            _handle_skill_update(sub_args)
+            return
+
+        if sub_cmd == "remove":
+            _handle_skill_remove(sub_args)
+            return
+
+        if sub_cmd == "sources":
+            _handle_skill_sources()
+            return
 
     if not args:
         # List non-core skills grouped by scope (core skills are in /help)
         non_core = [s for s in registry.list_all() if s.scope != "core"]
         if not non_core:
-            send_telegram("ℹ️ No extra skills loaded. Core skills are listed in /help.")
+            send_telegram("ℹ️ No extra skills loaded. Core skills are listed in /help.\n\nInstall with: /skill install <git-url> [scope]")
             return
 
         parts = ["Available Skills\n"]
@@ -175,7 +202,7 @@ def _handle_skill_command(args: str):
             parts.append("")
 
         parts.append("Use: /<scope>.<name> [args]")
-        parts.append("Core skills are listed in /help.")
+        parts.append("Manage: /skill install|update|remove|sources")
         send_telegram("\n".join(parts))
         return
 
@@ -213,6 +240,74 @@ def _handle_skill_command(args: str):
         return
 
     _dispatch_skill(skill, subcommand, skill_args)
+
+
+def _handle_skill_install(args: str):
+    """Handle /skill install <url> [scope] [--ref=<ref>]."""
+    from app.skill_manager import install_skill_source
+
+    if not args:
+        send_telegram(
+            "Usage: /skill install <git-url> [scope] [--ref=tag]\n\n"
+            "Examples:\n"
+            "  /skill install myorg/koan-skills-ops\n"
+            "  /skill install https://github.com/team/skills.git ops\n"
+            "  /skill install myorg/skills ops --ref=v1.0.0"
+        )
+        return
+
+    parts = args.split()
+    url = parts[0]
+    scope = None
+    ref = "main"
+
+    for part in parts[1:]:
+        if part.startswith("--ref="):
+            ref = part[6:]
+        elif scope is None:
+            scope = part
+
+    ok, msg = install_skill_source(INSTANCE_DIR, url, scope=scope, ref=ref)
+    if ok:
+        _reset_registry()  # Reload skills
+    send_telegram(f"{'✅' if ok else '❌'} {msg}")
+
+
+def _handle_skill_update(args: str):
+    """Handle /skill update [scope]."""
+    from app.skill_manager import update_skill_source, update_all_sources
+
+    scope = args.strip()
+    if scope:
+        ok, msg = update_skill_source(INSTANCE_DIR, scope)
+    else:
+        ok, msg = update_all_sources(INSTANCE_DIR)
+
+    if ok:
+        _reset_registry()  # Reload skills
+    send_telegram(msg)
+
+
+def _handle_skill_remove(args: str):
+    """Handle /skill remove <scope>."""
+    from app.skill_manager import remove_skill_source
+
+    scope = args.strip()
+    if not scope:
+        send_telegram("Usage: /skill remove <scope>")
+        return
+
+    ok, msg = remove_skill_source(INSTANCE_DIR, scope)
+    if ok:
+        _reset_registry()  # Reload skills
+    send_telegram(f"{'✅' if ok else '❌'} {msg}")
+
+
+def _handle_skill_sources():
+    """Handle /skill sources — list installed skill sources."""
+    from app.skill_manager import list_sources
+
+    send_telegram(list_sources(INSTANCE_DIR))
 
 
 def _handle_help_command(command_name: str):
@@ -258,7 +353,7 @@ def _handle_help():
         "▶️ /resume -- resume after pause (alias: /work, /awake, /start)",
         "⏹️ /stop -- stop Koan after current mission",
         "/help -- this help (use /help <command> for details)",
-        "/skill -- list available skills",
+        "/skill -- list skills (install|update|remove|sources)",
     ]
 
     def _fmt(cmd, skill):
