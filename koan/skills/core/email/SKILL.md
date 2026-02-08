@@ -1,0 +1,12 @@
+---
+name: email
+scope: core
+description: Email status and test
+version: 1.0.0
+commands:
+  - name: email
+    description: Email status and test
+    usage: /email, /email test
+    aliases: []
+handler: handler.py
+---

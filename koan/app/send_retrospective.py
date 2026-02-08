@@ -102,6 +102,14 @@ def create_retrospective(instance_dir: Path, project_name: str):
     append_to_outbox(instance_dir, retrospective)
     print(f"[send_retrospective] Retrospective sent to outbox ({len(retrospective)} chars)")
 
+    # Also email the digest if email is configured
+    try:
+        from app.email_notify import send_session_digest
+        if send_session_digest(project_name, retrospective):
+            print("[send_retrospective] Session digest emailed to owner")
+    except Exception as e:
+        print(f"[send_retrospective] Email digest skipped: {e}", file=sys.stderr)
+
 
 def main():
     """CLI entry point."""

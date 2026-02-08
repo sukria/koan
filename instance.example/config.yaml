@@ -94,6 +94,13 @@ usage:
   session_token_limit: 500000   # Tokens per 5h session window
   weekly_token_limit: 5000000   # Tokens per 7-day window
 
+# Email notifications to owner
+# Sends email via SMTP — credentials in .env (see env.example)
+# Use /email in Telegram to check status and send test emails
+email:
+  enabled: false          # Global on/off switch
+  max_per_day: 5          # Rate limit (rolling 24h window)
+
 # Per-project overrides
 # Override git_auto_merge settings for specific projects
 # Example: if you have a project named "myapp" configured via KOAN_PROJECTS
