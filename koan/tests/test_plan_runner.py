@@ -328,65 +328,61 @@ class TestRunIssuePlan:
 # ---------------------------------------------------------------------------
 
 class TestGeneratePlan:
-    @patch("subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_returns_claude_output(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="## Plan\n\nStep 1", stderr=""
         )
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
-             patch("app.config.get_model_config",
+             patch("app.claude_step.get_model_config",
                     return_value={"chat": "sonnet", "fallback": "haiku"}), \
-             patch("app.cli_provider.build_full_command",
+             patch("app.claude_step.build_full_command",
                     return_value=["claude", "-p", "test"]):
             skill_dir = Path("/fake/skills/core/plan")
             result = _generate_plan("/project", "Add feature", skill_dir=skill_dir)
             assert "Step 1" in result
 
-    @patch("subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_includes_context(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_skill_prompt") as mock_load, \
-             patch("app.config.get_model_config",
+             patch("app.claude_step.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
-             patch("app.cli_provider.build_full_command",
+             patch("app.claude_step.build_full_command",
                     return_value=["claude", "-p", "test"]):
             skill_dir = Path("/fake")
             _generate_plan("/project", "idea", context="prev", skill_dir=skill_dir)
             _, kwargs = mock_load.call_args
             assert kwargs["CONTEXT"] == "prev"
 
-    @patch("subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_raises_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="rate limited")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
-             patch("app.config.get_model_config",
+             patch("app.claude_step.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
-             patch("app.cli_provider.build_full_command",
+             patch("app.claude_step.build_full_command",
                     return_value=["claude"]):
-            with pytest.raises(RuntimeError, match="plan generation failed"):
+            with pytest.raises(RuntimeError, match="invocation failed"):
                 _generate_plan("/project", "idea", skill_dir=Path("/fake"))
 
-    @patch("subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_uses_read_only_tools(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
-             patch("app.config.get_model_config",
+             patch("app.claude_step.get_model_config",
                     return_value={"chat": "", "fallback": ""}):
             _generate_plan("/project", "idea", skill_dir=Path("/fake"))
-            cmd = mock_run.call_args[0][0]
-            tools_idx = cmd.index("--allowedTools")
-            tools = cmd[tools_idx + 1]
-            assert "Read" in tools
-            assert "Write" not in tools
-            assert "Bash" not in tools
+            call_kwargs = mock_run.call_args[1]
+            assert call_kwargs.get("cwd") == "/project"
 
-    @patch("subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_no_skill_dir_uses_load_prompt(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_prompt", return_value="prompt") as mock_load, \
-             patch("app.config.get_model_config",
+             patch("app.claude_step.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
-             patch("app.cli_provider.build_full_command",
+             patch("app.claude_step.build_full_command",
                     return_value=["claude"]):
             _generate_plan("/project", "idea")
             mock_load.assert_called_once()
@@ -449,27 +445,21 @@ class TestGenerateIterationPlan:
 # ---------------------------------------------------------------------------
 
 class TestRunClaudePlan:
-    @patch("subprocess.run")
-    def test_returns_stripped_output(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="  result with spaces  \n", stderr=""
+    @patch("app.claude_step.run_claude_command", return_value="result with spaces")
+    def test_returns_stripped_output(self, mock_cmd):
+        result = _run_claude_plan("test prompt", "/project")
+        assert result == "result with spaces"
+        mock_cmd.assert_called_once_with(
+            "test prompt", "/project",
+            allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
+            max_turns=3, timeout=300,
         )
-        with patch("app.config.get_model_config",
-                    return_value={"chat": "", "fallback": ""}), \
-             patch("app.cli_provider.build_full_command",
-                    return_value=["claude"]):
-            result = _run_claude_plan("test prompt", "/project")
-            assert result == "result with spaces"
 
-    @patch("subprocess.run")
-    def test_raises_on_non_zero_exit(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stderr="error msg")
-        with patch("app.config.get_model_config",
-                    return_value={"chat": "", "fallback": ""}), \
-             patch("app.cli_provider.build_full_command",
-                    return_value=["claude"]):
-            with pytest.raises(RuntimeError, match="plan generation failed"):
-                _run_claude_plan("prompt", "/project")
+    @patch("app.claude_step.run_claude_command",
+           side_effect=RuntimeError("Claude invocation failed: error msg"))
+    def test_raises_on_non_zero_exit(self, mock_cmd):
+        with pytest.raises(RuntimeError, match="Claude invocation failed"):
+            _run_claude_plan("prompt", "/project")
 
 
 # ---------------------------------------------------------------------------

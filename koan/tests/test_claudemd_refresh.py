@@ -1,6 +1,5 @@
 """Tests for the claudemd_refresh pipeline module."""
 
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
@@ -23,30 +22,26 @@ from app.claudemd_refresh import (
 
 class TestGitLastModified:
     def test_returns_date_on_success(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="2026-01-15T10:30:00+01:00\n")
+        with patch("app.claudemd_refresh.run_git", return_value="2026-01-15T10:30:00+01:00") as mock_git:
             result = _git_last_modified("/project", "CLAUDE.md")
             assert result == "2026-01-15T10:30:00+01:00"
-            cmd = mock_run.call_args[0][0]
-            assert "git" in cmd
-            assert "CLAUDE.md" in cmd
+            mock_git.assert_called_once_with("/project", "log", "-1", "--format=%aI", "--", "CLAUDE.md")
 
     def test_returns_empty_on_no_history(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="")
+        with patch("app.claudemd_refresh.run_git", return_value=""):
             result = _git_last_modified("/project", "CLAUDE.md")
             assert result == ""
 
     def test_returns_empty_on_exception(self):
-        with patch("app.claudemd_refresh.subprocess.run", side_effect=Exception("fail")):
+        """run_git swallows exceptions internally, so this returns empty."""
+        with patch("app.claudemd_refresh.run_git", return_value=""):
             result = _git_last_modified("/project", "CLAUDE.md")
             assert result == ""
 
-    def test_cwd_passed_to_subprocess(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="")
+    def test_project_path_passed(self):
+        with patch("app.claudemd_refresh.run_git", return_value="") as mock_git:
             _git_last_modified("/my/project", "CLAUDE.md")
-            assert mock_run.call_args[1]["cwd"] == "/my/project"
+            assert mock_git.call_args[0][0] == "/my/project"
 
 
 # ---------------------------------------------------------------------------
@@ -56,28 +51,26 @@ class TestGitLastModified:
 class TestGitLogSince:
     def test_returns_log_lines(self):
         log = "abc1234 Add new module\ndef5678 Refactor auth"
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout=log)
+        with patch("app.claudemd_refresh.run_git", return_value=log):
             result = _git_log_since("/project", "2026-01-01")
             assert "abc1234" in result
             assert "Refactor auth" in result
 
     def test_since_date_in_command(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="")
+        with patch("app.claudemd_refresh.run_git", return_value="") as mock_git:
             _git_log_since("/project", "2026-01-15")
-            cmd = mock_run.call_args[0][0]
-            assert "--since=2026-01-15" in cmd
+            args = mock_git.call_args[0]
+            assert "--since=2026-01-15" in args
 
     def test_max_commits_limit(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="")
+        with patch("app.claudemd_refresh.run_git", return_value="") as mock_git:
             _git_log_since("/project", "2026-01-01", max_commits=10)
-            cmd = mock_run.call_args[0][0]
-            assert "-n10" in cmd
+            args = mock_git.call_args[0]
+            assert "-n10" in args
 
     def test_returns_empty_on_exception(self):
-        with patch("app.claudemd_refresh.subprocess.run", side_effect=Exception("fail")):
+        """run_git swallows exceptions internally, so this returns empty."""
+        with patch("app.claudemd_refresh.run_git", return_value=""):
             result = _git_log_since("/project", "2026-01-01")
             assert result == ""
 
@@ -88,42 +81,42 @@ class TestGitLogSince:
 
 class TestGitDiffStatSince:
     def test_returns_stat_output(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            # First call: find commits
-            # Second call: rev-parse --verify (has parent)
+        with patch("app.claudemd_refresh.run_git") as mock_git:
+            # First call: find commits (log --reverse)
+            # Second call: rev-parse --verify (has parent → non-empty)
             # Third call: diff stat
-            mock_run.side_effect = [
-                MagicMock(stdout="abc123\ndef456\n"),
-                MagicMock(returncode=0),
-                MagicMock(stdout=" app/new.py | 50 ++++\n 2 files changed"),
+            mock_git.side_effect = [
+                "abc123\ndef456",
+                "parent-hash",
+                " app/new.py | 50 ++++\n 2 files changed",
             ]
             result = _git_diff_stat_since("/project", "2026-01-01")
             assert "app/new.py" in result
 
     def test_root_commit_uses_oldest_to_head(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
+        with patch("app.claudemd_refresh.run_git") as mock_git:
             # First call: find commits (single root commit)
-            # Second call: rev-parse --verify (no parent — returncode=1)
+            # Second call: rev-parse --verify (no parent → empty string)
             # Third call: diff stat with oldest..HEAD
-            mock_run.side_effect = [
-                MagicMock(stdout="abc123\n"),
-                MagicMock(returncode=1),
-                MagicMock(stdout=" README.md | 10 ++++\n 1 file changed"),
+            mock_git.side_effect = [
+                "abc123",
+                "",
+                " README.md | 10 ++++\n 1 file changed",
             ]
             result = _git_diff_stat_since("/project", "2026-01-01")
             assert "README.md" in result
             # Verify the diff range used oldest..HEAD (not oldest~1..HEAD)
-            diff_call = mock_run.call_args_list[2]
-            assert "abc123..HEAD" in diff_call[0][0]
+            diff_call = mock_git.call_args_list[2]
+            assert "abc123..HEAD" in diff_call[0]
 
     def test_returns_empty_when_no_commits(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="")
+        with patch("app.claudemd_refresh.run_git", return_value=""):
             result = _git_diff_stat_since("/project", "2026-01-01")
             assert result == ""
 
     def test_returns_empty_on_exception(self):
-        with patch("app.claudemd_refresh.subprocess.run", side_effect=Exception("fail")):
+        """run_git swallows exceptions internally, so this returns empty."""
+        with patch("app.claudemd_refresh.run_git", return_value=""):
             result = _git_diff_stat_since("/project", "2026-01-01")
             assert result == ""
 
@@ -134,20 +127,19 @@ class TestGitDiffStatSince:
 
 class TestGitLogFull:
     def test_returns_recent_log(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="abc1234 Initial commit")
+        with patch("app.claudemd_refresh.run_git", return_value="abc1234 Initial commit"):
             result = _git_log_full("/project")
             assert "abc1234" in result
 
     def test_no_merges_flag(self):
-        with patch("app.claudemd_refresh.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="")
+        with patch("app.claudemd_refresh.run_git", return_value="") as mock_git:
             _git_log_full("/project")
-            cmd = mock_run.call_args[0][0]
-            assert "--no-merges" in cmd
+            args = mock_git.call_args[0]
+            assert "--no-merges" in args
 
     def test_returns_empty_on_exception(self):
-        with patch("app.claudemd_refresh.subprocess.run", side_effect=Exception("fail")):
+        """run_git swallows exceptions internally, so this returns empty."""
+        with patch("app.claudemd_refresh.run_git", return_value=""):
             result = _git_log_full("/project")
             assert result == ""
 
