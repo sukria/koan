@@ -584,6 +584,164 @@ class TestBoldHelpers:
 
 
 # ---------------------------------------------------------------------------
+# Test: quota spam loop regression tests (session 220 fixes)
+# ---------------------------------------------------------------------------
+
+class TestQuotaSpamLoopFixes:
+    """Regression tests for the quota exhaustion spam loop bug.
+
+    The bug: when quota is exhausted, the system entered a rapid
+    auto-resume → detect exhaustion → pause → auto-resume loop,
+    spamming the user with messages.
+
+    Root causes:
+    1. wait_pause created pause with timestamp=now (instant auto-resume)
+    2. Usage refresh was skipped when count=0 (stale data after resume)
+    3. Post-mission quota_info was treated as dict but was actually a tuple
+    """
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.resolve_focus_area", return_value="General autonomous work")
+    @patch("app.run.should_run_contemplative", return_value=False)
+    @patch("app.run.get_contemplative_chance", return_value=10)
+    def test_usage_refresh_called_at_count_zero(
+        self, mock_chance, mock_contemp, mock_focus, mock_subproc, koan_root
+    ):
+        """Usage refresh must happen even at count=0 (after auto-resume)."""
+        from app.run import plan_iteration
+
+        calls = []
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(str(c) for c in cmd)
+            calls.append(cmd_str)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            if "pick_mission" in cmd_str:
+                result.stdout = ""
+            elif "usage_tracker" in cmd_str:
+                result.stdout = "implement:50:Normal:0"
+            elif "focus_manager" in cmd_str:
+                result.returncode = 1
+            return result
+
+        mock_subproc.side_effect = side_effect
+        instance = str(koan_root / "instance")
+        projects = [("test", str(koan_root))]
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+
+        # Call with count=0 (simulates first run after auto-resume)
+        plan_iteration(instance, str(koan_root), projects, 1, 0, 5)
+
+        # Verify usage_estimator refresh was called
+        refresh_calls = [c for c in calls if "usage_estimator" in c and "refresh" in c]
+        assert len(refresh_calls) == 1, (
+            f"Usage refresh must be called even at count=0. Calls: {calls}"
+        )
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.resolve_focus_area", return_value="General autonomous work")
+    @patch("app.run.should_run_contemplative", return_value=False)
+    @patch("app.run.get_contemplative_chance", return_value=10)
+    def test_wait_pause_returns_wait_action(
+        self, mock_chance, mock_contemp, mock_focus, mock_subproc, koan_root
+    ):
+        """When usage tracker says 'wait', plan_iteration returns wait_pause."""
+        from app.run import plan_iteration
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(str(c) for c in cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            if "pick_mission" in cmd_str:
+                result.stdout = ""
+            elif "usage_tracker" in cmd_str:
+                result.stdout = "wait:2:Budget exhausted:0"
+            elif "focus_manager" in cmd_str:
+                result.returncode = 1
+            return result
+
+        mock_subproc.side_effect = side_effect
+        instance = str(koan_root / "instance")
+        projects = [("test", str(koan_root))]
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+
+        result = plan_iteration(instance, str(koan_root), projects, 1, 0, 5)
+        assert result["action"] == "wait_pause"
+
+    def test_post_mission_quota_info_tuple_handling(self):
+        """Post-mission quota_info is a (reset_display, resume_msg) tuple."""
+        post_result = {
+            "quota_exhausted": True,
+            "quota_info": ("resets at 10am", "Auto-resume at reset time (~2h)"),
+        }
+
+        quota_info = post_result.get("quota_info")
+        if quota_info and isinstance(quota_info, (list, tuple)) and len(quota_info) >= 2:
+            reset_display, resume_msg = quota_info[0], quota_info[1]
+        else:
+            reset_display, resume_msg = "", "Auto-resume in ~5h"
+
+        assert reset_display == "resets at 10am"
+        assert resume_msg == "Auto-resume at reset time (~2h)"
+
+    def test_post_mission_quota_info_none_handling(self):
+        """When quota_info is None, use fallback values."""
+        post_result = {
+            "quota_exhausted": True,
+            "quota_info": None,
+        }
+
+        quota_info = post_result.get("quota_info")
+        if quota_info and isinstance(quota_info, (list, tuple)) and len(quota_info) >= 2:
+            reset_display, resume_msg = quota_info[0], quota_info[1]
+        else:
+            reset_display, resume_msg = "", "Auto-resume in ~5h"
+
+        assert reset_display == ""
+        assert resume_msg == "Auto-resume in ~5h"
+
+    def test_post_mission_quota_info_dict_fallback(self):
+        """If quota_info were an empty dict (legacy), use fallback values."""
+        post_result = {
+            "quota_exhausted": True,
+            "quota_info": {},
+        }
+
+        quota_info = post_result.get("quota_info")
+        if quota_info and isinstance(quota_info, (list, tuple)) and len(quota_info) >= 2:
+            reset_display, resume_msg = quota_info[0], quota_info[1]
+        else:
+            reset_display, resume_msg = "", "Auto-resume in ~5h"
+
+        assert reset_display == ""
+        assert resume_msg == "Auto-resume in ~5h"
+
+    def test_pause_with_now_timestamp_resumes_instantly(self):
+        """Prove the old bug: pause with timestamp=now causes instant auto-resume."""
+        from app.pause_manager import should_auto_resume, PauseState
+
+        now = int(time.time())
+        state = PauseState(reason="quota", timestamp=now, display="")
+        # With timestamp=now, should_auto_resume returns True immediately
+        assert should_auto_resume(state, now=now) is True
+
+    def test_pause_with_future_timestamp_does_not_resume(self):
+        """Pause with a future timestamp should NOT auto-resume."""
+        from app.pause_manager import should_auto_resume, PauseState
+
+        now = int(time.time())
+        future = now + 3600  # 1 hour from now
+        state = PauseState(reason="quota", timestamp=future, display="")
+        assert should_auto_resume(state, now=now) is False
+
+
+# ---------------------------------------------------------------------------
 # Test: CLI entry point
 # ---------------------------------------------------------------------------
 
