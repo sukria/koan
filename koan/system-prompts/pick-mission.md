@@ -17,7 +17,7 @@ Your ONLY job: read the missions file below and pick the single most important p
 
 ## Rules
 
-1. Only consider missions in the "En attente" / "Pending" section
+1. Only consider missions in the "Pending" section
 2. Missions can be grouped under `### project:name` or `### projet:name` sub-headers — these define which project a mission belongs to
 3. Missions can also have inline tags like `[project:name]` or `[projet:name]`
 4. Strikethrough missions (`~~...~~`) are already done — skip them

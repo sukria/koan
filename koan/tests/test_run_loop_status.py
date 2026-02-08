@@ -215,7 +215,7 @@ class TestPendingMissionDetection:
 
     def test_french_section_names(self):
         from app.missions import count_pending
-        content = "# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n## Terminées\n"
+        content = "# Missions\n\n## Pending\n\n- fix bug\n\n## In Progress\n\n## Done\n"
         assert count_pending(content) == 1
 
     def test_in_progress_not_counted(self):
@@ -236,8 +236,8 @@ class TestStatusHandlerIntegration:
         inst = tmp_path / "instance"
         inst.mkdir()
         (inst / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n- add feature\n\n"
-            "## En cours\n\n- [project:koan] fix the bug\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n- add feature\n\n"
+            "## In Progress\n\n- [project:koan] fix the bug\n\n## Done\n"
         )
         (tmp_path / ".koan-status").write_text("Run 3/20 — executing mission on koan")
 

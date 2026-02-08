@@ -487,6 +487,12 @@ def main():
 
     check_config()
 
+    # Run pending data migrations (e.g. French→English header conversion)
+    from app.migration_runner import run_pending_migrations
+    applied = run_pending_migrations()
+    if applied:
+        log("init", f"Applied {len(applied)} migration(s)")
+
     # Enforce single instance — abort if another awake process is running
     pidfile_lock = acquire_pidfile(KOAN_ROOT, "awake")
 

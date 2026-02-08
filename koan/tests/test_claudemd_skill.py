@@ -33,7 +33,7 @@ def ctx(tmp_path):
     instance_dir = tmp_path / "instance"
     instance_dir.mkdir()
     missions_md = instance_dir / "missions.md"
-    missions_md.write_text("## En attente\n\n## En cours\n\n## Terminées\n")
+    missions_md.write_text("## Pending\n\n## In Progress\n\n## Done\n")
     return SkillContext(
         koan_root=tmp_path,
         instance_dir=instance_dir,

@@ -32,15 +32,15 @@ class TestPriorityHandler:
     SAMPLE = textwrap.dedent("""\
         # Missions
 
-        ## En attente
+        ## Pending
 
         - first task
         - second task
         - third task
 
-        ## En cours
+        ## In Progress
 
-        ## Terminées
+        ## Done
     """)
 
     def test_bare_shows_queue_with_hint(self, tmp_path):

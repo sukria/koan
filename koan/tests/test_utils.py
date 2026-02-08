@@ -140,12 +140,12 @@ class TestInsertPendingMission:
     def test_inserts_into_existing_file(self, tmp_path):
         from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## En attente\n\n## En cours\n")
+        missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n")
 
         insert_pending_mission(missions, "- New task")
         content = missions.read_text()
         assert "- New task" in content
-        assert content.index("- New task") < content.index("## En cours")
+        assert content.index("- New task") < content.index("## In Progress")
 
     def test_creates_file_if_missing(self, tmp_path):
         from app.utils import insert_pending_mission
@@ -169,7 +169,7 @@ class TestInsertPendingMission:
     def test_handles_no_pending_section(self, tmp_path):
         from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## En cours\n")
+        missions.write_text("# Missions\n\n## In Progress\n")
 
         insert_pending_mission(missions, "- Orphan task")
         content = missions.read_text()
@@ -180,7 +180,7 @@ class TestInsertPendingMission:
         """Regression: concurrent inserts must not lose missions (TOCTOU fix)."""
         from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n")
+        missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n")
 
         num_threads = 8
         errors = []

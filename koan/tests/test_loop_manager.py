@@ -391,7 +391,7 @@ class TestInterruptibleSleep:
 
         # Create a missions.md with a pending mission
         missions_md = Path(instance) / "missions.md"
-        missions_md.write_text("## En attente\n\n- Fix the bug\n\n## Terminées\n")
+        missions_md.write_text("## Pending\n\n- Fix the bug\n\n## Done\n")
 
         result = interruptible_sleep(
             interval=60,
@@ -476,7 +476,7 @@ class TestCheckHelpers:
         from app.loop_manager import _check_pending_missions
 
         missions = tmp_path / "missions.md"
-        missions.write_text("## En attente\n\n- Do something\n\n## Terminées\n")
+        missions.write_text("## Pending\n\n- Do something\n\n## Done\n")
 
         assert _check_pending_missions(str(tmp_path)) is True
 
@@ -484,7 +484,7 @@ class TestCheckHelpers:
         from app.loop_manager import _check_pending_missions
 
         missions = tmp_path / "missions.md"
-        missions.write_text("## En attente\n\n## Terminées\n")
+        missions.write_text("## Pending\n\n## Done\n")
 
         assert _check_pending_missions(str(tmp_path)) is False
 

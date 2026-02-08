@@ -51,12 +51,12 @@ class TestClassifySection:
 
 SAMPLE_CONTENT = (
     "# Missions\n\n"
-    "## En attente\n\n"
+    "## Pending\n\n"
     "- Fix the bug\n"
     "- Another task\n\n"
-    "## En cours\n\n"
+    "## In Progress\n\n"
     "- Working on it\n\n"
-    "## Terminées\n\n"
+    "## Done\n\n"
     "- **Done task** (session 1)\n"
 )
 
@@ -73,11 +73,11 @@ class TestParseSections:
 
     def test_complex_mission(self):
         content = (
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "### Big project\n"
             "- Step 1\n"
             "- Step 2\n\n"
-            "## Terminées\n"
+            "## Done\n"
         )
         result = parse_sections(content)
         assert len(result["in_progress"]) == 1
@@ -90,7 +90,7 @@ class TestParseSections:
         assert len(result["pending"]) == 1
 
     def test_continuation_lines(self):
-        content = "## En attente\n\n- Main task\n  sub-item detail\n"
+        content = "## Pending\n\n- Main task\n  sub-item detail\n"
         result = parse_sections(content)
         assert len(result["pending"]) == 1
         assert "sub-item detail" in result["pending"][0]
@@ -100,11 +100,11 @@ class TestParseSections:
 
 class TestInsertMission:
     def test_insert_into_existing(self):
-        content = "# Missions\n\n## En attente\n\n## En cours\n"
+        content = "# Missions\n\n## Pending\n\n## In Progress\n"
         result = insert_mission(content, "- New task")
         assert "- New task" in result
-        # Should be before "## En cours"
-        assert result.index("- New task") < result.index("## En cours")
+        # Should be before "## In Progress"
+        assert result.index("- New task") < result.index("## In Progress")
 
     def test_insert_into_empty(self):
         result = insert_mission("", "- New task")
@@ -117,7 +117,7 @@ class TestInsertMission:
         assert "- Task" in result
 
     def test_insert_no_pending_section(self):
-        content = "# Missions\n\n## En cours\n"
+        content = "# Missions\n\n## In Progress\n"
         result = insert_mission(content, "- Task")
         assert "## Pending" in result
         assert "- Task" in result
@@ -130,10 +130,10 @@ class TestCountPending:
         assert count_pending(SAMPLE_CONTENT) == 2
 
     def test_empty(self):
-        assert count_pending("## En attente\n\n## En cours\n") == 0
+        assert count_pending("## Pending\n\n## In Progress\n") == 0
 
     def test_ignores_in_progress(self):
-        content = "## En attente\n\n- One\n\n## En cours\n\n- Two\n"
+        content = "## Pending\n\n- One\n\n## In Progress\n\n- Two\n"
         assert count_pending(content) == 1
 
 
@@ -144,18 +144,18 @@ class TestExtractNextPending:
         assert extract_next_pending(SAMPLE_CONTENT) == "- Fix the bug"
 
     def test_empty(self):
-        assert extract_next_pending("## En attente\n\n## En cours\n") == ""
+        assert extract_next_pending("## Pending\n\n## In Progress\n") == ""
 
     def test_project_filter_match(self):
-        content = "## En attente\n\n- [projet:koan] Fix memory\n- [projet:anantys] Fix stripe\n"
+        content = "## Pending\n\n- [projet:koan] Fix memory\n- [projet:anantys] Fix stripe\n"
         assert extract_next_pending(content, "koan") == "- [projet:koan] Fix memory"
 
     def test_project_filter_skip(self):
-        content = "## En attente\n\n- [projet:anantys] Fix stripe\n"
+        content = "## Pending\n\n- [projet:anantys] Fix stripe\n"
         assert extract_next_pending(content, "koan") == ""
 
     def test_untagged_matches_any_project(self):
-        content = "## En attente\n\n- Untagged task\n"
+        content = "## Pending\n\n- Untagged task\n"
         assert extract_next_pending(content, "koan") == "- Untagged task"
 
     def test_english_sections(self):
@@ -181,11 +181,11 @@ class TestExtractProjectTag:
 class TestGroupByProject:
     def test_grouping(self):
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- [project:koan] Fix memory\n"
             "- [project:anantys] Fix stripe\n"
             "- Untagged\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "- [project:koan] Working\n"
         )
         result = group_by_project(content)
@@ -198,12 +198,12 @@ class TestGroupByProject:
     def test_single_project_no_tags(self):
         """Single-project setup: all missions untagged go to 'default'."""
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- Fix the login bug\n"
             "- Add dark mode\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "- Write documentation\n\n"
-            "## Terminées\n\n"
+            "## Done\n\n"
             "- Initial setup\n"
         )
         result = group_by_project(content)
@@ -219,13 +219,13 @@ class TestFindSectionBoundaries:
         lines = [
             "# Missions",
             "",
-            "## En attente",
+            "## Pending",
             "",
             "- Task",
             "",
-            "## En cours",
+            "## In Progress",
             "",
-            "## Terminées",
+            "## Done",
             "",
         ]
         result = find_section_boundaries(lines)
@@ -234,7 +234,7 @@ class TestFindSectionBoundaries:
         assert result["done"] == (8, 10)
 
     def test_missing_section(self):
-        lines = ["## En attente", "", "- Task"]
+        lines = ["## Pending", "", "- Task"]
         result = find_section_boundaries(lines)
         assert "pending" in result
         assert "in_progress" not in result
@@ -248,11 +248,11 @@ class TestParseSectionsComplexBlocks:
     def test_complex_block_flushed_at_section_boundary(self):
         """### block in one section should be flushed when next ## section starts (lines 53-55)."""
         content = (
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "### Big project\n"
             "- Step 1\n"
             "- Step 2\n"
-            "## Terminées\n\n"
+            "## Done\n\n"
             "- Done task\n"
         )
         result = parse_sections(content)
@@ -265,12 +265,12 @@ class TestParseSectionsComplexBlocks:
     def test_sequential_complex_blocks_same_section(self):
         """Two ### blocks in the same section should be separate entries (lines 65-66)."""
         content = (
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "### Block A\n"
             "- Detail A\n"
             "### Block B\n"
             "- Detail B\n\n"
-            "## Terminées\n"
+            "## Done\n"
         )
         result = parse_sections(content)
         assert len(result["in_progress"]) == 2
@@ -280,7 +280,7 @@ class TestParseSectionsComplexBlocks:
     def test_complex_block_at_eof_no_trailing_newline(self):
         """### block at end of file with no trailing blank line (lines 82-83)."""
         content = (
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "### Final block\n"
             "- Last item"
         )
@@ -292,11 +292,11 @@ class TestParseSectionsComplexBlocks:
     def test_mixed_simple_and_complex_same_section(self):
         """Simple - items followed by ### block in same section."""
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- Simple task\n"
             "### Complex task\n"
             "- Sub-detail\n\n"
-            "## En cours\n"
+            "## In Progress\n"
         )
         result = parse_sections(content)
         assert len(result["pending"]) == 2
@@ -306,12 +306,12 @@ class TestParseSectionsComplexBlocks:
     def test_complex_block_with_strikethrough(self):
         """Real-world pattern: ### block with ~~done~~ items (from actual missions.md)."""
         content = (
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "### project:anantys Admin Dashboard\n"
             "- ~~Explorer l'admin~~ done\n"
             "- ~~Cartographier les données~~ done\n"
             "- Reste à faire : V2\n\n"
-            "## Terminées\n"
+            "## Done\n"
         )
         result = parse_sections(content)
         assert len(result["in_progress"]) == 1
@@ -322,11 +322,11 @@ class TestParseSectionsComplexBlocks:
     def test_empty_complex_block(self):
         """### header with no content lines before next ### or section."""
         content = (
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "### Empty block\n"
             "### Second block\n"
             "- Content\n\n"
-            "## Terminées\n"
+            "## Done\n"
         )
         result = parse_sections(content)
         assert len(result["in_progress"]) == 2
@@ -334,11 +334,11 @@ class TestParseSectionsComplexBlocks:
     def test_unrecognized_section_header(self):
         """Content under unrecognized ## header should be ignored."""
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- Task\n\n"
             "## Random section\n\n"
             "- Should be ignored\n\n"
-            "## En cours\n"
+            "## In Progress\n"
         )
         result = parse_sections(content)
         assert len(result["pending"]) == 1
@@ -356,13 +356,13 @@ class TestSubHeaderProjectGrouping:
 
     SUBHEADER_CONTENT = (
         "# Missions\n\n"
-        "## En attente\n\n"
+        "## Pending\n\n"
         "### projet:anantys-back\n\n"
         "### project:koan\n"
         "- Fix the rotation bug\n"
         "- Fix test warnings\n\n"
-        "## En cours\n\n"
-        "## Terminées\n"
+        "## In Progress\n\n"
+        "## Done\n"
     )
 
     def test_extract_pending_with_subheader_filter_match(self):
@@ -383,11 +383,11 @@ class TestSubHeaderProjectGrouping:
     def test_inline_tag_overrides_subheader(self):
         """Inline [project:X] tag takes priority over ### sub-header context."""
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "### project:koan\n"
             "- [project:anantys] Overridden task\n"
             "- Normal koan task\n\n"
-            "## En cours\n"
+            "## In Progress\n"
         )
         result = extract_next_pending(content, "koan")
         assert result == "- Normal koan task"
@@ -395,11 +395,11 @@ class TestSubHeaderProjectGrouping:
     def test_untagged_outside_subheader_matches_any(self):
         """Missions outside any sub-header (untagged) match any project filter."""
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- Untagged task\n"
             "### project:koan\n"
             "- Kōan task\n\n"
-            "## En cours\n"
+            "## In Progress\n"
         )
         result = extract_next_pending(content, "anantys")
         assert result == "- Untagged task"
@@ -407,10 +407,10 @@ class TestSubHeaderProjectGrouping:
     def test_french_subheader_variant(self):
         """### projet:X (French) should also work."""
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "### projet:anantys-back\n"
             "- French tagged task\n\n"
-            "## En cours\n"
+            "## In Progress\n"
         )
         result = extract_next_pending(content, "anantys-back")
         assert result == "- French tagged task"
@@ -427,14 +427,14 @@ class TestSubHeaderProjectGrouping:
     def test_group_by_project_with_subheaders(self):
         """group_by_project should correctly assign missions under ### sub-headers."""
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "### project:koan\n"
             "- Kōan task 1\n"
             "- Kōan task 2\n\n"
             "### project:anantys\n"
             "- Anantys task\n\n"
-            "## En cours\n\n"
-            "## Terminées\n"
+            "## In Progress\n\n"
+            "## Done\n"
         )
         result = group_by_project(content)
         assert "koan" in result
@@ -447,23 +447,23 @@ class TestSubHeaderProjectGrouping:
 
 class TestNormalizeContent:
     def test_collapses_consecutive_blank_lines(self):
-        content = "# Missions\n\n## En attente\n\n\n\n\n- Task\n\n## En cours\n"
+        content = "# Missions\n\n## Pending\n\n\n\n\n- Task\n\n## In Progress\n"
         result = normalize_content(content)
         assert "\n\n\n" not in result
         assert "- Task" in result
 
     def test_preserves_single_blank_lines(self):
-        content = "# Missions\n\n## En attente\n\n- Task 1\n\n- Task 2\n"
+        content = "# Missions\n\n## Pending\n\n- Task 1\n\n- Task 2\n"
         result = normalize_content(content)
         assert result == content
 
     def test_many_blank_lines_in_pending(self):
         """Real-world case: 40+ blank lines accumulated in pending section."""
-        content = "# Missions\n\n## En attente\n" + "\n" * 40 + "- Fix bug\n\n## En cours\n"
+        content = "# Missions\n\n## Pending\n" + "\n" * 40 + "- Fix bug\n\n## In Progress\n"
         result = normalize_content(content)
         lines = result.splitlines()
         # Should have at most 1 blank line between header and item
-        header_idx = lines.index("## En attente")
+        header_idx = lines.index("## Pending")
         item_idx = next(i for i, l in enumerate(lines) if l.startswith("- Fix"))
         assert item_idx - header_idx <= 2  # header, blank, item
 
@@ -474,13 +474,13 @@ class TestNormalizeContent:
         assert normalize_content("\n\n\n\n") == ""
 
     def test_no_trailing_blank_lines(self):
-        content = "# Missions\n\n## En attente\n\n- Task\n\n\n\n"
+        content = "# Missions\n\n## Pending\n\n- Task\n\n\n\n"
         result = normalize_content(content)
         assert result.endswith("- Task\n")
 
     def test_preserves_content_between_items(self):
         content = (
-            "## Terminées\n\n"
+            "## Done\n\n"
             "- Done 1\n\n"
             "- Done 2\n\n"
             "- Done 3\n"
@@ -493,10 +493,10 @@ class TestNormalizeContent:
     def test_multiple_sections_all_cleaned(self):
         content = (
             "# Missions\n\n"
-            "## En attente\n\n\n\n\n"
+            "## Pending\n\n\n\n\n"
             "- Pending task\n\n\n"
-            "## En cours\n\n\n\n"
-            "## Terminées\n\n\n"
+            "## In Progress\n\n\n\n"
+            "## Done\n\n\n"
             "- Done task\n"
         )
         result = normalize_content(content)
@@ -506,14 +506,14 @@ class TestNormalizeContent:
         assert "- Done task" in result
 
     def test_preserves_indentation(self):
-        content = "## En attente\n\n- Task\n  sub-detail\n  more detail\n"
+        content = "## Pending\n\n- Task\n  sub-detail\n  more detail\n"
         result = normalize_content(content)
         assert "  sub-detail" in result
         assert "  more detail" in result
 
     def test_insert_mission_returns_normalized(self):
         """insert_mission should return normalized content (no excessive blanks)."""
-        content = "# Missions\n\n## En attente\n" + "\n" * 20 + "- Old task\n\n## En cours\n"
+        content = "# Missions\n\n## Pending\n" + "\n" * 20 + "- Old task\n\n## In Progress\n"
         result = insert_mission(content, "- New task")
         assert "\n\n\n" not in result
         assert "- New task" in result
@@ -526,12 +526,12 @@ class TestNormalizeContent:
 
 class TestReorderMission:
     SAMPLE = (
-        "## En attente\n\n"
+        "## Pending\n\n"
         "- first task\n"
         "- second task\n"
         "- third task\n\n"
-        "## En cours\n\n"
-        "## Terminées\n"
+        "## In Progress\n\n"
+        "## Done\n"
     )
 
     def test_move_to_top(self):
@@ -575,23 +575,23 @@ class TestReorderMission:
             reorder_mission(self.SAMPLE, 2, 2)
 
     def test_no_pending_raises(self):
-        content = "## En attente\n\n## En cours\n\n## Terminées\n"
+        content = "## Pending\n\n## In Progress\n\n## Done\n"
         with pytest.raises(ValueError, match="No pending"):
             reorder_mission(content, 1, 1)
 
     def test_no_pending_section_raises(self):
-        content = "## En cours\n\n- working\n\n## Terminées\n"
+        content = "## In Progress\n\n- working\n\n## Done\n"
         with pytest.raises(ValueError, match="No pending section"):
             reorder_mission(content, 1, 1)
 
     def test_preserves_project_tags(self):
         content = (
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- [project:koan] first\n"
             "- [project:web] second\n"
             "- third\n\n"
-            "## En cours\n\n"
-            "## Terminées\n"
+            "## In Progress\n\n"
+            "## Done\n"
         )
         new_content, moved = reorder_mission(content, 2, 1)
         assert "second" in moved
@@ -753,10 +753,10 @@ class TestInsertMissionOrdering:
     def test_bottom_insert_with_french_headers(self):
         content = (
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- tache existante\n\n"
-            "## En cours\n\n"
-            "## Terminées\n"
+            "## In Progress\n\n"
+            "## Done\n"
         )
         result = insert_mission(content, "- nouvelle tache")
         lines = [l for l in result.splitlines() if l.startswith("- ")]

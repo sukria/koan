@@ -4,18 +4,18 @@
 <h1>Missions</h1>
 
 <div class="card">
-    <h2 style="margin-bottom:0.5rem;">Nouvelle mission</h2>
+    <h2 style="margin-bottom:0.5rem;">New mission</h2>
     <form method="POST" action="/missions/add">
-        <input type="text" name="mission" placeholder="Description de la mission..." required>
+        <input type="text" name="mission" placeholder="Mission description..." required>
         <div class="form-row">
-            <input type="text" name="project" placeholder="Projet (optionnel)" style="max-width:200px;">
-            <button type="submit">Ajouter</button>
+            <input type="text" name="project" placeholder="Project (optional)" style="max-width:200px;">
+            <button type="submit">Add</button>
         </div>
     </form>
 </div>
 
 {% if missions.in_progress %}
-<h2>En cours</h2>
+<h2>In Progress</h2>
 {% for m in missions.in_progress %}
 <div class="card">
     <pre>{{ m }}</pre>
@@ -24,7 +24,7 @@
 {% endif %}
 
 {% if missions.pending %}
-<h2>En attente ({{ missions.pending|length }})</h2>
+<h2>Pending ({{ missions.pending|length }})</h2>
 {% for m in missions.pending %}
 <div class="card">
     <div class="mission-item">{{ m }}</div>
@@ -33,14 +33,14 @@
 {% endif %}
 
 {% if missions.done %}
-<h2>Terminées ({{ missions.done|length }})</h2>
+<h2>Done ({{ missions.done|length }})</h2>
 <div class="card">
 {% for m in missions.done[:20] %}
     <div class="mission-item" style="color: var(--text-muted);">{{ m }}</div>
 {% endfor %}
 {% if missions.done|length > 20 %}
     <div class="mission-item" style="color: var(--text-muted); font-style: italic;">
-        ... et {{ missions.done|length - 20 }} autres
+        ... and {{ missions.done|length - 20 }} more
     </div>
 {% endif %}
 </div>

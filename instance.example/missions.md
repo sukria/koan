@@ -1,6 +1,6 @@
 # Missions
 
-## En attente
+## Pending
 
 <!--
 Add missions here. Format: "- Description of the task"
@@ -10,10 +10,10 @@ Example:
 - [project:myapp] Add user authentication
 - Review database schema
 
-The project tag must match a name from your KOAN_PROJECTS environment variable.
-If you only have one project (KOAN_PROJECT_PATH), you can omit the tag.
+The project tag must match a name from your projects.yaml file.
+If you only have one project, you can omit the tag.
 -->
 
-## En cours
+## In Progress
 
-## Terminées
+## Done

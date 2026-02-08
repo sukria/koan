@@ -16,13 +16,13 @@ from app.skills import SkillContext
 
 CANCEL_CONTENT = (
     "# Missions\n\n"
-    "## En attente\n\n"
+    "## Pending\n\n"
     "- [project:koan] fix auth bug\n"
     "- add dark mode\n"
     "- [project:koan] refactor tests\n\n"
-    "## En cours\n\n"
+    "## In Progress\n\n"
     "- doing stuff\n\n"
-    "## Terminées\n"
+    "## Done\n"
 )
 
 
@@ -32,11 +32,11 @@ class TestListPending:
 
         content = (
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- fix auth bug\n"
             "- add dark mode\n"
             "- refactor tests\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "- doing stuff\n"
         )
         result = list_pending(content)
@@ -46,7 +46,7 @@ class TestListPending:
     def test_empty_pending(self):
         from app.missions import list_pending
 
-        content = "# Missions\n\n## En attente\n\n## En cours\n\n"
+        content = "# Missions\n\n## Pending\n\n## In Progress\n\n"
         assert list_pending(content) == []
 
     def test_english_headers(self):
@@ -124,7 +124,7 @@ class TestCancelPendingMission:
     def test_cancel_empty_pending(self):
         from app.missions import cancel_pending_mission
 
-        content = "# Missions\n\n## En attente\n\n## En cours\n\n"
+        content = "# Missions\n\n## Pending\n\n## In Progress\n\n"
         with pytest.raises(ValueError, match="No pending missions"):
             cancel_pending_mission(content, "1")
 
@@ -132,20 +132,20 @@ class TestCancelPendingMission:
         from app.missions import cancel_pending_mission
 
         new_content, _ = cancel_pending_mission(CANCEL_CONTENT, "1")
-        assert "## En cours" in new_content
+        assert "## In Progress" in new_content
         assert "- doing stuff" in new_content
-        assert "## Terminées" in new_content
+        assert "## Done" in new_content
 
     def test_cancel_with_continuation_lines(self):
         from app.missions import cancel_pending_mission
 
         content = (
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- fix auth bug\n"
             "  with extra details\n"
             "- add dark mode\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
         )
         new_content, cancelled = cancel_pending_mission(content, "1")
         assert "fix auth bug" in cancelled
@@ -176,12 +176,12 @@ class TestCancelHandler:
 
     MISSIONS = (
         "# Missions\n\n"
-        "## En attente\n\n"
+        "## Pending\n\n"
         "- [project:koan] fix auth bug\n"
         "- add dark mode\n"
         "- refactor tests\n\n"
-        "## En cours\n\n"
-        "## Terminées\n"
+        "## In Progress\n\n"
+        "## Done\n"
     )
 
     def test_empty_args_shows_list(self, tmp_path):

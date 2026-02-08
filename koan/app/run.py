@@ -728,6 +728,12 @@ def main_loop():
         log("error", "No instance/ directory found. Run: cp -r instance.example instance")
         sys.exit(1)
 
+    # Run pending data migrations (e.g. French→English header conversion)
+    from app.migration_runner import run_pending_migrations
+    applied = run_pending_migrations()
+    if applied:
+        log("init", f"Applied {len(applied)} migration(s)")
+
     # Set PYTHONPATH
     os.environ["PYTHONPATH"] = os.path.join(koan_root, "koan")
 

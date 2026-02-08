@@ -410,13 +410,13 @@ class TestPromoteIdea:
 
             - my idea
 
-            ## En attente
+            ## Pending
 
             - existing pending
 
-            ## En cours
+            ## In Progress
 
-            ## Terminées
+            ## Done
         """)
         result, promoted = promote_idea(content, 1)
         assert promoted == "- my idea"
@@ -774,7 +774,7 @@ class TestIdeaHandler:
         assert any("implement /plan skill" in p for p in sections["pending"])
 
     def test_promote_with_french_headers_via_handler(self, tmp_path):
-        """Handler works with French section headers (## En attente)."""
+        """Handler works with French section headers (## Pending)."""
         from skills.core.idea.handler import handle
 
         content = textwrap.dedent("""\
@@ -784,13 +784,13 @@ class TestIdeaHandler:
 
             - idea for French layout
 
-            ## En attente
+            ## Pending
 
             - existing mission
 
-            ## En cours
+            ## In Progress
 
-            ## Terminées
+            ## Done
         """)
         ctx = self._make_ctx(tmp_path, content, command="idea", args="promote 1")
         result = handle(ctx)

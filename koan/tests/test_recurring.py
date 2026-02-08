@@ -253,9 +253,9 @@ class TestCheckAndInject:
         missions_path = tmp_path / "missions.md"
         missions_path.write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
-            "## En cours\n\n"
-            "## Terminées\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "## Done\n\n"
         )
         return missions_path
 
