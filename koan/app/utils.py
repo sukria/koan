@@ -304,6 +304,24 @@ def get_fast_reply_model() -> str:
     return ""
 
 
+def get_branch_prefix() -> str:
+    """Get the branch prefix used for agent-created branches.
+
+    Reads 'branch_prefix' from config.yaml. Defaults to 'koan' if not set.
+    Always returns the prefix with a trailing '/' (e.g., 'koan/').
+
+    This allows multiple bot instances to use distinct prefixes
+    (e.g., 'koan-bot1/', 'koan-bot2/') so their branches don't collide.
+    """
+    config = load_config()
+    prefix = config.get("branch_prefix", "").strip()
+    if not prefix:
+        prefix = "koan"
+    # Strip trailing slash if present, we'll add it ourselves
+    prefix = prefix.rstrip("/")
+    return f"{prefix}/"
+
+
 def get_contemplative_chance() -> int:
     """Get probability (0-100) of triggering contemplative mode on autonomous runs.
 

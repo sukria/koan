@@ -74,14 +74,16 @@ class TestIsAutoMergeEnabled:
 class TestGetMergePolicy:
     """Tests for merge policy text generation."""
 
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompt_builder._is_auto_merge_enabled", return_value=True)
-    def test_auto_merge_enabled(self, _mock):
+    def test_auto_merge_enabled(self, _mock_merge, _mock_prefix):
         policy = _get_merge_policy("proj")
         assert "Auto-Merge Enabled" in policy
         assert "auto-merge system handles the merge" in policy
 
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompt_builder._is_auto_merge_enabled", return_value=False)
-    def test_auto_merge_disabled(self, _mock):
+    def test_auto_merge_disabled(self, _mock_merge, _mock_prefix):
         policy = _get_merge_policy("proj")
         assert "NOT configured" in policy
         assert "DO NOT merge yourself" in policy
@@ -160,9 +162,10 @@ class TestBuildAgentPrompt:
     @patch("app.prompt_builder._get_verbose_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\n# Git Merge\nStandard.\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt")
     def test_basic_mission_prompt(
-        self, mock_load, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
     ):
         mock_load.return_value = "Template with {placeholder}"
 
@@ -194,6 +197,7 @@ class TestBuildAgentPrompt:
                 "Mark it In Progress in missions.md. Execute it thoroughly. "
                 "Take your time — go deep, don't rush."
             ),
+            BRANCH_PREFIX="koan/",
         )
 
         # Merge policy appended
@@ -202,9 +206,10 @@ class TestBuildAgentPrompt:
     @patch("app.prompt_builder._get_verbose_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt")
     def test_autonomous_mode_instruction(
-        self, mock_load, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
     ):
         mock_load.return_value = "Template"
 
@@ -229,9 +234,10 @@ class TestBuildAgentPrompt:
     @patch("app.prompt_builder._get_verbose_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="\n# Deep\nTopics\n")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
     def test_deep_mode_includes_research(
-        self, mock_load, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
     ):
         result = build_agent_prompt(
             instance=prompt_env["instance"],
@@ -251,9 +257,10 @@ class TestBuildAgentPrompt:
     @patch("app.prompt_builder._get_verbose_section", return_value="")
     @patch("app.prompt_builder._get_deep_research")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
     def test_deep_mode_with_mission_skips_research(
-        self, mock_load, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
     ):
         """Deep mode with assigned mission should NOT inject deep research."""
         build_agent_prompt(
@@ -273,9 +280,10 @@ class TestBuildAgentPrompt:
     @patch("app.prompt_builder._get_verbose_section", return_value="")
     @patch("app.prompt_builder._get_deep_research")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
     def test_implement_mode_skips_research(
-        self, mock_load, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
     ):
         """Non-deep modes should NOT inject deep research."""
         build_agent_prompt(
@@ -295,9 +303,10 @@ class TestBuildAgentPrompt:
     @patch("app.prompt_builder._get_verbose_section", return_value="\n# Verbose\nActive\n")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
     def test_verbose_mode_appended(
-        self, mock_load, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
     ):
         result = build_agent_prompt(
             instance=prompt_env["instance"],
@@ -315,9 +324,10 @@ class TestBuildAgentPrompt:
     @patch("app.prompt_builder._get_verbose_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base prompt")
     def test_prompt_assembly_order(
-        self, mock_load, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
     ):
         """Sections are appended in correct order: template, merge, deep, verbose."""
         result = build_agent_prompt(
@@ -501,6 +511,7 @@ class TestIntegration:
         assert "{FOCUS_AREA}" not in result
         assert "{AVAILABLE_PCT}" not in result
         assert "{MISSION_INSTRUCTION}" not in result
+        assert "{BRANCH_PREFIX}" not in result
 
         # Verify substituted values are present
         assert prompt_env["instance"] in result

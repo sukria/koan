@@ -163,6 +163,7 @@ export PYTHONPATH="$KOAN_ROOT/koan"
 # Load config from config.yaml (source of truth for behavioral settings)
 MAX_RUNS=$("$PYTHON" -c "from app.utils import get_max_runs; print(get_max_runs())" 2>/dev/null || echo "20")
 INTERVAL=$("$PYTHON" -c "from app.utils import get_interval_seconds; print(get_interval_seconds())" 2>/dev/null || echo "300")
+BRANCH_PREFIX=$("$PYTHON" -c "from app.utils import get_branch_prefix; print(get_branch_prefix())" 2>/dev/null || echo "koan/")
 
 # Set git identity for koan commits (overrides local git config)
 if [ -n "${KOAN_EMAIL:-}" ]; then

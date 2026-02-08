@@ -21,6 +21,12 @@ interval_seconds: 300
 # Faster response, lower cost, but simpler answers
 fast_reply: false
 
+# Branch prefix — used for all agent-created branches
+# Default is "koan" which creates branches like "koan/fix-something"
+# Change this for multi-bot setups to avoid branch name collisions
+# e.g., "koan-alice" creates branches like "koan-alice/fix-something"
+# branch_prefix: "koan"
+
 # Contemplative mode trigger chance (0-100%)
 # When no mission is pending, this is the probability of running a reflective
 # session instead of autonomous work. Allows regular moments of introspection

@@ -38,12 +38,25 @@ def run_git(cwd: str, *args: str) -> str:
         return ""
 
 
-def _normalize_branch(line: str) -> str:
-    """Extract koan/* branch name from git branch output line."""
+def _get_prefix() -> str:
+    """Get the configured branch prefix (lazy import to avoid circular deps)."""
+    from app.utils import get_branch_prefix
+    return get_branch_prefix()
+
+
+def _normalize_branch(line: str, prefix: str = "") -> str:
+    """Extract agent branch name from git branch output line.
+
+    Args:
+        line: Raw line from git branch output.
+        prefix: Branch prefix to match (e.g., 'koan/'). If empty, uses config.
+    """
+    if not prefix:
+        prefix = _get_prefix()
     name = line.strip().lstrip("* ")
     if "remotes/origin/" in name:
         name = name.replace("remotes/origin/", "")
-    return name if name.startswith("koan/") else ""
+    return name if name.startswith(prefix) else ""
 
 
 # ---------------------------------------------------------------------------
@@ -63,14 +76,16 @@ class GitSync:
         self.project_path = project_path
 
     def get_koan_branches(self) -> List[str]:
-        """List all koan/* branches (local and remote)."""
-        output = run_git(self.project_path, "branch", "-a", "--list", "*koan/*")
+        """List all agent branches (local and remote)."""
+        prefix = _get_prefix()
+        glob_pattern = f"*{prefix}*"
+        output = run_git(self.project_path, "branch", "-a", "--list", glob_pattern)
         branches = []
         for line in output.splitlines():
             name = line.strip().lstrip("* ")
             if "remotes/origin/" in name:
                 name = name.replace("remotes/origin/", "")
-            if name.startswith("koan/"):
+            if name.startswith(prefix):
                 branches.append(name)
         return sorted(set(branches))
 
@@ -93,14 +108,16 @@ class GitSync:
         return existing or ["origin/main"]
 
     def get_merged_branches(self) -> List[str]:
-        """List koan/* branches merged into any target branch."""
+        """List agent branches merged into any target branch."""
+        prefix = _get_prefix()
+        glob_pattern = f"*{prefix}*"
         targets = self._get_target_branches()
         merged = set()
         for target in targets:
             output = run_git(self.project_path, "branch", "-a", "--merged", target,
-                             "--list", "*koan/*")
+                             "--list", glob_pattern)
             for line in output.splitlines():
-                name = _normalize_branch(line)
+                name = _normalize_branch(line, prefix)
                 if name:
                     merged.add(name)
         return sorted(merged)
@@ -123,13 +140,16 @@ class GitSync:
         now = datetime.now().strftime("%H:%M")
         parts.append(f"Git sync @ {now}")
 
+        prefix = _get_prefix()
+        label = f"{prefix}*"
+
         if merged:
-            parts.append(f"\nMerged koan/* branches ({len(merged)}):")
+            parts.append(f"\nMerged {label} branches ({len(merged)}):")
             for b in merged:
                 parts.append(f"  ✓ {b}")
 
         if unmerged:
-            parts.append(f"\nUnmerged koan/* branches ({len(unmerged)}):")
+            parts.append(f"\nUnmerged {label} branches ({len(unmerged)}):")
             for b in unmerged:
                 parts.append(f"  → {b}")
 

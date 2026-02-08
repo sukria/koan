@@ -47,25 +47,35 @@ def _is_auto_merge_enabled(project_name: str) -> bool:
         return False
 
 
+def _get_branch_prefix() -> str:
+    """Get the configured branch prefix."""
+    try:
+        from app.utils import get_branch_prefix
+        return get_branch_prefix()
+    except Exception:
+        return "koan/"
+
+
 def _get_merge_policy(project_name: str) -> str:
     """Return the merge policy section to append to the agent prompt."""
+    prefix = _get_branch_prefix()
     if _is_auto_merge_enabled(project_name):
-        return """
+        return f"""
 
 # Git Merge Policy (Auto-Merge Enabled)
 
-Auto-merge is ENABLED for this project. After you complete your work on a koan/* branch
+Auto-merge is ENABLED for this project. After you complete your work on a {prefix}* branch
 and push it, the system will automatically merge it according to configured rules.
 
-Just focus on: creating koan/* branch, implementing, committing, pushing.
+Just focus on: creating {prefix}<name> branch, implementing, committing, pushing.
 The auto-merge system handles the merge to the base branch after mission completion.
 """
-    return """
+    return f"""
 
 # Git Merge Policy
 
 Auto-merge is NOT configured for this project. Follow standard workflow:
-create koan/* branches, commit, and push, but DO NOT merge yourself.
+create {prefix}<name> branches, commit, and push, but DO NOT merge yourself.
 """
 
 
@@ -179,6 +189,7 @@ def build_agent_prompt(
         )
 
     # Load template and substitute placeholders
+    branch_prefix = _get_branch_prefix()
     prompt = load_prompt(
         "agent",
         INSTANCE=instance,
@@ -190,6 +201,7 @@ def build_agent_prompt(
         FOCUS_AREA=focus_area,
         AVAILABLE_PCT=str(available_pct),
         MISSION_INSTRUCTION=mission_instruction,
+        BRANCH_PREFIX=branch_prefix,
     )
 
     # Append merge policy

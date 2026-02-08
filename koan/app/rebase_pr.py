@@ -350,7 +350,9 @@ def _push_with_fallback(
         }
 
     # Create new branch and draft PR
-    new_branch = f"koan/rebase-{branch.replace('/', '-')}"
+    from app.utils import get_branch_prefix
+    prefix = get_branch_prefix()
+    new_branch = f"{prefix}rebase-{branch.replace('/', '-')}"
     try:
         _run_git(
             ["git", "checkout", "-b", new_branch],

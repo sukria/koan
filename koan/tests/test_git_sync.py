@@ -35,6 +35,13 @@ class TestRunGit:
             assert run_git("/tmp", "status") == ""
 
 
+@pytest.fixture(autouse=True)
+def default_prefix():
+    """Ensure tests use default koan/ prefix."""
+    with patch("app.git_sync._get_prefix", return_value="koan/"):
+        yield
+
+
 class TestGetKoanBranches:
     def test_parses_local_and_remote(self):
         """Extracts koan/* branches from mixed branch listing."""

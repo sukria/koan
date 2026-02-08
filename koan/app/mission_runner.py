@@ -210,7 +210,8 @@ def check_auto_merge(
             capture_output=True, text=True, cwd=project_path,
         )
         branch = result.stdout.strip()
-        if not branch.startswith("koan/"):
+        from app.utils import get_branch_prefix
+        if not branch.startswith(get_branch_prefix()):
             return None
 
         from app.git_auto_merge import auto_merge_branch
