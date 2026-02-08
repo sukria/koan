@@ -273,6 +273,17 @@ def run_startup(koan_root: str, instance: str, projects: list):
     except Exception:
         pass
 
+    # Missions sanity check
+    log("health", "Running missions sanity check...")
+    try:
+        from app.missions_sanity import run_sanity_check
+        modified, changes = run_sanity_check(os.path.join(instance, "missions.md"))
+        if modified:
+            for change in changes:
+                log("health", f"  Missions fix: {change}")
+    except Exception:
+        pass
+
     # Memory cleanup
     log("health", "Running memory cleanup...")
     try:
