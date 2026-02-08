@@ -153,31 +153,37 @@ Koan loads skills from two locations:
 
 Skills from `instance/skills/` are merged into the registry at startup. If a custom command name collides with a core one, the last-loaded wins.
 
-## Sharing skills via Git repos
+## Installing skills from Git repos
 
-A scope directory can be a **cloned Git repository**, letting a team share skills privately:
+Use `/skill install` from Telegram to install skills from a Git repository:
+
+```
+/skill install myorg/koan-skills-ops
+/skill install https://github.com/team/skills.git ops
+/skill install myorg/skills ops --ref=v1.0.0
+```
+
+This clones the repo into `instance/skills/<scope>/` and tracks it in `instance/skills.yaml`.
+
+### Managing installed skills
+
+```
+/skill sources                — list installed sources with metadata
+/skill update                 — update all installed sources
+/skill update ops             — update a specific source
+/skill remove ops             — remove an installed source
+```
+
+### Manual installation
+
+You can also clone repos manually:
 
 ```bash
-# Clone a shared skills repo into instance/skills/
 cd instance/skills/
 git clone git@github.com:myorg/koan-skills-ops.git ops
 ```
 
-This produces:
-
-```
-instance/
-  skills/
-    ops/                        # scope = "ops"
-      deploy/
-        SKILL.md
-        handler.py
-      oncall/
-        SKILL.md
-        handler.py
-```
-
-Now everyone on the team gets `/deploy` and `/oncall` commands. Updates propagate with `git pull`.
+Manually cloned repos work identically but won't be tracked in `skills.yaml` (no `/skill update` support).
 
 ### Organizing a shared skills repo
 
@@ -196,7 +202,7 @@ koan-skills-ops/          # repo root = scope directory
   README.md               # optional, for humans
 ```
 
-Each subdirectory follows the same `SKILL.md` + optional `handler.py` pattern. The scope name is determined by the directory name you clone into, not the repo name.
+Each subdirectory follows the same `SKILL.md` + optional `handler.py` pattern. The scope name is determined by the directory name you clone/install into, not the repo name.
 
 ### Multiple shared repos
 
@@ -205,10 +211,10 @@ You can mix multiple repos under `instance/skills/`:
 ```
 instance/
   skills/
-    ops/                  # git@github.com:myorg/koan-skills-ops.git
+    ops/                  # /skill install myorg/koan-skills-ops
       deploy/
       oncall/
-    analytics/            # git@github.com:myorg/koan-skills-analytics.git
+    analytics/            # /skill install myorg/koan-skills-analytics
       report/
       dashboard/
     personal/             # your own local skills, no repo needed
@@ -216,6 +222,25 @@ instance/
 ```
 
 Each top-level directory becomes its own scope. Skills are invocable directly (`/deploy`) or with explicit scope (`/ops.deploy`).
+
+### Versioning
+
+Skills declare their version in `SKILL.md` using semver:
+
+```yaml
+---
+name: deploy
+version: 2.1.0
+---
+```
+
+Use `--ref=<tag>` with `/skill install` to pin to a specific version:
+
+```
+/skill install myorg/skills ops --ref=v2.1.0
+```
+
+Use `/skill update` to pull the latest from the tracked ref.
 
 ### Scoped commands
 
