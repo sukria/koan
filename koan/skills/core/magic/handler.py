@@ -40,7 +40,7 @@ def handle(ctx):
     )
 
     try:
-        from app.utils import get_fast_reply_model
+        from app.config import get_fast_reply_model
         from app.cli_provider import build_full_command
         fast_model = get_fast_reply_model()
         cmd = build_full_command(

@@ -42,21 +42,21 @@ def prompt_env(tmp_path):
 class TestIsAutoMergeEnabled:
     """Tests for auto-merge config detection."""
 
-    @patch("app.utils.get_auto_merge_config")
+    @patch("app.config.get_auto_merge_config")
     @patch("app.prompt_builder._load_config_safe")
     def test_enabled_with_rules(self, mock_load_config, mock_merge_cfg):
         mock_load_config.return_value = {}
         mock_merge_cfg.return_value = {"enabled": True, "rules": ["*"]}
         assert _is_auto_merge_enabled("myproject") is True
 
-    @patch("app.utils.get_auto_merge_config")
+    @patch("app.config.get_auto_merge_config")
     @patch("app.prompt_builder._load_config_safe")
     def test_disabled(self, mock_load_config, mock_merge_cfg):
         mock_load_config.return_value = {}
         mock_merge_cfg.return_value = {"enabled": False, "rules": ["*"]}
         assert _is_auto_merge_enabled("myproject") is False
 
-    @patch("app.utils.get_auto_merge_config")
+    @patch("app.config.get_auto_merge_config")
     @patch("app.prompt_builder._load_config_safe")
     def test_enabled_no_rules(self, mock_load_config, mock_merge_cfg):
         mock_load_config.return_value = {}

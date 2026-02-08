@@ -22,53 +22,53 @@ import pytest
 class TestGetBranchPrefix:
     """Tests for utils.get_branch_prefix()."""
 
-    @patch("app.utils.load_config")
+    @patch("app.config._load_config")
     def test_default_prefix(self, mock_config):
         """Returns 'koan/' when no branch_prefix configured."""
         mock_config.return_value = {}
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         assert get_branch_prefix() == "koan/"
 
-    @patch("app.utils.load_config")
+    @patch("app.config._load_config")
     def test_custom_prefix(self, mock_config):
         """Returns custom prefix with trailing slash."""
         mock_config.return_value = {"branch_prefix": "mybot"}
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         assert get_branch_prefix() == "mybot/"
 
-    @patch("app.utils.load_config")
+    @patch("app.config._load_config")
     def test_custom_prefix_with_trailing_slash(self, mock_config):
         """Strips duplicate trailing slash."""
         mock_config.return_value = {"branch_prefix": "mybot/"}
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         assert get_branch_prefix() == "mybot/"
 
-    @patch("app.utils.load_config")
+    @patch("app.config._load_config")
     def test_empty_string_falls_back_to_koan(self, mock_config):
         """Empty string in config falls back to 'koan/'."""
         mock_config.return_value = {"branch_prefix": ""}
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         assert get_branch_prefix() == "koan/"
 
-    @patch("app.utils.load_config")
+    @patch("app.config._load_config")
     def test_whitespace_only_falls_back_to_koan(self, mock_config):
         """Whitespace-only string falls back to 'koan/'."""
         mock_config.return_value = {"branch_prefix": "   "}
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         assert get_branch_prefix() == "koan/"
 
-    @patch("app.utils.load_config")
+    @patch("app.config._load_config")
     def test_prefix_with_hyphens(self, mock_config):
         """Supports hyphenated prefixes."""
         mock_config.return_value = {"branch_prefix": "koan-alice"}
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         assert get_branch_prefix() == "koan-alice/"
 
-    @patch("app.utils.load_config")
+    @patch("app.config._load_config")
     def test_prefix_stripped(self, mock_config):
         """Leading/trailing whitespace is stripped."""
         mock_config.return_value = {"branch_prefix": "  bot1  "}
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         assert get_branch_prefix() == "bot1/"
 
 
@@ -246,19 +246,19 @@ class TestBuildAgentPromptBranchPrefix:
 class TestRebasePrBranchPrefix:
     """Tests that rebase_pr.py uses configurable prefix for fallback branches."""
 
-    @patch("app.utils.get_branch_prefix", return_value="mybot/")
+    @patch("app.config.get_branch_prefix", return_value="mybot/")
     def test_fallback_branch_uses_custom_prefix(self, mock_prefix):
         """The fallback branch name should use the configured prefix."""
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         prefix = get_branch_prefix()
         branch = "koan/fix-bug"
         new_branch = f"{prefix}rebase-{branch.replace('/', '-')}"
         assert new_branch == "mybot/rebase-koan-fix-bug"
 
-    @patch("app.utils.get_branch_prefix", return_value="koan/")
+    @patch("app.config.get_branch_prefix", return_value="koan/")
     def test_fallback_branch_default_prefix(self, mock_prefix):
         """Default prefix produces the expected branch name."""
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         prefix = get_branch_prefix()
         branch = "feature/something"
         new_branch = f"{prefix}rebase-{branch.replace('/', '-')}"
@@ -273,7 +273,7 @@ class TestRebasePrBranchPrefix:
 class TestMissionRunnerBranchPrefix:
     """Tests that check_auto_merge uses configurable prefix."""
 
-    @patch("app.utils.get_branch_prefix", return_value="mybot/")
+    @patch("app.config.get_branch_prefix", return_value="mybot/")
     @patch("app.mission_runner.subprocess")
     def test_auto_merge_checks_custom_prefix(self, mock_subprocess, mock_prefix):
         """check_auto_merge skips branches not matching prefix."""
@@ -284,7 +284,7 @@ class TestMissionRunnerBranchPrefix:
         assert result is None
 
     @patch("app.git_auto_merge.auto_merge_branch")
-    @patch("app.utils.get_branch_prefix", return_value="mybot/")
+    @patch("app.config.get_branch_prefix", return_value="mybot/")
     @patch("app.mission_runner.subprocess")
     def test_auto_merge_matches_custom_prefix(self, mock_subprocess, mock_prefix, mock_merge):
         """check_auto_merge processes branches matching prefix."""

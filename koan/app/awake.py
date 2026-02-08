@@ -61,15 +61,19 @@ from app.format_outbox import format_for_telegram, load_soul, load_human_prefs, 
 from app.health_check import write_heartbeat
 from app.language_preference import get_language_instruction
 from app.notify import send_telegram
-from app.utils import (
-    parse_project as _parse_project,
+from app.config import (
+    get_chat_tools,
+    get_tools_description,
+    get_model_config,
+)
+from app.telegram_history import (
     save_telegram_message,
     load_recent_telegram_history,
     format_conversation_history,
     compact_telegram_history,
-    get_chat_tools,
-    get_tools_description,
-    get_model_config,
+)
+from app.utils import (
+    parse_project as _parse_project,
 )
 
 
@@ -148,7 +152,7 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
     journal_context = ""
     if not lite:
         # Load today's journal for recent context
-        from app.utils import read_all_journals
+        from app.journal import read_all_journals
         journal_content = read_all_journals(INSTANCE_DIR, date.today())
         if journal_content:
             if len(journal_content) > 2000:

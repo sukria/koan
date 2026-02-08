@@ -66,7 +66,7 @@ def summarize_section(section: str, max_chars: int = 400) -> str:
 
 def get_mission_summary(instance_dir: str, project_name: str, max_chars: int = 400) -> str:
     """Get a summary of the latest journal entry for a project."""
-    from app.utils import get_journal_file
+    from app.journal import get_journal_file
     instance = Path(instance_dir)
 
     journal_file = get_journal_file(instance, date.today(), project_name)

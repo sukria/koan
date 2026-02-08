@@ -22,7 +22,7 @@ from pathlib import Path
 
 from app.cli_provider import build_full_command
 from app.prompts import get_prompt_path
-from app.utils import get_model_config
+from app.config import get_model_config
 
 
 PROMPT_TEMPLATE_PATH = get_prompt_path("pick-mission")

@@ -10,7 +10,7 @@ from app.bridge_log import log
 def handle(ctx):
     """Launch a sparring session via Claude."""
     from app.prompts import load_skill_prompt
-    from app.utils import get_fast_reply_model
+    from app.config import get_fast_reply_model
 
     instance_dir = ctx.instance_dir
 
@@ -86,7 +86,7 @@ def handle(ctx):
             response = result.stdout.strip()
             response = response.replace("**", "").replace("```", "")
             # Save sparring response to conversation history
-            from app.utils import save_telegram_message
+            from app.telegram_history import save_telegram_message
             history_file = instance_dir / "telegram-history.jsonl"
             save_telegram_message(history_file, "assistant", response)
             return response

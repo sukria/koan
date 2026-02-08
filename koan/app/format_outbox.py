@@ -22,7 +22,7 @@ from pathlib import Path
 
 from app.cli_provider import build_full_command
 from app.language_preference import get_language_instruction
-from app.utils import get_model_config
+from app.config import get_model_config
 
 
 def load_soul(instance_dir: Path) -> str:

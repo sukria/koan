@@ -64,7 +64,7 @@ def should_send_report() -> Optional[str]:
 
 def _read_journal(target_date: date) -> str:
     """Read all journal entries for a given date across all project subdirs."""
-    from app.utils import read_all_journals
+    from app.journal import read_all_journals
     return read_all_journals(INSTANCE_DIR, target_date)
 
 
