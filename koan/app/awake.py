@@ -485,9 +485,14 @@ def handle_message(text: str):
 def main():
     from app.banners import print_bridge_banner
     from app.github_auth import setup_github_auth
+    from app.pid_manager import acquire_pidfile, release_pidfile
     from app.restart_manager import check_restart, clear_restart, reexec_bridge
 
     check_config()
+
+    # Enforce single instance — abort if another awake process is running
+    pidfile_lock = acquire_pidfile(KOAN_ROOT, "awake")
+
     setup_github_auth()
 
     provider_name = "telegram"  # about to become dynamic with provider abstraction
@@ -552,10 +557,12 @@ def main():
             # were already cleared above after the first poll.
             if check_restart(KOAN_ROOT, since=startup_time):
                 log("init", "Restart signal detected. Re-executing...")
+                release_pidfile(pidfile_lock, KOAN_ROOT, "awake")
                 reexec_bridge()
 
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
+        release_pidfile(pidfile_lock, KOAN_ROOT, "awake")
         log("init", "Shutting down.")
         sys.exit(0)
 
