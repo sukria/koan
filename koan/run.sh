@@ -517,6 +517,16 @@ while true; do
     continue
   fi
 
+  # Handle schedule_wait action (work hours active, no missions pending)
+  if [ "$ACTION" = "schedule_wait" ]; then
+    log koan "Work hours schedule active — no missions pending, sleeping"
+    set_status "Work hours — waiting for missions"
+    WAKE_REASON=$("$PYTHON" -m app.loop_manager interruptible-sleep \
+      --interval "$INTERVAL" --koan-root "$KOAN_ROOT" --instance "$INSTANCE" 2>/dev/null || echo "timeout")
+    [ "$WAKE_REASON" = "mission" ] && log koan "New mission detected during work hours sleep — waking up"
+    continue
+  fi
+
   # Handle wait_pause action (budget exhausted)
   if [ "$ACTION" = "wait_pause" ]; then
     log quota "Decision: WAIT mode (budget exhausted)"

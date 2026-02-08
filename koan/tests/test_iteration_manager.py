@@ -13,6 +13,7 @@ os.environ.setdefault("KOAN_ROOT", "/tmp/test-koan")
 
 from app.iteration_manager import (
     _check_focus,
+    _check_schedule,
     _get_known_project_names,
     _get_project_by_index,
     _get_usage_decision,
@@ -291,6 +292,28 @@ class TestShouldContemplate:
     def test_skips_when_focus_active(self):
         assert _should_contemplate("deep", True, 50) is False
 
+    @patch("random.randint", return_value=5)
+    def test_schedule_deep_hours_boosts_chance(self, mock_rand):
+        """During deep hours, contemplative chance is tripled."""
+        from app.schedule_manager import ScheduleState
+        schedule = ScheduleState(in_deep_hours=True, in_work_hours=False)
+        # base chance 10 → adjusted to 30, roll of 5 < 30 → True
+        assert _should_contemplate("deep", False, 10, schedule) is True
+
+    @patch("random.randint", return_value=5)
+    def test_schedule_work_hours_zeroes_chance(self, mock_rand):
+        """During work hours, contemplative chance is zero."""
+        from app.schedule_manager import ScheduleState
+        schedule = ScheduleState(in_deep_hours=False, in_work_hours=True)
+        # chance becomes 0, roll of 5 >= 0 → False
+        assert _should_contemplate("deep", False, 10, schedule) is False
+
+    @patch("random.randint", return_value=5)
+    def test_schedule_none_unchanged(self, mock_rand):
+        """When schedule_state is None, chance is unchanged."""
+        # base chance 10, roll of 5 < 10 → True
+        assert _should_contemplate("deep", False, 10, None) is True
+
 
 # === Tests: _check_focus ===
 
@@ -317,6 +340,36 @@ class TestCheckFocus:
         mock_module.check_focus.return_value = mock_state
         with patch.dict("sys.modules", {"app.focus_manager": mock_module}):
             assert _check_focus("/koan-root") is mock_state
+
+
+# === Tests: _check_schedule ===
+
+
+class TestCheckSchedule:
+
+    def test_returns_state_when_configured(self):
+        """Returns a ScheduleState when schedule is configured."""
+        from app.schedule_manager import ScheduleState
+        mock_state = ScheduleState(in_deep_hours=True, in_work_hours=False)
+        with patch("app.schedule_manager.get_current_schedule", return_value=mock_state):
+            result = _check_schedule()
+            assert result is not None
+            assert result.mode == "deep"
+
+    def test_returns_normal_state_when_unconfigured(self):
+        """Returns state (normal) when schedule has no windows configured."""
+        from app.schedule_manager import ScheduleState
+        mock_state = ScheduleState(in_deep_hours=False, in_work_hours=False)
+        with patch("app.schedule_manager.get_current_schedule", return_value=mock_state):
+            result = _check_schedule()
+            assert result is not None
+            assert result.mode == "normal"
+
+    def test_returns_none_on_import_error(self):
+        """Returns None gracefully when module is unavailable."""
+        with patch("app.schedule_manager.get_current_schedule", side_effect=ImportError):
+            result = _check_schedule()
+            assert result is None
 
 
 # === Tests: plan_iteration (integration) ===
@@ -415,6 +468,56 @@ class TestPlanIteration:
 
         assert result["action"] == "focus_wait"
         assert result["focus_remaining"] == "2h remaining"
+
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("app.iteration_manager._check_schedule")
+    @patch("random.randint", return_value=99)  # No contemplation
+    def test_schedule_wait_mode(self, mock_rand, mock_schedule, mock_focus,
+                                mock_refresh, mock_pick,
+                                instance_dir, koan_root, usage_state):
+        """When work_hours are active and no mission, returns schedule_wait."""
+        from app.schedule_manager import ScheduleState
+        mock_schedule.return_value = ScheduleState(in_deep_hours=False, in_work_hours=True)
+
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects_str=PROJECTS_STR,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "schedule_wait"
+        assert result["schedule_mode"] == "work"
+
+    @patch("app.pick_mission.pick_mission", return_value="koan:Fix auth bug")
+    @patch("app.usage_estimator.cmd_refresh")
+    def test_schedule_does_not_block_missions(self, mock_refresh, mock_pick,
+                                              instance_dir, koan_root, usage_state):
+        """Work hours schedule doesn't block queued missions."""
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
+
+        # Even though work hours would suppress exploration, missions still run
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects_str=PROJECTS_STR,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "mission"
+        assert result["mission_title"] == "Fix auth bug"
 
     @patch("app.pick_mission.pick_mission", return_value="")
     @patch("app.usage_estimator.cmd_refresh")

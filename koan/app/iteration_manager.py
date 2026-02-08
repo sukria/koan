@@ -202,13 +202,15 @@ def _resolve_focus_area(autonomous_mode: str, has_mission: bool) -> str:
 
 
 def _should_contemplate(autonomous_mode: str, focus_active: bool,
-                        contemplative_chance: int) -> bool:
+                        contemplative_chance: int,
+                        schedule_state=None) -> bool:
     """Check if this iteration should be a contemplative session.
 
     Contemplative sessions only trigger when:
     - Mode is deep or implement (need budget for Claude call)
     - Focus mode is NOT active
-    - Random roll succeeds
+    - Schedule is not in work_hours
+    - Random roll succeeds (chance boosted during deep_hours)
 
     Returns:
         True if should run a contemplative session
@@ -218,6 +220,13 @@ def _should_contemplate(autonomous_mode: str, focus_active: bool,
 
     if focus_active:
         return False
+
+    # Adjust chance based on schedule (work hours → 0, deep hours → 3x)
+    if schedule_state is not None:
+        from app.schedule_manager import adjust_contemplative_chance
+        contemplative_chance = adjust_contemplative_chance(
+            contemplative_chance, schedule_state
+        )
 
     import random
     return random.randint(0, 99) < contemplative_chance
@@ -233,6 +242,24 @@ def _check_focus(koan_root: str):
     try:
         from app.focus_manager import check_focus
         return check_focus(koan_root)
+    except Exception:
+        return None
+
+
+def _check_schedule():
+    """Check schedule state (time-of-day windows from config).
+
+    Returns:
+        ScheduleState object, or None if schedule is not configured
+        or module is unavailable.
+    """
+    try:
+        from app.schedule_manager import get_current_schedule
+        state = get_current_schedule()
+        # If neither deep nor work hours are active, treat as unconfigured
+        if state.mode == "normal":
+            return state
+        return state
     except Exception:
         return None
 
@@ -254,7 +281,7 @@ def plan_iteration(
     Returns:
         dict with iteration plan:
         {
-            "action": "mission" | "autonomous" | "contemplative" | "focus_wait" | "wait_pause" | "error",
+            "action": "mission" | "autonomous" | "contemplative" | "focus_wait" | "schedule_wait" | "wait_pause" | "error",
             "project_name": str,
             "project_path": str,
             "mission_title": str (empty for autonomous/contemplative),
@@ -265,6 +292,7 @@ def plan_iteration(
             "display_lines": list[str] (usage status lines for console),
             "recurring_injected": list[str] (injected recurring missions),
             "focus_remaining": str | None (if focus mode active),
+            "schedule_mode": str (deep/work/normal from schedule config),
             "error": str | None (project validation error),
         }
     """
@@ -311,6 +339,7 @@ def plan_iteration(
                 "display_lines": display_lines,
                 "recurring_injected": recurring_injected,
                 "focus_remaining": None,
+                "schedule_mode": "normal",
                 "error": f"Unknown project '{project_name}'. Known: {', '.join(known)}",
             }
     else:
@@ -320,12 +349,16 @@ def plan_iteration(
 
     # Step 6: Determine action for autonomous mode
     action = "mission" if mission_title else "autonomous"
+    schedule_state = None  # Will be set for autonomous mode
 
     if not mission_title:
         # No mission — check autonomous mode decisions
 
         # Check focus state once (used by both contemplative and focus_wait)
         focus_state = _check_focus(koan_root)
+
+        # Check schedule state (time-of-day windows from config)
+        schedule_state = _check_schedule()
 
         # 6a: Contemplative chance (random reflection)
         try:
@@ -334,7 +367,8 @@ def plan_iteration(
         except Exception:
             contemplative_chance = 10
 
-        if _should_contemplate(autonomous_mode, focus_state is not None, contemplative_chance):
+        if _should_contemplate(autonomous_mode, focus_state is not None,
+                               contemplative_chance, schedule_state):
             action = "contemplative"
         else:
             # 6b: Focus mode — skip autonomous, wait for missions
@@ -360,6 +394,29 @@ def plan_iteration(
                     "display_lines": display_lines,
                     "recurring_injected": recurring_injected,
                     "focus_remaining": focus_remaining,
+                    "schedule_mode": schedule_state.mode if schedule_state else "normal",
+                    "error": None,
+                }
+
+            # 6b2: Schedule work_hours — suppress exploration, wait for missions
+            if schedule_state is not None and schedule_state.in_work_hours:
+                action = "schedule_wait"
+
+                focus_area = _resolve_focus_area(autonomous_mode, has_mission=False)
+
+                return {
+                    "action": action,
+                    "project_name": project_name,
+                    "project_path": project_path or "",
+                    "mission_title": "",
+                    "autonomous_mode": autonomous_mode,
+                    "focus_area": focus_area,
+                    "available_pct": available_pct,
+                    "decision_reason": decision_reason,
+                    "display_lines": display_lines,
+                    "recurring_injected": recurring_injected,
+                    "focus_remaining": None,
+                    "schedule_mode": "work",
                     "error": None,
                 }
 
@@ -383,6 +440,7 @@ def plan_iteration(
         "display_lines": display_lines,
         "recurring_injected": recurring_injected,
         "focus_remaining": None,
+        "schedule_mode": schedule_state.mode if schedule_state else "normal",
         "error": None,
     }
 

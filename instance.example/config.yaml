@@ -87,6 +87,16 @@ git_auto_merge:
       auto_merge: true              # Enable auto-merge for matching branches
       delete_after_merge: true      # Clean up branch after successful merge
 
+# Schedule — control when deep exploration vs mission-only work happens
+# deep_hours: time ranges for deep/contemplative work (higher exploration chance)
+# work_hours: time ranges for mission-only work (exploration suppressed)
+# Format: "START-END" using 24h hours. Wraps around midnight: "22-6".
+# Multiple ranges: "0-6,22-24". Leave empty to disable.
+# Example: deep exploration at night (0-6), missions only during work day (8-20)
+# schedule:
+#   deep_hours: "0-6"
+#   work_hours: "8-20"
+
 # Usage estimation (auto-calibration from Claude JSON output)
 # Tune these limits based on your Claude plan by comparing
 # estimated % with actual /usage output in Claude CLI
