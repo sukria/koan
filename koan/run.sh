@@ -527,17 +527,9 @@ $KNOWN_PROJECTS"
         else
           set_status "Idle — post-contemplation sleep ($(date '+%H:%M'))"
           log pause "Contemplative session complete. Sleeping ${INTERVAL}s..."
-          SLEEP_ELAPSED=0
-          while [ $SLEEP_ELAPSED -lt $INTERVAL ]; do
-            sleep 10
-            SLEEP_ELAPSED=$((SLEEP_ELAPSED + 10))
-            if has_pending_missions; then
-              log koan "New mission detected during sleep — waking up early"
-              break
-            fi
-            [ -f "$KOAN_ROOT/.koan-stop" ] && break
-            [ -f "$KOAN_ROOT/.koan-pause" ] && break
-          done
+          WAKE_REASON=$("$PYTHON" -m app.loop_manager interruptible-sleep \
+            --interval "$INTERVAL" --koan-root "$KOAN_ROOT" --instance "$INSTANCE" 2>/dev/null || echo "timeout")
+          [ "$WAKE_REASON" = "mission" ] && log koan "New mission detected during sleep — waking up early"
         fi
         continue
       fi
@@ -547,48 +539,28 @@ $KNOWN_PROJECTS"
     FOCUS_REMAINING=$("$PYTHON" -m app.focus_manager check "$KOAN_ROOT" 2>/dev/null) && {
       log koan "Focus mode active ($FOCUS_REMAINING remaining) — no missions pending, sleeping"
       set_status "Focus mode — waiting for missions ($FOCUS_REMAINING remaining)"
-      SLEEP_ELAPSED=0
-      while [ $SLEEP_ELAPSED -lt $INTERVAL ]; do
-        sleep 10
-        SLEEP_ELAPSED=$((SLEEP_ELAPSED + 10))
-        if has_pending_missions; then
-          log koan "New mission detected during focus sleep — waking up"
-          break
-        fi
-        [ -f "$KOAN_ROOT/.koan-stop" ] && break
-        [ -f "$KOAN_ROOT/.koan-pause" ] && break
-      done
+      WAKE_REASON=$("$PYTHON" -m app.loop_manager interruptible-sleep \
+        --interval "$INTERVAL" --koan-root "$KOAN_ROOT" --instance "$INSTANCE" 2>/dev/null || echo "timeout")
+      [ "$WAKE_REASON" = "mission" ] && log koan "New mission detected during focus sleep — waking up"
       continue
     }
 
-    case "$AUTONOMOUS_MODE" in
-      wait)
-        log quota "Decision: WAIT mode (budget exhausted)"
-        echo "  Reason: $DECISION_REASON"
-        echo "  Action: Entering pause mode (will auto-resume after 5h)"
-        echo ""
-        # Send retrospective and enter pause mode
-        "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
-        # Create pause via pause_manager
-        "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota"
-        notify "⏸️ Koan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Auto-resume in 5h or use /resume."
-        continue  # Go back to start of loop (will enter pause mode)
-        ;;
-      review)
-        FOCUS_AREA="Low-cost review: audit code, find issues, suggest improvements (READ-ONLY)"
-        ;;
-      implement)
-        FOCUS_AREA="Medium-cost implementation: prototype fixes, small improvements"
-        ;;
-      deep)
-        FOCUS_AREA="High-cost deep work: refactoring, architectural changes"
-        ;;
-      *)
-        FOCUS_AREA="General autonomous work"
-        ;;
-    esac
+    # Handle WAIT mode (budget exhausted) — enter pause
+    if [ "$AUTONOMOUS_MODE" = "wait" ]; then
+      log quota "Decision: WAIT mode (budget exhausted)"
+      echo "  Reason: $DECISION_REASON"
+      echo "  Action: Entering pause mode (will auto-resume after 5h)"
+      echo ""
+      "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
+      "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota"
+      notify "⏸️ Koan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Auto-resume in 5h or use /resume."
+      continue
+    fi
+
+    # Resolve focus area from autonomous mode (Python handles the mapping)
+    FOCUS_AREA=$("$PYTHON" -m app.loop_manager resolve-focus --mode "$AUTONOMOUS_MODE" 2>/dev/null || echo "General autonomous work")
   else
-    FOCUS_AREA="Execute assigned mission"
+    FOCUS_AREA=$("$PYTHON" -m app.loop_manager resolve-focus --mode "$AUTONOMOUS_MODE" --has-mission 2>/dev/null || echo "Execute assigned mission")
   fi
 
   # Enforce current project state
@@ -631,30 +603,13 @@ $KNOWN_PROJECTS"
     --mission-title "$MISSION_TITLE")
 
   # Create pending.md — live progress journal for this run
-  PENDING_FILE="$INSTANCE/journal/pending.md"
-  JOURNAL_DIR="$INSTANCE/journal/$(date +%Y-%m-%d)"
-  mkdir -p "$JOURNAL_DIR"
-  if [ -n "$MISSION_TITLE" ]; then
-    cat > "$PENDING_FILE" <<EOF
-# Mission: $MISSION_TITLE
-Project: $PROJECT_NAME
-Started: $(date '+%Y-%m-%d %H:%M:%S')
-Run: $RUN_NUM/$MAX_RUNS
-Mode: ${AUTONOMOUS_MODE:-mission}
-
----
-EOF
-  else
-    cat > "$PENDING_FILE" <<EOF
-# Autonomous run
-Project: $PROJECT_NAME
-Started: $(date '+%Y-%m-%d %H:%M:%S')
-Run: $RUN_NUM/$MAX_RUNS
-Mode: $AUTONOMOUS_MODE
-
----
-EOF
-  fi
+  "$PYTHON" -m app.loop_manager create-pending \
+    --instance "$INSTANCE" \
+    --project-name "$PROJECT_NAME" \
+    --run-num "$RUN_NUM" \
+    --max-runs "$MAX_RUNS" \
+    --autonomous-mode "${AUTONOMOUS_MODE:-implement}" \
+    --mission-title "$MISSION_TITLE" 2>/dev/null || true
 
   # Execute next mission, capture JSON output for token tracking
   if [ -n "$MISSION_TITLE" ]; then
@@ -773,22 +728,12 @@ Koan paused after $count runs. $RESUME_MSG or use /resume to restart manually."
   else
     set_status "Idle — sleeping ${INTERVAL}s ($(date '+%H:%M'))"
     log koan "Sleeping ${INTERVAL}s (checking for new missions every 10s)..."
-    # Interruptible sleep: check for new missions every 10s instead of blocking
-    SLEEP_ELAPSED=0
-    while [ $SLEEP_ELAPSED -lt $INTERVAL ]; do
-      sleep 10
-      SLEEP_ELAPSED=$((SLEEP_ELAPSED + 10))
-      # Wake up early if a new mission appeared
-      if has_pending_missions; then
-        log koan "New mission detected during sleep — waking up early"
-        set_status "Run $RUN_NUM/$MAX_RUNS — done, new mission detected"
-        break
-      fi
-      # Also wake up on stop/pause/restart requests
-      [ -f "$KOAN_ROOT/.koan-stop" ] && break
-      [ -f "$KOAN_ROOT/.koan-pause" ] && break
-      [ -f "$KOAN_ROOT/.koan-restart" ] && break
-    done
+    WAKE_REASON=$("$PYTHON" -m app.loop_manager interruptible-sleep \
+      --interval "$INTERVAL" --koan-root "$KOAN_ROOT" --instance "$INSTANCE" 2>/dev/null || echo "timeout")
+    if [ "$WAKE_REASON" = "mission" ]; then
+      log koan "New mission detected during sleep — waking up early"
+      set_status "Run $RUN_NUM/$MAX_RUNS — done, new mission detected"
+    fi
   fi
 done
 
