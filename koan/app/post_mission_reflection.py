@@ -12,12 +12,10 @@ missions. Duration >= 45min overrides the journal length check.
 Usage: python -m app.post_mission_reflection <instance_dir> <mission_text> <duration_minutes> [--journal-file <path>]
 """
 
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from app.cli_provider import build_full_command
 from app.prompts import get_prompt_path
 from app.utils import atomic_write
 
@@ -182,22 +180,18 @@ def run_reflection(
     prompt = build_reflection_prompt(instance_dir, mission_text, journal_content)
 
     try:
+        from app.claude_step import run_claude
+        from app.cli_provider import build_full_command
+
         cmd = build_full_command(prompt=prompt, max_turns=1)
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        if result.returncode == 0:
-            output = result.stdout.strip()
+        result = run_claude(cmd, cwd=str(instance_dir), timeout=60)
+
+        if result["success"]:
+            output = result["output"]
             # Check for skip signal
             if output in ["—", "-", ""]:
                 return ""
             return output
-    except subprocess.TimeoutExpired:
-        print("[post_mission_reflection] Claude timeout", file=sys.stderr)
     except Exception as e:
         print(f"[post_mission_reflection] Error: {e}", file=sys.stderr)
 

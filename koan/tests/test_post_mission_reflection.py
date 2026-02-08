@@ -1,6 +1,5 @@
 """Tests for post_mission_reflection.py module."""
 
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -249,45 +248,48 @@ class TestWriteToJournal:
 class TestRunReflection:
     """Tests for run_reflection()."""
 
-    @patch("app.post_mission_reflection.subprocess.run")
-    def test_calls_claude_with_prompt(self, mock_run, instance_dir):
-        mock_run.return_value = MagicMock(returncode=0, stdout="Test reflection output")
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
+    def test_calls_claude_with_prompt(self, mock_build, mock_run_claude, instance_dir):
+        mock_run_claude.return_value = {"success": True, "output": "Test reflection output", "error": ""}
         result = run_reflection(instance_dir, "Audit mission")
-        assert mock_run.called
-        args = mock_run.call_args[0][0]
-        assert args[0] == "claude"
-        assert "-p" in args
+        assert mock_run_claude.called
         assert result == "Test reflection output"
 
-    @patch("app.post_mission_reflection.subprocess.run")
-    def test_passes_journal_content_to_prompt(self, mock_run, instance_dir):
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
+    def test_passes_journal_content_to_prompt(self, mock_build, mock_run_claude, instance_dir):
         """Journal content is included in the Claude prompt."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="Reflection")
+        mock_run_claude.return_value = {"success": True, "output": "Reflection", "error": ""}
         journal = "Rewrote auth module. Tests pass."
         run_reflection(instance_dir, "feature: auth", journal)
-        call_args = mock_run.call_args[0][0]
-        prompt_idx = call_args.index("-p") + 1
-        prompt = call_args[prompt_idx]
+        # build_full_command is called with a prompt that contains the journal content
+        call_args = mock_build.call_args
+        prompt = call_args[1]["prompt"] if "prompt" in call_args[1] else call_args[0][0] if call_args[0] else ""
         assert "Rewrote auth module" in prompt
 
-    @patch("app.post_mission_reflection.subprocess.run")
-    def test_returns_empty_on_skip_signal(self, mock_run, instance_dir):
-        mock_run.return_value = MagicMock(returncode=0, stdout="—")
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
+    def test_returns_empty_on_skip_signal(self, mock_build, mock_run_claude, instance_dir):
+        mock_run_claude.return_value = {"success": True, "output": "—", "error": ""}
         assert run_reflection(instance_dir, "Test mission") == ""
 
-    @patch("app.post_mission_reflection.subprocess.run")
-    def test_returns_empty_on_timeout(self, mock_run, instance_dir):
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=60)
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
+    def test_returns_empty_on_timeout(self, mock_build, mock_run_claude, instance_dir):
+        mock_run_claude.return_value = {"success": False, "output": "", "error": "Timeout (60s)"}
         assert run_reflection(instance_dir, "Test mission") == ""
 
-    @patch("app.post_mission_reflection.subprocess.run")
-    def test_returns_empty_on_error(self, mock_run, instance_dir):
-        mock_run.return_value = MagicMock(returncode=1, stdout="")
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
+    def test_returns_empty_on_error(self, mock_build, mock_run_claude, instance_dir):
+        mock_run_claude.return_value = {"success": False, "output": "", "error": "Exit code 1"}
         assert run_reflection(instance_dir, "Test mission") == ""
 
-    @patch("app.post_mission_reflection.subprocess.run")
-    def test_returns_empty_on_dash_skip(self, mock_run, instance_dir):
-        mock_run.return_value = MagicMock(returncode=0, stdout="-")
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
+    def test_returns_empty_on_dash_skip(self, mock_build, mock_run_claude, instance_dir):
+        mock_run_claude.return_value = {"success": True, "output": "-", "error": ""}
         assert run_reflection(instance_dir, "Test mission") == ""
 
 
@@ -336,14 +338,15 @@ class TestReadJournalFile:
 class TestCLI:
     """Tests for CLI entry point."""
 
-    @patch("app.post_mission_reflection.subprocess.run")
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
     def test_main_with_significant_mission_and_journal(
-        self, mock_subprocess, instance_dir, journal_file
+        self, mock_build, mock_run_claude, instance_dir, journal_file
     ):
         """Significant mission + substantial journal → reflection written."""
-        mock_subprocess.return_value = MagicMock(
-            returncode=0, stdout="Réflexion post-mission."
-        )
+        mock_run_claude.return_value = {
+            "success": True, "output": "Réflexion post-mission.", "error": ""
+        }
         from app.post_mission_reflection import main
 
         with patch.object(
@@ -397,14 +400,15 @@ class TestCLI:
         shared = instance_dir / "shared-journal.md"
         assert not shared.exists()
 
-    @patch("app.post_mission_reflection.subprocess.run")
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
     def test_main_force_flag_overrides_heuristic(
-        self, mock_subprocess, instance_dir
+        self, mock_build, mock_run_claude, instance_dir
     ):
         """--force bypasses significance check."""
-        mock_subprocess.return_value = MagicMock(
-            returncode=0, stdout="Forced reflection."
-        )
+        mock_run_claude.return_value = {
+            "success": True, "output": "Forced reflection.", "error": ""
+        }
         from app.post_mission_reflection import main
 
         with patch.object(
@@ -446,12 +450,13 @@ class TestCLI:
                 main()
             assert exc_info.value.code == 1
 
-    @patch("app.post_mission_reflection.subprocess.run")
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
     def test_main_no_reflection_generated(
-        self, mock_subprocess, instance_dir, journal_file
+        self, mock_build, mock_run_claude, instance_dir, journal_file
     ):
         """No reflection output → no shared-journal.md written."""
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="")
+        mock_run_claude.return_value = {"success": True, "output": "", "error": ""}
         from app.post_mission_reflection import main
 
         with patch.object(
@@ -468,14 +473,15 @@ class TestCLI:
         shared = instance_dir / "shared-journal.md"
         assert not shared.exists()
 
-    @patch("app.post_mission_reflection.subprocess.run")
+    @patch("app.claude_step.run_claude")
+    @patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"])
     def test_main_long_duration_without_journal(
-        self, mock_subprocess, instance_dir
+        self, mock_build, mock_run_claude, instance_dir
     ):
         """Long duration overrides the journal requirement."""
-        mock_subprocess.return_value = MagicMock(
-            returncode=0, stdout="Long session reflection."
-        )
+        mock_run_claude.return_value = {
+            "success": True, "output": "Long session reflection.", "error": ""
+        }
         from app.post_mission_reflection import main
 
         with patch.object(
