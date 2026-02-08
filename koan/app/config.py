@@ -289,12 +289,9 @@ def get_auto_merge_config(config: dict, project_name: str) -> dict:
     try:
         from app.projects_config import load_projects_config, get_project_auto_merge
         koan_root = os.environ.get("KOAN_ROOT", "")
-        if koan_root:
-            projects_config = load_projects_config(koan_root)
-            if projects_config is not None:
-                # Check if this project exists in projects.yaml
-                if project_name in projects_config.get("projects", {}):
-                    return get_project_auto_merge(projects_config, project_name)
+        projects_config = load_projects_config(koan_root) if koan_root else None
+        if projects_config and project_name in projects_config.get("projects", {}):
+            return get_project_auto_merge(projects_config, project_name)
     except Exception:
         pass
 

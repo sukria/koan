@@ -103,11 +103,10 @@ def get_projects_from_config(config: dict) -> List[Tuple[str, str]]:
     Same format as get_known_projects() returns — enables drop-in replacement.
     """
     projects = config.get("projects", {})
-    result = []
-    for name, project in projects.items():
-        path = project.get("path", "")
-        result.append((name, path.strip()))
-    return sorted(result, key=lambda x: x[0].lower())
+    return sorted(
+        [(name, proj.get("path", "").strip()) for name, proj in projects.items()],
+        key=lambda x: x[0].lower(),
+    )
 
 
 def get_project_config(config: dict, project_name: str) -> dict:
