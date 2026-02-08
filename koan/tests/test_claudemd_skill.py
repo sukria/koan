@@ -185,6 +185,19 @@ class TestSkillMd:
         assert skill is not None
         assert skill.name == "claudemd"
 
+    def test_claude_alias_in_skill(self):
+        from app.skills import parse_skill_md
+        skill_md = Path(__file__).parent.parent / "skills" / "core" / "claudemd" / "SKILL.md"
+        skill = parse_skill_md(skill_md)
+        assert "claude" in skill.commands[0].aliases
+
+    def test_claude_alias_registered_in_registry(self):
+        from app.skills import build_registry
+        registry = build_registry()
+        skill = registry.find_by_command("claude")
+        assert skill is not None
+        assert skill.name == "claudemd"
+
     def test_skill_handler_exists(self):
         assert HANDLER_PATH.exists()
 

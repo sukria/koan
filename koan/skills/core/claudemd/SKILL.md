@@ -7,6 +7,6 @@ commands:
   - name: claude.md
     description: Refresh CLAUDE.md for a project
     usage: /claude.md <project-name>
-    aliases: [claudemd]
+    aliases: [claude, claudemd]
 handler: handler.py
 ---
