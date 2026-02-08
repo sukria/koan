@@ -16,7 +16,7 @@ def instance_dir(tmp_path):
     d = tmp_path / "instance"
     d.mkdir()
     missions_md = d / "missions.md"
-    missions_md.write_text("## En attente\n\n## En cours\n\n## Terminées\n")
+    missions_md.write_text("## Pending\n\n## In Progress\n\n## Done\n")
     return d
 
 

@@ -699,9 +699,9 @@ class TestCLI:
         # Create missions.md with a pending mission
         missions_md = instance_dir / "missions.md"
         missions_md.write_text(
-            "# Missions\n\n## En attente\n\n"
+            "# Missions\n\n## Pending\n\n"
             "- [project:koan] Fix the test CLI\n\n"
-            "## En cours\n\n## Terminées\n"
+            "## In Progress\n\n## Done\n"
         )
 
         result = subprocess.run(

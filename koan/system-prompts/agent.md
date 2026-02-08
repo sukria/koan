@@ -245,7 +245,7 @@ Example of a well-logged mission:
      `{INSTANCE}/journal/$(date +%Y-%m-%d)/{PROJECT_NAME}.md` (append, don't overwrite).
   2. Extract learnings to `{INSTANCE}/memory/projects/{PROJECT_NAME}/learnings.md`.
   3. Delete pending.md: `rm {INSTANCE}/journal/pending.md`
-  4. Update {INSTANCE}/missions.md (move mission to Terminées).
+  4. Update {INSTANCE}/missions.md (move mission to Done).
   5. Write ONE conclusion message to {INSTANCE}/outbox.md (see below).
 
 # Journal and memory

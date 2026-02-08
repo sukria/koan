@@ -97,8 +97,8 @@ class TestGetMissionsContext:
     def test_returns_in_progress_and_pending(self, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
-            "# Missions\n\n## En attente\n\n- pending task\n\n"
-            "## En cours\n\n- active task\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n- pending task\n\n"
+            "## In Progress\n\n- active task\n\n## Done\n"
         )
         result = _get_missions_context(tmp_path)
         assert "active task" in result
@@ -107,7 +107,7 @@ class TestGetMissionsContext:
     def test_returns_no_active_when_empty(self, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
         result = _get_missions_context(tmp_path)
         assert "No active" in result
@@ -121,8 +121,8 @@ class TestGetMissionsContext:
         missions_file = tmp_path / "missions.md"
         pending = "\n".join(f"- task {i}" for i in range(10))
         missions_file.write_text(
-            f"# Missions\n\n## En attente\n\n{pending}\n\n"
-            "## En cours\n\n## Terminées\n"
+            f"# Missions\n\n## Pending\n\n{pending}\n\n"
+            "## In Progress\n\n## Done\n"
         )
         result = _get_missions_context(tmp_path)
         assert "task 4" in result

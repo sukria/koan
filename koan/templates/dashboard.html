@@ -19,21 +19,21 @@
         </div>
     </div>
     <div class="card">
-        <div class="stat-label">En attente</div>
+        <div class="stat-label">Pending</div>
         <div class="stat-value">{{ pending_count }}</div>
     </div>
     <div class="card">
-        <div class="stat-label">En cours</div>
+        <div class="stat-label">In Progress</div>
         <div class="stat-value">{{ in_progress_count }}</div>
     </div>
     <div class="card">
-        <div class="stat-label">Terminées</div>
+        <div class="stat-label">Done</div>
         <div class="stat-value">{{ done_count }}</div>
     </div>
 </div>
 
 {% if missions.in_progress %}
-<h2>En cours</h2>
+<h2>In Progress</h2>
 {% for m in missions.in_progress %}
 <div class="card">
     <div class="mission-item">{{ m }}</div>
@@ -42,7 +42,7 @@
 {% endif %}
 
 {% if missions.pending %}
-<h2>En attente</h2>
+<h2>Pending</h2>
 {% for m in missions.pending %}
 <div class="card">
     <div class="mission-item">{{ m }}</div>

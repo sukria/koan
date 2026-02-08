@@ -264,7 +264,7 @@ class TestHandleMission:
     def test_mission_appended_to_pending(self, mock_inst, mock_file, mock_send, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
-            "# Missions\n\n## En attente\n\n(aucune)\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n(none)\n\n## In Progress\n\n## Done\n"
         )
         mock_file.__class__ = type(missions_file)
         # Directly test the file manipulation logic
@@ -279,7 +279,7 @@ class TestHandleMission:
     def test_mission_with_project_tag(self, mock_send, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
-            "# Missions\n\n## En attente\n\n(aucune)\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n(none)\n\n## In Progress\n\n"
         )
         with patch("app.command_handlers.MISSIONS_FILE", missions_file):
             handle_mission("[project:koan] add tests")
@@ -292,7 +292,7 @@ class TestHandleMission:
         """'koan fix bug' should auto-detect project 'koan' from the first word."""
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
-            "# Missions\n\n## En attente\n\n(aucune)\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n(none)\n\n## In Progress\n\n"
         )
         with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
              patch("app.utils.get_known_projects", return_value=[("koan", "/path/to/koan")]):
@@ -308,7 +308,7 @@ class TestHandleMission:
         """First word 'fix' should not be detected as project."""
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
-            "# Missions\n\n## En attente\n\n(aucune)\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n(none)\n\n## In Progress\n\n"
         )
         with patch("app.command_handlers.MISSIONS_FILE", missions_file), \
              patch("app.utils.get_known_projects", return_value=[("koan", "/path/to/koan")]):
@@ -331,10 +331,10 @@ class TestBuildStatus:
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- [project:koan] add tests\n"
             "- fix bug\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
             "- [project:koan] doing stuff\n\n"
         )
         status = _call_status_handler(tmp_path)
@@ -349,10 +349,10 @@ class TestBuildStatus:
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
             "# Missions\n\n"
-            "## En attente\n\n"
+            "## Pending\n\n"
             "- [project:koan] add tests\n"
             "- [project:koan] fix dashboard\n\n"
-            "## En cours\n\n"
+            "## In Progress\n\n"
         )
         status = _call_status_handler(tmp_path)
 
@@ -364,7 +364,7 @@ class TestBuildStatus:
     def test_status_empty(self, tmp_path):
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n"
         )
         status = _call_status_handler(tmp_path)
         assert "Kōan Status" in status
@@ -372,7 +372,7 @@ class TestBuildStatus:
     def test_status_with_stop_file(self, tmp_path):
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n"
         )
         (tmp_path / ".koan-stop").write_text("STOP")
         status = _call_status_handler(tmp_path)
@@ -381,7 +381,7 @@ class TestBuildStatus:
     def test_status_with_loop_status(self, tmp_path):
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n"
         )
         (tmp_path / ".koan-status").write_text("Run 3/20")
         status = _call_status_handler(tmp_path)
@@ -404,7 +404,7 @@ class TestHandleCommand:
     def test_status_routes_via_skill(self, mock_send, tmp_path):
         """Status now goes through skill system."""
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n")
         with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
              patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
              patch("app.command_handlers.MISSIONS_FILE", missions_file):
@@ -1028,7 +1028,7 @@ class TestPauseCommand:
         (tmp_path / ".koan-pause").write_text("PAUSE")
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
         status = _call_status_handler(tmp_path)
         assert "Paused" in status
@@ -1040,7 +1040,7 @@ class TestPauseCommand:
         (tmp_path / ".koan-pause-reason").write_text("quota\n1234567890")
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
         status = _call_status_handler(tmp_path)
         assert "Paused" in status
@@ -1052,7 +1052,7 @@ class TestPauseCommand:
         (tmp_path / ".koan-pause-reason").write_text("max_runs\n1234567890")
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
         status = _call_status_handler(tmp_path)
         assert "Paused" in status
@@ -1062,7 +1062,7 @@ class TestPauseCommand:
         """Status shows Working when no pause/stop."""
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
         status = _call_status_handler(tmp_path)
         assert "Working" in status
@@ -1072,7 +1072,7 @@ class TestPauseCommand:
         (tmp_path / ".koan-stop").write_text("STOP")
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
         )
         status = _call_status_handler(tmp_path)
         assert "Stopping" in status
@@ -1232,7 +1232,7 @@ class TestPauseAwareness:
         """When paused, status shows Paused FIRST, not at the bottom."""
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n- fix bug\n\n## In Progress\n\n"
         )
         (tmp_path / ".koan-pause").write_text("PAUSE")
 
@@ -1247,7 +1247,7 @@ class TestPauseAwareness:
         """When not paused, status shows Working."""
         (tmp_path / "instance").mkdir()
         (tmp_path / "instance" / "missions.md").write_text(
-            "# Missions\n\n## En attente\n\n## En cours\n\n"
+            "# Missions\n\n## Pending\n\n## In Progress\n\n"
         )
         status = _call_status_handler(tmp_path)
         assert "Working" in status
@@ -1268,7 +1268,7 @@ class TestPauseAwareness:
 
         (tmp_path / ".koan-pause").write_text("PAUSE")
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n- fix bug\n\n## In Progress\n\n")
 
         with patch("app.awake.INSTANCE_DIR", tmp_path), \
              patch("app.awake.KOAN_ROOT", tmp_path), \
@@ -1296,7 +1296,7 @@ class TestPauseAwareness:
 
         # No .koan-pause file
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n- fix bug\n\n## En cours\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n- fix bug\n\n## In Progress\n\n")
 
         with patch("app.awake.INSTANCE_DIR", tmp_path), \
              patch("app.awake.KOAN_ROOT", tmp_path), \
@@ -1376,7 +1376,7 @@ class TestHandleMissionCommand:
     @patch("app.command_handlers.send_telegram")
     def test_handle_command_routes_mission(self, mock_send, tmp_path):
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n")
         with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
              patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
              patch("app.command_handlers.MISSIONS_FILE", missions_file), \
@@ -1393,7 +1393,7 @@ class TestMissionProjectAutoDetection:
     def test_mission_skill_detects_project_from_first_word(self, mock_send, tmp_path):
         """'/mission koan fix bug' should detect 'koan' as project."""
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n")
         with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
              patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
              patch("app.command_handlers.MISSIONS_FILE", missions_file), \
@@ -1409,7 +1409,7 @@ class TestMissionProjectAutoDetection:
     def test_mission_skill_explicit_tag_takes_precedence(self, mock_send, tmp_path):
         """'[project:web] koan fix bug' uses explicit tag, not first word."""
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n")
         with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
              patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
              patch("app.command_handlers.MISSIONS_FILE", missions_file), \
@@ -1435,7 +1435,7 @@ class TestMissionProjectAutoDetection:
     def test_mission_skill_single_project_no_ask(self, mock_send, tmp_path):
         """Single project: no need to ask or detect."""
         missions_file = tmp_path / "missions.md"
-        missions_file.write_text("# Missions\n\n## En attente\n\n## En cours\n\n")
+        missions_file.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n")
         with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
              patch("app.command_handlers.INSTANCE_DIR", tmp_path), \
              patch("app.command_handlers.MISSIONS_FILE", missions_file), \

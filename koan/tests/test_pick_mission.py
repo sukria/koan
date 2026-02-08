@@ -51,7 +51,7 @@ class TestParsePickerOutput:
 class TestBuildPrompt:
     def test_placeholders_replaced(self):
         prompt = build_prompt(
-            missions_content="## En attente\n- task 1",
+            missions_content="## Pending\n- task 1",
             projects_str="koan:/path;anantys:/path2",
             run_num="3",
             max_runs="20",
@@ -62,38 +62,38 @@ class TestBuildPrompt:
         assert "{PROJECTS}" not in prompt
         assert "{RUN_NUM}" not in prompt
         assert "{LAST_PROJECT}" not in prompt
-        assert "## En attente" in prompt
+        assert "## Pending" in prompt
 
 
 class TestFallbackExtract:
     def test_with_inline_tag(self, tmp_path):
         missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## En attente\n\n- [project:koan] fix tests\n\n## En cours\n\n## Terminées\n")
+        missions.write_text("# Missions\n\n## Pending\n\n- [project:koan] fix tests\n\n## In Progress\n\n## Done\n")
         project, title = fallback_extract(missions, "koan:/path")
         assert project == "koan"
         assert title == "fix tests"
 
     def test_without_tag(self, tmp_path):
         missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## En attente\n\n- fix tests\n\n## En cours\n\n## Terminées\n")
+        missions.write_text("# Missions\n\n## Pending\n\n- fix tests\n\n## In Progress\n\n## Done\n")
         project, title = fallback_extract(missions, "koan:/path;anantys:/path2")
         assert project == "koan"
         assert title == "fix tests"
 
     def test_no_pending(self, tmp_path):
         missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n")
+        missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n")
         project, title = fallback_extract(missions, "koan:/path")
         assert project is None
 
     def test_with_subheader_tag(self, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n"
+            "# Missions\n\n## Pending\n\n"
             "### projet:anantys-back\n\n"
             "### project:koan\n"
             "- fix rotation bug\n\n"
-            "## En cours\n\n## Terminées\n"
+            "## In Progress\n\n## Done\n"
         )
         # fallback_extract uses extract_next_pending which now respects sub-headers
         # but fallback_extract doesn't pass project_name, so it returns first item
@@ -122,11 +122,11 @@ class TestPickMission:
         """With 3+ missions and 2+ projects, Claude picker is called."""
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n"
+            "# Missions\n\n## Pending\n\n"
             "- [project:koan] fix tests\n"
             "- [project:koan] refactor utils\n"
             "- [project:anantys] implement dashboard\n\n"
-            "## En cours\n\n## Terminées\n"
+            "## In Progress\n\n## Done\n"
         )
         mock_claude.return_value = "mission:anantys:implement dashboard"
 
@@ -136,7 +136,7 @@ class TestPickMission:
     @patch("app.pick_mission.call_claude")
     def test_autonomous_when_no_missions(self, mock_claude, tmp_path):
         missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## En attente\n\n## En cours\n\n## Terminées\n")
+        missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n")
 
         result = pick_mission(str(tmp_path), "koan:/p1", "1", "implement")
         # count_pending returns 0, so we never call Claude
@@ -147,7 +147,7 @@ class TestPickMission:
     def test_fallback_on_claude_failure(self, mock_claude, tmp_path):
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n- [project:koan] fix tests\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n- [project:koan] fix tests\n\n## In Progress\n\n## Done\n"
         )
         mock_claude.return_value = ""  # Claude failed
 
@@ -165,7 +165,7 @@ class TestPickMission:
         """When there's only 1-2 pending missions, use fast fallback."""
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n- [project:koan] fix tests\n\n## En cours\n\n## Terminées\n"
+            "# Missions\n\n## Pending\n\n- [project:koan] fix tests\n\n## In Progress\n\n## Done\n"
         )
         result = pick_mission(str(tmp_path), "koan:/p1;anantys:/p2", "1", "implement")
         assert result == "koan:fix tests"
@@ -176,9 +176,9 @@ class TestPickMission:
         """When there's only 1 project, use fast fallback even with many missions."""
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n"
+            "# Missions\n\n## Pending\n\n"
             "- fix tests\n- add feature\n- refactor module\n\n"
-            "## En cours\n\n## Terminées\n"
+            "## In Progress\n\n## Done\n"
         )
         result = pick_mission(str(tmp_path), "koan:/p1", "1", "implement")
         assert result == "koan:fix tests"
@@ -189,11 +189,11 @@ class TestPickMission:
         """When 3+ missions AND 2+ projects, Claude picker is used."""
         missions = tmp_path / "missions.md"
         missions.write_text(
-            "# Missions\n\n## En attente\n\n"
+            "# Missions\n\n## Pending\n\n"
             "- [project:koan] fix tests\n"
             "- [project:anantys] add feature\n"
             "- [project:koan] refactor module\n\n"
-            "## En cours\n\n## Terminées\n"
+            "## In Progress\n\n## Done\n"
         )
         mock_claude.return_value = "mission:anantys:add feature"
         result = pick_mission(str(tmp_path), "koan:/p1;anantys:/p2", "1", "implement")
