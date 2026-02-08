@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from app.claude_step import _rebase_onto_target, _run_git, _truncate
-from app.github import run_gh
+from app.github import pr_create, run_gh
 
 
 def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
@@ -119,7 +119,7 @@ def run_rebase(
         6. Comment on the PR with a summary
 
     Args:
-        owner: GitHub owner (e.g., "sukria")
+        owner: GitHub owner (e.g., "owner")
         repo: GitHub repo name (e.g., "koan")
         pr_number: PR number as string
         project_path: Local path to the project
@@ -372,14 +372,13 @@ def _push_with_fallback(
             f"Original PR: {context.get('url', f'#{pr_number}')}\n\n"
             f"---\n_Automated by Koan_"
         )
-        new_pr_url = run_gh(
-            "pr", "create",
-            "--repo", full_repo,
-            "--head", new_branch,
-            "--base", base,
-            "--title", f"[Rebase] {title}",
-            "--body", new_pr_body,
-            "--draft",
+        new_pr_url = pr_create(
+            title=f"[Rebase] {title}",
+            body=new_pr_body,
+            draft=True,
+            base=base,
+            repo=full_repo,
+            head=new_branch,
         )
         actions.append(f"Created draft PR: {new_pr_url.strip()}")
 

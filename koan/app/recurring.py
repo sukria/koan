@@ -21,14 +21,17 @@ Storage format (recurring.json):
 ]
 """
 
+import fcntl
 import json
 import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, TypeVar
 
 from app.utils import atomic_write, insert_pending_mission
+
+T = TypeVar("T")
 
 
 FREQUENCIES = ("hourly", "daily", "weekly")
@@ -56,6 +59,23 @@ def save_recurring(recurring_path: Path, missions: List[Dict]):
     atomic_write(recurring_path, content)
 
 
+def _locked_modify(recurring_path: Path, fn: Callable[[List[Dict]], T]) -> T:
+    """Acquire a file lock, load recurring missions, apply *fn*, and save.
+
+    Returns whatever *fn* returns.
+    """
+    lock_path = recurring_path.parent / ".recurring.lock"
+    with open(lock_path, "a") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            missions = load_recurring(recurring_path)
+            result = fn(missions)
+            save_recurring(recurring_path, missions)
+            return result
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
 def add_recurring(
     recurring_path: Path,
     frequency: str,
@@ -79,21 +99,24 @@ def add_recurring(
     if frequency not in FREQUENCIES:
         raise ValueError(f"Invalid frequency: {frequency}. Must be one of {FREQUENCIES}")
 
-    missions = load_recurring(recurring_path)
+    created_mission = {}
 
-    mission = {
-        "id": f"rec_{int(time.time())}_{os.getpid()}_{len(missions)}",
-        "frequency": frequency,
-        "text": text.strip(),
-        "project": project,
-        "created": datetime.now().isoformat(timespec="seconds"),
-        "last_run": None,
-        "enabled": True,
-    }
+    def _add(missions: List[Dict]) -> Dict:
+        mission = {
+            "id": f"rec_{int(time.time())}_{os.getpid()}_{len(missions)}",
+            "frequency": frequency,
+            "text": text.strip(),
+            "project": project,
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "last_run": None,
+            "enabled": True,
+        }
+        missions.append(mission)
+        created_mission.update(mission)
+        return mission
 
-    missions.append(mission)
-    save_recurring(recurring_path, missions)
-    return mission
+    _locked_modify(recurring_path, _add)
+    return created_mission
 
 
 def remove_recurring(recurring_path: Path, identifier: str) -> str:
@@ -109,40 +132,41 @@ def remove_recurring(recurring_path: Path, identifier: str) -> str:
     Raises:
         ValueError: If identifier doesn't match any mission
     """
-    missions = load_recurring(recurring_path)
-    if not missions:
-        raise ValueError("No recurring missions configured.")
+    def _remove(missions: List[Dict]) -> str:
+        if not missions:
+            raise ValueError("No recurring missions configured.")
 
-    enabled = [m for m in missions if m.get("enabled", True)]
-    if not enabled:
-        raise ValueError("No active recurring missions.")
+        enabled = [m for m in missions if m.get("enabled", True)]
+        if not enabled:
+            raise ValueError("No active recurring missions.")
 
-    if identifier.isdigit():
-        idx = int(identifier) - 1
-        if idx < 0 or idx >= len(enabled):
-            raise ValueError(
-                f"Invalid number: {identifier}. "
-                f"Valid range: 1-{len(enabled)}"
-            )
-        target = enabled[idx]
-    else:
-        # Keyword match (case-insensitive substring)
-        matches = [
-            m for m in enabled
-            if identifier.lower() in m["text"].lower()
-        ]
-        if not matches:
-            raise ValueError(f"No recurring mission matching '{identifier}'.")
-        if len(matches) > 1:
-            raise ValueError(
-                f"Multiple matches for '{identifier}'. Be more specific or use a number."
-            )
-        target = matches[0]
+        if identifier.isdigit():
+            idx = int(identifier) - 1
+            if idx < 0 or idx >= len(enabled):
+                raise ValueError(
+                    f"Invalid number: {identifier}. "
+                    f"Valid range: 1-{len(enabled)}"
+                )
+            target = enabled[idx]
+        else:
+            # Keyword match (case-insensitive substring)
+            matches = [
+                m for m in enabled
+                if identifier.lower() in m["text"].lower()
+            ]
+            if not matches:
+                raise ValueError(f"No recurring mission matching '{identifier}'.")
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Multiple matches for '{identifier}'. Be more specific or use a number."
+                )
+            target = matches[0]
 
-    # Remove from list
-    missions = [m for m in missions if m["id"] != target["id"]]
-    save_recurring(recurring_path, missions)
-    return f"[{target['frequency']}] {target['text']}"
+        # Remove from list (mutate in place so _locked_modify saves correctly)
+        missions[:] = [m for m in missions if m["id"] != target["id"]]
+        return f"[{target['frequency']}] {target['text']}"
+
+    return _locked_modify(recurring_path, _remove)
 
 
 def list_recurring(recurring_path: Path) -> List[Dict]:
@@ -247,37 +271,35 @@ def check_and_inject(
     Returns:
         List of mission descriptions that were injected
     """
-    missions = load_recurring(recurring_path)
-    if not missions:
-        return []
-
     now = now or datetime.now()
-    injected = []
 
-    for mission in missions:
-        if not is_due(mission, now):
-            continue
+    def _check(missions: List[Dict]) -> List[str]:
+        if not missions:
+            return []
 
-        text = mission["text"]
-        project = mission.get("project")
-        freq = mission["frequency"]
+        injected = []
+        for mission in missions:
+            if not is_due(mission, now):
+                continue
 
-        # Build mission entry for missions.md
-        tag = f"[{freq}] "
-        if project:
-            entry = f"- [project:{project}] {tag}{text}"
-        else:
-            entry = f"- {tag}{text}"
+            text = mission["text"]
+            project = mission.get("project")
+            freq = mission["frequency"]
 
-        # Insert into pending section
-        insert_pending_mission(missions_path, entry)
+            # Build mission entry for missions.md
+            tag = f"[{freq}] "
+            if project:
+                entry = f"- [project:{project}] {tag}{text}"
+            else:
+                entry = f"- {tag}{text}"
 
-        # Update last_run
-        mission["last_run"] = now.isoformat(timespec="seconds")
-        injected.append(f"[{freq}] {text}")
+            # Insert into pending section
+            insert_pending_mission(missions_path, entry)
 
-    # Save updated timestamps
-    if injected:
-        save_recurring(recurring_path, missions)
+            # Update last_run
+            mission["last_run"] = now.isoformat(timespec="seconds")
+            injected.append(f"[{freq}] {text}")
 
-    return injected
+        return injected
+
+    return _locked_modify(recurring_path, _check)

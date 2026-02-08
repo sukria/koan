@@ -532,7 +532,7 @@ def cancel_pending_mission(content: str, identifier: str) -> Tuple[str, str]:
         raise ValueError("Could not locate mission in file content.")
 
     new_lines = lines[:remove_start] + lines[remove_end:]
-    return "\n".join(new_lines), target_text
+    return normalize_content("\n".join(new_lines)), target_text
 
 
 def clean_mission_display(text: str, max_length: int = 120) -> str:
@@ -705,4 +705,4 @@ def reorder_mission(content: str, position: int, target: int = 1) -> Tuple[str, 
     result_lines = new_lines[:insert_idx] + moved_lines + new_lines[insert_idx:]
 
     display = clean_mission_display(moved_text)
-    return "\n".join(result_lines), display
+    return normalize_content("\n".join(result_lines)), display

@@ -161,6 +161,7 @@ def append_to_journal(instance_dir: Path, project_name: str, content: str):
     with open(journal_file, "a", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         f.write(content)
+        f.flush()
         fcntl.flock(f, fcntl.LOCK_UN)
 
 

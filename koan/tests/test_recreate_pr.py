@@ -174,7 +174,9 @@ class TestPushRecreated:
 
     def test_permission_denied_creates_new_pr(self, pr_context):
         with patch("app.recreate_pr._run_git") as mock_git, \
-             patch("app.recreate_pr.run_gh", return_value="https://github.com/sukria/koan/pull/120"):
+             patch("app.recreate_pr.pr_create", return_value="https://github.com/sukria/koan/pull/120"), \
+             patch("app.recreate_pr.run_gh"), \
+             patch("app.utils.get_branch_prefix", return_value="koan/"):
             mock_git.side_effect = [
                 RuntimeError("permission denied"),  # force-push fails
                 None,  # checkout -b

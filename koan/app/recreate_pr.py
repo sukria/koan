@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from app.claude_step import _run_git, run_claude_step
-from app.github import run_gh
+from app.github import pr_create, run_gh
 from app.rebase_pr import (
     _get_current_branch,
     _is_permission_error,
@@ -43,7 +43,7 @@ def run_recreate(
     from scratch, using the original PR as inspiration.
 
     Args:
-        owner: GitHub owner (e.g., "sukria")
+        owner: GitHub owner (e.g., "owner")
         repo: GitHub repo name (e.g., "koan")
         pr_number: PR number as string
         project_path: Local path to the project
@@ -315,7 +315,9 @@ def _push_recreated(
         }
 
     # Create new branch and draft PR
-    new_branch = f"koan/recreate-{branch.replace('/', '-')}"
+    from app.utils import get_branch_prefix
+    prefix = get_branch_prefix()
+    new_branch = f"{prefix}recreate-{branch.replace('/', '-')}"
     try:
         _run_git(
             ["git", "checkout", "-b", new_branch],
@@ -340,14 +342,13 @@ def _push_recreated(
             f"Original PR: {context.get('url', f'#{pr_number}')}\n\n"
             f"---\n_Automated by Koan_"
         )
-        new_pr_url = run_gh(
-            "pr", "create",
-            "--repo", full_repo,
-            "--head", new_branch,
-            "--base", base,
-            "--title", f"[Recreate] {title}",
-            "--body", new_pr_body,
-            "--draft",
+        new_pr_url = pr_create(
+            title=f"[Recreate] {title}",
+            body=new_pr_body,
+            draft=True,
+            base=base,
+            repo=full_repo,
+            head=new_branch,
         )
         actions.append(f"Created draft PR: {new_pr_url.strip()}")
 

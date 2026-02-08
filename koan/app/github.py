@@ -35,7 +35,7 @@ def run_gh(*args, cwd=None, timeout=30, stdin_data=None):
     return result.stdout.strip()
 
 
-def pr_create(title, body, draft=True, base=None, cwd=None):
+def pr_create(title, body, draft=True, base=None, repo=None, head=None, cwd=None):
     """Create a pull request via ``gh pr create``.
 
     Args:
@@ -43,6 +43,8 @@ def pr_create(title, body, draft=True, base=None, cwd=None):
         body: PR body (markdown).
         draft: If True (default), create a draft PR.
         base: Target branch (omit to let ``gh`` pick the default).
+        repo: Repository in ``owner/repo`` format (omit to use local repo).
+        head: Branch containing the changes (omit to use current branch).
         cwd: Working directory (must be inside a git repo).
 
     Returns:
@@ -53,6 +55,10 @@ def pr_create(title, body, draft=True, base=None, cwd=None):
         args.append("--draft")
     if base:
         args.extend(["--base", base])
+    if repo:
+        args.extend(["--repo", repo])
+    if head:
+        args.extend(["--head", head])
     return run_gh(*args, cwd=cwd)
 
 

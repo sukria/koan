@@ -58,25 +58,12 @@ def _get_branch_prefix() -> str:
 
 def _get_merge_policy(project_name: str) -> str:
     """Return the merge policy section to append to the agent prompt."""
+    from app.prompts import load_prompt
+
     prefix = _get_branch_prefix()
     if _is_auto_merge_enabled(project_name):
-        return f"""
-
-# Git Merge Policy (Auto-Merge Enabled)
-
-Auto-merge is ENABLED for this project. After you complete your work on a {prefix}* branch
-and push it, the system will automatically merge it according to configured rules.
-
-Just focus on: creating {prefix}<name> branch, implementing, committing, pushing.
-The auto-merge system handles the merge to the base branch after mission completion.
-"""
-    return f"""
-
-# Git Merge Policy
-
-Auto-merge is NOT configured for this project. Follow standard workflow:
-create {prefix}<name> branches, commit, and push, but DO NOT merge yourself.
-"""
+        return load_prompt("merge-policy-enabled", BRANCH_PREFIX=prefix)
+    return load_prompt("merge-policy-disabled", BRANCH_PREFIX=prefix)
 
 
 def _get_deep_research(instance: str, project_name: str, project_path: str) -> str:
@@ -104,20 +91,10 @@ def _get_focus_section(instance: str) -> str:
     if state is None:
         return ""
 
+    from app.prompts import load_prompt
+
     remaining = state.remaining_display()
-    return f"""
-
-# Focus Mode (ACTIVE — {remaining} remaining)
-
-The human has activated focus mode. This means:
-- Do NOT enter free exploration or autonomous mode
-- Do NOT write reflections or contemplative entries
-- Focus EXCLUSIVELY on the assigned mission
-- If no mission is assigned, check missions.md carefully for pending work
-- When the mission is done, write your conclusion and stop — do not start new autonomous work
-
-Focus mode expires automatically. The human is feeding you missions — stay ready.
-"""
+    return load_prompt("focus-mode", REMAINING=remaining)
 
 
 def _get_verbose_section(instance: str) -> str:
@@ -125,23 +102,10 @@ def _get_verbose_section(instance: str) -> str:
     koan_root = str(Path(instance).parent)
     if not os.path.isfile(os.path.join(koan_root, ".koan-verbose")):
         return ""
-    return f"""
 
-# Verbose Mode (ACTIVE)
+    from app.prompts import load_prompt
 
-The human has activated verbose mode (/verbose). Every time you write a progress line
-to pending.md, you MUST ALSO write the same line to {instance}/outbox.md so the human
-gets real-time updates on Telegram. Use this pattern:
-
-```bash
-MSG="$(date +%H:%M) — description"
-echo "$MSG" >> {instance}/journal/pending.md
-echo "$MSG" >> {instance}/outbox.md
-```
-
-This replaces the single echo to pending.md. Do this for EVERY progress update.
-The conclusion message at the end of the mission is still a single write as usual.
-"""
+    return load_prompt("verbose-mode", INSTANCE=instance)
 
 
 def build_agent_prompt(

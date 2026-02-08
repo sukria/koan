@@ -220,7 +220,7 @@ class TestCommitIfChanges:
         result = commit_if_changes("/project", "test msg")
         assert result is True
         assert mock_git.call_count == 2
-        mock_git.assert_any_call(["git", "add", "-u"], cwd="/project")
+        mock_git.assert_any_call(["git", "add", "-A"], cwd="/project")
         mock_git.assert_any_call(
             ["git", "commit", "-m", "test msg"], cwd="/project"
         )

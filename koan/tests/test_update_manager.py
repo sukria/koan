@@ -217,6 +217,8 @@ class TestPullUpstream:
             MagicMock(returncode=0, stdout="Updating..\n"),   # pull
             MagicMock(returncode=0, stdout="def5678\n"),      # _get_short_sha (new)
             MagicMock(returncode=0, stdout="3\n"),            # _count_commits_between
+            MagicMock(returncode=0, stdout=""),               # checkout original branch
+            MagicMock(returncode=0, stdout=""),               # stash pop
         ]
 
         result = pull_upstream(Path("/repo"))

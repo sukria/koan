@@ -95,7 +95,7 @@ def commit_if_changes(project_path: str, message: str) -> bool:
     if not status.stdout.strip():
         return False
 
-    _run_git(["git", "add", "-u"], cwd=project_path)
+    _run_git(["git", "add", "-A"], cwd=project_path)
     _run_git(["git", "commit", "-m", message], cwd=project_path)
     return True
 

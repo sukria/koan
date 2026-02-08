@@ -193,6 +193,12 @@ def pull_upstream(koan_root: Path) -> UpdateResult:
     new_sha = _get_short_sha(koan_root)
     commits = _count_commits_between(koan_root, old_sha, new_sha) if old_sha != new_sha else 0
 
+    # Restore original branch and stash
+    if current_branch and current_branch != "main":
+        _run_git(["checkout", current_branch], koan_root)
+    if stashed:
+        _run_git(["stash", "pop"], koan_root)
+
     return UpdateResult(
         success=True,
         old_commit=old_sha,
