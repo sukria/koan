@@ -1,12 +1,11 @@
 ---
 name: check
 scope: core
-description: Check the status of a GitHub Pull Request or Issue and take appropriate action
-version: 1.0.0
-worker: true
+description: Queue a check mission for a GitHub PR or Issue (rebase, review, plan)
+version: 2.0.0
 commands:
   - name: check
-    description: Check a PR/issue and take action if needed (rebase, review, plan)
+    description: Queue a check on a PR/issue (rebase, review, plan)
     usage: /check https://github.com/owner/repo/pull/123
     aliases: [inspect]
 handler: handler.py

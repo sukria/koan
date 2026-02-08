@@ -1,7 +1,8 @@
-"""Kōan /check skill -- inspect a PR or issue and take appropriate action."""
+"""Koan /check skill -- queue a check mission for a PR or issue."""
 
-import json
 import re
+import shlex
+
 
 # PR URL: https://github.com/owner/repo/pull/123
 _PR_URL_RE = re.compile(
@@ -14,14 +15,13 @@ _ISSUE_URL_RE = re.compile(
 
 
 def handle(ctx):
-    """Handle /check command.
+    """Handle /check command -- queue a mission to check a PR or issue.
 
     Usage:
         /check <github-url>
 
-    For PRs: checks rebase status, review state, and takes action.
-    For issues: triggers /plan if there are new updates.
-    Tracks last-checked timestamps to avoid redundant work.
+    Queues a mission that inspects the PR/issue via GitHub API and
+    takes action (rebase, review, plan) as needed.
     """
     args = ctx.args.strip()
 
@@ -29,189 +29,60 @@ def handle(ctx):
         return (
             "Usage: /check <github-pr-or-issue-url>\n"
             "Ex: /check https://github.com/sukria/koan/pull/85\n\n"
-            "For PRs: checks rebase, review status, and takes action.\n"
-            "For issues: triggers /plan if updated since last check."
+            "Queues a mission that checks rebase/review status for PRs, "
+            "or triggers /plan for updated issues."
         )
 
-    # Try PR first (pull/N comes before issues/N in specificity)
+    # Validate URL format before queuing
     pr_match = _PR_URL_RE.search(args)
-    if pr_match:
-        return _handle_pr(ctx, pr_match)
-
     issue_match = _ISSUE_URL_RE.search(args)
-    if issue_match:
-        return _handle_issue(ctx, issue_match)
 
-    return (
-        "\u274c No valid GitHub PR or issue URL found.\n"
-        "Expected: https://github.com/owner/repo/pull/123\n"
-        "      or: https://github.com/owner/repo/issues/123"
-    )
-
-
-def _canonical_url(owner, repo, kind, number):
-    """Build a canonical URL for tracker storage."""
-    return f"https://github.com/{owner}/{repo}/{kind}/{number}"
-
-
-def _fetch_pr_metadata(owner, repo, pr_number):
-    """Fetch PR metadata via gh CLI.
-
-    Returns dict with: state, mergeable, reviewDecision, updatedAt,
-    headRefName, baseRefName, title, isDraft, author, url.
-    """
-    from app.github import run_gh
-
-    fields = (
-        "state,mergeable,reviewDecision,updatedAt,"
-        "headRefName,baseRefName,title,isDraft,author,url"
-    )
-    raw = run_gh(
-        "pr", "view", pr_number,
-        "--repo", f"{owner}/{repo}",
-        "--json", fields,
-    )
-    return json.loads(raw)
-
-
-def _fetch_issue_metadata(owner, repo, issue_number):
-    """Fetch issue metadata via gh CLI.
-
-    Returns dict with: state, updatedAt, title, url, comments count.
-    """
-    from app.github import api
-
-    raw = api(
-        f"repos/{owner}/{repo}/issues/{issue_number}",
-        jq='{"state": .state, "updatedAt": .updated_at, '
-           '"title": .title, "url": .html_url, '
-           '"comments": .comments}',
-    )
-    return json.loads(raw)
-
-
-def _needs_rebase(pr_data):
-    """Determine if the PR branch needs a rebase.
-
-    Uses the ``mergeable`` field from the GitHub API.
-    CONFLICTING means the branch has merge conflicts (needs rebase).
-    UNKNOWN can be transient — we treat it as "check later".
-    """
-    mergeable = pr_data.get("mergeable", "UNKNOWN")
-    return mergeable == "CONFLICTING"
-
-
-def _has_no_reviews(pr_data):
-    """Return True if the PR has received no review decision yet."""
-    decision = pr_data.get("reviewDecision")
-    # None or empty string means no review submitted
-    return not decision
-
-
-def _handle_pr(ctx, match):
-    """Check a pull request and decide on action."""
-    from app.check_tracker import has_changed, mark_checked
-
-    send = ctx.send_message
-    owner = match.group("owner")
-    repo = match.group("repo")
-    pr_number = match.group("number")
-    url = _canonical_url(owner, repo, "pull", pr_number)
-
-    if send:
-        send(f"\U0001f50d Checking PR #{pr_number} ({owner}/{repo})...")
-
-    try:
-        pr_data = _fetch_pr_metadata(owner, repo, pr_number)
-    except Exception as e:
-        return f"\u274c Failed to fetch PR #{pr_number}: {str(e)[:300]}"
-
-    updated_at = pr_data.get("updatedAt", "")
-    title = pr_data.get("title", "")
-    state = pr_data.get("state", "UNKNOWN")
-
-    # Skip closed/merged PRs
-    if state in ("CLOSED", "MERGED"):
-        mark_checked(ctx.instance_dir, url, updated_at)
-        return f"PR #{pr_number} is {state.lower()}. No action needed."
-
-    # Check if anything changed since last check
-    if not has_changed(ctx.instance_dir, url, updated_at):
+    if not pr_match and not issue_match:
         return (
-            f"PR #{pr_number} ({title[:60]}) — no updates since last check. "
-            "Skipping."
+            "\u274c No valid GitHub PR or issue URL found.\n"
+            "Expected: https://github.com/owner/repo/pull/123\n"
+            "      or: https://github.com/owner/repo/issues/123"
         )
 
-    # Build status report
-    actions = []
-    missions_path = ctx.instance_dir / "missions.md"
-    needs_rebase = _needs_rebase(pr_data)
+    # Extract the clean URL (strip fragments/query)
+    if pr_match:
+        owner = pr_match.group("owner")
+        repo = pr_match.group("repo")
+        number = pr_match.group("number")
+        url = f"https://github.com/{owner}/{repo}/pull/{number}"
+        label = f"PR #{number} ({owner}/{repo})"
+    else:
+        owner = issue_match.group("owner")
+        repo = issue_match.group("repo")
+        number = issue_match.group("number")
+        url = f"https://github.com/{owner}/{repo}/issues/{number}"
+        label = f"issue #{number} ({owner}/{repo})"
 
-    # 1. Check if rebase is needed
-    if needs_rebase:
-        _queue_rebase(ctx, owner, repo, pr_number, missions_path)
-        actions.append(f"\u267b\ufe0f Rebase queued — PR has merge conflicts")
-
-    # 2. Check if review is needed (no review decision + not draft + not conflicting)
-    is_draft = pr_data.get("isDraft", False)
-    if _has_no_reviews(pr_data) and not is_draft and not needs_rebase:
-        _queue_pr_review(ctx, owner, repo, pr_number, missions_path)
-        actions.append(f"\U0001f4dd PR review queued — no reviews yet")
-
-    # Record the check
-    mark_checked(ctx.instance_dir, url, updated_at)
-
-    if not actions:
-        head = pr_data.get("headRefName", "?")
-        base = pr_data.get("baseRefName", "?")
-        mergeable = pr_data.get("mergeable", "UNKNOWN")
-        review = pr_data.get("reviewDecision") or "none"
-        return (
-            f"\u2705 PR #{pr_number} ({title[:60]})\n"
-            f"Branch: {head} \u2192 {base}\n"
-            f"Mergeable: {mergeable} | Review: {review}\n"
-            "No action needed."
-        )
-
-    summary = "\n".join(f"  \u2022 {a}" for a in actions)
-    return f"\U0001f527 PR #{pr_number} ({title[:60]}):\n{summary}"
-
-
-def _queue_rebase(ctx, owner, repo, pr_number, missions_path):
-    """Queue a rebase mission for the PR."""
-    from app.utils import insert_pending_mission, resolve_project_path
-
-    project_path = resolve_project_path(repo)
+    # Resolve project name for the mission tag
     project_name = _resolve_project_name(repo)
-    koan_root = ctx.koan_root
 
+    # Build CLI command
+    koan_root = ctx.koan_root
+    instance_dir = ctx.instance_dir
     cmd = (
         f"cd {koan_root}/koan && "
-        f"{koan_root}/.venv/bin/python3 -m app.rebase_pr "
-        f"https://github.com/{owner}/{repo}/pull/{pr_number}"
+        f"{koan_root}/.venv/bin/python3 -m app.check_runner "
+        f"{shlex.quote(url)} "
+        f"--instance-dir {shlex.quote(str(instance_dir))} "
+        f"--koan-root {shlex.quote(str(koan_root))}"
     )
-    if project_path:
-        cmd += f" --project-path {project_path}"
 
-    entry = (
-        f"- [project:{project_name}] Rebase PR #{pr_number} "
-        f"({owner}/{repo}) \u2014 run: `{cmd}`"
-    )
-    insert_pending_mission(missions_path, entry)
-
-
-def _queue_pr_review(ctx, owner, repo, pr_number, missions_path):
-    """Queue a PR review mission."""
+    # Queue the mission
     from app.utils import insert_pending_mission
 
-    project_name = _resolve_project_name(repo)
-    pr_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
-
-    entry = (
-        f"- [project:{project_name}] Review PR #{pr_number} "
-        f"({owner}/{repo}) \u2014 /pr {pr_url}"
+    mission_entry = (
+        f"- [project:{project_name}] Check {label} "
+        f"\u2014 run: `{cmd}`"
     )
-    insert_pending_mission(missions_path, entry)
+    missions_path = instance_dir / "missions.md"
+    insert_pending_mission(missions_path, mission_entry)
+
+    return f"\U0001f50d Check queued for {label}"
 
 
 def _resolve_project_name(repo):
@@ -222,64 +93,3 @@ def _resolve_project_name(repo):
         if name.lower() == repo.lower():
             return name
     return repo
-
-
-def _handle_issue(ctx, match):
-    """Check an issue and trigger /plan if updated."""
-    from app.check_tracker import has_changed, mark_checked
-
-    send = ctx.send_message
-    owner = match.group("owner")
-    repo = match.group("repo")
-    issue_number = match.group("number")
-    url = _canonical_url(owner, repo, "issues", issue_number)
-
-    if send:
-        send(f"\U0001f50d Checking issue #{issue_number} ({owner}/{repo})...")
-
-    try:
-        issue_data = _fetch_issue_metadata(owner, repo, issue_number)
-    except Exception as e:
-        return f"\u274c Failed to fetch issue #{issue_number}: {str(e)[:300]}"
-
-    updated_at = issue_data.get("updatedAt", "")
-    title = issue_data.get("title", "")
-    state = issue_data.get("state", "unknown")
-
-    # Skip closed issues
-    if state == "closed":
-        mark_checked(ctx.instance_dir, url, updated_at)
-        return f"Issue #{issue_number} is closed. No action needed."
-
-    # Check if anything changed since last check
-    if not has_changed(ctx.instance_dir, url, updated_at):
-        return (
-            f"Issue #{issue_number} ({title[:60]}) — no updates since last "
-            "check. Skipping."
-        )
-
-    # Queue /plan on the issue
-    _queue_plan(ctx, owner, repo, issue_number, title)
-
-    mark_checked(ctx.instance_dir, url, updated_at)
-
-    return (
-        f"\U0001f9e0 Issue #{issue_number} ({title[:60]}) has updates.\n"
-        f"  \u2022 /plan queued for iteration."
-    )
-
-
-def _queue_plan(ctx, owner, repo, issue_number, title):
-    """Queue a /plan mission for the issue."""
-    from app.utils import insert_pending_mission
-
-    project_name = _resolve_project_name(repo)
-    issue_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
-    missions_path = ctx.instance_dir / "missions.md"
-
-    short_title = title[:80] if title else f"issue #{issue_number}"
-    entry = (
-        f"- [project:{project_name}] Plan iteration on {short_title} "
-        f"\u2014 /plan {issue_url}"
-    )
-    insert_pending_mission(missions_path, entry)

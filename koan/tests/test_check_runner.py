@@ -1,0 +1,677 @@
+"""Tests for check_runner.py — PR/issue check pipeline."""
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch, call
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def instance_dir(tmp_path):
+    d = tmp_path / "instance"
+    d.mkdir()
+    missions_md = d / "missions.md"
+    missions_md.write_text("## En attente\n\n## En cours\n\n## Terminées\n")
+    return d
+
+
+@pytest.fixture
+def koan_root(tmp_path):
+    return str(tmp_path)
+
+
+def _pr_json(**overrides):
+    """Build a realistic PR metadata dict."""
+    base = {
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "reviewDecision": "",
+        "updatedAt": "2026-02-07T10:00:00Z",
+        "headRefName": "koan/fix-xyz",
+        "baseRefName": "main",
+        "title": "Fix XYZ",
+        "isDraft": False,
+        "author": {"login": "koan-bot"},
+        "url": "https://github.com/sukria/koan/pull/99",
+    }
+    base.update(overrides)
+    return base
+
+
+def _issue_json(**overrides):
+    """Build a realistic issue metadata dict."""
+    base = {
+        "state": "open",
+        "updatedAt": "2026-02-07T10:00:00Z",
+        "title": "Improve performance",
+        "url": "https://github.com/sukria/koan/issues/42",
+        "comments": 3,
+    }
+    base.update(overrides)
+    return base
+
+
+# ---------------------------------------------------------------------------
+# run_check() — URL routing
+# ---------------------------------------------------------------------------
+
+class TestRunCheckRouting:
+    def test_pr_url_routes_to_pr_handler(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(state="MERGED")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.mark_checked"):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "merged" in msg.lower()
+
+    def test_issue_url_routes_to_issue_handler(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        issue_data = _issue_json(state="closed")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata", return_value=issue_data), \
+             patch("app.check_tracker.mark_checked"):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "closed" in msg.lower()
+
+    def test_invalid_url_returns_failure(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        notify = MagicMock()
+        success, msg = run_check(
+            "https://example.com/nothing",
+            str(instance_dir), koan_root, notify_fn=notify,
+        )
+        assert not success
+        assert "No valid" in msg
+
+
+# ---------------------------------------------------------------------------
+# PR handling — closed/merged
+# ---------------------------------------------------------------------------
+
+class TestPrClosed:
+    def test_closed_pr_no_action(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(state="CLOSED")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.mark_checked") as mock_mark:
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "closed" in msg.lower()
+            mock_mark.assert_called_once()
+
+    def test_merged_pr_no_action(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(state="MERGED")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.mark_checked"):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert "merged" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# PR handling — no changes since last check
+# ---------------------------------------------------------------------------
+
+class TestPrNoChanges:
+    def test_skip_when_no_updates(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json()
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=False):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "no updates" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# PR handling — rebase needed
+# ---------------------------------------------------------------------------
+
+class TestPrRebase:
+    def test_conflicting_pr_queues_rebase(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(mergeable="CONFLICTING")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.resolve_project_path", return_value="/home/koan"), \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "Rebase queued" in msg
+            mock_insert.assert_called_once()
+            entry = mock_insert.call_args[0][1]
+            assert "Rebase PR #42" in entry
+            assert "app.rebase_pr" in entry
+
+    def test_rebase_mission_has_project_path(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(mergeable="CONFLICTING")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.resolve_project_path", return_value="/home/koan"), \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
+            run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            entry = mock_insert.call_args[0][1]
+            assert "--project-path /home/koan" in entry
+
+    def test_rebase_without_project_path(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(mergeable="CONFLICTING")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.resolve_project_path", return_value=None), \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
+            run_check(
+                "https://github.com/unknown/repo/pull/10",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            entry = mock_insert.call_args[0][1]
+            assert "--project-path" not in entry
+
+
+# ---------------------------------------------------------------------------
+# PR handling — review needed
+# ---------------------------------------------------------------------------
+
+class TestPrReview:
+    def test_no_review_queues_pr_review(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(reviewDecision="", isDraft=False, mergeable="MERGEABLE")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "review queued" in msg.lower()
+            mock_insert.assert_called_once()
+            entry = mock_insert.call_args[0][1]
+            assert "/pr" in entry
+            assert "Review PR #42" in entry
+
+    def test_draft_pr_no_review(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(reviewDecision="", isDraft=True, mergeable="MERGEABLE")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
+            run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            mock_insert.assert_not_called()
+
+    def test_approved_pr_no_review_queued(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(reviewDecision="APPROVED", isDraft=False, mergeable="MERGEABLE")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert "No action needed" in msg
+
+    def test_conflicting_pr_no_review_queued(self, instance_dir, koan_root):
+        """When rebase is needed, skip review (rebase first)."""
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(reviewDecision="", isDraft=False, mergeable="CONFLICTING")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.resolve_project_path", return_value="/home/koan"), \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
+            run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            # Only rebase should be queued, not review
+            assert mock_insert.call_count == 1
+            entry = mock_insert.call_args[0][1]
+            assert "Rebase" in entry
+
+
+# ---------------------------------------------------------------------------
+# PR handling — clean status
+# ---------------------------------------------------------------------------
+
+class TestPrCleanStatus:
+    def test_clean_pr_reports_status(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(
+            reviewDecision="APPROVED",
+            mergeable="MERGEABLE",
+            headRefName="koan/fix-xyz",
+            baseRefName="main",
+        )
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "\u2705" in msg
+            assert "koan/fix-xyz" in msg
+            assert "No action needed" in msg
+
+
+# ---------------------------------------------------------------------------
+# PR handling — fetch error
+# ---------------------------------------------------------------------------
+
+class TestPrFetchError:
+    def test_fetch_error_returns_failure(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata",
+                    side_effect=RuntimeError("timeout")):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert not success
+            assert "timeout" in msg
+
+
+# ---------------------------------------------------------------------------
+# PR handling — notifications
+# ---------------------------------------------------------------------------
+
+class TestPrNotifications:
+    def test_sends_checking_notification(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(state="MERGED")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.mark_checked"):
+            run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            # First call should be the "Checking..." notification
+            first_msg = notify.call_args_list[0][0][0]
+            assert "Checking PR #42" in first_msg
+
+    def test_sends_result_notification(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        pr_data = _pr_json(state="MERGED")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.mark_checked"):
+            run_check(
+                "https://github.com/sukria/koan/pull/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            # Last call should be the result
+            last_msg = notify.call_args_list[-1][0][0]
+            assert "merged" in last_msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# Issue handling — closed
+# ---------------------------------------------------------------------------
+
+class TestIssueClosed:
+    def test_closed_issue_no_action(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        issue_data = _issue_json(state="closed")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata", return_value=issue_data), \
+             patch("app.check_tracker.mark_checked") as mock_mark:
+            success, msg = run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "closed" in msg.lower()
+            mock_mark.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Issue handling — no changes
+# ---------------------------------------------------------------------------
+
+class TestIssueNoChanges:
+    def test_skip_when_no_updates(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        issue_data = _issue_json()
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata", return_value=issue_data), \
+             patch("app.check_tracker.has_changed", return_value=False):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "no updates" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# Issue handling — plan queued
+# ---------------------------------------------------------------------------
+
+class TestIssuePlan:
+    def test_updated_issue_queues_plan(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        issue_data = _issue_json()
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata", return_value=issue_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]), \
+             patch("app.utils.resolve_project_path", return_value="/home/koan"):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert success
+            assert "/plan queued" in msg.lower()
+            mock_insert.assert_called_once()
+            entry = mock_insert.call_args[0][1]
+            assert "github.com/sukria/koan/issues/42" in entry
+
+    def test_plan_mission_has_project_tag(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        issue_data = _issue_json()
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata", return_value=issue_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]), \
+             patch("app.utils.resolve_project_path", return_value="/home/koan"):
+            run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            entry = mock_insert.call_args[0][1]
+            assert "[project:koan]" in entry
+
+    def test_plan_mission_has_run_command_when_project_found(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        issue_data = _issue_json()
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata", return_value=issue_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]), \
+             patch("app.utils.resolve_project_path", return_value="/home/koan"):
+            run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            entry = mock_insert.call_args[0][1]
+            assert "run: `" in entry
+            assert "app.plan_runner" in entry
+
+    def test_plan_mission_fallback_when_no_project_path(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        issue_data = _issue_json()
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata", return_value=issue_data), \
+             patch("app.check_tracker.has_changed", return_value=True), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.utils.insert_pending_mission") as mock_insert, \
+             patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]), \
+             patch("app.utils.resolve_project_path", return_value=None):
+            run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            entry = mock_insert.call_args[0][1]
+            assert "/plan" in entry
+
+
+# ---------------------------------------------------------------------------
+# Issue handling — fetch error
+# ---------------------------------------------------------------------------
+
+class TestIssueFetchError:
+    def test_fetch_error_returns_failure(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata",
+                    side_effect=RuntimeError("not found")):
+            success, msg = run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            assert not success
+            assert "not found" in msg
+
+
+# ---------------------------------------------------------------------------
+# Issue handling — notifications
+# ---------------------------------------------------------------------------
+
+class TestIssueNotifications:
+    def test_sends_checking_notification(self, instance_dir, koan_root):
+        from app.check_runner import run_check
+
+        issue_data = _issue_json(state="closed")
+        notify = MagicMock()
+        with patch("app.check_runner._fetch_issue_metadata", return_value=issue_data), \
+             patch("app.check_tracker.mark_checked"):
+            run_check(
+                "https://github.com/sukria/koan/issues/42",
+                str(instance_dir), koan_root, notify_fn=notify,
+            )
+            first_msg = notify.call_args_list[0][0][0]
+            assert "Checking issue #42" in first_msg
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+class TestHelpers:
+    def test_canonical_url_pr(self):
+        from app.check_runner import _canonical_url
+        assert _canonical_url("sukria", "koan", "pull", "42") == \
+            "https://github.com/sukria/koan/pull/42"
+
+    def test_canonical_url_issue(self):
+        from app.check_runner import _canonical_url
+        assert _canonical_url("sukria", "koan", "issues", "7") == \
+            "https://github.com/sukria/koan/issues/7"
+
+    def test_needs_rebase_conflicting(self):
+        from app.check_runner import _needs_rebase
+        assert _needs_rebase({"mergeable": "CONFLICTING"}) is True
+
+    def test_needs_rebase_mergeable(self):
+        from app.check_runner import _needs_rebase
+        assert _needs_rebase({"mergeable": "MERGEABLE"}) is False
+
+    def test_has_no_reviews_empty(self):
+        from app.check_runner import _has_no_reviews
+        assert _has_no_reviews({"reviewDecision": ""}) is True
+
+    def test_has_no_reviews_approved(self):
+        from app.check_runner import _has_no_reviews
+        assert _has_no_reviews({"reviewDecision": "APPROVED"}) is False
+
+    def test_resolve_project_name_known(self):
+        from app.check_runner import _resolve_project_name
+        with patch("app.utils.get_known_projects",
+                    return_value=[("koan", "/home/koan")]):
+            assert _resolve_project_name("koan") == "koan"
+
+    def test_resolve_project_name_unknown(self):
+        from app.check_runner import _resolve_project_name
+        with patch("app.utils.get_known_projects",
+                    return_value=[("other", "/other")]):
+            assert _resolve_project_name("myrepo") == "myrepo"
+
+    def test_resolve_project_name_case_insensitive(self):
+        from app.check_runner import _resolve_project_name
+        with patch("app.utils.get_known_projects",
+                    return_value=[("Koan", "/home/koan")]):
+            assert _resolve_project_name("koan") == "Koan"
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+class TestCLI:
+    def test_main_success(self, instance_dir, koan_root):
+        from app.check_runner import main
+
+        pr_data = _pr_json(state="MERGED")
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.notify.send_telegram"):
+            exit_code = main([
+                "https://github.com/sukria/koan/pull/42",
+                "--instance-dir", str(instance_dir),
+                "--koan-root", koan_root,
+            ])
+            assert exit_code == 0
+
+    def test_main_failure(self, instance_dir, koan_root):
+        from app.check_runner import main
+
+        with patch("app.check_runner._fetch_pr_metadata",
+                    side_effect=RuntimeError("oops")), \
+             patch("app.notify.send_telegram"):
+            exit_code = main([
+                "https://github.com/sukria/koan/pull/42",
+                "--instance-dir", str(instance_dir),
+                "--koan-root", koan_root,
+            ])
+            assert exit_code == 1
+
+    def test_main_missing_instance_dir(self):
+        from app.check_runner import main
+
+        with patch.dict("os.environ", {}, clear=True):
+            exit_code = main([
+                "https://github.com/sukria/koan/pull/42",
+                "--koan-root", "/tmp/koan",
+            ])
+            assert exit_code == 1
+
+    def test_main_missing_koan_root(self, instance_dir):
+        from app.check_runner import main
+
+        with patch.dict("os.environ", {}, clear=True):
+            exit_code = main([
+                "https://github.com/sukria/koan/pull/42",
+                "--instance-dir", str(instance_dir),
+            ])
+            assert exit_code == 1
+
+    def test_main_invalid_url(self, instance_dir, koan_root):
+        from app.check_runner import main
+
+        with patch("app.notify.send_telegram"):
+            exit_code = main([
+                "https://example.com/nothing",
+                "--instance-dir", str(instance_dir),
+                "--koan-root", koan_root,
+            ])
+            assert exit_code == 1
+
+    def test_main_uses_env_vars(self, instance_dir, koan_root):
+        """CLI reads from KOAN_INSTANCE_DIR and KOAN_ROOT env vars."""
+        import os
+        from app.check_runner import main
+
+        pr_data = _pr_json(state="MERGED")
+        env = {
+            "KOAN_INSTANCE_DIR": str(instance_dir),
+            "KOAN_ROOT": koan_root,
+        }
+        with patch("app.check_runner._fetch_pr_metadata", return_value=pr_data), \
+             patch("app.check_tracker.mark_checked"), \
+             patch("app.notify.send_telegram"), \
+             patch.dict(os.environ, env):
+            exit_code = main([
+                "https://github.com/sukria/koan/pull/42",
+            ])
+            assert exit_code == 0
