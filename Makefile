@@ -16,8 +16,8 @@ $(VENV)/.installed: koan/requirements.txt
 awake: setup
 	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/awake.py
 
-run:
-	./koan/run.sh
+run: setup
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/run.py
 
 say: setup
 	@test -n "$(m)" || (echo "Usage: make say m=\"your message\"" && exit 1)
