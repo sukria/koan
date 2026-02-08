@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: setup awake run clean say migrate test dashboard errand-run errand-awake install sync-instance
+.PHONY: setup awake run clean say migrate test dashboard errand-run errand-awake install sync-instance docker-setup docker
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python3
@@ -58,3 +58,9 @@ sync-instance:
 		fi; \
 	done
 	@echo "✓ instance/ synced with instance.example/"
+
+docker-setup:
+	@./setup-docker.sh
+
+docker: docker-setup
+	docker compose up --build

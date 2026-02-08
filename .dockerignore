@@ -1,0 +1,36 @@
+# Kōan Docker — ignore list
+# Keep the build context small and avoid leaking secrets
+
+# Instance state (mounted at runtime, never baked into image)
+instance/
+
+# Git
+.git/
+.gitignore
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Environment files (secrets)
+.env
+.env.*
+!env.docker.example
+
+# OS
+.DS_Store
+*.swp
+*.swo
+
+# IDE
+.idea/
+.vscode/
+
+# Docs (not needed in runtime image)
+docs/
+
+# Projects config (machine-specific, mounted or generated)
+projects.yaml

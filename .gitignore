@@ -18,7 +18,12 @@ venv/
 
 # Environment & secrets
 .env
+.env.*
+!env.docker.example
 .envrc
+
+# Docker (generated per-machine)
+docker-compose.override.yml
 
 # OS
 .DS_Store
