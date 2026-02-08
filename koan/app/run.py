@@ -273,6 +273,17 @@ def run_startup(koan_root: str, instance: str, projects: list):
     except Exception:
         pass
 
+    # Sanity checks (all modules in koan/sanity/, alphabetical order)
+    log("health", "Running sanity checks...")
+    try:
+        from sanity import run_all
+        for name, modified, changes in run_all(instance):
+            if modified:
+                for change in changes:
+                    log("health", f"  [{name}] {change}")
+    except Exception:
+        pass
+
     # Memory cleanup
     log("health", "Running memory cleanup...")
     try:
