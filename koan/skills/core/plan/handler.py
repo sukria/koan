@@ -1,12 +1,7 @@
-"""Kōan plan skill -- deep-think an idea, create or update a GitHub issue."""
+"""Kōan plan skill -- queue a plan mission."""
 
-import json
-import os
 import re
-import subprocess
-from pathlib import Path
-
-from app.github import run_gh, issue_create, api
+import shlex
 
 
 # GitHub issue URL pattern
@@ -16,13 +11,16 @@ _ISSUE_URL_RE = re.compile(
 
 
 def handle(ctx):
-    """Handle /plan command.
+    """Handle /plan command -- queue a mission to generate a plan.
 
-    Modes:
+    Usage:
         /plan                              -- usage help
         /plan <idea>                       -- plan for default project
         /plan <project> <idea>             -- plan for a specific project
         /plan <github-issue-url>           -- iterate on existing issue
+
+    Queues a mission that invokes Claude to deep-think the idea,
+    explore the codebase, and post a structured plan as a GitHub issue.
     """
     args = ctx.args.strip()
 
@@ -32,22 +30,23 @@ def handle(ctx):
             "  /plan <idea> -- plan for default project\n"
             "  /plan <project> <idea> -- plan for a specific project\n"
             "  /plan <github-issue-url> -- iterate on an existing issue\n\n"
-            "Creates a structured plan with step-by-step implementation, "
-            "corner cases, and open questions. Posts to GitHub as an issue."
+            "Queues a mission that generates a structured plan with "
+            "implementation steps, corner cases, and open questions. "
+            "Posts to GitHub as an issue."
         )
 
     # Mode 1: existing GitHub issue URL
     issue_match = _ISSUE_URL_RE.search(args)
     if issue_match:
-        return _handle_existing_issue(ctx, issue_match)
+        return _queue_issue_plan(ctx, issue_match)
 
-    # Mode 2: detect project name prefix
+    # Mode 2: new idea (optionally project-prefixed)
     project, idea = _parse_project_arg(args)
 
     if not idea:
         return "Please provide an idea to plan. Ex: /plan Add dark mode to the dashboard"
 
-    return _handle_new_plan(ctx, project, idea)
+    return _queue_new_plan(ctx, project, idea)
 
 
 def _parse_project_arg(args):
@@ -80,14 +79,9 @@ def _parse_project_arg(args):
 
 
 def _resolve_project_path(project_name, fallback=False):
-    """Resolve project name to its local path.
-
-    Args:
-        project_name: Project name to look up (None = use default).
-        fallback: If True, fall back to first project or env var when
-                  no exact match is found (used for existing issue mode).
-                  If False, return None on no match (used for new plan mode).
-    """
+    """Resolve project name to its local path."""
+    import os
+    from pathlib import Path
     from app.utils import get_known_projects
 
     projects = get_known_projects()
@@ -96,151 +90,21 @@ def _resolve_project_path(project_name, fallback=False):
         for name, path in projects:
             if name.lower() == project_name.lower():
                 return path
-        # Try directory basename match
         for name, path in projects:
             if Path(path).name.lower() == project_name.lower():
                 return path
         if not fallback:
             return None
 
-    # Default to first project
     if projects:
         return projects[0][1]
 
     return os.environ.get("KOAN_PROJECT_PATH", "")
 
 
-def _get_repo_info(project_path):
-    """Get GitHub owner/repo from a local git repo."""
-    try:
-        output = run_gh("repo", "view", "--json", "owner,name",
-                        cwd=project_path, timeout=15)
-        data = json.loads(output)
-        owner = data.get("owner", {}).get("login", "")
-        repo = data.get("name", "")
-        if owner and repo:
-            return owner, repo
-    except Exception:
-        pass
-    return None, None
-
-
-def _fetch_issue_context(owner, repo, issue_number):
-    """Fetch issue title, body and comments via gh CLI.
-
-    Returns:
-        Tuple of (title, body, comments_text).
-        comments_text preserves authorship and timestamps for plan iteration.
-    """
-    # Get issue title and body
-    issue_json = api(
-        f"repos/{owner}/{repo}/issues/{issue_number}",
-        jq='{"title": .title, "body": .body}',
-    )
-    try:
-        data = json.loads(issue_json)
-        title = data.get("title", "")
-        body = data.get("body", "")
-    except (json.JSONDecodeError, TypeError):
-        title = ""
-        body = issue_json
-
-    # Get all comments with author and date context
-    comments_json = api(
-        f"repos/{owner}/{repo}/issues/{issue_number}/comments",
-        jq='[.[] | {author: .user.login, date: .created_at, body: .body}]',
-    )
-
-    comments_text = _format_comments(comments_json)
-    return title, body, comments_text
-
-
-def _format_comments(comments_json):
-    """Format comments JSON into readable text with authorship."""
-    try:
-        comments = json.loads(comments_json)
-        if not isinstance(comments, list) or not comments:
-            return ""
-    except (json.JSONDecodeError, TypeError):
-        # Fallback: return raw text if not valid JSON
-        return comments_json.strip() if comments_json else ""
-
-    parts = []
-    for c in comments:
-        author = c.get("author", "unknown")
-        date = c.get("date", "")[:10]  # YYYY-MM-DD
-        body = c.get("body", "").strip()
-        if body:
-            parts.append(f"**{author}** ({date}):\n{body}")
-    return "\n\n---\n\n".join(parts)
-
-
-def _generate_plan(project_path, idea, context=""):
-    """Run Claude to generate a structured plan.
-
-    Args:
-        project_path: Path to project for codebase context.
-        idea: The idea to plan.
-        context: Optional existing issue/comments context.
-    """
-    from app.prompts import load_skill_prompt
-
-    prompt = load_skill_prompt(Path(__file__).parent, "plan", IDEA=idea, CONTEXT=context)
-
-    from app.cli_provider import build_full_command
-    from app.config import get_model_config
-
-    models = get_model_config()
-    cmd = build_full_command(
-        prompt=prompt,
-        allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
-        model=models.get("chat", ""),
-        fallback=models.get("fallback", ""),
-        max_turns=3,
-    )
-
-    result = subprocess.run(
-        cmd,
-        capture_output=True, text=True, timeout=300,
-        cwd=project_path,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Claude plan generation failed: {result.stderr[:300]}")
-
-    return result.stdout.strip()
-
-
-def _comment_on_issue(owner, repo, issue_number, body):
-    """Post a comment on an existing GitHub issue."""
-    api(
-        f"repos/{owner}/{repo}/issues/{issue_number}/comments",
-        input_data=body,
-    )
-
-
-def _extract_title(plan_text):
-    """Extract a short title from the plan for the issue title."""
-    lines = plan_text.strip().splitlines()
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("#"):
-            # Use the first heading as title (strip # prefix)
-            title = re.sub(r'^#+\s*', '', line).strip()
-            if title:
-                return title[:120]
-        # Use first non-empty line
-        clean = re.sub(r'^[#*>\-]+\s*', '', line).strip()
-        if clean:
-            return clean[:120]
-    return "Implementation Plan"
-
-
-def _handle_new_plan(ctx, project_name, idea):
-    """Generate a plan for a new idea and create a GitHub issue."""
-    send = ctx.send_message
+def _queue_new_plan(ctx, project_name, idea):
+    """Queue a mission to generate a plan for a new idea."""
+    from app.utils import insert_pending_mission
 
     project_path = _resolve_project_path(project_name)
     if not project_path:
@@ -248,119 +112,63 @@ def _handle_new_plan(ctx, project_name, idea):
         known = ", ".join(n for n, _ in get_known_projects()) or "none"
         return f"Project '{project_name}' not found. Known: {known}"
 
-    project_label = project_name or Path(project_path).name
+    project_label = project_name or _project_name_for_path(project_path)
 
-    if send:
-        send(f"\U0001f9e0 Planning: {idea[:100]}{'...' if len(idea) > 100 else ''} (project: {project_label})")
+    koan_root = ctx.koan_root
+    idea_escaped = shlex.quote(idea)
+    cmd = (
+        f"cd {koan_root}/koan && "
+        f"{koan_root}/.venv/bin/python3 -m app.plan_runner "
+        f"--project-path {shlex.quote(project_path)} "
+        f"--idea {idea_escaped}"
+    )
 
-    try:
-        plan = _generate_plan(project_path, idea)
-    except Exception as e:
-        return f"Plan generation failed: {str(e)[:300]}"
+    mission_entry = (
+        f"- [project:{project_label}] Plan: {idea[:80]} "
+        f"\u2014 run: `{cmd}`"
+    )
+    missions_path = ctx.instance_dir / "missions.md"
+    insert_pending_mission(missions_path, mission_entry)
 
-    if not plan:
-        return "Claude returned an empty plan. Try rephrasing your idea."
-
-    # Create GitHub issue
-    owner, repo = _get_repo_info(project_path)
-    if not owner or not repo:
-        # No GitHub repo — return the plan as a message
-        if send:
-            send(f"Plan (no GitHub repo found, showing inline):\n\n{plan[:3500]}")
-        return None
-
-    title = _extract_title(plan)
-    issue_body = f"## Plan: {idea}\n\n{plan}\n\n---\n*Generated by Kōan /plan*"
-
-    try:
-        issue_url = issue_create(title, issue_body, cwd=project_path)
-    except Exception as e:
-        # Fallback: send plan inline if issue creation fails
-        if send:
-            send(f"\u26a0\ufe0f Plan ready but issue creation failed ({e}):\n\n{plan[:3000]}")
-        return None
-
-    if send:
-        send(f"\u2705 Plan created: {issue_url}")
-    return None
+    return f"\U0001f9e0 Plan queued: {idea[:100]}{'...' if len(idea) > 100 else ''} (project: {project_label})"
 
 
-def _handle_existing_issue(ctx, match):
-    """Read an existing issue + comments, generate updated plan, post comment."""
-    send = ctx.send_message
+def _queue_issue_plan(ctx, match):
+    """Queue a mission to iterate on an existing GitHub issue."""
+    from app.utils import insert_pending_mission
+
     owner = match.group("owner")
     repo = match.group("repo")
     issue_number = match.group("number")
+    issue_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
 
-    if send:
-        send(f"\U0001f4d6 Reading issue #{issue_number} ({owner}/{repo})...")
-
-    # Resolve project path for codebase context (fallback=True: best-effort match)
     project_path = _resolve_project_path(repo, fallback=True)
+    project_label = _project_name_for_path(project_path) if project_path else repo
 
-    try:
-        title, body, comments = _fetch_issue_context(owner, repo, issue_number)
-    except Exception as e:
-        return f"Failed to fetch issue: {str(e)[:300]}"
+    koan_root = ctx.koan_root
+    cmd = (
+        f"cd {koan_root}/koan && "
+        f"{koan_root}/.venv/bin/python3 -m app.plan_runner "
+        f"--project-path {shlex.quote(project_path or '.')} "
+        f"--issue-url {issue_url}"
+    )
 
-    # Build context from issue body + comments
-    context_parts = [f"## Original Issue #{issue_number}: {title}\n\n{body}"]
-    if comments:
-        context_parts.append(f"\n\n## Comments\n\n{comments}")
+    mission_entry = (
+        f"- [project:{project_label}] Plan iteration on issue #{issue_number} "
+        f"({owner}/{repo}) \u2014 run: `{cmd}`"
+    )
+    missions_path = ctx.instance_dir / "missions.md"
+    insert_pending_mission(missions_path, mission_entry)
 
-    context = "\n".join(context_parts)
-
-    # Extract the core idea from the issue body
-    idea = _extract_idea_from_issue(body)
-
-    try:
-        plan = _generate_plan(
-            project_path or str(Path.cwd()),
-            idea,
-            context=context,
-        )
-    except Exception as e:
-        return f"Plan generation failed: {str(e)[:300]}"
-
-    if not plan:
-        return "Claude returned an empty plan. The issue may need more context."
-
-    # Post as a comment on the issue
-    comment_body = f"## Updated Plan\n\n{plan}\n\n---\n*Generated by Kōan /plan — iteration on existing issue*"
-
-    try:
-        _comment_on_issue(owner, repo, issue_number, comment_body)
-    except Exception as e:
-        # Fallback: send inline
-        if send:
-            send(f"Plan ready but comment failed ({e}):\n\n{plan[:3000]}")
-        return None
-
-    issue_label = f"#{issue_number}"
-    if title:
-        issue_label = f"#{issue_number} ({title[:60]})"
-    if send:
-        send(f"\u2705 Plan posted as comment on {issue_label}: https://github.com/{owner}/{repo}/issues/{issue_number}")
-    return None
+    return f"\U0001f4d6 Plan queued for issue #{issue_number} ({owner}/{repo})"
 
 
-def _extract_idea_from_issue(body):
-    """Extract the core idea from an issue body for re-planning."""
-    if not body:
-        return "Review and update this plan"
-    # Use the first non-empty paragraph as the idea
-    lines = body.strip().splitlines()
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # Skip markdown headers/metadata
-        if line.startswith("---") or line.startswith("*Generated by"):
-            continue
-        # Strip markdown header prefix
-        clean = re.sub(r'^#+\s*', '', line).strip()
-        # Skip "Plan:" prefix if present
-        clean = re.sub(r'^Plan:\s*', '', clean).strip()
-        if clean and len(clean) > 3:
-            return clean[:500]
-    return "Review and refine this plan based on the discussion"
+def _project_name_for_path(project_path):
+    """Get project name from path, checking known projects first."""
+    from pathlib import Path
+    from app.utils import get_known_projects
+
+    for name, path in get_known_projects():
+        if path == project_path:
+            return name
+    return Path(project_path).name
