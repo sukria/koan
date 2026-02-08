@@ -155,11 +155,17 @@ class TestResolveFocusArea:
 
 class TestRefreshUsage:
 
-    def test_skips_on_first_run(self):
-        """Count=0 means first run — don't refresh."""
-        with patch("app.iteration_manager.sys") as _:
-            # Should not call cmd_refresh when count=0
-            _refresh_usage(Path("/fake/state"), Path("/fake/usage.md"), count=0)
+    @patch("app.usage_estimator.cmd_refresh")
+    def test_refreshes_on_first_run(self, mock_refresh, tmp_path):
+        """Count=0 (first run or after auto-resume) must still refresh.
+
+        Critical for the budget exhaustion fix: after auto-resume, count
+        resets to 0 but stale usage.md must be cleared.
+        """
+        state = tmp_path / "usage_state.json"
+        usage_md = tmp_path / "usage.md"
+        _refresh_usage(state, usage_md, count=0)
+        mock_refresh.assert_called_once_with(state, usage_md)
 
     @patch("app.usage_estimator.cmd_refresh")
     def test_calls_refresh_after_first_run(self, mock_refresh, tmp_path):
@@ -564,8 +570,9 @@ class TestPlanIteration:
 
     @patch("app.pick_mission.pick_mission", return_value="koan:Fix it")
     @patch("app.usage_estimator.cmd_refresh")
-    def test_first_run_skips_usage_refresh(self, mock_refresh, mock_pick,
-                                           instance_dir, koan_root, usage_state):
+    def test_first_run_always_refreshes_usage(self, mock_refresh, mock_pick,
+                                               instance_dir, koan_root, usage_state):
+        """Count=0 must still refresh — critical after auto-resume."""
         usage_md = instance_dir / "usage.md"
         usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
 
@@ -579,7 +586,7 @@ class TestPlanIteration:
             usage_state_path=str(usage_state),
         )
 
-        mock_refresh.assert_not_called()
+        mock_refresh.assert_called_once()
 
     @patch("app.pick_mission.pick_mission", return_value="koan:Fix it")
     @patch("app.usage_estimator.cmd_refresh")

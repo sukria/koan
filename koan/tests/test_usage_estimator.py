@@ -17,6 +17,7 @@ from app.usage_estimator import (
     _get_limits,
     cmd_update,
     cmd_refresh,
+    cmd_reset_time,
     SESSION_DURATION_HOURS,
 )
 
@@ -355,3 +356,112 @@ class TestUsageEstimatorCLI:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
+
+    def test_main_reset_time(self, tmp_path):
+        import sys
+        from app.usage_estimator import main
+        state_file = tmp_path / "state.json"
+        state = _fresh_state()
+        state_file.write_text(json.dumps(state))
+
+        with patch.object(sys, "argv", [
+            "usage_estimator.py", "reset-time", str(state_file),
+        ]):
+            main()  # Should print a timestamp and not crash
+
+    def test_main_reset_time_missing_args(self):
+        import sys
+        from app.usage_estimator import main
+        with patch.object(sys, "argv", ["usage_estimator.py", "reset-time"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+
+class TestCmdResetTime:
+    """Tests for cmd_reset_time — compute session reset timestamp."""
+
+    def test_returns_future_timestamp(self, tmp_path):
+        """Reset time should be in the future for a recently started session."""
+        state_file = tmp_path / "state.json"
+        state = _fresh_state()  # session_start = now
+        state_file.write_text(json.dumps(state))
+
+        ts = cmd_reset_time(state_file)
+        now_ts = int(time.time())
+        # Should be roughly 5 hours from now (with some tolerance)
+        assert ts > now_ts
+        assert ts <= now_ts + SESSION_DURATION_HOURS * 3600 + 60
+
+    def test_returns_future_for_stale_session(self, tmp_path):
+        """If session started >5h ago, should return now + 5h (not a past time)."""
+        state_file = tmp_path / "state.json"
+        state = _fresh_state()
+        state["session_start"] = (datetime.now() - timedelta(hours=10)).isoformat()
+        state_file.write_text(json.dumps(state))
+
+        ts = cmd_reset_time(state_file)
+        now_ts = int(time.time())
+        assert ts > now_ts
+
+    def test_returns_future_for_missing_file(self, tmp_path):
+        """Missing state file should fallback to now + 5h."""
+        state_file = tmp_path / "nonexistent.json"
+        ts = cmd_reset_time(state_file)
+        now_ts = int(time.time())
+        assert ts > now_ts
+        assert ts <= now_ts + SESSION_DURATION_HOURS * 3600 + 60
+
+    def test_returns_future_for_corrupted_state(self, tmp_path):
+        """Corrupted state file should fallback to now + 5h."""
+        state_file = tmp_path / "bad.json"
+        state_file.write_text("not json")
+        ts = cmd_reset_time(state_file)
+        now_ts = int(time.time())
+        assert ts > now_ts
+
+    def test_returns_future_for_invalid_session_start(self, tmp_path):
+        """Invalid session_start should fallback to now + 5h."""
+        state_file = tmp_path / "state.json"
+        state = _fresh_state()
+        state["session_start"] = "garbage"
+        state_file.write_text(json.dumps(state))
+
+        ts = cmd_reset_time(state_file)
+        now_ts = int(time.time())
+        assert ts > now_ts
+
+    def test_mid_session_returns_correct_remainder(self, tmp_path):
+        """Session started 2h ago -> reset should be ~3h from now."""
+        state_file = tmp_path / "state.json"
+        state = _fresh_state()
+        state["session_start"] = (datetime.now() - timedelta(hours=2)).isoformat()
+        state_file.write_text(json.dumps(state))
+
+        ts = cmd_reset_time(state_file)
+        now_ts = int(time.time())
+        expected_ts = now_ts + 3 * 3600  # ~3h from now
+        # Allow 2 minutes tolerance
+        assert abs(ts - expected_ts) < 120
+
+    def test_prevents_immediate_auto_resume(self, tmp_path):
+        """Core regression test: reset time must NEVER be <= now.
+
+        This is the exact bug that caused the infinite loop.
+        """
+        state_file = tmp_path / "state.json"
+        for state_data in [
+            _fresh_state(),
+            {"session_start": "garbage", "session_tokens": 0,
+             "weekly_start": datetime.now().isoformat(), "weekly_tokens": 0, "runs": 0},
+            {"session_start": (datetime.now() - timedelta(hours=20)).isoformat(),
+             "session_tokens": 500000,
+             "weekly_start": datetime.now().isoformat(), "weekly_tokens": 0, "runs": 50},
+        ]:
+            state_file.write_text(json.dumps(state_data))
+            ts = cmd_reset_time(state_file)
+            now_ts = int(time.time())
+            assert ts > now_ts, (
+                f"Reset time {ts} must be strictly in the future "
+                f"(now={now_ts}), state={state_data}"
+            )

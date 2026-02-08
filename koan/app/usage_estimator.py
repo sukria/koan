@@ -207,9 +207,36 @@ def cmd_refresh(state_file: Path, usage_md: Path):
     _write_usage_md(state, usage_md, config)
 
 
+def cmd_reset_time(state_file: Path) -> int:
+    """Compute when the current session resets (UNIX timestamp).
+
+    Used by run.sh to set a proper future pause timestamp when
+    entering wait mode (budget exhausted).
+
+    Returns:
+        UNIX timestamp of the session reset time.
+        Falls back to now + 5h if state is unreadable.
+    """
+    state = _load_state(state_file)
+    try:
+        session_start = datetime.fromisoformat(state["session_start"])
+    except (KeyError, ValueError):
+        return int((datetime.now() + timedelta(hours=SESSION_DURATION_HOURS)).timestamp())
+
+    reset_at = session_start + timedelta(hours=SESSION_DURATION_HOURS)
+    reset_ts = int(reset_at.timestamp())
+
+    # If the computed reset time is in the past (stale state), use now + 5h
+    now_ts = int(datetime.now().timestamp())
+    if reset_ts <= now_ts:
+        return now_ts + SESSION_DURATION_HOURS * 3600
+
+    return reset_ts
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: usage_estimator.py <update|refresh> ...", file=sys.stderr)
+        print("Usage: usage_estimator.py <update|refresh|reset-time> ...", file=sys.stderr)
         sys.exit(1)
 
     command = sys.argv[1]
@@ -225,6 +252,13 @@ def main():
             print("Usage: usage_estimator.py refresh <state_file> <usage_md>", file=sys.stderr)
             sys.exit(1)
         cmd_refresh(Path(sys.argv[2]), Path(sys.argv[3]))
+
+    elif command == "reset-time":
+        if len(sys.argv) < 3:
+            print("Usage: usage_estimator.py reset-time <state_file>", file=sys.stderr)
+            sys.exit(1)
+        ts = cmd_reset_time(Path(sys.argv[2]))
+        print(ts)
 
     else:
         print(f"Unknown command: {command}", file=sys.stderr)

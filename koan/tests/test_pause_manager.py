@@ -546,3 +546,61 @@ class TestCLI:
     def test_no_args(self):
         result = self._run_cli()
         assert result.returncode == 1
+
+
+class TestBudgetLoopRegression:
+    """Regression tests for the budget exhaustion infinite loop bug.
+
+    The bug: when usage_tracker decided "wait" mode, run.sh called
+    `pause_manager create quota` without a timestamp. This defaulted
+    to `time.time()` (now), making should_auto_resume() immediately
+    return True — causing an instant resume -> re-pause -> resume loop.
+
+    The fix: run.sh now passes the session reset timestamp from
+    usage_estimator.py, ensuring the pause always has a future timestamp.
+    """
+
+    def test_quota_pause_with_now_timestamp_resumes_immediately(self, tmp_path, monkeypatch):
+        """Demonstrates the bug: quota pause with current time = instant resume."""
+        from app.pause_manager import create_pause, check_and_resume
+
+        now = 1000000
+        monkeypatch.setattr("app.pause_manager.time.time", lambda: now)
+
+        # BUG: create pause with timestamp = now (old behavior)
+        create_pause(str(tmp_path), "quota", now, "")
+
+        msg = check_and_resume(str(tmp_path))
+        assert msg is not None, "Bug confirmed: pause with current timestamp auto-resumes immediately"
+
+    def test_quota_pause_with_future_timestamp_stays_paused(self, tmp_path, monkeypatch):
+        """Demonstrates the fix: quota pause with future timestamp stays paused."""
+        from app.pause_manager import create_pause, check_and_resume
+
+        now = 1000000
+        future_reset = now + 5 * 3600  # 5 hours from now
+        monkeypatch.setattr("app.pause_manager.time.time", lambda: now)
+
+        create_pause(str(tmp_path), "quota", future_reset, "reset at 15:00")
+
+        msg = check_and_resume(str(tmp_path))
+        assert msg is None, "Fix confirmed: pause with future timestamp stays paused"
+
+    def test_quota_pause_with_future_timestamp_resumes_at_reset(self, tmp_path, monkeypatch):
+        """After waiting, the pause correctly auto-resumes at reset time."""
+        from app.pause_manager import create_pause, check_and_resume
+
+        now = 1000000
+        future_reset = now + 5 * 3600
+
+        create_pause(str(tmp_path), "quota", future_reset, "reset at 15:00")
+
+        # Still paused 1 hour later
+        monkeypatch.setattr("app.pause_manager.time.time", lambda: now + 3600)
+        assert check_and_resume(str(tmp_path)) is None
+
+        # Resumes at reset time
+        monkeypatch.setattr("app.pause_manager.time.time", lambda: future_reset + 1)
+        msg = check_and_resume(str(tmp_path))
+        assert msg is not None
+        assert "quota reset time reached" in msg

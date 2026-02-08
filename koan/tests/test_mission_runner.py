@@ -611,12 +611,13 @@ class TestRunShIntegration:
         assert "app.mission_runner post-mission" in content
 
     def test_run_sh_no_direct_usage_estimator_update(self):
-        """run.sh should not call usage_estimator directly — iteration_manager
-        handles refresh, mission_runner handles update."""
+        """run.sh should not call usage_estimator update/refresh directly —
+        iteration_manager handles refresh, mission_runner handles update.
+        reset-time is allowed (computes pause timestamp for wait mode)."""
         run_sh = Path(__file__).parent.parent / "run.sh"
         content = run_sh.read_text()
-        # Both refresh and update are now handled by Python modules
-        lines = [l for l in content.splitlines() if "usage_estimator" in l]
+        lines = [l for l in content.splitlines()
+                 if "usage_estimator" in l and "reset-time" not in l]
         assert len(lines) == 0, f"Direct usage_estimator calls remain: {lines}"
 
     def test_run_sh_no_dead_mission_summary_var(self):

@@ -30,9 +30,11 @@ from typing import Optional
 
 
 def _refresh_usage(usage_state: Path, usage_md: Path, count: int):
-    """Refresh usage.md from accumulated token state (skip on first run)."""
-    if count <= 0:
-        return
+    """Refresh usage.md from accumulated token state.
+
+    Always refreshes — critical after auto-resume so stale usage.md
+    is cleared and session resets are detected.
+    """
     try:
         from app.usage_estimator import cmd_refresh
         cmd_refresh(usage_state, usage_md)

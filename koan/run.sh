@@ -534,8 +534,11 @@ while true; do
     echo "  Action: Entering pause mode (will auto-resume after 5h)"
     echo ""
     "$PYTHON" "$APP_DIR/send_retrospective.py" "$INSTANCE" "$PROJECT_NAME" 2>/dev/null || true
-    "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota"
-    notify "⏸️ Kōan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Auto-resume in 5h or use /resume."
+    # Get the session reset timestamp so the pause has a proper future time
+    RESET_TS=$("$PYTHON" -m app.usage_estimator reset-time "$USAGE_STATE" 2>/dev/null || echo "0")
+    RESET_DISPLAY=$("$PYTHON" -c "from datetime import datetime; print(datetime.fromtimestamp($RESET_TS).strftime('%H:%M'))" 2>/dev/null || echo "~5h")
+    "$PYTHON" -m app.pause_manager create "$KOAN_ROOT" "quota" "$RESET_TS" "reset at $RESET_DISPLAY"
+    notify "⏸️ Kōan paused: budget exhausted after $count runs on [$PROJECT_NAME]. Auto-resume at $RESET_DISPLAY or use /resume."
     continue
   fi
 
