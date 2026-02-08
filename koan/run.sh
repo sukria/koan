@@ -139,8 +139,8 @@ else
 fi
 
 # Validate project configuration
-if [ ${#PROJECT_NAMES[@]} -gt 5 ]; then
-  log error "Max 5 projects allowed. You have ${#PROJECT_NAMES[@]}."
+if [ ${#PROJECT_NAMES[@]} -gt 50 ]; then
+  log error "Max 50 projects allowed. You have ${#PROJECT_NAMES[@]}."
   exit 1
 fi
 
