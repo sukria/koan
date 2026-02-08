@@ -76,6 +76,18 @@ class TestReflectSkill:
         shared_journal = nested / "shared-journal.md"
         assert shared_journal.exists()
 
+    def test_think_alias_works(self, tmp_path):
+        from skills.core.reflect.handler import handle
+
+        ctx = _make_ctx(tmp_path, args="Ideas for self-improvement")
+        ctx.command_name = "think"
+        result = handle(ctx)
+
+        assert "Noted" in result
+        shared_journal = tmp_path / "shared-journal.md"
+        content = shared_journal.read_text()
+        assert "Ideas for self-improvement" in content
+
     def test_entry_includes_timestamp(self, tmp_path):
         from skills.core.reflect.handler import handle
         from datetime import datetime

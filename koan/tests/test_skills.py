@@ -782,6 +782,13 @@ class TestCoreSkillsComplete:
         assert skill is not None
         assert skill.name == "journal"
 
+    def test_think_alias_resolves_to_reflect(self):
+        """'/think' should resolve via alias to the reflect skill."""
+        registry = build_registry()
+        skill = registry.find_by_command("think")
+        assert skill is not None
+        assert skill.name == "reflect"
+
     def test_core_skills_with_args_have_usage(self):
         """Core skills that take arguments should have usage set."""
         registry = build_registry()

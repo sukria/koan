@@ -7,6 +7,6 @@ commands:
   - name: reflect
     description: Write a reflection to the shared journal
     usage: /reflect <observation>
-    aliases: []
+    aliases: [think]
 handler: handler.py
 ---
