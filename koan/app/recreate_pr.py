@@ -315,7 +315,7 @@ def _push_recreated(
         }
 
     # Create new branch and draft PR
-    from app.utils import get_branch_prefix
+    from app.config import get_branch_prefix
     prefix = get_branch_prefix()
     new_branch = f"{prefix}recreate-{branch.replace('/', '-')}"
     try:

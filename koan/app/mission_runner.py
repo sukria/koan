@@ -69,7 +69,7 @@ def get_mission_flags(autonomous_mode: str = "") -> str:
     Returns:
         Space-separated CLI flags string (may be empty).
     """
-    from app.utils import get_claude_flags_for_role
+    from app.config import get_claude_flags_for_role
 
     return get_claude_flags_for_role("mission", autonomous_mode)
 
@@ -220,7 +220,7 @@ def check_auto_merge(
             capture_output=True, text=True, cwd=project_path,
         )
         branch = result.stdout.strip()
-        from app.utils import get_branch_prefix
+        from app.config import get_branch_prefix
         if not branch.startswith(get_branch_prefix()):
             return None
 

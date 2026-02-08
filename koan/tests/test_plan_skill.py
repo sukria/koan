@@ -451,7 +451,7 @@ class TestGeneratePlan:
             stderr="",
         )
         with patch("app.prompts.load_skill_prompt", return_value="Plan this: idea"), \
-             patch("app.utils.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"}), \
+             patch("app.config.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"}), \
              patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"]):
             result = handler._generate_plan("/project", "Add feature")
             assert "Step 1" in result
@@ -460,7 +460,7 @@ class TestGeneratePlan:
     def test_includes_context_in_prompt(self, mock_run, handler):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_skill_prompt", return_value="prompt with previous discussion") as mock_load, \
-             patch("app.utils.get_model_config", return_value={"chat": "", "fallback": ""}), \
+             patch("app.config.get_model_config", return_value={"chat": "", "fallback": ""}), \
              patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"]):
             handler._generate_plan("/project", "idea", context="previous discussion")
             mock_load.assert_called_once()
@@ -472,7 +472,7 @@ class TestGeneratePlan:
     def test_raises_on_claude_failure(self, mock_run, handler):
         mock_run.return_value = MagicMock(returncode=1, stderr="rate limited")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
-             patch("app.utils.get_model_config", return_value={"chat": "", "fallback": ""}), \
+             patch("app.config.get_model_config", return_value={"chat": "", "fallback": ""}), \
              patch("app.cli_provider.build_full_command", return_value=["claude", "-p", "test"]):
             with pytest.raises(RuntimeError, match="plan generation failed"):
                 handler._generate_plan("/project", "idea")
@@ -481,7 +481,7 @@ class TestGeneratePlan:
     def test_uses_read_only_tools(self, mock_run, handler):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
-             patch("app.utils.get_model_config", return_value={"chat": "", "fallback": ""}):
+             patch("app.config.get_model_config", return_value={"chat": "", "fallback": ""}):
             handler._generate_plan("/project", "idea")
             cmd = mock_run.call_args[0][0]
             tools_idx = cmd.index("--allowedTools")

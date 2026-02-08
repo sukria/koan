@@ -22,7 +22,7 @@ from app.git_auto_merge import (
     write_merge_failure_to_journal,
     GitAutoMerger,
 )
-from app.utils import get_auto_merge_config
+from app.config import get_auto_merge_config
 
 
 # --- get_auto_merge_config ---
@@ -1082,7 +1082,7 @@ class TestGitAutoMergerClass:
         assert success is False
         assert "checkout" in error.lower()
 
-    @patch("app.utils.append_to_journal")
+    @patch("app.journal.append_to_journal")
     def test_write_merge_success_to_journal(self, mock_journal):
         merger = self._make_merger(instance_dir="/inst")
         merger.write_merge_success_to_journal("koan/fix", "main", "squash")
@@ -1091,7 +1091,7 @@ class TestGitAutoMergerClass:
         assert "koan/fix" in call_content
         assert "main" in call_content
 
-    @patch("app.utils.append_to_journal")
+    @patch("app.journal.append_to_journal")
     def test_write_merge_failure_to_journal(self, mock_journal):
         merger = self._make_merger(instance_dir="/inst")
         merger.write_merge_failure_to_journal("koan/fix", "Conflict")

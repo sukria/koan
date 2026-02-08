@@ -188,7 +188,7 @@ def _generate_plan(project_path, idea, context=""):
     prompt = load_skill_prompt(Path(__file__).parent, "plan", IDEA=idea, CONTEXT=context)
 
     from app.cli_provider import build_full_command
-    from app.utils import get_model_config
+    from app.config import get_model_config
 
     models = get_model_config()
     cmd = build_full_command(

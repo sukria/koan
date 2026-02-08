@@ -9,7 +9,7 @@ import subprocess
 from typing import List, Optional
 
 from app.cli_provider import build_full_command
-from app.utils import get_model_config
+from app.config import get_model_config
 
 
 def _run_git(cmd: list, cwd: str = None, timeout: int = 60) -> str:

@@ -146,7 +146,7 @@ class TestBuildContemplativeCommand:
 class TestGetContemplativeFlags:
     """Tests for flag retrieval from config."""
 
-    @patch("app.utils.get_claude_flags_for_role")
+    @patch("app.config.get_claude_flags_for_role")
     def test_returns_split_flags(self, mock_flags):
         """Non-empty flags string is split into list."""
         mock_flags.return_value = "--model claude-sonnet-4-5-20250929"
@@ -154,21 +154,21 @@ class TestGetContemplativeFlags:
         assert result == ["--model", "claude-sonnet-4-5-20250929"]
         mock_flags.assert_called_once_with("contemplative")
 
-    @patch("app.utils.get_claude_flags_for_role")
+    @patch("app.config.get_claude_flags_for_role")
     def test_empty_flags(self, mock_flags):
         """Empty flags string returns empty list."""
         mock_flags.return_value = ""
         result = get_contemplative_flags()
         assert result == []
 
-    @patch("app.utils.get_claude_flags_for_role")
+    @patch("app.config.get_claude_flags_for_role")
     def test_whitespace_only(self, mock_flags):
         """Whitespace-only string returns empty list."""
         mock_flags.return_value = "   "
         result = get_contemplative_flags()
         assert result == []
 
-    @patch("app.utils.get_claude_flags_for_role")
+    @patch("app.config.get_claude_flags_for_role")
     def test_multiple_flags(self, mock_flags):
         """Multiple flags are properly split."""
         mock_flags.return_value = "--model sonnet --fallback-model haiku"

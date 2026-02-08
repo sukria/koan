@@ -28,7 +28,7 @@ def _read_pending_progress(instance_dir, max_lines=5):
 
 def handle(ctx):
     """Handle /log [project] [date] command."""
-    from app.utils import get_latest_journal
+    from app.journal import get_latest_journal
 
     args = ctx.args
     parts = args.split() if args else []

@@ -6,9 +6,9 @@ from unittest.mock import patch, MagicMock
 from app.skills import SkillContext
 
 # The sparring handler imports lazily inside handle():
-#   from app.prompts import load_skill_prompt   → patch at app.prompts.load_skill_prompt
-#   from app.utils import get_fast_reply_model   → patch at app.utils.get_fast_reply_model
-#   from app.utils import save_telegram_message  → patch at app.utils.save_telegram_message
+#   from app.prompts import load_skill_prompt      → patch at app.prompts.load_skill_prompt
+#   from app.config import get_fast_reply_model    → patch at app.config.get_fast_reply_model
+#   from app.telegram_history import save_telegram_message → patch at app.telegram_history.save_telegram_message
 # But subprocess is module-level → patch at skills.core.sparring.handler.subprocess
 
 
@@ -24,8 +24,8 @@ def _make_ctx(instance_dir, send_message=None):
 
 _P_SUB = "skills.core.sparring.handler.subprocess"
 _P_PROMPT = "app.prompts.load_skill_prompt"
-_P_MODEL = "app.utils.get_fast_reply_model"
-_P_SAVE = "app.utils.save_telegram_message"
+_P_MODEL = "app.config.get_fast_reply_model"
+_P_SAVE = "app.telegram_history.save_telegram_message"
 
 
 # ---------------------------------------------------------------------------

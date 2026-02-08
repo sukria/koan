@@ -74,7 +74,7 @@ def get_contemplative_flags() -> List[str]:
     Returns:
         List of CLI flag strings (may be empty).
     """
-    from app.utils import get_claude_flags_for_role
+    from app.config import get_claude_flags_for_role
 
     flags_str = get_claude_flags_for_role("contemplative")
     if not flags_str.strip():

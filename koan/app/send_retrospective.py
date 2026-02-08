@@ -19,7 +19,7 @@ def get_todays_journal(instance_dir: Path, project_name: str) -> Path:
 
     Delegates to utils.get_journal_file for the actual path resolution.
     """
-    from app.utils import get_journal_file
+    from app.journal import get_journal_file
     return get_journal_file(instance_dir, date.today(), project_name)
 
 

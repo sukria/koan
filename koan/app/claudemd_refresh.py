@@ -145,7 +145,7 @@ def run_refresh(project_path: str, project_name: str) -> int:
     from app.claude_step import run_claude
     from app.cli_provider import build_full_command
     from app.prompts import load_skill_prompt
-    from app.utils import get_model_config
+    from app.config import get_model_config
 
     project_path = str(Path(project_path).resolve())
     claude_md = Path(project_path) / "CLAUDE.md"
