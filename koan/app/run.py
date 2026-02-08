@@ -205,22 +205,21 @@ def run_claude_task(
 # Project configuration
 # ---------------------------------------------------------------------------
 
-def parse_projects(koan_projects: str, koan_project_path: str = "") -> list:
-    """Parse project configuration from env vars.
+def parse_projects() -> list:
+    """Parse project configuration with validation.
 
-    Returns list of (name, path) tuples.
+    Delegates to get_known_projects() which checks:
+    1. projects.yaml (if exists)
+    2. KOAN_PROJECTS env var
+    3. KOAN_PROJECT_PATH env var
+
+    Returns list of (name, path) tuples. Exits on error.
     """
-    projects = []
-    if koan_projects:
-        for pair in koan_projects.split(";"):
-            if ":" in pair:
-                name, path = pair.split(":", 1)
-                projects.append((name.strip(), path.strip()))
-    elif koan_project_path:
-        projects.append(("default", koan_project_path))
+    from app.utils import get_known_projects
+    projects = get_known_projects()
 
     if not projects:
-        log("error", "Set KOAN_PROJECT_PATH or KOAN_PROJECTS env var.")
+        log("error", "No projects configured. Create projects.yaml or set KOAN_PROJECTS env var.")
         sys.exit(1)
 
     if len(projects) > 50:
@@ -741,10 +740,8 @@ def main_loop():
     # Set PYTHONPATH
     os.environ["PYTHONPATH"] = os.path.join(koan_root, "koan")
 
-    # Parse projects
-    koan_projects = os.environ.get("KOAN_PROJECTS", "")
-    koan_project_path = os.environ.get("KOAN_PROJECT_PATH", "")
-    projects = parse_projects(koan_projects, koan_project_path)
+    # Parse projects (projects.yaml > KOAN_PROJECTS > KOAN_PROJECT_PATH)
+    projects = parse_projects()
 
     # Record startup time
     start_time = time.time()

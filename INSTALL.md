@@ -57,24 +57,51 @@ Look for `"chat": {"id": 123456789, ...}` in the response — that number is you
 cp env.example .env
 ```
 
-Edit `.env` and fill in the **required** values:
+Edit `.env` and fill in the **required** Telegram credentials:
 
 ```bash
-# Required: Your Telegram credentials
 KOAN_TELEGRAM_TOKEN=123456789:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
 KOAN_TELEGRAM_CHAT_ID=987654321
-
-# Required: At least one project path
-# Option A: Single project
-KOAN_PROJECT_PATH=/Users/yourname/myproject
-
-# Option B: Multiple projects (semicolon-separated)
-# KOAN_PROJECTS=myapp:/Users/yourname/myapp;backend:/Users/yourname/backend
 ```
 
 The `.env` file is gitignored — your secrets stay local.
 
-### 4. Set up project memory (optional but recommended)
+### 4. Configure projects
+
+**Recommended:** Use `projects.yaml` at your koan root:
+
+```bash
+cp projects.example.yaml projects.yaml
+```
+
+Edit `projects.yaml`:
+
+```yaml
+defaults:
+  git_auto_merge:
+    enabled: false
+    base_branch: "main"
+    strategy: "squash"
+
+projects:
+  myapp:
+    path: "/Users/yourname/myapp"
+  backend:
+    path: "/Users/yourname/backend"
+```
+
+Each project only needs a `path`. All other fields are optional and inherit from `defaults`.
+
+**Alternative (legacy):** You can use env vars in `.env` instead:
+
+```bash
+KOAN_PROJECT_PATH=/Users/yourname/myproject
+# or: KOAN_PROJECTS=myapp:/Users/yourname/myapp;backend:/Users/yourname/backend
+```
+
+If `projects.yaml` exists, env vars are ignored.
+
+### 5. Set up project memory (optional but recommended)
 
 If you're using multi-project mode, create a memory folder for each project:
 
@@ -85,13 +112,13 @@ cp -r instance/memory/projects/_template instance/memory/projects/myapp
 
 Edit the files in `instance/memory/projects/myapp/` to describe your project's architecture. This helps Kōan understand your codebase faster.
 
-### 5. Customize your agent (optional)
+### 6. Customize your agent (optional)
 
 ```bash
 $EDITOR instance/soul.md    # Write your agent's personality
 ```
 
-### 6. Install dependencies
+### 7. Install dependencies
 
 ```bash
 make setup
@@ -99,7 +126,7 @@ make setup
 
 This creates a `.venv/` and installs Python dependencies.
 
-### 7. Run
+### 8. Run
 
 ```bash
 # Terminal 1: Telegram bridge
@@ -196,7 +223,8 @@ Alternatively: **System Settings → Energy → Prevent automatic sleeping when 
 |----------|-------------|
 | `KOAN_TELEGRAM_TOKEN` | Telegram bot token from @BotFather |
 | `KOAN_TELEGRAM_CHAT_ID` | Your Telegram chat ID |
-| `KOAN_PROJECT_PATH` or `KOAN_PROJECTS` | Path(s) to your project(s) |
+
+> **Note:** Project paths are configured in `projects.yaml` (recommended) or via `KOAN_PROJECTS` / `KOAN_PROJECT_PATH` env vars (legacy fallback).
 
 ### Optional
 
@@ -213,20 +241,34 @@ Alternatively: **System Settings → Energy → Prevent automatic sleeping when 
 
 ## Multi-Project Setup
 
-Kōan can work on up to 5 projects, rotating between them. Configure with:
+Kōan can work on up to 50 projects, rotating between them.
+
+**Recommended:** Configure in `projects.yaml`:
+
+```yaml
+projects:
+  myapp:
+    path: "/Users/yourname/myapp"
+  backend:
+    path: "/Users/yourname/backend"
+    git_auto_merge:
+      base_branch: "staging"
+```
+
+**Legacy:** You can also use the `KOAN_PROJECTS` env var:
 
 ```bash
-KOAN_PROJECTS=project1:/path/to/project1;project2:/path/to/project2
+KOAN_PROJECTS=myapp:/Users/yourname/myapp;backend:/Users/yourname/backend
 ```
 
 For each project, create a memory folder:
 ```bash
-cp -r instance/memory/projects/_template instance/memory/projects/project1
-cp -r instance/memory/projects/_template instance/memory/projects/project2
+cp -r instance/memory/projects/_template instance/memory/projects/myapp
+cp -r instance/memory/projects/_template instance/memory/projects/backend
 ```
 
 Tag missions with the target project:
 ```
-- [project:project1] Add user authentication
-- [project:project2] Fix CSS bug on homepage
+- [project:myapp] Add user authentication
+- [project:backend] Fix CSS bug on homepage
 ```

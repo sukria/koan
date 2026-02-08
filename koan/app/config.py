@@ -12,6 +12,7 @@ Note: load_config() itself lives in utils.py to avoid circular imports.
 Functions here call it via import to ensure mocks propagate correctly.
 """
 
+import os
 from typing import List, Optional
 
 
@@ -273,7 +274,9 @@ def get_output_flags_for_shell(fmt: str) -> str:
 def get_auto_merge_config(config: dict, project_name: str) -> dict:
     """Get auto-merge config with per-project override support.
 
-    Merges global defaults with project-specific overrides.
+    Resolution order:
+    1. projects.yaml (if it exists) — per-project git_auto_merge
+    2. config.yaml — global git_auto_merge + projects section overrides
 
     Args:
         config: Full config dict from load_config()
@@ -282,6 +285,20 @@ def get_auto_merge_config(config: dict, project_name: str) -> dict:
     Returns:
         Merged config with keys: enabled, base_branch, strategy, rules
     """
+    # Try projects.yaml first
+    try:
+        from app.projects_config import load_projects_config, get_project_auto_merge
+        koan_root = os.environ.get("KOAN_ROOT", "")
+        if koan_root:
+            projects_config = load_projects_config(koan_root)
+            if projects_config is not None:
+                # Check if this project exists in projects.yaml
+                if project_name in projects_config.get("projects", {}):
+                    return get_project_auto_merge(projects_config, project_name)
+    except Exception:
+        pass
+
+    # Fall back to config.yaml
     global_cfg = config.get("git_auto_merge", {})
     project_cfg = config.get("projects", {}).get(project_name, {}).get("git_auto_merge", {})
 

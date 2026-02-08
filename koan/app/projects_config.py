@@ -1,0 +1,156 @@
+"""Project configuration loader — reads projects.yaml.
+
+Provides:
+- load_projects_config(koan_root) -> dict: Load and validate projects.yaml
+- get_projects_from_config(config) -> list[tuple[str, str]]: Extract (name, path) tuples
+- get_project_config(config, name) -> dict: Get merged defaults + project overrides
+- get_project_auto_merge(config, name) -> dict: Get auto-merge config for a project
+
+File location: projects.yaml at KOAN_ROOT (next to .env).
+"""
+
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import yaml
+
+
+def load_projects_config(koan_root: str) -> Optional[dict]:
+    """Load projects.yaml from KOAN_ROOT.
+
+    Returns the parsed config dict, or None if file doesn't exist.
+    Raises ValueError on invalid YAML or schema violations.
+    """
+    config_path = Path(koan_root) / "projects.yaml"
+    if not config_path.exists():
+        return None
+
+    try:
+        with open(config_path, "r") as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in projects.yaml: {e}")
+
+    if data is None:
+        return None
+
+    if not isinstance(data, dict):
+        raise ValueError("projects.yaml must be a YAML mapping (dict)")
+
+    _validate_config(data)
+    return data
+
+
+def _validate_config(config: dict) -> None:
+    """Validate the structure of the projects config.
+
+    Raises ValueError on validation failures.
+    """
+    # defaults section is optional, must be dict if present
+    defaults = config.get("defaults")
+    if defaults is not None and not isinstance(defaults, dict):
+        raise ValueError("'defaults' must be a mapping")
+
+    # projects section is required
+    projects = config.get("projects")
+    if projects is None:
+        raise ValueError("'projects' section is required in projects.yaml")
+
+    if not isinstance(projects, dict):
+        raise ValueError("'projects' must be a mapping of project_name -> config")
+
+    if not projects:
+        raise ValueError("'projects' must contain at least one project")
+
+    if len(projects) > 50:
+        raise ValueError(f"Max 50 projects allowed. You have {len(projects)}.")
+
+    for name, project in projects.items():
+        if not isinstance(name, str):
+            raise ValueError(f"Project name must be a string, got: {type(name).__name__}")
+
+        if project is None:
+            raise ValueError(f"Project '{name}' has no configuration (must have at least 'path')")
+
+        if not isinstance(project, dict):
+            raise ValueError(f"Project '{name}' must be a mapping, got: {type(project).__name__}")
+
+        if "path" not in project:
+            raise ValueError(f"Project '{name}' is missing required 'path' field")
+
+        path = project["path"]
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError(f"Project '{name}' has invalid path: {path!r}")
+
+
+def validate_project_paths(config: dict) -> Optional[str]:
+    """Check that all project paths exist on disk.
+
+    Returns an error message if any path is missing, or None if all valid.
+    Separated from _validate_config() so tests can skip filesystem checks.
+    """
+    projects = config.get("projects", {})
+    for name, project in projects.items():
+        path = project.get("path", "")
+        if not Path(path).is_dir():
+            return f"Project '{name}' path does not exist: {path}"
+    return None
+
+
+def get_projects_from_config(config: dict) -> List[Tuple[str, str]]:
+    """Extract sorted (name, path) tuples from config.
+
+    Same format as get_known_projects() returns — enables drop-in replacement.
+    """
+    projects = config.get("projects", {})
+    result = []
+    for name, project in projects.items():
+        path = project.get("path", "")
+        result.append((name, path.strip()))
+    return sorted(result, key=lambda x: x[0].lower())
+
+
+def get_project_config(config: dict, project_name: str) -> dict:
+    """Get merged config for a project (defaults + project overrides).
+
+    Deep-merges per-section: project-level keys override default-level keys.
+    Unknown sections are passed through as-is.
+    """
+    defaults = config.get("defaults", {}) or {}
+    project = config.get("projects", {}).get(project_name, {}) or {}
+
+    merged = {}
+    # Start with all default keys
+    for key, value in defaults.items():
+        if isinstance(value, dict):
+            # Deep merge dicts (one level)
+            project_value = project.get(key, {}) or {}
+            merged[key] = {**value, **project_value}
+        else:
+            merged[key] = project.get(key, value)
+
+    # Add project-only keys not in defaults
+    for key, value in project.items():
+        if key == "path":
+            continue  # path is structural, not a setting
+        if key not in merged:
+            merged[key] = value
+
+    return merged
+
+
+def get_project_auto_merge(config: dict, project_name: str) -> dict:
+    """Get auto-merge config for a project from projects.yaml.
+
+    Returns a dict with keys: enabled, base_branch, strategy, rules.
+    Falls back to defaults section, then sensible defaults.
+    """
+    project_cfg = get_project_config(config, project_name)
+    am = project_cfg.get("git_auto_merge", {}) or {}
+
+    return {
+        "enabled": am.get("enabled", False),
+        "base_branch": am.get("base_branch", "main"),
+        "strategy": am.get("strategy", "squash"),
+        "rules": am.get("rules", []),
+    }
