@@ -429,14 +429,18 @@ def handle_pause(
         resume_msg = check_and_resume(koan_root)
         if resume_msg:
             log("pause", f"Auto-resume: {resume_msg}")
+            _reset_usage_session(instance)
             _notify(instance, f"🔄 Kōan auto-resumed: {resume_msg}. Starting fresh (0/{max_runs} runs).")
             return "resume"
     except Exception:
         pass
 
-    # Manual resume (pause file already removed)
+    # Manual resume (pause file already removed — /resume handler already
+    # resets session counters for quota pauses, but we reset here too as
+    # a safety net for any resume path)
     if not Path(koan_root, ".koan-pause").exists():
         log("pause", "Manual resume detected")
+        _reset_usage_session(instance)
         return "resume"
 
     # Contemplative session (~50% chance, skip in focus mode)
@@ -881,19 +885,30 @@ def main_loop():
                     pass
                 # Compute a proper future reset timestamp to avoid instant auto-resume
                 reset_ts = None
+                reset_display = ""
                 try:
-                    from app.usage_estimator import cmd_reset_time
+                    from app.usage_estimator import cmd_reset_time, _estimate_reset_time, _load_state
                     usage_state_path = Path(instance, "usage_state.json")
                     reset_ts = cmd_reset_time(usage_state_path)
+                    # Build display info for the pause reason file
+                    state = _load_state(usage_state_path)
+                    reset_display = f"session reset in ~{_estimate_reset_time(state.get('session_start', ''), 5)}"
                 except Exception:
                     pass
                 if reset_ts is None:
                     reset_ts = int(time.time()) + 5 * 3600  # fallback: now + 5h
                 from app.pause_manager import create_pause
-                create_pause(koan_root, "quota", reset_ts)
+                create_pause(koan_root, "quota", reset_ts, reset_display)
+
+                # Build quota detail string for the notification
+                quota_details = plan['decision_reason']
+                if plan["display_lines"]:
+                    quota_details += "\n" + "\n".join(plan["display_lines"])
+
                 _notify(instance, (
-                    f"⏸️ Kōan paused: budget exhausted after {count} runs on [{project_name}]. "
-                    "Auto-resume in 5h or use /resume."
+                    f"⏸️ Kōan paused: budget exhausted after {count} runs on [{project_name}].\n"
+                    f"{quota_details}\n"
+                    f"Auto-resume when session resets or use /resume."
                 ))
                 continue
 
@@ -1126,6 +1141,23 @@ def _interruptible_sleep(interval: int, koan_root: str, instance: str) -> str:
     except Exception:
         time.sleep(min(interval, 30))
         return "timeout"
+
+
+def _reset_usage_session(instance: str):
+    """Reset internal usage session counters after resume.
+
+    Ensures the usage estimator starts fresh so it doesn't
+    re-pause immediately with stale high usage from the
+    exhausted session.
+    """
+    try:
+        from app.usage_estimator import cmd_reset_session
+        usage_state = Path(instance, "usage_state.json")
+        usage_md = Path(instance, "usage.md")
+        cmd_reset_session(usage_state, usage_md)
+        log("health", "Usage session counters reset after resume")
+    except Exception:
+        pass
 
 
 def _cleanup_temp(*files):

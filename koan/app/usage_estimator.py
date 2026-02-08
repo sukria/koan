@@ -207,6 +207,25 @@ def cmd_refresh(state_file: Path, usage_md: Path):
     _write_usage_md(state, usage_md, config)
 
 
+def cmd_reset_session(state_file: Path, usage_md: Path):
+    """Force-reset the session counters and refresh usage.md.
+
+    Called when resuming from a quota pause — the human has verified
+    that API quota is available, so the internal token counter should
+    not block the next iteration with a stale high percentage.
+    """
+    config = load_config()
+    state = _load_state(state_file)
+
+    # Force session reset regardless of elapsed time
+    state["session_start"] = datetime.now().isoformat()
+    state["session_tokens"] = 0
+    state["runs"] = 0
+
+    _save_state(state_file, state)
+    _write_usage_md(state, usage_md, config)
+
+
 def cmd_reset_time(state_file: Path) -> int:
     """Compute when the current session resets (UNIX timestamp).
 
@@ -252,6 +271,12 @@ def main():
             print("Usage: usage_estimator.py refresh <state_file> <usage_md>", file=sys.stderr)
             sys.exit(1)
         cmd_refresh(Path(sys.argv[2]), Path(sys.argv[3]))
+
+    elif command == "reset-session":
+        if len(sys.argv) < 4:
+            print("Usage: usage_estimator.py reset-session <state_file> <usage_md>", file=sys.stderr)
+            sys.exit(1)
+        cmd_reset_session(Path(sys.argv[2]), Path(sys.argv[3]))
 
     elif command == "reset-time":
         if len(sys.argv) < 3:
