@@ -159,30 +159,40 @@ def trigger_reflection(
     instance_dir: str,
     mission_title: str,
     duration_minutes: int,
+    project_name: str = "",
 ) -> bool:
     """Trigger post-mission reflection if the mission was significant.
+
+    Reads today's journal file for the project to provide context to the
+    reflection prompt. The dual heuristic (keyword + substantial journal)
+    prevents noise from trivial missions.
 
     Args:
         instance_dir: Path to instance directory.
         mission_title: Mission description text.
         duration_minutes: Duration in minutes.
+        project_name: Current project name (for journal file lookup).
 
     Returns:
         True if reflection was generated.
     """
     try:
         from app.post_mission_reflection import (
+            _read_journal_file,
             is_significant_mission,
             run_reflection,
             write_to_journal,
         )
 
-        if not is_significant_mission(mission_title, duration_minutes):
+        inst = Path(instance_dir)
+        journal_content = _read_journal_file(inst, project_name)
+
+        if not is_significant_mission(mission_title, duration_minutes, journal_content):
             return False
 
-        reflection = run_reflection(Path(instance_dir), mission_title)
+        reflection = run_reflection(inst, mission_title, journal_content)
         if reflection:
-            write_to_journal(Path(instance_dir), reflection)
+            write_to_journal(inst, reflection)
             return True
     except Exception:
         pass
@@ -305,7 +315,8 @@ def run_post_mission(
 
         mission_text = mission_title if mission_title else f"Autonomous {autonomous_mode} on {project_name}"
         result["reflection_written"] = trigger_reflection(
-            instance_dir, mission_text, duration_minutes
+            instance_dir, mission_text, duration_minutes,
+            project_name=project_name,
         )
 
         # Auto-merge check

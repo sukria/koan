@@ -203,27 +203,50 @@ class TestTriggerReflection:
     @patch("app.post_mission_reflection.write_to_journal")
     @patch("app.post_mission_reflection.run_reflection", return_value="Deep insight")
     @patch("app.post_mission_reflection.is_significant_mission", return_value=True)
-    def test_generates_reflection_for_significant_mission(self, mock_sig, mock_run, mock_write, tmp_path):
+    @patch("app.post_mission_reflection._read_journal_file", return_value="substantial content")
+    def test_generates_reflection_for_significant_mission(
+        self, mock_read, mock_sig, mock_run, mock_write, tmp_path
+    ):
         from app.mission_runner import trigger_reflection
 
-        result = trigger_reflection(str(tmp_path), "audit security", 60)
+        result = trigger_reflection(str(tmp_path), "audit security", 60, project_name="koan")
         assert result is True
         mock_write.assert_called_once()
+        # Verify journal content is passed to run_reflection
+        mock_run.assert_called_once()
+        call_kwargs_or_args = mock_run.call_args
+        assert "substantial content" in str(call_kwargs_or_args)
 
     @patch("app.post_mission_reflection.is_significant_mission", return_value=False)
-    def test_skips_insignificant_missions(self, mock_sig, tmp_path):
+    @patch("app.post_mission_reflection._read_journal_file", return_value="")
+    def test_skips_insignificant_missions(self, mock_read, mock_sig, tmp_path):
         from app.mission_runner import trigger_reflection
 
-        result = trigger_reflection(str(tmp_path), "small fix", 5)
+        result = trigger_reflection(str(tmp_path), "small fix", 5, project_name="koan")
         assert result is False
 
     @patch("app.post_mission_reflection.run_reflection", return_value="")
     @patch("app.post_mission_reflection.is_significant_mission", return_value=True)
-    def test_returns_false_when_no_reflection_generated(self, mock_sig, mock_run, tmp_path):
+    @patch("app.post_mission_reflection._read_journal_file", return_value="content")
+    def test_returns_false_when_no_reflection_generated(self, mock_read, mock_sig, mock_run, tmp_path):
         from app.mission_runner import trigger_reflection
 
-        result = trigger_reflection(str(tmp_path), "deep refactor", 60)
+        result = trigger_reflection(str(tmp_path), "deep refactor", 60, project_name="koan")
         assert result is False
+
+    @patch("app.post_mission_reflection.write_to_journal")
+    @patch("app.post_mission_reflection.run_reflection", return_value="Insight")
+    @patch("app.post_mission_reflection.is_significant_mission", return_value=True)
+    @patch("app.post_mission_reflection._read_journal_file", return_value="journal text")
+    def test_passes_project_name_to_read_journal(
+        self, mock_read, mock_sig, mock_run, mock_write, tmp_path
+    ):
+        from app.mission_runner import trigger_reflection
+
+        trigger_reflection(str(tmp_path), "audit", 60, project_name="myproject")
+        mock_read.assert_called_once()
+        call_args = mock_read.call_args
+        assert call_args[0][1] == "myproject"
 
 
 class TestCheckAutoMerge:
