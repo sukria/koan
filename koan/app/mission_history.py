@@ -8,6 +8,8 @@ import json
 import time
 from pathlib import Path
 
+from app.utils import atomic_write
+
 
 _HISTORY_FILE = "mission_history.json"
 _MAX_ENTRIES = 100
@@ -38,7 +40,6 @@ def _load_history(instance_dir: str) -> dict:
 
 
 def _save_history(instance_dir: str, data: dict):
-    from app.utils import atomic_write
     path = _history_path(instance_dir)
     atomic_write(path, json.dumps(data, indent=2) + "\n")
 

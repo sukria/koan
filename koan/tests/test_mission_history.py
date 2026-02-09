@@ -1,8 +1,8 @@
 """Tests for mission_history.py — execution tracker for dedup protection."""
 
 import json
-import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -71,8 +71,8 @@ class TestRecordExecution:
 
     def test_records_project_and_exit_code(self, instance_dir):
         record_execution(instance_dir, "- Fix bug", "koan", 1)
-        history_path = os.path.join(instance_dir, "mission_history.json")
-        data = json.loads(open(history_path).read())
+        history_path = Path(instance_dir, "mission_history.json")
+        data = json.loads(history_path.read_text())
         key = "Fix bug"
         assert data[key]["project"] == "koan"
         assert data[key]["last_exit_code"] == 1
@@ -81,8 +81,8 @@ class TestRecordExecution:
         before = time.time()
         record_execution(instance_dir, "- Fix bug", "koan", 0)
         after = time.time()
-        history_path = os.path.join(instance_dir, "mission_history.json")
-        data = json.loads(open(history_path).read())
+        history_path = Path(instance_dir, "mission_history.json")
+        data = json.loads(history_path.read_text())
         key = "Fix bug"
         assert before <= data[key]["last_run"] <= after
 
@@ -133,10 +133,10 @@ class TestCleanupOldEntries:
     def test_removes_old_entries(self, instance_dir):
         record_execution(instance_dir, "- Old task", "koan", 0)
         # Manually backdate the entry
-        history_path = os.path.join(instance_dir, "mission_history.json")
-        data = json.loads(open(history_path).read())
+        history_path = Path(instance_dir, "mission_history.json")
+        data = json.loads(history_path.read_text())
         data["Old task"]["last_run"] = time.time() - 200_000  # ~55 hours ago
-        open(history_path, "w").write(json.dumps(data))
+        history_path.write_text(json.dumps(data))
 
         record_execution(instance_dir, "- Recent task", "koan", 0)
         cleanup_old_entries(instance_dir, max_age_hours=48)
@@ -153,16 +153,16 @@ class TestCleanupOldEntries:
         for i in range(110):
             record_execution(instance_dir, f"- Task {i}", "koan", 0)
         cleanup_old_entries(instance_dir)
-        history_path = os.path.join(instance_dir, "mission_history.json")
-        data = json.loads(open(history_path).read())
+        history_path = Path(instance_dir, "mission_history.json")
+        data = json.loads(history_path.read_text())
         assert len(data) <= 100
 
     def test_empty_history_no_error(self, instance_dir):
         cleanup_old_entries(instance_dir)  # no history file yet
 
     def test_corrupt_json_handled_gracefully(self, instance_dir):
-        history_path = os.path.join(instance_dir, "mission_history.json")
-        open(history_path, "w").write("not json{{{")
+        history_path = Path(instance_dir, "mission_history.json")
+        history_path.write_text("not json{{{")
         cleanup_old_entries(instance_dir)
         # Should not raise — corrupt data treated as empty
 

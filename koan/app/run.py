@@ -980,8 +980,8 @@ def main_loop():
                         _notify(instance, f"⚠️ Mission failed 3+ times, moved to Failed: {mission_title[:60]}")
                         _commit_instance(instance)
                         continue
-                except Exception:
-                    pass
+                except (OSError, ValueError) as e:
+                    log("error", f"Dedup guard error: {e}")
 
             # Set project state
             Path(koan_root, ".koan-project").write_text(project_name)
@@ -1027,17 +1027,10 @@ def main_loop():
 
                     if exit_code == 0:
                         log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
-                        _update_mission_in_file(instance, mission_title)
                     else:
-                        _update_mission_in_file(instance, mission_title, failed=True)
                         _notify(instance, f"❌ Run {run_num}/{max_runs} — [{project_name}] Skill failed: {mission_title}")
 
-                    try:
-                        from app.mission_history import record_execution
-                        record_execution(instance, mission_title, project_name, exit_code)
-                    except Exception:
-                        pass
-
+                    _finalize_mission(instance, mission_title, project_name, exit_code)
                     _commit_instance(instance)
                     count += 1
 
@@ -1175,16 +1168,7 @@ def main_loop():
 
             # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
             if mission_title:
-                if claude_exit == 0:
-                    _update_mission_in_file(instance, mission_title)
-                else:
-                    _update_mission_in_file(instance, mission_title, failed=True)
-
-                try:
-                    from app.mission_history import record_execution
-                    record_execution(instance, mission_title, project_name, claude_exit)
-                except Exception:
-                    pass
+                _finalize_mission(instance, mission_title, project_name, claude_exit)
 
             # Report result
             if claude_exit == 0:
@@ -1320,6 +1304,16 @@ def _update_mission_in_file(instance: str, mission_title: str, *, failed: bool =
     except Exception as e:
         label = "fail" if failed else "complete"
         log("error", f"Could not {label} mission in missions.md: {e}")
+
+
+def _finalize_mission(instance: str, mission_title: str, project_name: str, exit_code: int):
+    """Complete or fail a mission and record execution history."""
+    _update_mission_in_file(instance, mission_title, failed=(exit_code != 0))
+    try:
+        from app.mission_history import record_execution
+        record_execution(instance, mission_title, project_name, exit_code)
+    except (OSError, ValueError) as e:
+        log("error", f"Mission history recording error: {e}")
 
 
 def _run_skill_mission(

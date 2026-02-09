@@ -1,11 +1,19 @@
 """Tests for prompts.py — system prompt loader and placeholder substitution."""
 
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from app.prompts import PROMPT_DIR, _substitute, get_prompt_path, load_prompt, load_skill_prompt
+from app.prompts import (
+    PROMPT_DIR,
+    _read_prompt_with_git_fallback,
+    _substitute,
+    get_prompt_path,
+    load_prompt,
+    load_skill_prompt,
+)
 
 
 # ---------- _substitute ----------
@@ -171,3 +179,136 @@ class TestLoadSkillPrompt:
                 for md_file in prompts.glob("*.md"):
                     result = load_skill_prompt(skill_dir, md_file.stem)
                     assert len(result) > 0, f"{skill_dir.name}/{md_file.stem} is empty"
+
+
+# ---------- _read_prompt_with_git_fallback ----------
+
+
+def _make_run_side_effect(rev_parse="ok", remotes=None, repo_root="/repo"):
+    """Build a side_effect function for subprocess.run mocking.
+
+    Args:
+        rev_parse: "ok", "fail", or "timeout" for git rev-parse behavior.
+        remotes: dict mapping remote prefix (e.g. "upstream/main") to
+                 "ok", "fail", or "timeout".  Defaults to both failing.
+        repo_root: path returned by rev-parse --show-toplevel.
+    """
+    if remotes is None:
+        remotes = {"upstream/main": "fail", "origin/main": "fail"}
+
+    def side_effect(cmd, **kwargs):
+        if cmd[:3] == ["git", "rev-parse", "--show-toplevel"]:
+            if rev_parse == "timeout":
+                raise subprocess.TimeoutExpired(cmd, 5)
+            rc = 0 if rev_parse == "ok" else 1
+            return subprocess.CompletedProcess(cmd, rc, stdout=f"{repo_root}\n", stderr="")
+
+        if cmd[:2] == ["git", "show"]:
+            ref = cmd[2]  # e.g. "upstream/main:rel/path.md"
+            for remote, behavior in remotes.items():
+                if ref.startswith(f"{remote}:"):
+                    if behavior == "timeout":
+                        raise subprocess.TimeoutExpired(cmd, 5)
+                    if behavior == "ok":
+                        return subprocess.CompletedProcess(
+                            cmd, 0, stdout=f"content from {remote.split('/')[0]}", stderr=""
+                        )
+                    return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: not found")
+
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="unknown command")
+
+    return side_effect
+
+
+class TestGitFallback:
+    """Tests for _read_prompt_with_git_fallback."""
+
+    def test_file_exists_no_git_call(self, tmp_path):
+        """When the file exists on disk, return it without calling git."""
+        p = tmp_path / "prompt.md"
+        p.write_text("on disk content")
+        with patch("app.prompts.subprocess.run") as mock_run:
+            result = _read_prompt_with_git_fallback(p)
+        assert result == "on disk content"
+        mock_run.assert_not_called()
+
+    def test_file_missing_reads_upstream(self, tmp_path):
+        """When file is missing, falls back to upstream/main."""
+        p = tmp_path / "sub" / "prompt.md"
+        se = _make_run_side_effect(remotes={"upstream/main": "ok", "origin/main": "fail"}, repo_root=str(tmp_path))
+        with patch("app.prompts.subprocess.run", side_effect=se):
+            result = _read_prompt_with_git_fallback(p)
+        assert result == "content from upstream"
+
+    def test_upstream_fails_reads_origin(self, tmp_path):
+        """When upstream/main fails, falls back to origin/main."""
+        p = tmp_path / "sub" / "prompt.md"
+        se = _make_run_side_effect(remotes={"upstream/main": "fail", "origin/main": "ok"}, repo_root=str(tmp_path))
+        with patch("app.prompts.subprocess.run", side_effect=se):
+            result = _read_prompt_with_git_fallback(p)
+        assert result == "content from origin"
+
+    def test_both_remotes_fail_raises(self, tmp_path):
+        """When both remotes fail, raises FileNotFoundError."""
+        p = tmp_path / "sub" / "prompt.md"
+        se = _make_run_side_effect(repo_root=str(tmp_path))
+        with patch("app.prompts.subprocess.run", side_effect=se):
+            with pytest.raises(FileNotFoundError):
+                _read_prompt_with_git_fallback(p)
+
+    def test_rev_parse_fails_raises(self, tmp_path):
+        """When git rev-parse fails, raises FileNotFoundError."""
+        p = tmp_path / "prompt.md"
+        se = _make_run_side_effect(rev_parse="fail", repo_root=str(tmp_path))
+        with patch("app.prompts.subprocess.run", side_effect=se):
+            with pytest.raises(FileNotFoundError):
+                _read_prompt_with_git_fallback(p)
+
+    def test_rev_parse_timeout_raises(self, tmp_path):
+        """When git rev-parse times out, raises FileNotFoundError."""
+        p = tmp_path / "prompt.md"
+        se = _make_run_side_effect(rev_parse="timeout", repo_root=str(tmp_path))
+        with patch("app.prompts.subprocess.run", side_effect=se):
+            with pytest.raises(FileNotFoundError):
+                _read_prompt_with_git_fallback(p)
+
+    def test_upstream_timeout_tries_origin(self, tmp_path):
+        """When upstream/main times out, tries origin/main."""
+        p = tmp_path / "sub" / "prompt.md"
+        se = _make_run_side_effect(
+            remotes={"upstream/main": "timeout", "origin/main": "ok"}, repo_root=str(tmp_path),
+        )
+        with patch("app.prompts.subprocess.run", side_effect=se):
+            result = _read_prompt_with_git_fallback(p)
+        assert result == "content from origin"
+
+    def test_both_timeouts_raises(self, tmp_path):
+        """When both remotes time out, raises FileNotFoundError."""
+        p = tmp_path / "sub" / "prompt.md"
+        se = _make_run_side_effect(
+            remotes={"upstream/main": "timeout", "origin/main": "timeout"}, repo_root=str(tmp_path),
+        )
+        with patch("app.prompts.subprocess.run", side_effect=se):
+            with pytest.raises(FileNotFoundError):
+                _read_prompt_with_git_fallback(p)
+
+    def test_load_prompt_uses_fallback(self, tmp_path):
+        """load_prompt() uses the git fallback when file is missing."""
+        fake_path = tmp_path / "nonexistent.md"
+        se = _make_run_side_effect(remotes={"upstream/main": "ok", "origin/main": "fail"}, repo_root=str(tmp_path))
+        with patch("app.prompts.get_prompt_path", return_value=fake_path):
+            with patch("app.prompts.subprocess.run", side_effect=se):
+                result = load_prompt("nonexistent")
+        assert result == "content from upstream"
+
+    def test_load_skill_prompt_uses_fallback(self, tmp_path):
+        """load_skill_prompt() uses the git fallback on system-prompt fallback path."""
+        skill_dir = tmp_path / "myskill"
+        skill_dir.mkdir()
+        # No prompts/ dir in skill, so it falls back to system-prompts
+        fake_path = tmp_path / "nonexistent.md"
+        se = _make_run_side_effect(remotes={"upstream/main": "fail", "origin/main": "ok"}, repo_root=str(tmp_path))
+        with patch("app.prompts.get_prompt_path", return_value=fake_path):
+            with patch("app.prompts.subprocess.run", side_effect=se):
+                result = load_skill_prompt(skill_dir, "nonexistent")
+        assert result == "content from origin"
