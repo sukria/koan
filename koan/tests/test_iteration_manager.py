@@ -56,6 +56,7 @@ def usage_state(tmp_path):
 
 
 PROJECTS_STR = "koan:/path/to/koan;backend:/path/to/backend;webapp:/path/to/webapp"
+PROJECTS_LIST = [("koan", "/path/to/koan"), ("backend", "/path/to/backend"), ("webapp", "/path/to/webapp")]
 
 
 # === Tests: _resolve_project_path ===
@@ -64,60 +65,57 @@ PROJECTS_STR = "koan:/path/to/koan;backend:/path/to/backend;webapp:/path/to/weba
 class TestResolveProjectPath:
 
     def test_finds_existing_project(self):
-        assert _resolve_project_path("koan", PROJECTS_STR) == "/path/to/koan"
-        assert _resolve_project_path("backend", PROJECTS_STR) == "/path/to/backend"
-        assert _resolve_project_path("webapp", PROJECTS_STR) == "/path/to/webapp"
+        assert _resolve_project_path("koan", PROJECTS_LIST) == "/path/to/koan"
+        assert _resolve_project_path("backend", PROJECTS_LIST) == "/path/to/backend"
+        assert _resolve_project_path("webapp", PROJECTS_LIST) == "/path/to/webapp"
 
     def test_returns_none_for_unknown(self):
-        assert _resolve_project_path("unknown", PROJECTS_STR) is None
+        assert _resolve_project_path("unknown", PROJECTS_LIST) is None
 
-    def test_empty_projects_string(self):
-        assert _resolve_project_path("koan", "") is None
+    def test_empty_projects_list(self):
+        assert _resolve_project_path("koan", []) is None
 
     def test_single_project(self):
-        assert _resolve_project_path("only", "only:/single/path") == "/single/path"
-
-    def test_handles_whitespace(self):
-        assert _resolve_project_path("proj", "  proj : /the/path  ") == "/the/path"
+        assert _resolve_project_path("only", [("only", "/single/path")]) == "/single/path"
 
 
 class TestGetProjectByIndex:
 
     def test_first_project(self):
-        name, path = _get_project_by_index(PROJECTS_STR, 0)
+        name, path = _get_project_by_index(PROJECTS_LIST, 0)
         assert name == "koan"
         assert path == "/path/to/koan"
 
     def test_second_project(self):
-        name, path = _get_project_by_index(PROJECTS_STR, 1)
+        name, path = _get_project_by_index(PROJECTS_LIST, 1)
         assert name == "backend"
         assert path == "/path/to/backend"
 
     def test_index_clamped_high(self):
-        name, path = _get_project_by_index(PROJECTS_STR, 99)
+        name, path = _get_project_by_index(PROJECTS_LIST, 99)
         assert name == "webapp"  # Last project
 
     def test_index_clamped_low(self):
-        name, path = _get_project_by_index(PROJECTS_STR, -1)
+        name, path = _get_project_by_index(PROJECTS_LIST, -1)
         assert name == "koan"  # First project
 
     def test_empty_projects(self):
-        name, path = _get_project_by_index("", 0)
+        name, path = _get_project_by_index([], 0)
         assert name == "default"
 
 
 class TestGetKnownProjectNames:
 
     def test_extracts_sorted_names(self):
-        names = _get_known_project_names(PROJECTS_STR)
+        names = _get_known_project_names(PROJECTS_LIST)
         assert names == ["backend", "koan", "webapp"]
 
     def test_single_project(self):
-        names = _get_known_project_names("solo:/path")
+        names = _get_known_project_names([("solo", "/path")])
         assert names == ["solo"]
 
-    def test_empty_string(self):
-        names = _get_known_project_names("")
+    def test_empty_list(self):
+        names = _get_known_project_names([])
         assert names == []
 
 
@@ -394,7 +392,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -419,7 +417,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -443,7 +441,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -467,7 +465,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -495,7 +493,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -517,7 +515,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -538,7 +536,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=5,
             count=4,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -558,7 +556,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -581,7 +579,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=1,
             count=0,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="",
             usage_state_path=str(usage_state),
         )
@@ -604,7 +602,7 @@ class TestPlanIteration:
                 koan_root=str(koan_root),
                 run_num=2,
                 count=1,
-                projects_str=PROJECTS_STR,
+                projects=PROJECTS_LIST,
                 last_project="koan",
                 usage_state_path=str(usage_state),
             )
@@ -624,7 +622,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )
@@ -647,7 +645,7 @@ class TestPlanIteration:
             koan_root=str(koan_root),
             run_num=2,
             count=1,
-            projects_str=PROJECTS_STR,
+            projects=PROJECTS_LIST,
             last_project="koan",
             usage_state_path=str(usage_state),
         )

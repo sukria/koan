@@ -26,7 +26,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 
 def _refresh_usage(usage_state: Path, usage_md: Path, count: int):
@@ -129,57 +129,44 @@ def _pick_mission(instance_dir: Path, projects_str: str, run_num: int,
         return None, None
 
 
-def _resolve_project_path(project_name: str, projects_str: str) -> Optional[str]:
-    """Find the path for a project name from the projects string.
+def _projects_to_str(projects: List[Tuple[str, str]]) -> str:
+    """Convert a list of (name, path) tuples to semicolon-separated string.
 
-    Args:
-        project_name: Name to look up
-        projects_str: Semicolon-separated "name:path" pairs
+    This is used for downstream functions that still expect the string format
+    (pick_mission, UsageTracker.select_project).
+    """
+    return ";".join(f"{name}:{path}" for name, path in projects)
+
+
+def _resolve_project_path(
+    project_name: str, projects: List[Tuple[str, str]],
+) -> Optional[str]:
+    """Find the path for a project name.
 
     Returns:
         Path string or None if not found
     """
-    if not projects_str:
-        return None
-
-    for pair in projects_str.split(";"):
-        pair = pair.strip()
-        if not pair:
-            continue
-        parts = pair.split(":", 1)
-        if len(parts) == 2 and parts[0].strip() == project_name:
-            return parts[1].strip()
-
+    for name, path in projects:
+        if name == project_name:
+            return path
     return None
 
 
-def _get_project_by_index(projects_str: str, idx: int):
+def _get_project_by_index(projects: List[Tuple[str, str]], idx: int):
     """Get (name, path) for project at given index.
 
     Returns:
         (name, path) tuple
     """
-    pairs = [p.strip() for p in projects_str.split(";") if p.strip()]
-    if not pairs:
+    if not projects:
         return "default", ""
-
-    idx = max(0, min(idx, len(pairs) - 1))
-    parts = pairs[idx].split(":", 1)
-    if len(parts) == 2:
-        return parts[0].strip(), parts[1].strip()
-    return parts[0].strip(), ""
+    idx = max(0, min(idx, len(projects) - 1))
+    return projects[idx]
 
 
-def _get_known_project_names(projects_str: str) -> list:
-    """Extract sorted list of project names from projects string."""
-    names = []
-    for pair in projects_str.split(";"):
-        pair = pair.strip()
-        if pair:
-            name = pair.split(":")[0].strip()
-            if name:
-                names.append(name)
-    return sorted(names)
+def _get_known_project_names(projects: List[Tuple[str, str]]) -> list:
+    """Extract sorted list of project names."""
+    return sorted(name for name, _ in projects)
 
 
 def _resolve_focus_area(autonomous_mode: str, has_mission: bool) -> str:
@@ -258,11 +245,7 @@ def _check_schedule():
     """
     try:
         from app.schedule_manager import get_current_schedule
-        state = get_current_schedule()
-        # If neither deep nor work hours are active, treat as unconfigured
-        if state.mode == "normal":
-            return state
-        return state
+        return get_current_schedule()
     except Exception:
         return None
 
@@ -272,14 +255,23 @@ def plan_iteration(
     koan_root: str,
     run_num: int,
     count: int,
-    projects_str: str,
-    last_project: str,
-    usage_state_path: str,
+    projects: List[Tuple[str, str]],
+    last_project: str = "",
+    usage_state_path: str = "",
 ) -> dict:
     """Plan a single iteration of the run loop.
 
     This is the main entry point. It consolidates all per-iteration
     decision-making into a single call.
+
+    Args:
+        instance_dir: Path to instance directory
+        koan_root: Path to KOAN_ROOT
+        run_num: Current run number (1-based)
+        count: Completed runs count
+        projects: List of (name, path) tuples
+        last_project: Last project name (for rotation)
+        usage_state_path: Path to usage_state.json (defaults to instance/usage_state.json)
 
     Returns:
         dict with iteration plan:
@@ -300,8 +292,14 @@ def plan_iteration(
         }
     """
     instance = Path(instance_dir)
-    usage_state = Path(usage_state_path)
+    if usage_state_path:
+        usage_state = Path(usage_state_path)
+    else:
+        usage_state = instance / "usage_state.json"
     usage_md = instance / "usage.md"
+
+    # Convert projects to string format for downstream functions
+    projects_str = _projects_to_str(projects)
 
     # Step 1: Refresh usage
     _refresh_usage(usage_state, usage_md, count)
@@ -326,10 +324,10 @@ def plan_iteration(
     if mission_project and mission_title:
         # Mission picked — resolve project path
         project_name = mission_project
-        project_path = _resolve_project_path(project_name, projects_str)
+        project_path = _resolve_project_path(project_name, projects)
 
         if project_path is None:
-            known = _get_known_project_names(projects_str)
+            known = _get_known_project_names(projects)
             return {
                 "action": "error",
                 "project_name": project_name,
@@ -348,7 +346,7 @@ def plan_iteration(
     else:
         # No mission — autonomous mode
         mission_title = ""
-        project_name, project_path = _get_project_by_index(projects_str, recommended_idx)
+        project_name, project_path = _get_project_by_index(projects, recommended_idx)
 
     # Step 6: Determine action for autonomous mode
     action = "mission" if mission_title else "autonomous"
@@ -466,12 +464,20 @@ def main():
     args = parser.parse_args()
 
     if args.command == "plan-iteration":
+        # Convert CLI string format to tuples
+        projects = []
+        for pair in args.projects.split(";"):
+            pair = pair.strip()
+            if pair:
+                parts = pair.split(":", 1)
+                if len(parts) == 2:
+                    projects.append((parts[0].strip(), parts[1].strip()))
         result = plan_iteration(
             instance_dir=args.instance,
             koan_root=args.koan_root,
             run_num=args.run_num,
             count=args.count,
-            projects_str=args.projects,
+            projects=projects,
             last_project=args.last_project,
             usage_state_path=args.usage_state,
         )

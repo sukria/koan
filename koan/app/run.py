@@ -27,10 +27,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from app.contemplative_runner import should_run_contemplative
-from app.loop_manager import resolve_focus_area
+from app.iteration_manager import plan_iteration
 from app.pid_manager import acquire_pid, release_pid
-from app.utils import get_contemplative_chance
 
 
 # ---------------------------------------------------------------------------
@@ -545,227 +543,6 @@ def handle_pause(
 
 
 # ---------------------------------------------------------------------------
-# Iteration planning
-# ---------------------------------------------------------------------------
-
-def plan_iteration(
-    instance: str, koan_root: str, projects: list,
-    run_num: int, count: int, max_runs: int,
-) -> dict:
-    """Plan the next iteration: usage, mode, mission picking.
-
-    Returns a dict with keys:
-        action: mission|autonomous|contemplative|focus_wait|wait_pause|error
-        project_name, project_path, mission_title, autonomous_mode,
-        focus_area, available_pct, decision_reason, display_lines, etc.
-    """
-    from app.missions import count_pending
-    from app.recurring import check_and_inject
-
-    koan_projects = os.environ.get("KOAN_PROJECTS", "")
-    usage_state = Path(instance, "usage_state.json").as_posix()
-    usage_md = Path(instance, "usage.md")
-
-    # Always refresh usage — critical after auto-resume so stale usage.md
-    # is cleared and session resets are detected.
-    try:
-        subprocess.run(
-            [sys.executable, Path(koan_root, "koan/app/usage_estimator.py").as_posix(),
-             "refresh", usage_state, usage_md.as_posix()],
-            capture_output=True, timeout=15,
-        )
-    except Exception:
-        pass
-
-    # Parse usage and decide mode
-    autonomous_mode = "implement"
-    available_pct = 50
-    decision_reason = "Default mode"
-    recommended_idx = 0
-    display_lines = []
-
-    try:
-        result = subprocess.run(
-            [sys.executable, Path(koan_root, "koan/app/usage_tracker.py").as_posix(),
-             usage_md.as_posix(), str(count), koan_projects],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            parts = result.stdout.strip().split(":")
-            if len(parts) >= 4:
-                autonomous_mode = parts[0]
-                available_pct = int(parts[1])
-                decision_reason = parts[2]
-                recommended_idx = int(parts[3])
-    except Exception:
-        pass
-
-    # Display usage
-    if usage_md.exists():
-        try:
-            content = usage_md.read_text()
-            for line in content.splitlines():
-                if "session" in line.lower() or "weekly" in line.lower():
-                    display_lines.append(line.strip())
-                    if len(display_lines) >= 2:
-                        break
-        except Exception:
-            pass
-
-    # Recurring missions
-    recurring_injected = []
-    try:
-        recurring_path = Path(instance, "recurring.json")
-        missions_path = Path(instance, "missions.md")
-        if recurring_path.exists():
-            recurring_injected = check_and_inject(recurring_path, missions_path)
-    except Exception:
-        pass
-
-    # Pick mission
-    last_project = ""
-    try:
-        last_project = Path(koan_root, ".koan-project").read_text().strip()
-    except Exception:
-        pass
-
-    mission_title = ""
-    project_name = ""
-    project_path = ""
-
-    try:
-        result = subprocess.run(
-            [sys.executable, Path(koan_root, "koan/app/pick_mission.py").as_posix(),
-             instance, koan_projects, str(run_num), autonomous_mode, last_project],
-            capture_output=True, text=True, timeout=120,
-        )
-        if result.stderr:
-            log("mission", f"Mission picker stderr: {result.stderr.strip()}")
-        pick_result = result.stdout.strip()
-        log("mission", f"Picker result: '{pick_result or '<empty>'}'")
-
-        if pick_result and ":" in pick_result:
-            project_name = pick_result.split(":")[0]
-            mission_title = pick_result.split(":", 1)[1]
-    except Exception as e:
-        log("error", f"Mission picker failed: {e}")
-
-    # Resolve project
-    if mission_title and project_name:
-        # Find path for picked project
-        found = False
-        for name, path in projects:
-            if name == project_name:
-                project_path = path
-                found = True
-                break
-
-        if not found:
-            known = "\n".join(f"  • {n}" for n, _ in sorted(projects))
-            return {
-                "action": "error",
-                "error": f"Mission references unknown project: {project_name}\nKnown projects:\n{known}",
-                "project_name": project_name,
-                "project_path": "",
-                "mission_title": mission_title,
-                "autonomous_mode": autonomous_mode,
-                "focus_area": "",
-                "available_pct": available_pct,
-                "decision_reason": decision_reason,
-                "display_lines": display_lines,
-                "recurring_injected": recurring_injected,
-            }
-    else:
-        # Autonomous mode — use recommended project
-        idx = min(recommended_idx, len(projects) - 1)
-        project_name = projects[idx][0]
-        project_path = projects[idx][1]
-        mission_title = ""
-
-    # Check contemplative mode (no mission, budget available)
-    if not mission_title and autonomous_mode in ("deep", "implement"):
-        contemplative_chance = get_contemplative_chance()
-
-        # Check focus mode
-        in_focus = False
-        focus_remaining = ""
-        try:
-            result = subprocess.run(
-                [sys.executable, "-m", "app.focus_manager", "check", koan_root],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0:
-                in_focus = True
-                focus_remaining = result.stdout.strip()
-        except Exception:
-            pass
-
-        if not in_focus:
-            if should_run_contemplative(contemplative_chance):
-                return {
-                    "action": "contemplative",
-                    "project_name": project_name,
-                    "project_path": project_path,
-                    "mission_title": "",
-                    "autonomous_mode": autonomous_mode,
-                    "focus_area": "",
-                    "available_pct": available_pct,
-                    "decision_reason": decision_reason,
-                    "display_lines": display_lines,
-                    "recurring_injected": recurring_injected,
-                }
-
-        # Focus mode active — wait for missions
-        if in_focus:
-            return {
-                "action": "focus_wait",
-                "project_name": project_name,
-                "project_path": project_path,
-                "mission_title": "",
-                "autonomous_mode": autonomous_mode,
-                "focus_area": "",
-                "available_pct": available_pct,
-                "decision_reason": decision_reason,
-                "display_lines": display_lines,
-                "recurring_injected": recurring_injected,
-                "focus_remaining": focus_remaining,
-            }
-
-    # Handle WAIT mode
-    if not mission_title and autonomous_mode == "wait":
-        return {
-            "action": "wait_pause",
-            "project_name": project_name,
-            "project_path": project_path,
-            "mission_title": "",
-            "autonomous_mode": autonomous_mode,
-            "focus_area": "",
-            "available_pct": available_pct,
-            "decision_reason": decision_reason,
-            "display_lines": display_lines,
-            "recurring_injected": recurring_injected,
-        }
-
-    # Resolve focus area
-    has_mission = bool(mission_title)
-    focus_area = resolve_focus_area(autonomous_mode, has_mission)
-
-    action = "mission" if mission_title else "autonomous"
-    return {
-        "action": action,
-        "project_name": project_name,
-        "project_path": project_path,
-        "mission_title": mission_title,
-        "autonomous_mode": autonomous_mode,
-        "focus_area": focus_area,
-        "available_pct": available_pct,
-        "decision_reason": decision_reason,
-        "display_lines": display_lines,
-        "recurring_injected": recurring_injected,
-    }
-
-
-# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
@@ -851,8 +628,20 @@ def main_loop():
             print()
             print(bold_cyan(f"=== Run {run_num}/{max_runs} — {time.strftime('%Y-%m-%d %H:%M:%S')} ==="))
 
-            # Plan iteration
-            plan = plan_iteration(instance, koan_root, projects, run_num, count, max_runs)
+            # Plan iteration (delegated to iteration_manager)
+            last_project = ""
+            try:
+                last_project = Path(koan_root, ".koan-project").read_text().strip()
+            except Exception:
+                pass
+            plan = plan_iteration(
+                instance_dir=instance,
+                koan_root=koan_root,
+                run_num=run_num,
+                count=count,
+                projects=projects,
+                last_project=last_project,
+            )
 
             # Display usage
             log("quota", "Usage Status:")
@@ -920,6 +709,15 @@ def main_loop():
                     wake = _interruptible_sleep(interval, koan_root, instance)
                 if wake == "mission":
                     log("koan", "New mission detected during focus sleep — waking up")
+                continue
+
+            if action == "schedule_wait":
+                log("koan", "Work hours active — waiting for missions (exploration suppressed)")
+                set_status(koan_root, f"Work hours — waiting for missions ({time.strftime('%H:%M')})")
+                with protected_phase("Work hours — waiting for missions"):
+                    wake = _interruptible_sleep(interval, koan_root, instance)
+                if wake == "mission":
+                    log("koan", "New mission detected during work hours sleep — waking up")
                 continue
 
             if action == "wait_pause":
@@ -1264,13 +1062,10 @@ def main_loop():
 # ---------------------------------------------------------------------------
 
 def _has_pending_missions(instance: str) -> bool:
-    """Quick check for pending missions."""
+    """Quick check for pending missions (delegates to loop_manager)."""
     try:
-        from app.missions import count_pending
-        missions_path = Path(instance, "missions.md")
-        if not missions_path.exists():
-            return False
-        return count_pending(missions_path.read_text()) > 0
+        from app.loop_manager import check_pending_missions
+        return check_pending_missions(instance)
     except Exception:
         return False
 

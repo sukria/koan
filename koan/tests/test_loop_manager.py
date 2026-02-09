@@ -473,25 +473,25 @@ class TestCheckHelpers:
         assert _check_signal_file(str(tmp_path), ".koan-restart") is False
 
     def test_check_pending_missions_with_missions(self, tmp_path):
-        from app.loop_manager import _check_pending_missions
+        from app.loop_manager import check_pending_missions
 
         missions = tmp_path / "missions.md"
         missions.write_text("## Pending\n\n- Do something\n\n## Done\n")
 
-        assert _check_pending_missions(str(tmp_path)) is True
+        assert check_pending_missions(str(tmp_path)) is True
 
     def test_check_pending_missions_empty(self, tmp_path):
-        from app.loop_manager import _check_pending_missions
+        from app.loop_manager import check_pending_missions
 
         missions = tmp_path / "missions.md"
         missions.write_text("## Pending\n\n## Done\n")
 
-        assert _check_pending_missions(str(tmp_path)) is False
+        assert check_pending_missions(str(tmp_path)) is False
 
     def test_check_pending_missions_no_file(self, tmp_path):
-        from app.loop_manager import _check_pending_missions
+        from app.loop_manager import check_pending_missions
 
-        assert _check_pending_missions(str(tmp_path)) is False
+        assert check_pending_missions(str(tmp_path)) is False
 
 
 # --- Test CLI interface ---

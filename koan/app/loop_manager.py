@@ -164,7 +164,7 @@ def _check_signal_file(koan_root: str, filename: str) -> bool:
     return os.path.isfile(os.path.join(koan_root, filename))
 
 
-def _check_pending_missions(instance_dir: str) -> bool:
+def check_pending_missions(instance_dir: str) -> bool:
     """Check if there are pending missions in missions.md."""
     missions_path = Path(instance_dir) / "missions.md"
     if not missions_path.exists():
@@ -200,7 +200,7 @@ def interruptible_sleep(
         time.sleep(check_interval)
         elapsed += check_interval
 
-        if _check_pending_missions(instance_dir):
+        if check_pending_missions(instance_dir):
             return "mission"
         if _check_signal_file(koan_root, ".koan-stop"):
             return "stop"
