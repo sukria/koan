@@ -19,6 +19,8 @@ from app.pid_manager import (
     acquire_pid,
     release_pid,
     check_pidfile,
+    stop_processes,
+    PROCESS_NAMES,
 )
 
 
@@ -455,3 +457,156 @@ class TestEdgeCases:
         release_pidfile(fh, tmp_path, "awake")
         # Second release with closed fh — should not raise
         release_pidfile(fh, tmp_path, "awake")
+
+
+# ---------------------------------------------------------------------------
+# stop_processes
+# ---------------------------------------------------------------------------
+
+
+class TestStopProcesses:
+    def test_no_processes_running(self, tmp_path):
+        """When no processes are running, all results are not_running."""
+        results = stop_processes(tmp_path)
+        assert results["run"] == "not_running"
+        assert results["awake"] == "not_running"
+
+    def test_creates_stop_file(self, tmp_path):
+        """stop_processes always creates .koan-stop signal file."""
+        stop_processes(tmp_path)
+        assert (tmp_path / ".koan-stop").exists()
+        assert (tmp_path / ".koan-stop").read_text() == "STOP"
+
+    def test_stops_running_subprocess(self, tmp_path):
+        """SIGTERM a real subprocess and verify it exits."""
+        # Start a sleep process to simulate a running koan process
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"]
+        )
+        pidfile = tmp_path / ".koan-pid-run"
+        pidfile.write_text(str(proc.pid))
+
+        results = stop_processes(tmp_path, timeout=3.0)
+        assert results["run"] in ("stopped", "force_killed")
+        assert results["awake"] == "not_running"
+        # PID file should be cleaned up
+        assert not pidfile.exists()
+        # Reap child to verify it's gone
+        proc.wait(timeout=5)
+        assert proc.returncode is not None
+
+    def test_force_kills_stubborn_process(self, tmp_path):
+        """If SIGTERM doesn't work within timeout, SIGKILL is sent."""
+        # Start a process that ignores SIGTERM and signals readiness via file
+        ready_file = tmp_path / ".ready"
+        proc = subprocess.Popen(
+            [sys.executable, "-c",
+             f"import signal, time, pathlib; "
+             f"signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+             f"pathlib.Path('{ready_file}').write_text('ok'); "
+             f"time.sleep(60)"]
+        )
+        pidfile = tmp_path / ".koan-pid-awake"
+        pidfile.write_text(str(proc.pid))
+
+        # Wait for child to install SIGTERM handler
+        deadline = time.monotonic() + 5
+        while not ready_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        results = stop_processes(tmp_path, timeout=1.0)
+        assert results["awake"] == "force_killed"
+        assert not pidfile.exists()
+        # Reap the child to verify it's gone
+        proc.wait(timeout=5)
+        assert proc.returncode is not None
+
+    def test_handles_already_dead_pid(self, tmp_path):
+        """If PID in file is already dead, report not_running."""
+        pidfile = tmp_path / ".koan-pid-run"
+        pidfile.write_text("99999999")  # dead PID
+        results = stop_processes(tmp_path)
+        assert results["run"] == "not_running"
+
+    def test_stops_both_processes(self, tmp_path):
+        """Can stop both run and awake simultaneously."""
+        procs = []
+        for name in PROCESS_NAMES:
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(60)"]
+            )
+            pidfile = tmp_path / f".koan-pid-{name}"
+            pidfile.write_text(str(proc.pid))
+            procs.append(proc)
+
+        results = stop_processes(tmp_path, timeout=3.0)
+        assert results["run"] in ("stopped", "force_killed")
+        assert results["awake"] in ("stopped", "force_killed")
+
+        for proc in procs:
+            proc.wait(timeout=5)
+
+    def test_cleans_up_pid_files_after_stop(self, tmp_path):
+        """PID files are removed after stopping."""
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"]
+        )
+        pidfile = tmp_path / ".koan-pid-run"
+        pidfile.write_text(str(proc.pid))
+
+        stop_processes(tmp_path, timeout=3.0)
+        assert not (tmp_path / ".koan-pid-run").exists()
+        proc.wait(timeout=5)  # Clean up child
+
+    def test_process_names_constant(self):
+        """PROCESS_NAMES includes both expected processes."""
+        assert "run" in PROCESS_NAMES
+        assert "awake" in PROCESS_NAMES
+
+
+# ---------------------------------------------------------------------------
+# CLI: stop-all and status-all
+# ---------------------------------------------------------------------------
+
+
+class TestCLIStopAll:
+    def _run_cli(self, *args):
+        cmd = [sys.executable, "-m", "app.pid_manager"] + list(args)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(Path(__file__).parent.parent)
+        return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+    def test_stop_all_no_processes(self, tmp_path):
+        result = self._run_cli("stop-all", str(tmp_path))
+        assert result.returncode == 0
+        assert "not running" in result.stdout
+        assert "No processes were running." in result.stdout
+
+    def test_stop_all_with_process(self, tmp_path):
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"]
+        )
+        pidfile = tmp_path / ".koan-pid-run"
+        pidfile.write_text(str(proc.pid))
+
+        result = self._run_cli("stop-all", str(tmp_path))
+        assert result.returncode == 0
+        # Process may be stopped or force-killed depending on timing
+        assert "run: stopped" in result.stdout or "run: force killed" in result.stdout
+        # Reap to clean up
+        proc.wait(timeout=5)
+
+    def test_status_all_no_processes(self, tmp_path):
+        result = self._run_cli("status-all", str(tmp_path))
+        assert result.returncode == 0
+        assert "run: not running" in result.stdout
+        assert "awake: not running" in result.stdout
+
+    def test_status_all_with_running_process(self, tmp_path):
+        pidfile = tmp_path / ".koan-pid-run"
+        pidfile.write_text(str(os.getpid()))
+
+        result = self._run_cli("status-all", str(tmp_path))
+        assert result.returncode == 0
+        assert f"run: running (PID {os.getpid()})" in result.stdout
+        assert "awake: not running" in result.stdout

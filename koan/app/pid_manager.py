@@ -15,7 +15,9 @@ Usage from Python:
 
 import fcntl
 import os
+import signal
 import sys
+import time
 from pathlib import Path
 from typing import Optional, IO
 
@@ -167,8 +169,118 @@ def check_pidfile(koan_root: Path, process_name: str) -> Optional[int]:
     return None
 
 
+PROCESS_NAMES = ("run", "awake")
+
+
+def _wait_for_exit(pid: int, timeout: float) -> bool:
+    """Wait for a process to exit, with timeout.
+
+    Returns True if the process exited, False if still alive after timeout.
+    Handles both child processes (waitpid) and non-children (kill probe).
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        # Try to reap child zombie (works if we're the parent)
+        try:
+            result = os.waitpid(pid, os.WNOHANG)
+            if result[0] != 0:
+                return True  # Child reaped
+        except ChildProcessError:
+            pass  # Not our child — use kill probe
+
+        if not _is_process_alive(pid):
+            return True
+        time.sleep(0.2)
+    return not _is_process_alive(pid)
+
+
+def stop_processes(koan_root: Path, timeout: float = 5.0) -> dict:
+    """Stop all running Kōan processes (run + awake).
+
+    Sends SIGTERM to each running process, waits up to timeout seconds
+    for termination. Creates .koan-stop signal file for graceful shutdown.
+
+    Returns dict mapping process name to result: "stopped", "not_running",
+    or "force_killed".
+    """
+    results = {}
+
+    # Create .koan-stop signal file for graceful run loop shutdown
+    stop_file = koan_root / ".koan-stop"
+    stop_file.write_text("STOP")
+
+    for name in PROCESS_NAMES:
+        pid = check_pidfile(koan_root, name)
+        if not pid:
+            results[name] = "not_running"
+            continue
+
+        # Send SIGTERM
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            results[name] = "not_running"
+            continue
+
+        # Wait for process to exit
+        if _wait_for_exit(pid, timeout):
+            results[name] = "stopped"
+        else:
+            # Force kill
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
+            # Wait briefly for SIGKILL to take effect
+            _wait_for_exit(pid, 1.0)
+            results[name] = "force_killed"
+
+        # Clean up PID file
+        pidfile = _pidfile_path(koan_root, name)
+        pidfile.unlink(missing_ok=True)
+
+    return results
+
+
 # --- CLI interface ---
 if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        print(
+            "Usage: python -m app.pid_manager "
+            "<acquire-pid|release-pid|check|stop-all> <run|awake|KOAN_ROOT> [koan_root] [pid]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    action = sys.argv[1]
+
+    if action == "stop-all":
+        root = Path(sys.argv[2])
+        results = stop_processes(root)
+        any_stopped = False
+        for name, result in results.items():
+            if result == "stopped":
+                print(f"  {name}: stopped")
+                any_stopped = True
+            elif result == "force_killed":
+                print(f"  {name}: force killed")
+                any_stopped = True
+            else:
+                print(f"  {name}: not running")
+        if not any_stopped:
+            print("No processes were running.")
+        sys.exit(0)
+
+    if action == "status-all":
+        root = Path(sys.argv[2])
+        for name in PROCESS_NAMES:
+            pid = check_pidfile(root, name)
+            if pid:
+                print(f"  {name}: running (PID {pid})")
+            else:
+                print(f"  {name}: not running")
+        sys.exit(0)
+
     if len(sys.argv) < 4:
         print(
             "Usage: python -m app.pid_manager "
@@ -177,7 +289,6 @@ if __name__ == "__main__":
         )
         sys.exit(2)
 
-    action = sys.argv[1]
     proc_name = sys.argv[2]
     root = Path(sys.argv[3])
 

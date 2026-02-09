@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: install setup
+.PHONY: install setup stop status
 .PHONY: clean say migrate test sync-instance
 .PHONY: awake run errand-run errand-awake dashboard
 
@@ -34,6 +34,12 @@ migrate: setup
 
 dashboard: setup
 	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/dashboard.py
+
+stop: setup
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager stop-all $(PWD)
+
+status: setup
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager status-all $(PWD)
 
 errand-run: setup
 	caffeinate -i $(MAKE) run

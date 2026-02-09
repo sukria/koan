@@ -12,6 +12,8 @@ Kōan is an autonomous background agent that uses idle Claude API quota to work 
 make setup          # Create venv, install dependencies
 make run            # Start main agent loop
 make awake          # Start Telegram bridge (fast-response polling)
+make stop           # Stop all running processes (run + awake)
+make status         # Show running process status
 make dashboard      # Start Flask web dashboard (port 5001)
 make test           # Run full test suite (pytest)
 make say m="..."    # Send test message as if from Telegram
