@@ -336,6 +336,13 @@ def run_startup(koan_root: str, instance: str, projects: list):
         except Exception:
             pass
 
+        # Mission history cleanup
+        try:
+            from app.mission_history import cleanup_old_entries
+            cleanup_old_entries(instance)
+        except Exception:
+            pass
+
         # Health check
         log("health", "Checking Telegram bridge health...")
         try:
@@ -963,6 +970,19 @@ def main_loop():
             focus_area = plan["focus_area"]
             available_pct = plan["available_pct"]
 
+            # --- Dedup guard ---
+            if mission_title:
+                try:
+                    from app.mission_history import should_skip_mission
+                    if should_skip_mission(instance, mission_title, max_executions=3):
+                        log("mission", f"Skipping repeated mission (3+ attempts): {mission_title[:60]}")
+                        _fail_mission_in_file(instance, mission_title)
+                        _notify(instance, f"⚠️ Mission failed 3+ times, moved to Failed: {mission_title[:60]}")
+                        _commit_instance(instance)
+                        continue
+                except Exception:
+                    pass
+
             # Set project state
             Path(koan_root, ".koan-project").write_text(project_name)
             os.environ["KOAN_CURRENT_PROJECT"] = project_name
@@ -1007,18 +1027,16 @@ def main_loop():
 
                     if exit_code == 0:
                         log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
-                        # Move the mission from Pending to Done
-                        try:
-                            from app.missions import complete_mission
-                            missions_path = Path(instance, "missions.md")
-                            if missions_path.exists():
-                                from app.utils import atomic_write
-                                updated = complete_mission(missions_path.read_text(), mission_title)
-                                atomic_write(missions_path, updated)
-                        except Exception as e:
-                            log("warning", f"Could not complete mission in missions.md: {e}")
+                        _complete_mission_in_file(instance, mission_title)
                     else:
+                        _fail_mission_in_file(instance, mission_title)
                         _notify(instance, f"❌ Run {run_num}/{max_runs} — [{project_name}] Skill failed: {mission_title}")
+
+                    try:
+                        from app.mission_history import record_execution
+                        record_execution(instance, mission_title, project_name, exit_code)
+                    except Exception:
+                        pass
 
                     _commit_instance(instance)
                     count += 1
@@ -1155,6 +1173,19 @@ def main_loop():
 
             _cleanup_temp(stdout_file, stderr_file)
 
+            # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
+            if mission_title:
+                if claude_exit == 0:
+                    _complete_mission_in_file(instance, mission_title)
+                else:
+                    _fail_mission_in_file(instance, mission_title)
+
+                try:
+                    from app.mission_history import record_execution
+                    record_execution(instance, mission_title, project_name, claude_exit)
+                except Exception:
+                    pass
+
             # Report result
             if claude_exit == 0:
                 log("mission", f"Run {run_num}/{max_runs} — [{project_name}] completed successfully")
@@ -1271,6 +1302,30 @@ def _reset_usage_session(instance: str):
         log("health", "Usage session counters reset after resume")
     except Exception:
         pass
+
+
+def _complete_mission_in_file(instance: str, mission_title: str):
+    """Remove completed mission from Pending, add to Done (locked, idempotent)."""
+    try:
+        from app.missions import complete_mission
+        from app.utils import modify_missions_file
+        missions_path = Path(instance, "missions.md")
+        if missions_path.exists():
+            modify_missions_file(missions_path, lambda c: complete_mission(c, mission_title))
+    except Exception as e:
+        log("error", f"Could not complete mission in missions.md: {e}")
+
+
+def _fail_mission_in_file(instance: str, mission_title: str):
+    """Remove failed mission from Pending, add to Failed (locked, idempotent)."""
+    try:
+        from app.missions import fail_mission
+        from app.utils import modify_missions_file
+        missions_path = Path(instance, "missions.md")
+        if missions_path.exists():
+            modify_missions_file(missions_path, lambda c: fail_mission(c, mission_title))
+    except Exception as e:
+        log("error", f"Could not fail mission in missions.md: {e}")
 
 
 def _run_skill_mission(

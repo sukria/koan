@@ -24,9 +24,10 @@ _SECTION_MAP = {
     "terminés": "done",
     "done": "done",
     "completed": "done",
+    "failed": "failed",
 }
 
-DEFAULT_SKELETON = "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
+DEFAULT_SKELETON = "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n## Failed\n"
 
 
 def extract_now_flag(text: str) -> Tuple[bool, str]:
@@ -60,7 +61,7 @@ def parse_sections(content: str) -> Dict[str, List[str]]:
     (for ### complex missions). Continuation lines (indented text,
     code-fenced blocks) are attached to their parent "- ..." item.
     """
-    sections = {"pending": [], "in_progress": [], "done": []}
+    sections = {"pending": [], "in_progress": [], "done": [], "failed": []}
     current = None
     current_block = []
     in_code_fence = False
@@ -672,6 +673,51 @@ def complete_mission(content: str, mission_text: str) -> str:
 
     # No Done section — append one
     return normalize_content(updated + f"\n## Done\n\n{done_entry}\n")
+
+
+def fail_mission(content: str, mission_text: str) -> str:
+    """Move a mission from Pending to Failed with a failure timestamp.
+
+    Same pattern as complete_mission() but moves to ## Failed instead of ## Done.
+    Creates the ## Failed section if it doesn't exist.
+
+    Returns content unchanged if the mission is not found in Pending.
+    """
+    pending = list_pending(content)
+    if not pending:
+        return content
+
+    target_idx = None
+    needle = mission_text.strip()
+    for i, item in enumerate(pending):
+        if needle in item:
+            target_idx = i
+            break
+
+    if target_idx is None:
+        return content
+
+    result = _remove_pending_by_index(content, target_idx)
+    if result is None:
+        return content
+
+    updated = result[0]
+
+    timestamp = time.strftime("%Y-%m-%d %H:%M")
+    failed_entry = f"- {needle} \u274c ({timestamp})"
+
+    lines = updated.splitlines()
+    boundaries = find_section_boundaries(lines)
+    if "failed" in boundaries:
+        start, end = boundaries["failed"]
+        insert_at = start + 1
+        while insert_at < end and lines[insert_at].strip() == "":
+            insert_at += 1
+        lines.insert(insert_at, failed_entry)
+        return normalize_content("\n".join(lines))
+
+    # No Failed section — append one
+    return normalize_content(updated + f"\n## Failed\n\n{failed_entry}\n")
 
 
 def clean_mission_display(text: str, max_length: int = 120) -> str:

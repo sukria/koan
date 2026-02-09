@@ -4,6 +4,7 @@ import pytest
 from app.missions import (
     classify_section,
     complete_mission,
+    fail_mission,
     parse_sections,
     insert_mission,
     count_pending,
@@ -70,7 +71,7 @@ class TestParseSections:
 
     def test_empty_content(self):
         result = parse_sections("")
-        assert result == {"pending": [], "in_progress": [], "done": []}
+        assert result == {"pending": [], "in_progress": [], "done": [], "failed": []}
 
     def test_complex_mission(self):
         content = (
@@ -1056,3 +1057,119 @@ class TestCompleteMission:
         sections = parse_sections(result)
         assert len(sections["pending"]) == 0
         assert len(sections["done"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# fail_mission
+# ---------------------------------------------------------------------------
+
+class TestFailMission:
+    CONTENT = (
+        "# Missions\n\n"
+        "## Pending\n\n"
+        "- /plan Add dark mode\n"
+        "- Fix the login bug\n\n"
+        "## In Progress\n\n"
+        "## Done\n\n"
+        "- Old completed task\n"
+    )
+
+    def test_moves_mission_to_failed(self):
+        result = fail_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        assert len(sections["pending"]) == 1
+        assert "/plan Add dark mode" not in "\n".join(sections["pending"])
+        failed_text = "\n".join(sections["failed"])
+        assert "/plan Add dark mode" in failed_text
+
+    def test_failed_entry_has_cross_mark(self):
+        result = fail_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        failed_text = "\n".join(sections["failed"])
+        assert "\u274c" in failed_text
+
+    def test_failed_entry_has_timestamp(self):
+        import re
+        result = fail_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        failed_text = "\n".join(sections["failed"])
+        assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", failed_text)
+
+    def test_creates_failed_section_if_missing(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- /plan Test\n\n"
+            "## In Progress\n"
+        )
+        result = fail_mission(content, "/plan Test")
+        assert "## Failed" in result
+        sections = parse_sections(result)
+        assert len(sections["pending"]) == 0
+        assert len(sections["failed"]) == 1
+
+    def test_nonexistent_mission_unchanged(self):
+        result = fail_mission(self.CONTENT, "/nonexistent thing")
+        assert result == normalize_content(self.CONTENT)
+
+    def test_empty_pending_unchanged(self):
+        content = "# Missions\n\n## Pending\n\n## Done\n"
+        result = fail_mission(content, "/plan something")
+        assert result == normalize_content(content)
+
+    def test_remaining_pending_preserved(self):
+        result = fail_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        assert "- Fix the login bug" in sections["pending"]
+
+    def test_existing_done_preserved(self):
+        result = fail_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        done_text = "\n".join(sections["done"])
+        assert "Old completed task" in done_text
+
+    def test_existing_failed_section_preserved(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- New task\n\n"
+            "## In Progress\n\n"
+            "## Done\n\n"
+            "## Failed\n\n"
+            "- Old failed task\n"
+        )
+        result = fail_mission(content, "New task")
+        sections = parse_sections(result)
+        failed_text = "\n".join(sections["failed"])
+        assert "Old failed task" in failed_text
+        assert "New task" in failed_text
+
+    def test_project_tagged_mission(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- [project:koan] /plan Add dark mode\n\n"
+            "## Done\n\n"
+            "## Failed\n"
+        )
+        result = fail_mission(content, "/plan Add dark mode")
+        sections = parse_sections(result)
+        assert len(sections["pending"]) == 0
+        assert len(sections["failed"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# parse_sections — failed section
+# ---------------------------------------------------------------------------
+
+class TestParseSectionsFailed:
+    def test_includes_failed_key(self):
+        result = parse_sections("## Pending\n\n## Failed\n\n- Bad task\n")
+        assert "failed" in result
+        assert len(result["failed"]) == 1
+
+    def test_classify_section_failed(self):
+        assert classify_section("Failed") == "failed"
+
+    def test_default_skeleton_has_failed(self):
+        assert "## Failed" in DEFAULT_SKELETON
