@@ -3,6 +3,7 @@
 import pytest
 from app.missions import (
     classify_section,
+    complete_mission,
     parse_sections,
     insert_mission,
     count_pending,
@@ -976,3 +977,82 @@ class TestInsertMissionOrdering:
         result = insert_mission(self.CONTENT, "- urgent!", urgent=True)
         existing = [l for l in result.splitlines() if l.startswith("- ")]
         assert existing.index("- existing task one") < existing.index("- existing task two")
+
+
+# ---------------------------------------------------------------------------
+# complete_mission
+# ---------------------------------------------------------------------------
+
+class TestCompleteMission:
+    CONTENT = (
+        "# Missions\n\n"
+        "## Pending\n\n"
+        "- /plan Add dark mode\n"
+        "- Fix the login bug\n\n"
+        "## In Progress\n\n"
+        "## Done\n\n"
+        "- Old completed task\n"
+    )
+
+    def test_moves_mission_to_done(self):
+        result = complete_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        assert len(sections["pending"]) == 1
+        assert "/plan Add dark mode" not in "\n".join(sections["pending"])
+        # Should appear in Done
+        done_text = "\n".join(sections["done"])
+        assert "/plan Add dark mode" in done_text
+
+    def test_done_entry_has_timestamp(self):
+        result = complete_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        done_text = "\n".join(sections["done"])
+        # Timestamp format: YYYY-MM-DD HH:MM
+        import re
+        assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", done_text)
+
+    def test_done_entry_has_checkmark(self):
+        result = complete_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        done_text = "\n".join(sections["done"])
+        assert "✅" in done_text
+
+    def test_nonexistent_mission_unchanged(self):
+        result = complete_mission(self.CONTENT, "/nonexistent thing")
+        assert result == normalize_content(self.CONTENT)
+
+    def test_empty_pending_unchanged(self):
+        content = "# Missions\n\n## Pending\n\n## Done\n"
+        result = complete_mission(content, "/plan something")
+        assert result == normalize_content(content)
+
+    def test_remaining_pending_preserved(self):
+        result = complete_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        assert "- Fix the login bug" in sections["pending"]
+
+    def test_existing_done_preserved(self):
+        result = complete_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        done_text = "\n".join(sections["done"])
+        assert "Old completed task" in done_text
+
+    def test_no_done_section_creates_one(self):
+        content = "# Missions\n\n## Pending\n\n- /plan Test\n\n## In Progress\n"
+        result = complete_mission(content, "/plan Test")
+        sections = parse_sections(result)
+        assert len(sections["pending"]) == 0
+        assert len(sections["done"]) == 1
+        assert "/plan Test" in sections["done"][0]
+
+    def test_project_tagged_mission(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- [project:koan] /plan Add dark mode\n\n"
+            "## Done\n"
+        )
+        result = complete_mission(content, "/plan Add dark mode")
+        sections = parse_sections(result)
+        assert len(sections["pending"]) == 0
+        assert len(sections["done"]) == 1

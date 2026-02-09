@@ -1007,6 +1007,16 @@ def main_loop():
 
                     if exit_code == 0:
                         log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
+                        # Move the mission from Pending to Done
+                        try:
+                            from app.missions import complete_mission
+                            missions_path = Path(instance, "missions.md")
+                            if missions_path.exists():
+                                from app.utils import atomic_write
+                                updated = complete_mission(missions_path.read_text(), mission_title)
+                                atomic_write(missions_path, updated)
+                        except Exception as e:
+                            log("warning", f"Could not complete mission in missions.md: {e}")
                     else:
                         _notify(instance, f"❌ Run {run_num}/{max_runs} — [{project_name}] Skill failed: {mission_title}")
 

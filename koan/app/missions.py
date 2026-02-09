@@ -8,6 +8,7 @@ instead of reimplementing section detection and parsing.
 """
 
 import re
+import time
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -529,6 +530,46 @@ def list_pending(content: str) -> List[str]:
     return sections["pending"]
 
 
+def _remove_pending_by_index(
+    content: str, target_idx: int,
+) -> Optional[Tuple[str, str]]:
+    """Remove the Nth pending item (0-indexed) from missions.md content.
+
+    Returns (updated_content, removed_text) or None if the item cannot
+    be found in the raw content.
+    """
+    lines = content.splitlines()
+    boundaries = find_section_boundaries(lines)
+    if "pending" not in boundaries:
+        return None
+
+    start, end = boundaries["pending"]
+    pending_count = 0
+    remove_start = None
+    remove_end = None
+
+    for i in range(start + 1, end):
+        stripped = lines[i].strip()
+        if stripped.startswith("- "):
+            if pending_count == target_idx:
+                remove_start = i
+                remove_end = i + 1
+                for j in range(i + 1, end):
+                    next_stripped = lines[j].strip()
+                    if next_stripped == "" or next_stripped.startswith("- ") or next_stripped.startswith("#"):
+                        break
+                    remove_end = j + 1
+                break
+            pending_count += 1
+
+    if remove_start is None:
+        return None
+
+    removed_text = "\n".join(lines[remove_start:remove_end])
+    new_lines = lines[:remove_start] + lines[remove_end:]
+    return normalize_content("\n".join(new_lines)), removed_text
+
+
 def cancel_pending_mission(content: str, identifier: str) -> Tuple[str, str]:
     """Cancel a pending mission by number (1-indexed) or keyword match.
 
@@ -570,37 +611,67 @@ def cancel_pending_mission(content: str, identifier: str) -> Tuple[str, str]:
 
     target_text = pending[target_idx]
 
-    # Remove the target from raw content by finding the Nth "- " line in pending section
-    lines = content.splitlines()
-    boundaries = find_section_boundaries(lines)
-    if "pending" not in boundaries:
-        raise ValueError("No pending section found.")
-
-    start, end = boundaries["pending"]
-    pending_count = 0
-    remove_start = None
-    remove_end = None
-
-    for i in range(start + 1, end):
-        stripped = lines[i].strip()
-        if stripped.startswith("- "):
-            if pending_count == target_idx:
-                remove_start = i
-                # Include continuation lines (indented, non-empty, non-header)
-                remove_end = i + 1
-                for j in range(i + 1, end):
-                    next_stripped = lines[j].strip()
-                    if next_stripped == "" or next_stripped.startswith("- ") or next_stripped.startswith("#"):
-                        break
-                    remove_end = j + 1
-                break
-            pending_count += 1
-
-    if remove_start is None:
+    result = _remove_pending_by_index(content, target_idx)
+    if result is None:
         raise ValueError("Could not locate mission in file content.")
 
-    new_lines = lines[:remove_start] + lines[remove_end:]
-    return normalize_content("\n".join(new_lines)), target_text
+    return result[0], target_text
+
+
+def complete_mission(content: str, mission_text: str) -> str:
+    """Move a mission from Pending to Done with a completion timestamp.
+
+    Finds the mission in the Pending section by matching its text content,
+    removes it, and appends it to the Done section.
+
+    Args:
+        content: Full missions.md content.
+        mission_text: The mission text to match (e.g. "/plan Add dark mode").
+
+    Returns:
+        Updated content string. Returns original content unchanged if
+        the mission is not found in the Pending section.
+    """
+    pending = list_pending(content)
+    if not pending:
+        return content
+
+    # Find the matching pending item (by substring match on the mission text)
+    target_idx = None
+    needle = mission_text.strip()
+    for i, item in enumerate(pending):
+        if needle in item:
+            target_idx = i
+            break
+
+    if target_idx is None:
+        return content
+
+    result = _remove_pending_by_index(content, target_idx)
+    if result is None:
+        return content
+
+    updated = result[0]
+
+    # Add to Done section with timestamp
+    timestamp = time.strftime("%Y-%m-%d %H:%M")
+    done_entry = f"- {needle} ✅ ({timestamp})"
+
+    # Find the Done section and append
+    done_lines = updated.splitlines()
+    done_boundaries = find_section_boundaries(done_lines)
+    if "done" in done_boundaries:
+        done_start, done_end = done_boundaries["done"]
+        # Insert at the top of the Done section (right after header)
+        insert_at = done_start + 1
+        # Skip blank lines after header
+        while insert_at < done_end and done_lines[insert_at].strip() == "":
+            insert_at += 1
+        done_lines.insert(insert_at, done_entry)
+        return normalize_content("\n".join(done_lines))
+
+    # No Done section — append one
+    return normalize_content(updated + f"\n## Done\n\n{done_entry}\n")
 
 
 def clean_mission_display(text: str, max_length: int = 120) -> str:

@@ -49,35 +49,82 @@ _ISSUE_URL_RE = re.compile(
 )
 
 
+_PROJECT_TAG_RE = re.compile(r"^\[projec?t:([a-zA-Z0-9_-]+)\]\s*")
+_PROJECT_WORD_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+
+def _strip_project_prefix(text: str) -> Tuple[str, str]:
+    """Strip an optional project prefix from mission text.
+
+    Handles two forms:
+        - ``[project:koan] /plan Add dark mode``  -> ("koan", "/plan Add dark mode")
+        - ``koan /plan Add dark mode``             -> ("koan", "/plan Add dark mode")
+        - ``/plan Add dark mode``                  -> ("",     "/plan Add dark mode")
+
+    Returns (project_id, remaining_text).
+    """
+    stripped = text.strip()
+
+    # 1. [project:X] tag prefix
+    tag_match = _PROJECT_TAG_RE.match(stripped)
+    if tag_match:
+        return tag_match.group(1), stripped[tag_match.end():].strip()
+
+    # 2. Raw word prefix: "koan /plan ..."
+    # Only accept lowercase identifiers as project-id prefixes to avoid
+    # matching regular English words (e.g. "Fix /plan bug").
+    parts = stripped.split(None, 1)
+    if (len(parts) >= 2
+            and not parts[0].startswith("/")
+            and parts[1].startswith("/")
+            and _PROJECT_WORD_RE.match(parts[0])):
+        return parts[0], parts[1]
+
+    # 3. No prefix
+    return "", stripped
+
+
 def is_skill_mission(mission_text: str) -> bool:
-    """Check if a mission starts with a /skill command.
+    """Check if a mission contains a /skill command.
+
+    Handles optional project-id prefixes:
+        - ``/plan Add dark mode``                  (plain)
+        - ``[project:koan] /plan Add dark mode``   (tag prefix)
+        - ``koan /plan Add dark mode``             (word prefix)
 
     Args:
-        mission_text: The mission title (without the "- [project:X]" prefix).
+        mission_text: The mission title text.
 
     Returns:
-        True if the mission starts with /command.
+        True if the mission contains a /command.
     """
-    stripped = mission_text.strip()
-    return stripped.startswith("/") and len(stripped) > 1
+    _, remainder = _strip_project_prefix(mission_text)
+    return remainder.startswith("/") and len(remainder) > 1
 
 
-def parse_skill_mission(mission_text: str) -> Tuple[str, str]:
-    """Parse a skill mission into (command, args).
+def parse_skill_mission(mission_text: str) -> Tuple[str, str, str]:
+    """Parse a skill mission into (project_id, command, args).
+
+    Handles optional project-id prefixes:
+        - ``/plan Add dark mode``                  -> ("", "plan", "Add dark mode")
+        - ``[project:koan] /plan Add dark mode``   -> ("koan", "plan", "Add dark mode")
+        - ``koan /plan Add dark mode``             -> ("koan", "plan", "Add dark mode")
 
     Args:
-        mission_text: e.g. "/plan Add dark mode" or "/core.plan Fix bug"
+        mission_text: e.g. "/plan Add dark mode" or "[project:koan] /core.plan Fix bug"
 
     Returns:
-        (command, args) tuple. Command is normalized (no leading /).
-        For scoped commands like "/core.plan", returns ("plan", args).
+        (project_id, command, args) tuple. project_id is "" when no prefix.
+        Command is normalized (no leading /).
+        For scoped commands like "/core.plan", returns ("", "plan", args).
     """
-    stripped = mission_text.strip()
-    if not stripped.startswith("/"):
-        return "", stripped
+    project_id, remainder = _strip_project_prefix(mission_text)
+
+    if not remainder.startswith("/"):
+        return project_id, "", remainder
 
     # Split into command and args
-    parts = stripped[1:].split(None, 1)
+    parts = remainder[1:].split(None, 1)
     raw_command = parts[0]
     args = parts[1] if len(parts) > 1 else ""
 
@@ -88,11 +135,11 @@ def parse_skill_mission(mission_text: str) -> Tuple[str, str]:
         skill_name = segments[1]
         # core scope is implicit — /core.plan == /plan
         if scope == "core":
-            return skill_name, args
+            return project_id, skill_name, args
         # Keep the full scoped name for external skills
-        return raw_command, args
+        return project_id, raw_command, args
 
-    return raw_command, args
+    return project_id, raw_command, args
 
 
 def build_skill_command(
@@ -231,14 +278,17 @@ def dispatch_skill_mission(
     if not is_skill_mission(mission_text):
         return None
 
-    command, args = parse_skill_mission(mission_text)
+    parsed_project, command, args = parse_skill_mission(mission_text)
     if not command:
         return None
+
+    # Use parsed project-id as fallback when caller's project_name is empty
+    effective_project = project_name or parsed_project
 
     return build_skill_command(
         command=command,
         args=args,
-        project_name=project_name,
+        project_name=effective_project,
         project_path=project_path,
         koan_root=koan_root,
         instance_dir=instance_dir,
