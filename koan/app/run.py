@@ -899,20 +899,19 @@ def main_loop():
             stdout_file = tempfile.mktemp(prefix="koan-out-")
             stderr_file = tempfile.mktemp(prefix="koan-err-")
 
-            # Build CLI command (with per-project model/tools overrides)
-            from app.config import get_claude_flags_for_role, get_mission_tools
+            # Build CLI command (provider-agnostic with per-project overrides)
+            from app.mission_runner import build_mission_command
             from app.debug import debug_log as _debug_log
-            mission_flags_str = get_claude_flags_for_role("mission", autonomous_mode, project_name)
-            mission_tools = get_mission_tools(project_name)
-            cmd = ["claude", "-p", prompt,
-                   "--allowedTools", mission_tools,
-                   "--output-format", "json"]
-            if mission_flags_str:
-                cmd.extend(mission_flags_str.split())
+            cmd = build_mission_command(
+                prompt=prompt,
+                autonomous_mode=autonomous_mode,
+                extra_flags="",
+                project_name=project_name,
+            )
 
-            _debug_log(f"[run] claude cli: cmd={' '.join(cmd[:6])}... cwd={project_path}")
+            _debug_log(f"[run] cli: cmd={' '.join(cmd[:6])}... cwd={project_path}")
             claude_exit = run_claude_task(cmd, stdout_file, stderr_file, cwd=project_path)
-            _debug_log(f"[run] claude cli: exit_code={claude_exit}")
+            _debug_log(f"[run] cli: exit_code={claude_exit}")
 
             # Parse and display output
             try:

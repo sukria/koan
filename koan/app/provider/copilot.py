@@ -83,13 +83,26 @@ class CopilotProvider(CLIProvider):
         return flags
 
     def build_output_args(self, fmt: str = "") -> List[str]:
-        if fmt == "json":
-            return ["--json"]
+        # Copilot CLI does not support --json or --output-format flags
+        # Output is always plain text (we parse it in post-processing if needed)
+        if fmt:
+            import os
+            if os.environ.get("KOAN_DEBUG") or os.environ.get("DEBUG"):
+                import sys
+                print(f"[DEBUG] Copilot provider: output format '{fmt}' requested but not supported",
+                      file=sys.stderr)
         return []
 
     def build_max_turns_args(self, max_turns: int = 0) -> List[str]:
+        # Copilot CLI does not support --max-turns flag
+        # The conversation naturally ends when the model's response is complete
         if max_turns > 0:
-            return ["--max-turns", str(max_turns)]
+            # Debug mode: warn that max-turns is requested but not supported
+            import os
+            if os.environ.get("KOAN_DEBUG") or os.environ.get("DEBUG"):
+                import sys
+                print(f"[DEBUG] Copilot provider: max-turns={max_turns} requested but not supported", 
+                      file=sys.stderr)
         return []
 
     def build_mcp_args(self, configs: Optional[List[str]] = None) -> List[str]:

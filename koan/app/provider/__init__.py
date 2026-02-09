@@ -61,17 +61,18 @@ def get_provider_name() -> str:
     """Determine which CLI provider to use.
 
     Resolution order:
-    1. KOAN_CLI_PROVIDER env var (highest priority)
+    1. KOAN_CLI_PROVIDER env var (with CLI_PROVIDER fallback; highest priority)
     2. config.yaml cli_provider key
     3. Default: "claude"
     """
-    env_val = os.environ.get("KOAN_CLI_PROVIDER", "").strip().lower()
+    # Lazy import to avoid circular dependency
+    from app.utils import get_cli_provider_env, load_config
+
+    env_val = get_cli_provider_env()
     if env_val and env_val in _PROVIDERS:
         return env_val
 
-    # Lazy import to avoid circular dependency
     try:
-        from app.utils import load_config
         config = load_config()
         config_val = str(config.get("cli_provider", "")).strip().lower()
         if config_val and config_val in _PROVIDERS:

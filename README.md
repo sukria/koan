@@ -163,6 +163,9 @@ models:
   contemplative: haiku   # Pause mode reflections
   review_mode: null      # Read-only audit mode
 
+# CLI provider — which AI backend to use
+cli_provider: "claude"   # Options: claude (default), copilot, local
+
 # Auto-merge rules for koan/* branches
 git_auto_merge:
   default:
@@ -173,6 +176,42 @@ git_auto_merge:
     - pattern: "koan/*"
       base_branch: main
 ```
+
+### CLI Provider Support
+
+Kōan supports multiple AI CLI backends:
+
+| Feature | Claude | Copilot | Local LLM |
+|---------|--------|---------|-----------|
+| **Model selection** | ✅ `--model` | ✅ `--model` | ✅ (via config) |
+| **Fallback model** | ✅ `--fallback-model` | ❌ Not supported | ❌ Not supported |
+| **Max turns limit** | ✅ `--max-turns` | ❌ Not supported | ✅ (wrapper script) |
+| **JSON output** | ✅ `--output-format json` | ❌ Plain text only | ✅ JSON via wrapper |
+| **Tool access** | ✅ `--allowedTools` | ✅ `--allow-tool` | ✅ Tool restrictions |
+| **MCP servers** | ✅ `--mcp-config` | ✅ `--additional-mcp-config` | ❌ Not implemented |
+| **Interactive** | ✅ Full support | ✅ Full support | ✅ Full support |
+
+**Usage:**
+```bash
+# Via environment variable (highest priority)
+export KOAN_CLI_PROVIDER=copilot
+
+# Via config.yaml
+cli_provider: "copilot"
+
+# Per-project in projects.yaml
+projects:
+  myapp:
+    path: /path/to/project
+    cli_provider: "copilot"
+```
+
+**Notes:**
+- `KOAN_CLI_PROVIDER` is the recommended environment variable (fallback to `CLI_PROVIDER` supported)
+- When Copilot lacks JSON output, Kōan falls back to plain text parsing
+- Max-turns absence means conversations run until model completion
+- Debug mode (`KOAN_DEBUG=1`) logs when unsupported features are requested
+- All providers tested with 143 unit tests
 
 ## Security
 

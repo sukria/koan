@@ -32,7 +32,7 @@ def build_mission_command(
     extra_flags: str = "",
     project_name: str = "",
 ) -> List[str]:
-    """Build the Claude CLI command for mission execution.
+    """Build the CLI command for mission execution (provider-agnostic).
 
     Args:
         prompt: The full agent prompt text.
@@ -43,16 +43,30 @@ def build_mission_command(
     Returns:
         Complete command list ready for subprocess.
     """
-    from app.config import get_mission_tools
+    from app.config import get_mission_tools, get_model_config
+    from app.cli_provider import build_full_command
 
-    tools = get_mission_tools(project_name)
+    # Get mission tools (comma-separated list)
+    tools_str = get_mission_tools(project_name)
+    tools_list = [t.strip() for t in tools_str.split(",") if t.strip()]
 
-    cmd = [
-        "claude", "-p", prompt,
-        "--allowedTools", tools,
-        "--output-format", "json",
-    ]
+    # Get model configuration with per-project overrides
+    models = get_model_config(project_name)
+    model = models["mission"]
+    if autonomous_mode == "review" and models["review_mode"]:
+        model = models["review_mode"]
+    fallback = models["fallback"]
 
+    # Build provider-specific command
+    cmd = build_full_command(
+        prompt=prompt,
+        allowed_tools=tools_list,
+        model=model,
+        fallback=fallback,
+        output_format="json",
+    )
+
+    # Append any extra flags from config
     if extra_flags.strip():
         cmd.extend(extra_flags.strip().split())
 
