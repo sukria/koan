@@ -163,6 +163,10 @@ def get_project_cli_provider(config: dict, project_name: str) -> str:
 
     Returns the provider name ("claude", "copilot", "local") or empty string
     if not configured (meaning: use the global provider).
+
+    Note: Data accessor only — the provider resolution in cli_provider.py
+    does not yet call this. Per-project provider switching requires changes
+    to get_provider() to accept a project_name parameter.
     """
     project_cfg = get_project_config(config, project_name)
     return str(project_cfg.get("cli_provider", "")).strip().lower()
