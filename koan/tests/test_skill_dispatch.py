@@ -50,54 +50,64 @@ class TestIsSkillMission:
 
 class TestParseSkillMission:
     def test_simple_plan(self):
-        cmd, args = parse_skill_mission("/plan Add dark mode")
+        pid, cmd, args = parse_skill_mission("/plan Add dark mode")
+        assert pid == ""
         assert cmd == "plan"
         assert args == "Add dark mode"
 
     def test_rebase_url(self):
-        cmd, args = parse_skill_mission("/rebase https://github.com/sukria/koan/pull/42")
+        pid, cmd, args = parse_skill_mission("/rebase https://github.com/sukria/koan/pull/42")
+        assert pid == ""
         assert cmd == "rebase"
         assert args == "https://github.com/sukria/koan/pull/42"
 
     def test_ai_no_args(self):
-        cmd, args = parse_skill_mission("/ai")
+        pid, cmd, args = parse_skill_mission("/ai")
+        assert pid == ""
         assert cmd == "ai"
         assert args == ""
 
     def test_ai_with_project(self):
-        cmd, args = parse_skill_mission("/ai koan")
+        pid, cmd, args = parse_skill_mission("/ai koan")
+        assert pid == ""
         assert cmd == "ai"
         assert args == "koan"
 
     def test_scoped_core(self):
         """core.plan should resolve to just 'plan'."""
-        cmd, args = parse_skill_mission("/core.plan Add dark mode")
+        pid, cmd, args = parse_skill_mission("/core.plan Add dark mode")
+        assert pid == ""
         assert cmd == "plan"
         assert args == "Add dark mode"
 
     def test_scoped_external(self):
         """External scoped skills keep full scope."""
-        cmd, args = parse_skill_mission("/anantys.review Check code")
+        pid, cmd, args = parse_skill_mission("/anantys.review Check code")
+        assert pid == ""
         assert cmd == "anantys.review"
         assert args == "Check code"
 
     def test_claude_md(self):
-        cmd, args = parse_skill_mission("/claude.md koan")
+        pid, cmd, args = parse_skill_mission("/claude.md koan")
+        assert pid == ""
         assert cmd == "claude.md"
         assert args == "koan"
 
     def test_no_slash(self):
-        cmd, args = parse_skill_mission("Fix the bug")
+        pid, cmd, args = parse_skill_mission("Fix the bug")
+        assert pid == ""
         assert cmd == ""
         assert args == "Fix the bug"
 
     def test_check_with_url(self):
-        cmd, args = parse_skill_mission("/check https://github.com/sukria/koan/issues/42")
+        pid, cmd, args = parse_skill_mission("/check https://github.com/sukria/koan/issues/42")
+        assert pid == ""
         assert cmd == "check"
         assert args == "https://github.com/sukria/koan/issues/42"
 
     def test_recreate_with_url(self):
-        cmd, args = parse_skill_mission("/recreate https://github.com/sukria/koan/pull/100")
+        pid, cmd, args = parse_skill_mission("/recreate https://github.com/sukria/koan/pull/100")
+        assert pid == ""
         assert cmd == "recreate"
         assert args == "https://github.com/sukria/koan/pull/100"
 
@@ -446,3 +456,127 @@ class TestHandlerCleanFormat:
         content = missions_file.read_text()
         assert "/recreate https://github.com/sukria/koan/pull/42" in content
         assert "run:" not in content
+
+
+# ---------------------------------------------------------------------------
+# is_skill_mission — project-id prefix handling
+# ---------------------------------------------------------------------------
+
+class TestIsSkillMissionWithPrefix:
+    def test_project_tag_prefix(self):
+        assert is_skill_mission("[project:koan] /plan Add dark mode") is True
+
+    def test_projet_tag_prefix(self):
+        assert is_skill_mission("[projet:koan] /plan Add dark mode") is True
+
+    def test_raw_project_word_prefix(self):
+        assert is_skill_mission("koan /plan Add dark mode") is True
+
+    def test_project_tag_no_slash(self):
+        """Tag prefix but no /command — not a skill mission."""
+        assert is_skill_mission("[project:koan] Fix the bug") is False
+
+    def test_raw_word_no_slash(self):
+        """Word prefix but second word doesn't start with /."""
+        assert is_skill_mission("koan Fix the bug") is False
+
+    def test_project_tag_scoped_command(self):
+        assert is_skill_mission("[project:koan] /core.plan Fix bug") is True
+
+    def test_raw_prefix_ai(self):
+        assert is_skill_mission("myproject /ai") is True
+
+
+# ---------------------------------------------------------------------------
+# parse_skill_mission — project-id prefix handling
+# ---------------------------------------------------------------------------
+
+class TestParseSkillMissionWithPrefix:
+    def test_project_tag_prefix(self):
+        pid, cmd, args = parse_skill_mission("[project:koan] /plan Add dark mode")
+        assert pid == "koan"
+        assert cmd == "plan"
+        assert args == "Add dark mode"
+
+    def test_projet_tag_prefix(self):
+        pid, cmd, args = parse_skill_mission("[projet:myapp] /rebase https://github.com/x/y/pull/1")
+        assert pid == "myapp"
+        assert cmd == "rebase"
+        assert args == "https://github.com/x/y/pull/1"
+
+    def test_raw_project_word_prefix(self):
+        pid, cmd, args = parse_skill_mission("koan /plan Add dark mode")
+        assert pid == "koan"
+        assert cmd == "plan"
+        assert args == "Add dark mode"
+
+    def test_raw_word_prefix_no_args(self):
+        pid, cmd, args = parse_skill_mission("koan /ai")
+        assert pid == "koan"
+        assert cmd == "ai"
+        assert args == ""
+
+    def test_project_tag_scoped_command(self):
+        pid, cmd, args = parse_skill_mission("[project:koan] /core.plan Fix bug")
+        assert pid == "koan"
+        assert cmd == "plan"
+        assert args == "Fix bug"
+
+    def test_project_tag_no_command(self):
+        pid, cmd, args = parse_skill_mission("[project:koan] Fix the login bug")
+        assert pid == "koan"
+        assert cmd == ""
+        assert args == "Fix the login bug"
+
+    def test_raw_word_no_command(self):
+        """Two regular words — first word is not a project prefix."""
+        pid, cmd, args = parse_skill_mission("Fix the bug")
+        assert pid == ""
+        assert cmd == ""
+        assert args == "Fix the bug"
+
+
+# ---------------------------------------------------------------------------
+# dispatch_skill_mission — project-id prefix handling
+# ---------------------------------------------------------------------------
+
+class TestDispatchSkillMissionWithPrefix:
+    KOAN_ROOT = "/home/user/koan"
+    INSTANCE = "/home/user/koan/instance"
+
+    def _dispatch(self, mission_text, project_name="koan", project_path="/home/user/workspace/koan"):
+        return dispatch_skill_mission(
+            mission_text=mission_text,
+            project_name=project_name,
+            project_path=project_path,
+            koan_root=self.KOAN_ROOT,
+            instance_dir=self.INSTANCE,
+        )
+
+    def test_project_tag_prefix_dispatches(self):
+        cmd = self._dispatch("[project:koan] /plan Add dark mode")
+        assert cmd is not None
+        assert "app.plan_runner" in cmd
+
+    def test_raw_word_prefix_dispatches(self):
+        cmd = self._dispatch("koan /plan Add dark mode")
+        assert cmd is not None
+        assert "app.plan_runner" in cmd
+
+    def test_project_tag_prefix_returns_none_for_regular_mission(self):
+        cmd = self._dispatch("[project:koan] Fix the login bug")
+        assert cmd is None
+
+    def test_project_id_used_as_fallback(self):
+        """When project_name is empty, parsed project_id is used."""
+        cmd = self._dispatch("koan /ai", project_name="", project_path="/workspace/koan")
+        assert cmd is not None
+        assert "app.ai_runner" in cmd
+        # The project name in the command should come from the parsed prefix
+        assert "koan" in cmd
+
+    def test_explicit_project_name_takes_priority(self):
+        """Caller's project_name is used even if prefix has a different project."""
+        cmd = self._dispatch("[project:other] /ai", project_name="koan", project_path="/workspace/koan")
+        assert cmd is not None
+        assert "koan" in cmd
