@@ -917,6 +917,103 @@ class TestIdeaHandler:
         assert "IDEAS" in result
         assert "1. main idea" in result
 
+    @patch("app.utils.get_known_projects", return_value=[("koan", "/p/koan"), ("web", "/p/web")])
+    def test_add_idea_auto_detect_project_from_first_word(self, mock_proj, tmp_path):
+        """'/idea koan some text' auto-detects koan as project."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="koan add retry logic")
+        result = handle(ctx)
+        assert "Idea saved" in result
+        assert "(project: koan)" in result
+
+        written = (tmp_path / "instance" / "missions.md").read_text()
+        assert "[project:koan]" in written
+        assert "add retry logic" in written
+        # The project name should NOT appear in the idea text itself
+        assert "- [project:koan] add retry logic" in written
+
+    @patch("app.utils.get_known_projects", return_value=[("koan", "/p/koan"), ("web", "/p/web")])
+    def test_add_idea_multi_project_no_project_asks(self, mock_proj, tmp_path):
+        """Multi-project setup without project specified prompts user."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="fix the login bug")
+        result = handle(ctx)
+        assert "Which project" in result
+        assert "koan" in result
+        assert "web" in result
+        assert "/idea koan" in result
+
+    @patch("app.utils.get_known_projects", return_value=[("myproj", "/p/myproj")])
+    def test_add_idea_single_project_no_prompt(self, mock_proj, tmp_path):
+        """Single-project setup saves without prompting."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="fix the login bug")
+        result = handle(ctx)
+        assert "Idea saved" in result
+        # Single project → no project tag, no prompt
+        assert "Which project" not in result
+
+    @patch("app.utils.get_known_projects", return_value=[("koan", "/p/koan"), ("web", "/p/web")])
+    def test_add_idea_explicit_tag_takes_priority(self, mock_proj, tmp_path):
+        """Explicit [project:X] tag takes priority over first-word detection."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(
+            tmp_path, content, command="idea",
+            args="[project:web] koan should do something",
+        )
+        result = handle(ctx)
+        assert "Idea saved" in result
+        assert "(project: web)" in result
+
+        written = (tmp_path / "instance" / "missions.md").read_text()
+        assert "[project:web]" in written
+        assert "koan should do something" in written
+
+    @patch("app.utils.get_known_projects", return_value=[("koan", "/p/koan"), ("web", "/p/web")])
+    def test_add_idea_case_insensitive_project(self, mock_proj, tmp_path):
+        """Project detection is case-insensitive."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="Koan fix tests")
+        result = handle(ctx)
+        assert "Idea saved" in result
+        assert "(project: koan)" in result
+
+    @patch("app.utils.get_known_projects", return_value=[("koan", "/p/koan"), ("web", "/p/web")])
+    def test_add_idea_project_only_no_text(self, mock_proj, tmp_path):
+        """'/idea koan' with no idea text stores empty idea."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(tmp_path, content, command="idea", args="koan")
+        result = handle(ctx)
+        # Should detect project but idea text is empty — still saves
+        assert "Idea saved" in result
+        assert "(project: koan)" in result
+
+    @patch("app.utils.get_known_projects", return_value=[("koan", "/p/koan")])
+    def test_add_idea_project_shown_in_ack_with_explicit_tag(self, mock_proj, tmp_path):
+        """Acknowledgment includes project when explicit tag is used."""
+        from skills.core.idea.handler import handle
+
+        content = "# Missions\n\n## Ideas\n\n## Pending\n\n## Done\n"
+        ctx = self._make_ctx(
+            tmp_path, content, command="idea",
+            args="[project:koan] improve tests",
+        )
+        result = handle(ctx)
+        assert "(project: koan)" in result
+        assert "improve tests" in result
+
 
 # ---------------------------------------------------------------------------
 # clean_mission_display helper
