@@ -3,6 +3,7 @@ name: journal
 scope: core
 description: View journal entries
 version: 1.0.0
+audience: bridge
 commands:
   - name: log
     description: Show latest journal entry

@@ -3,6 +3,7 @@ name: status
 scope: core
 description: Show Kōan status, missions, and run loop health
 version: 1.0.0
+audience: bridge
 commands:
   - name: status
     description: Quick status overview

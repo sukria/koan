@@ -3,6 +3,7 @@ name: magic
 scope: core
 description: Instant creative exploration of a project
 version: 1.1.0
+audience: bridge
 commands:
   - name: magic
     description: Instantly explore a project and suggest ideas

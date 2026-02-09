@@ -3,6 +3,7 @@ name: priority
 scope: core
 description: Reorder pending missions in the queue
 version: 1.0.0
+audience: bridge
 commands:
   - name: priority
     description: Move a pending mission to a new position

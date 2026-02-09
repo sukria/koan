@@ -3,6 +3,7 @@ name: projects
 scope: core
 description: List configured projects
 version: 1.0.0
+audience: bridge
 commands:
   - name: projects
     description: List configured projects
