@@ -180,6 +180,7 @@ class TestSignalState:
         assert s.first_ctrl_c == 0
         assert s.claude_proc is None
         assert s.timeout == 10
+        assert s.phase == ""
 
 
 # ---------------------------------------------------------------------------
@@ -198,10 +199,35 @@ class TestOnSigint:
         _init_colors()
         _sig.task_running = True
         _sig.first_ctrl_c = 0
+        _sig.phase = ""
         _on_sigint(signal.SIGINT, None)
         assert _sig.first_ctrl_c > 0
         out = capsys.readouterr().out
         assert "Press CTRL-C again" in out
+
+    def test_first_ctrl_c_shows_phase(self, capsys):
+        """First CTRL-C should display the current phase name."""
+        from app.run import _on_sigint, _sig, _init_colors
+        _init_colors()
+        _sig.task_running = True
+        _sig.first_ctrl_c = 0
+        _sig.phase = "Morning ritual"
+        _on_sigint(signal.SIGINT, None)
+        out = capsys.readouterr().out
+        assert "Morning ritual" in out
+        assert "Press CTRL-C again" in out
+        _sig.phase = ""
+
+    def test_first_ctrl_c_no_phase_no_parens(self, capsys):
+        """When no phase is set, the message should not have empty parens."""
+        from app.run import _on_sigint, _sig, _init_colors
+        _init_colors()
+        _sig.task_running = True
+        _sig.first_ctrl_c = 0
+        _sig.phase = ""
+        _on_sigint(signal.SIGINT, None)
+        out = capsys.readouterr().out
+        assert "()" not in out
 
     def test_second_ctrl_c_raises(self, capsys):
         from app.run import _on_sigint, _sig, _init_colors
@@ -224,6 +250,122 @@ class TestOnSigint:
         assert _sig.first_ctrl_c > time.time() - 2
         out = capsys.readouterr().out
         assert "Press CTRL-C again" in out
+
+
+# ---------------------------------------------------------------------------
+# Test: protected_phase context manager
+# ---------------------------------------------------------------------------
+
+class TestProtectedPhase:
+    def test_sets_task_running(self):
+        from app.run import protected_phase, _sig
+        _sig.task_running = False
+        _sig.phase = ""
+        with protected_phase("Testing"):
+            assert _sig.task_running is True
+            assert _sig.phase == "Testing"
+        assert _sig.task_running is False
+        assert _sig.phase == ""
+
+    def test_resets_on_exit(self):
+        from app.run import protected_phase, _sig
+        _sig.task_running = False
+        _sig.phase = ""
+        _sig.first_ctrl_c = 99.0
+        with protected_phase("Phase A"):
+            assert _sig.first_ctrl_c == 0  # Reset on entry
+        assert _sig.first_ctrl_c == 0  # Reset on exit
+
+    def test_restores_previous_state(self):
+        """Nested protected_phase should restore outer state."""
+        from app.run import protected_phase, _sig
+        _sig.task_running = False
+        _sig.phase = ""
+        with protected_phase("Outer"):
+            assert _sig.phase == "Outer"
+            assert _sig.task_running is True
+            with protected_phase("Inner"):
+                assert _sig.phase == "Inner"
+                assert _sig.task_running is True
+            assert _sig.phase == "Outer"
+            assert _sig.task_running is True
+        assert _sig.task_running is False
+        assert _sig.phase == ""
+
+    def test_restores_on_exception(self):
+        """State should be restored even if an exception occurs."""
+        from app.run import protected_phase, _sig
+        _sig.task_running = False
+        _sig.phase = ""
+        try:
+            with protected_phase("Failing"):
+                assert _sig.task_running is True
+                raise ValueError("boom")
+        except ValueError:
+            pass
+        assert _sig.task_running is False
+        assert _sig.phase == ""
+
+    def test_restores_on_keyboard_interrupt(self):
+        """State should be restored on KeyboardInterrupt."""
+        from app.run import protected_phase, _sig
+        _sig.task_running = False
+        _sig.phase = ""
+        try:
+            with protected_phase("Interrupted"):
+                raise KeyboardInterrupt
+        except KeyboardInterrupt:
+            pass
+        assert _sig.task_running is False
+        assert _sig.phase == ""
+
+    def test_first_ctrl_c_during_phase_warns(self, capsys):
+        """First CTRL-C inside a protected_phase should warn, not abort."""
+        from app.run import protected_phase, _on_sigint, _sig, _init_colors
+        _init_colors()
+        with protected_phase("Git sync"):
+            _sig.first_ctrl_c = 0
+            _on_sigint(signal.SIGINT, None)
+            out = capsys.readouterr().out
+            assert "Git sync" in out
+            assert "Press CTRL-C again" in out
+            assert _sig.first_ctrl_c > 0
+
+    def test_double_ctrl_c_during_phase_aborts(self, capsys):
+        """Double CTRL-C inside a protected_phase should raise."""
+        from app.run import protected_phase, _on_sigint, _sig, _init_colors
+        _init_colors()
+        with protected_phase("Morning ritual"):
+            _sig.first_ctrl_c = time.time()  # Simulate first press
+            with pytest.raises(KeyboardInterrupt):
+                _on_sigint(signal.SIGINT, None)
+
+    def test_outside_phase_ctrl_c_raises_immediately(self):
+        """Without protected_phase, CTRL-C should raise immediately."""
+        from app.run import _on_sigint, _sig
+        _sig.task_running = False
+        _sig.phase = ""
+        with pytest.raises(KeyboardInterrupt):
+            _on_sigint(signal.SIGINT, None)
+
+    def test_phase_cleared_after_double_tap(self):
+        """After double-tap abort, phase and task_running should be cleared."""
+        from app.run import protected_phase, _on_sigint, _sig, _init_colors
+        _init_colors()
+        _sig.task_running = False
+        _sig.phase = ""
+        try:
+            with protected_phase("Some phase"):
+                _sig.first_ctrl_c = time.time()
+                try:
+                    _on_sigint(signal.SIGINT, None)
+                except KeyboardInterrupt:
+                    raise
+        except KeyboardInterrupt:
+            pass
+        # The context manager __exit__ should have run
+        assert _sig.phase == ""
+        assert _sig.task_running is False
 
 
 # ---------------------------------------------------------------------------
