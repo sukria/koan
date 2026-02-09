@@ -269,7 +269,8 @@ class TestCopilotProvider:
 
     def test_output_args_json(self):
         p = self._make()
-        assert p.build_output_args("json") == ["--json"]
+        # Copilot doesn't support --json, should return empty
+        assert p.build_output_args("json") == []
 
     def test_output_args_empty(self):
         p = self._make()
@@ -277,7 +278,9 @@ class TestCopilotProvider:
 
     def test_max_turns_args(self):
         p = self._make()
-        assert p.build_max_turns_args(3) == ["--max-turns", "3"]
+        # Copilot doesn't support --max-turns, should return empty
+        assert p.build_max_turns_args(3) == []
+        assert p.build_max_turns_args(0) == []
 
     def test_mcp_args(self):
         p = self._make()
@@ -451,7 +454,8 @@ class TestConvenienceFunctions:
 
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "copilot"})
     def test_build_output_flags_copilot(self):
-        assert build_output_flags("json") == ["--json"]
+        # Copilot doesn't support --json, returns empty
+        assert build_output_flags("json") == []
 
     @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
     def test_build_full_command_claude(self):
@@ -479,7 +483,9 @@ class TestConvenienceFunctions:
         )
         assert cmd[0] == "copilot"
         assert "--allow-tool" in cmd
-        assert "--json" in cmd
+        # Copilot doesn't support --json or --max-turns
+        assert "--json" not in cmd
+        assert "--max-turns" not in cmd
 
 
 # ---------------------------------------------------------------------------
