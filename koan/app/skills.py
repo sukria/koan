@@ -12,6 +12,7 @@ SKILL.md format:
     name: status
     description: Show Kōan status
     version: 1.0.0
+    audience: bridge        # bridge | agent | command | hybrid
     commands:
       - name: status
         description: Quick status overview
@@ -30,6 +31,14 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# Valid audience values for skills.
+# - "bridge": Telegram-only (process control, quick checks)
+# - "agent": Exposed to Claude CLI as a plugin skill (auto-triggered by context)
+# - "command": Exposed to Claude CLI as a slash command (explicit invocation)
+# - "hybrid": Available in both Telegram and Claude CLI
+VALID_AUDIENCES = ("bridge", "agent", "command", "hybrid")
+DEFAULT_AUDIENCE = "bridge"
 
 
 @dataclass
@@ -55,6 +64,7 @@ class Skill:
     prompt_body: str = ""
     skill_dir: Optional[Path] = None
     worker: bool = False
+    audience: str = DEFAULT_AUDIENCE
 
     @property
     def qualified_name(self) -> str:
@@ -198,6 +208,11 @@ def parse_skill_md(path: Path) -> Optional[Skill]:
     # Parse worker flag
     worker = meta.get("worker", "").lower() in ("true", "yes", "1")
 
+    # Parse audience (default: "bridge" for backward compatibility)
+    audience = meta.get("audience", DEFAULT_AUDIENCE).lower()
+    if audience not in VALID_AUDIENCES:
+        audience = DEFAULT_AUDIENCE
+
     return Skill(
         name=meta["name"],
         scope=meta.get("scope", skill_dir.parent.name),
@@ -208,6 +223,7 @@ def parse_skill_md(path: Path) -> Optional[Skill]:
         prompt_body=prompt_body,
         skill_dir=skill_dir,
         worker=worker,
+        audience=audience,
     )
 
 
@@ -262,6 +278,10 @@ class SkillRegistry:
 
     def list_by_scope(self, scope: str) -> List[Skill]:
         return [s for s in self._skills.values() if s.scope == scope]
+
+    def list_by_audience(self, *audiences: str) -> List[Skill]:
+        """Return skills matching any of the given audience types."""
+        return [s for s in self._skills.values() if s.audience in audiences]
 
     def scopes(self) -> List[str]:
         return sorted(set(s.scope for s in self._skills.values()))

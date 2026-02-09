@@ -3,6 +3,7 @@ name: recurring
 scope: core
 description: Manage recurring missions (hourly, daily, weekly)
 version: 1.0.0
+audience: bridge
 commands:
   - name: daily
     description: Add a daily recurring mission

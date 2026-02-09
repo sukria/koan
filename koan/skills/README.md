@@ -35,6 +35,7 @@ name: greet
 scope: myteam
 description: Send a greeting to the channel
 version: 1.0.0
+audience: bridge
 commands:
   - name: greet
     description: Say hello
@@ -55,6 +56,30 @@ handler: handler.py
 | `commands` | no | List of commands this skill exposes |
 | `handler` | no | Path to Python handler (relative to skill dir) |
 | `worker` | no | Set to `true` for skills that block (call Claude, APIs, etc.) |
+| `audience` | no | Who consumes this skill: `bridge`, `agent`, `command`, or `hybrid` (default: `bridge`) |
+
+### Audience
+
+The `audience` field controls where a skill is available:
+
+| Value | Description |
+|-------|-------------|
+| `bridge` | Telegram-only. Process control, quick checks, interactive commands. Default. |
+| `agent` | Exposed to Claude Code CLI as a plugin skill. Auto-triggered by context during missions. |
+| `command` | Exposed to Claude Code CLI as a slash command. Explicit invocation by the agent. |
+| `hybrid` | Available in both worlds — Telegram command + Claude Code plugin. |
+
+Example:
+
+```yaml
+---
+name: refactor
+audience: hybrid
+description: Refactor and simplify code
+---
+```
+
+Skills default to `bridge` when `audience` is omitted (backward compatible).
 
 ### Commands
 

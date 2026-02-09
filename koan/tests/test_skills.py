@@ -7,10 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.skills import (
+    DEFAULT_AUDIENCE,
     Skill,
     SkillCommand,
     SkillContext,
     SkillRegistry,
+    VALID_AUDIENCES,
     _parse_inline_list,
     _parse_yaml_lite,
     build_registry,
@@ -615,6 +617,226 @@ class TestWorkerField:
         skill = registry.get("core", "status")
         assert skill is not None
         assert skill.worker is False
+
+
+# ---------------------------------------------------------------------------
+# Audience field
+# ---------------------------------------------------------------------------
+
+class TestAudienceField:
+    """Tests for the 'audience' field in SKILL.md."""
+
+    def test_audience_bridge_parsed(self, tmp_path):
+        skill_dir = tmp_path / "core" / "ctl"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: ctl
+            scope: core
+            description: A bridge-only skill
+            audience: bridge
+            commands:
+              - name: ctl
+                description: Control something
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.audience == "bridge"
+
+    def test_audience_hybrid_parsed(self, tmp_path):
+        skill_dir = tmp_path / "core" / "review"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: review
+            scope: core
+            description: A hybrid skill
+            audience: hybrid
+            commands:
+              - name: review
+                description: Review code
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.audience == "hybrid"
+
+    def test_audience_agent_parsed(self, tmp_path):
+        skill_dir = tmp_path / "core" / "lint"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: lint
+            scope: core
+            description: An agent-only skill
+            audience: agent
+            commands:
+              - name: lint
+                description: Lint code
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.audience == "agent"
+
+    def test_audience_command_parsed(self, tmp_path):
+        skill_dir = tmp_path / "core" / "slash"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: slash
+            scope: core
+            description: A command skill
+            audience: command
+            commands:
+              - name: slash
+                description: Slash command
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.audience == "command"
+
+    def test_audience_absent_defaults_to_bridge(self, tmp_path):
+        skill_dir = tmp_path / "core" / "simple"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: simple
+            scope: core
+            description: No audience field
+            commands:
+              - name: simple
+                description: Simple skill
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.audience == DEFAULT_AUDIENCE
+        assert skill.audience == "bridge"
+
+    def test_audience_invalid_falls_back_to_default(self, tmp_path):
+        skill_dir = tmp_path / "core" / "bad"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: bad
+            scope: core
+            description: Invalid audience value
+            audience: foobar
+            commands:
+              - name: bad
+                description: Bad audience
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.audience == DEFAULT_AUDIENCE
+
+    def test_audience_case_insensitive(self, tmp_path):
+        skill_dir = tmp_path / "core" / "upper"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: upper
+            scope: core
+            description: Uppercase audience
+            audience: HYBRID
+            commands:
+              - name: upper
+                description: Uppercase test
+            ---
+        """))
+        skill = parse_skill_md(skill_dir / "SKILL.md")
+        assert skill is not None
+        assert skill.audience == "hybrid"
+
+    def test_skill_dataclass_default_audience(self):
+        skill = Skill(name="test", scope="core")
+        assert skill.audience == DEFAULT_AUDIENCE
+
+    def test_valid_audiences_constant(self):
+        assert "bridge" in VALID_AUDIENCES
+        assert "agent" in VALID_AUDIENCES
+        assert "command" in VALID_AUDIENCES
+        assert "hybrid" in VALID_AUDIENCES
+        assert len(VALID_AUDIENCES) == 4
+
+    def test_status_skill_is_bridge(self):
+        """Status core skill should be audience: bridge."""
+        registry = build_registry()
+        skill = registry.get("core", "status")
+        assert skill is not None
+        assert skill.audience == "bridge"
+
+    def test_pr_skill_is_hybrid(self):
+        """PR core skill should be audience: hybrid."""
+        registry = build_registry()
+        skill = registry.get("core", "pr")
+        assert skill is not None
+        assert skill.audience == "hybrid"
+
+    def test_rebase_skill_is_hybrid(self):
+        """Rebase core skill should be audience: hybrid."""
+        registry = build_registry()
+        skill = registry.get("core", "rebase")
+        assert skill is not None
+        assert skill.audience == "hybrid"
+
+    def test_list_by_audience_single(self, tmp_path):
+        """list_by_audience with one audience type."""
+        self._make_mixed_registry(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        hybrids = registry.list_by_audience("hybrid")
+        assert len(hybrids) == 1
+        assert hybrids[0].name == "review"
+
+    def test_list_by_audience_multiple(self, tmp_path):
+        """list_by_audience with multiple audience types."""
+        self._make_mixed_registry(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        result = registry.list_by_audience("bridge", "hybrid")
+        assert len(result) == 2
+        names = {s.name for s in result}
+        assert names == {"ctl", "review"}
+
+    def test_list_by_audience_empty(self, tmp_path):
+        """list_by_audience returns empty for unmatched audience."""
+        self._make_mixed_registry(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        assert registry.list_by_audience("command") == []
+
+    def _make_mixed_registry(self, tmp_path):
+        """Helper: create two skills with different audiences."""
+        # bridge skill
+        d1 = tmp_path / "core" / "ctl"
+        d1.mkdir(parents=True)
+        (d1 / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: ctl
+            scope: core
+            description: Bridge skill
+            audience: bridge
+            commands:
+              - name: ctl
+                description: Control
+            ---
+        """))
+        # hybrid skill
+        d2 = tmp_path / "core" / "review"
+        d2.mkdir(parents=True)
+        (d2 / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: review
+            scope: core
+            description: Hybrid skill
+            audience: hybrid
+            commands:
+              - name: review
+                description: Review
+            ---
+        """))
 
 
 # ---------------------------------------------------------------------------

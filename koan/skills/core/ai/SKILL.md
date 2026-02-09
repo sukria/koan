@@ -3,6 +3,7 @@ name: ai
 scope: core
 description: Queue an AI exploration mission for a project
 version: 1.0.0
+audience: hybrid
 commands:
   - name: ai
     description: Queue an AI exploration mission for a project

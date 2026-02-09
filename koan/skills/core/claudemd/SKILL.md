@@ -3,6 +3,7 @@ name: claudemd
 scope: core
 description: Refresh or create CLAUDE.md for a project based on recent architectural changes
 version: 1.0.0
+audience: hybrid
 commands:
   - name: claude.md
     description: Refresh CLAUDE.md for a project

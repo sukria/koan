@@ -3,6 +3,7 @@ name: verbose
 scope: core
 description: Toggle verbose/silent progress updates
 version: 1.0.0
+audience: bridge
 commands:
   - name: verbose
     description: Enable verbose progress updates

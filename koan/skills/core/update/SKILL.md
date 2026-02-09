@@ -3,6 +3,7 @@ name: update
 scope: core
 description: Update Kōan to latest upstream code and restart
 version: 1.0.0
+audience: bridge
 commands:
   - name: update
     description: Pull latest code from upstream and restart both processes

@@ -3,6 +3,7 @@ name: language
 scope: core
 description: Set or reset reply language preference
 version: 1.1.0
+audience: bridge
 commands:
   - name: language
     description: Set reply language

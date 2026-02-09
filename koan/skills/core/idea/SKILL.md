@@ -3,6 +3,7 @@ name: idea
 scope: core
 description: Manage the ideas backlog
 version: 1.0.0
+audience: bridge
 commands:
   - name: idea
     description: Add or manage ideas in the backlog

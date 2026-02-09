@@ -3,6 +3,7 @@ name: chat
 scope: core
 description: Force chat mode (bypass mission detection)
 version: 1.0.0
+audience: bridge
 worker: true
 commands:
   - name: chat
