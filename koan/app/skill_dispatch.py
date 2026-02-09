@@ -164,9 +164,16 @@ def build_skill_command(
         Command list ready for subprocess, or None if the skill
         is not recognized as a direct-dispatch skill.
     """
+    from app.debug import debug_log
+
     runner_module = _SKILL_RUNNERS.get(command)
     if not runner_module:
+        debug_log(
+            f"[skill_dispatch] build_skill_command: no runner for '{command}' "
+            f"(known: {', '.join(sorted(_SKILL_RUNNERS))})"
+        )
         return None
+    debug_log(f"[skill_dispatch] build_skill_command: '{command}' -> {runner_module}")
 
     python = os.path.join(koan_root, ".venv", "bin", "python3")
     base_cmd = [python, "-m", runner_module]
@@ -275,17 +282,26 @@ def dispatch_skill_mission(
         Command list ready for subprocess, or None if not a skill mission
         or the skill is not recognized.
     """
+    from app.debug import debug_log
+
+    debug_log(f"[skill_dispatch] dispatch: mission_text='{mission_text}'")
+
     if not is_skill_mission(mission_text):
+        debug_log("[skill_dispatch] dispatch: not a skill mission, returning None")
         return None
 
     parsed_project, command, args = parse_skill_mission(mission_text)
+    debug_log(
+        f"[skill_dispatch] dispatch: parsed project='{parsed_project}' "
+        f"command='{command}' args='{args[:80]}'"
+    )
     if not command:
         return None
 
     # Use parsed project-id as fallback when caller's project_name is empty
     effective_project = project_name or parsed_project
 
-    return build_skill_command(
+    result = build_skill_command(
         command=command,
         args=args,
         project_name=effective_project,
@@ -293,3 +309,8 @@ def dispatch_skill_mission(
         koan_root=koan_root,
         instance_dir=instance_dir,
     )
+    if result:
+        debug_log(f"[skill_dispatch] dispatch: built command: {' '.join(result[:5])}")
+    else:
+        debug_log("[skill_dispatch] dispatch: build_skill_command returned None")
+    return result

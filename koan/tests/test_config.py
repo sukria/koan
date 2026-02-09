@@ -118,6 +118,29 @@ class TestGetStartOnPause:
             assert get_start_on_pause() is True
 
 
+# --- get_debug_enabled ---
+
+
+class TestGetDebugEnabled:
+    def test_default_false(self):
+        from app.config import get_debug_enabled
+
+        with _mock_config({}):
+            assert get_debug_enabled() is False
+
+    def test_explicit_true(self):
+        from app.config import get_debug_enabled
+
+        with _mock_config({"debug": True}):
+            assert get_debug_enabled() is True
+
+    def test_explicit_false(self):
+        from app.config import get_debug_enabled
+
+        with _mock_config({"debug": False}):
+            assert get_debug_enabled() is False
+
+
 # --- get_max_runs ---
 
 

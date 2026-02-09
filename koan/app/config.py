@@ -163,6 +163,15 @@ def get_start_on_pause() -> bool:
     return bool(config.get("start_on_pause", False))
 
 
+def get_debug_enabled() -> bool:
+    """Check if debug mode is enabled in config.yaml.
+
+    When True, detailed mission execution logs are written to .koan-debug.log.
+    """
+    config = _load_config()
+    return bool(config.get("debug", False))
+
+
 def get_max_runs() -> int:
     """Get maximum runs per day from config.yaml.
 
