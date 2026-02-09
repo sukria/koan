@@ -12,6 +12,7 @@ from app.plan_runner import (
     _generate_plan,
     _generate_iteration_plan,
     _run_claude_plan,
+    _is_error_output,
     _get_repo_info,
     _fetch_issue_context,
     _format_comments,
@@ -452,7 +453,7 @@ class TestRunClaudePlan:
         mock_cmd.assert_called_once_with(
             "test prompt", "/project",
             allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
-            max_turns=3, timeout=300,
+            max_turns=25, timeout=600,
         )
 
     @patch("app.cli_provider.run_command",
@@ -460,6 +461,56 @@ class TestRunClaudePlan:
     def test_raises_on_non_zero_exit(self, mock_cmd):
         with pytest.raises(RuntimeError, match="CLI invocation failed"):
             _run_claude_plan("prompt", "/project")
+
+    @patch("app.cli_provider.run_command",
+           return_value="Error: Reached max turns (3)")
+    def test_raises_on_max_turns_error(self, mock_cmd):
+        with pytest.raises(RuntimeError, match="Reached max turns"):
+            _run_claude_plan("prompt", "/project")
+
+    @patch("app.cli_provider.run_command",
+           return_value="Error: Something went wrong")
+    def test_raises_on_short_error_output(self, mock_cmd):
+        with pytest.raises(RuntimeError, match="Something went wrong"):
+            _run_claude_plan("prompt", "/project")
+
+
+# ---------------------------------------------------------------------------
+# _is_error_output
+# ---------------------------------------------------------------------------
+
+class TestIsErrorOutput:
+    def test_empty_string(self):
+        assert _is_error_output("") is False
+
+    def test_none(self):
+        assert _is_error_output(None) is False
+
+    def test_valid_plan_output(self):
+        assert _is_error_output("### Summary\n\nThis plan does X.") is False
+
+    def test_max_turns_error(self):
+        assert _is_error_output("Error: Reached max turns (3)") is True
+
+    def test_max_turns_error_with_prefix(self):
+        assert _is_error_output("Some text\nReached max turns (25)\nmore") is True
+
+    def test_short_error_message(self):
+        assert _is_error_output("Error: Connection refused") is True
+
+    def test_whitespace_prefixed_error(self):
+        assert _is_error_output("  Error: Reached max turns (3)") is True
+
+    def test_long_error_not_flagged(self):
+        # A long "Error:" string is likely plan content mentioning errors
+        long_text = "Error: " + "x" * 300
+        assert _is_error_output(long_text) is False
+
+    def test_error_in_plan_content_not_flagged(self):
+        # An error word in normal plan content should not trigger
+        assert _is_error_output(
+            "### Error Handling\n\nWe should handle errors gracefully."
+        ) is False
 
 
 # ---------------------------------------------------------------------------

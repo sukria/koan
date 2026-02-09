@@ -180,7 +180,7 @@ def run_command(
     project_path: str,
     allowed_tools: List[str],
     model_key: str = "chat",
-    max_turns: int = 3,
+    max_turns: int = 10,
     timeout: int = 300,
 ) -> str:
     """Build and run a CLI command, returning stripped stdout.

@@ -209,14 +209,30 @@ def _generate_iteration_plan(project_path, issue_context, skill_dir=None):
     return _run_claude_plan(prompt, project_path)
 
 
+def _is_error_output(output: str) -> bool:
+    """Detect CLI error patterns in output that should not be posted as a plan."""
+    if not output:
+        return False
+    # Claude CLI emits this when --max-turns is exhausted
+    if "Reached max turns" in output:
+        return True
+    # Other known error patterns
+    if output.lstrip().startswith("Error:") and len(output) < 200:
+        return True
+    return False
+
+
 def _run_claude_plan(prompt, project_path):
     """Execute Claude CLI with the given prompt and return the output."""
     from app.cli_provider import run_command
-    return run_command(
+    output = run_command(
         prompt, project_path,
         allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
-        max_turns=3, timeout=300,
+        max_turns=25, timeout=600,
     )
+    if _is_error_output(output):
+        raise RuntimeError(output)
+    return output
 
 
 def _search_existing_issue(owner, repo, idea):
