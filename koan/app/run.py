@@ -9,7 +9,10 @@ Usage:
     python -m app.run --restart    # Re-exec after restart signal (exit 42)
 
 Features:
-- Double-tap CTRL-C protection (first warns, second aborts)
+- Double-tap CTRL-C protection across ALL phases (missions, rituals,
+  sleep, startup, git sync). First press shows warning with current
+  activity name; second press within 10s aborts.
+- protected_phase() context manager for easy phase protection
 - Restart wrapper (exit code 42 → re-exec)
 - Process group isolation for Claude subprocess (SIGINT ignored)
 - Colored log output with TTY detection
@@ -117,9 +120,41 @@ class SignalState:
     first_ctrl_c: float = 0
     claude_proc: Optional[subprocess.Popen] = None
     timeout: int = 10
+    phase: str = ""  # Human-readable description of current activity
 
 
 _sig = SignalState()
+
+
+class protected_phase:
+    """Context manager that activates double-tap CTRL-C protection.
+
+    Usage:
+        with protected_phase("Running morning ritual"):
+            subprocess.run(...)
+
+    First CTRL-C warns with the phase name.
+    Second CTRL-C within timeout raises KeyboardInterrupt.
+    """
+
+    def __init__(self, phase_name: str):
+        self.phase_name = phase_name
+        self.prev_phase = ""
+        self.prev_task_running = False
+
+    def __enter__(self):
+        self.prev_phase = _sig.phase
+        self.prev_task_running = _sig.task_running
+        _sig.phase = self.phase_name
+        _sig.task_running = True
+        _sig.first_ctrl_c = 0
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _sig.phase = self.prev_phase
+        _sig.task_running = self.prev_task_running
+        _sig.first_ctrl_c = 0
+        return False  # Don't suppress exceptions
 
 
 def _on_sigint(signum, frame):
@@ -133,7 +168,7 @@ def _on_sigint(signum, frame):
         if elapsed <= _sig.timeout:
             # Second CTRL-C within timeout — abort
             print()
-            log("koan", "Confirmed. Aborting task...")
+            log("koan", "Confirmed. Aborting...")
             if _sig.claude_proc and _sig.claude_proc.poll() is None:
                 _sig.claude_proc.terminate()
             _sig.first_ctrl_c = 0
@@ -143,7 +178,8 @@ def _on_sigint(signum, frame):
     # First CTRL-C (or timeout expired)
     _sig.first_ctrl_c = now
     print()
-    log("koan", f"⚠️  A task is running. Press CTRL-C again within {_sig.timeout}s to abort.")
+    phase_hint = f" ({_sig.phase})" if _sig.phase else ""
+    log("koan", f"⚠️  Press CTRL-C again within {_sig.timeout}s to abort.{phase_hint}")
 
 
 # ---------------------------------------------------------------------------
@@ -264,58 +300,59 @@ def run_startup(koan_root: str, instance: str, projects: list):
     except Exception:
         pass
 
-    # Crash recovery
-    log("health", "Checking for interrupted missions...")
-    try:
-        recover_missions(instance)
-    except Exception:
-        pass
+    with protected_phase("Startup checks"):
+        # Crash recovery
+        log("health", "Checking for interrupted missions...")
+        try:
+            recover_missions(instance)
+        except Exception:
+            pass
 
-    # Auto-migrate env vars to projects.yaml (one-shot, idempotent)
-    try:
-        from app.projects_migration import run_migration
-        migration_msgs = run_migration(koan_root)
-        for msg in migration_msgs:
-            log("init", f"[migration] {msg}")
-    except Exception:
-        pass
+        # Auto-migrate env vars to projects.yaml (one-shot, idempotent)
+        try:
+            from app.projects_migration import run_migration
+            migration_msgs = run_migration(koan_root)
+            for msg in migration_msgs:
+                log("init", f"[migration] {msg}")
+        except Exception:
+            pass
 
-    # Sanity checks (all modules in koan/sanity/, alphabetical order)
-    log("health", "Running sanity checks...")
-    try:
-        from sanity import run_all
-        for name, modified, changes in run_all(instance):
-            if modified:
-                for change in changes:
-                    log("health", f"  [{name}] {change}")
-    except Exception:
-        pass
+        # Sanity checks (all modules in koan/sanity/, alphabetical order)
+        log("health", "Running sanity checks...")
+        try:
+            from sanity import run_all
+            for name, modified, changes in run_all(instance):
+                if modified:
+                    for change in changes:
+                        log("health", f"  [{name}] {change}")
+        except Exception:
+            pass
 
-    # Memory cleanup
-    log("health", "Running memory cleanup...")
-    try:
-        from app.memory_manager import run_cleanup
-        run_cleanup(instance)
-    except Exception:
-        pass
+        # Memory cleanup
+        log("health", "Running memory cleanup...")
+        try:
+            from app.memory_manager import run_cleanup
+            run_cleanup(instance)
+        except Exception:
+            pass
 
-    # Health check
-    log("health", "Checking Telegram bridge health...")
-    try:
-        check_and_alert(koan_root, max_age=120)
-    except Exception:
-        pass
+        # Health check
+        log("health", "Checking Telegram bridge health...")
+        try:
+            check_and_alert(koan_root, max_age=120)
+        except Exception:
+            pass
 
-    # Self-reflection
-    log("health", "Checking self-reflection trigger...")
-    try:
-        subprocess.run(
-            [sys.executable, Path(koan_root, "koan/app/self_reflection.py").as_posix(),
-             instance, "--notify"],
-            capture_output=True, timeout=60,
-        )
-    except Exception:
-        pass
+    with protected_phase("Self-reflection check"):
+        log("health", "Checking self-reflection trigger...")
+        try:
+            subprocess.run(
+                [sys.executable, Path(koan_root, "koan/app/self_reflection.py").as_posix(),
+                 instance, "--notify"],
+                capture_output=True, timeout=60,
+            )
+        except Exception:
+            pass
 
     # Start on pause
     if get_start_on_pause() and not Path(koan_root, ".koan-pause").exists():
@@ -350,14 +387,14 @@ def run_startup(koan_root: str, instance: str, projects: list):
         f"Current: {projects[0][0]}.{pause_note}"
     ))
 
-    # Git sync
-    log("git", "Running git sync...")
-    for name, path in projects:
-        try:
-            gs = GitSync(instance, name, path)
-            gs.sync_and_report()
-        except Exception:
-            pass
+    with protected_phase("Git sync"):
+        log("git", "Running git sync...")
+        for name, path in projects:
+            try:
+                gs = GitSync(instance, name, path)
+                gs.sync_and_report()
+            except Exception:
+                pass
 
     # Daily report
     try:
@@ -368,13 +405,13 @@ def run_startup(koan_root: str, instance: str, projects: list):
     except Exception:
         pass
 
-    # Morning ritual
-    log("init", "Running morning ritual...")
-    try:
-        from app.rituals import run_ritual
-        run_ritual("morning", Path(instance))
-    except Exception:
-        pass
+    with protected_phase("Morning ritual"):
+        log("init", "Running morning ritual...")
+        try:
+            from app.rituals import run_ritual
+            run_ritual("morning", Path(instance))
+        except Exception:
+            pass
 
     return max_runs, interval, branch_prefix
 
@@ -489,12 +526,13 @@ def handle_pause(
             log("error", f"Contemplative session error: {e}")
 
     # Sleep 5 min in 5s increments — check for resume/restart
-    for _ in range(60):
-        if not Path(koan_root, ".koan-pause").exists():
-            return "resume"
-        if Path(koan_root, ".koan-restart").exists():
-            break
-        time.sleep(5)
+    with protected_phase("Paused — waiting for resume"):
+        for _ in range(60):
+            if not Path(koan_root, ".koan-pause").exists():
+                return "resume"
+            if Path(koan_root, ".koan-restart").exists():
+                break
+            time.sleep(5)
 
     return None
 
@@ -861,7 +899,8 @@ def main_loop():
                 else:
                     set_status(koan_root, f"Idle — post-contemplation sleep ({time.strftime('%H:%M')})")
                     log("pause", f"Contemplative session complete. Sleeping {interval}s...")
-                    wake = _interruptible_sleep(interval, koan_root, instance)
+                    with protected_phase("Sleeping between runs"):
+                        wake = _interruptible_sleep(interval, koan_root, instance)
                     if wake == "mission":
                         log("koan", "New mission detected during sleep — waking up early")
                 continue
@@ -870,7 +909,8 @@ def main_loop():
                 remaining = plan.get("focus_remaining", "unknown")
                 log("koan", f"Focus mode active ({remaining} remaining) — no missions pending, sleeping")
                 set_status(koan_root, f"Focus mode — waiting for missions ({remaining} remaining)")
-                wake = _interruptible_sleep(interval, koan_root, instance)
+                with protected_phase("Focus mode — waiting for missions"):
+                    wake = _interruptible_sleep(interval, koan_root, instance)
                 if wake == "mission":
                     log("koan", "New mission detected during focus sleep — waking up")
                 continue
@@ -953,16 +993,17 @@ def main_loop():
                     set_status(koan_root, f"Run {run_num}/{max_runs} — skill dispatch on {project_name}")
                     _notify(instance, f"🚀 Run {run_num}/{max_runs} — [{project_name}] Skill: {mission_title}")
 
-                    exit_code = _run_skill_mission(
-                        skill_cmd=skill_cmd,
-                        koan_root=koan_root,
-                        instance=instance,
-                        project_name=project_name,
-                        project_path=project_path,
-                        run_num=run_num,
-                        mission_title=mission_title,
-                        autonomous_mode=autonomous_mode,
-                    )
+                    with protected_phase(f"Skill: {mission_title[:50]}"):
+                        exit_code = _run_skill_mission(
+                            skill_cmd=skill_cmd,
+                            koan_root=koan_root,
+                            instance=instance,
+                            project_name=project_name,
+                            project_path=project_path,
+                            run_num=run_num,
+                            mission_title=mission_title,
+                            autonomous_mode=autonomous_mode,
+                        )
 
                     if exit_code == 0:
                         log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
@@ -976,7 +1017,8 @@ def main_loop():
                         log("koan", "Pending missions — skipping sleep")
                     else:
                         set_status(koan_root, f"Idle — sleeping ({time.strftime('%H:%M')})")
-                        wake = _interruptible_sleep(interval, koan_root, instance)
+                        with protected_phase("Sleeping between runs"):
+                            wake = _interruptible_sleep(interval, koan_root, instance)
                         if wake == "mission":
                             log("koan", "New mission detected during sleep — waking up early")
                     continue
@@ -1118,23 +1160,25 @@ def main_loop():
 
             # Periodic git sync
             if count % git_sync_interval == 0:
-                log("git", f"Periodic git sync (run {count})...")
-                from app.git_sync import GitSync
-                for name, path in projects:
-                    try:
-                        gs = GitSync(instance, name, path)
-                        gs.sync_and_report()
-                    except Exception:
-                        pass
+                with protected_phase("Git sync"):
+                    log("git", f"Periodic git sync (run {count})...")
+                    from app.git_sync import GitSync
+                    for name, path in projects:
+                        try:
+                            gs = GitSync(instance, name, path)
+                            gs.sync_and_report()
+                        except Exception:
+                            pass
 
             # Max runs check
             if count >= max_runs:
                 log("koan", f"Max runs ({max_runs}) reached. Running evening ritual before pause.")
-                try:
-                    from app.rituals import run_ritual
-                    run_ritual("evening", Path(instance))
-                except Exception:
-                    pass
+                with protected_phase("Evening ritual"):
+                    try:
+                        from app.rituals import run_ritual
+                        run_ritual("evening", Path(instance))
+                    except Exception:
+                        pass
                 log("pause", "Entering pause mode (auto-resume in 5h).")
                 subprocess.run(
                     [sys.executable, "-m", "app.pause_manager", "create", koan_root, "max_runs"],
@@ -1153,7 +1197,8 @@ def main_loop():
             else:
                 set_status(koan_root, f"Idle — sleeping {interval}s ({time.strftime('%H:%M')})")
                 log("koan", f"Sleeping {interval}s (checking for new missions every 10s)...")
-                wake = _interruptible_sleep(interval, koan_root, instance)
+                with protected_phase("Sleeping between runs"):
+                    wake = _interruptible_sleep(interval, koan_root, instance)
                 if wake == "mission":
                     log("koan", "New mission detected during sleep — waking up early")
                     set_status(koan_root, f"Run {run_num}/{max_runs} — done, new mission detected")
@@ -1193,6 +1238,8 @@ def _interruptible_sleep(interval: int, koan_root: str, instance: str) -> str:
     try:
         from app.loop_manager import interruptible_sleep
         return interruptible_sleep(interval, koan_root, instance)
+    except KeyboardInterrupt:
+        raise
     except Exception:
         time.sleep(min(interval, 30))
         return "timeout"
