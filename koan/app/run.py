@@ -996,6 +996,8 @@ def main_loop():
             # are dispatched directly to the skill's CLI runner, bypassing
             # the Claude agent.
             if mission_title:
+                from app.debug import debug_log as _debug_log
+                _debug_log(f"[run] checking skill dispatch for: {mission_title}")
                 from app.skill_dispatch import dispatch_skill_mission
                 skill_cmd = dispatch_skill_mission(
                     mission_text=mission_title,
@@ -1005,6 +1007,7 @@ def main_loop():
                     instance_dir=instance,
                 )
                 if skill_cmd:
+                    _debug_log(f"[run] skill dispatch matched: {' '.join(skill_cmd[:5])}")
                     log("mission", "Decision: SKILL DISPATCH (direct runner)")
                     print(f"  Mission: {mission_title}")
                     print(f"  Project: {project_name}")
@@ -1100,6 +1103,7 @@ def main_loop():
 
             # Build CLI command (with per-project model/tools overrides)
             from app.config import get_claude_flags_for_role, get_mission_tools
+            from app.debug import debug_log as _debug_log
             mission_flags_str = get_claude_flags_for_role("mission", autonomous_mode, project_name)
             mission_tools = get_mission_tools(project_name)
             cmd = ["claude", "-p", prompt,
@@ -1108,7 +1112,9 @@ def main_loop():
             if mission_flags_str:
                 cmd.extend(mission_flags_str.split())
 
+            _debug_log(f"[run] claude cli: cmd={' '.join(cmd[:6])}... cwd={project_path}")
             claude_exit = run_claude_task(cmd, stdout_file, stderr_file, cwd=project_path)
+            _debug_log(f"[run] claude cli: exit_code={claude_exit}")
 
             # Parse and display output
             try:
@@ -1123,6 +1129,11 @@ def main_loop():
                         print(f.read())
                 except Exception:
                     pass
+
+            # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
+            # Done BEFORE post-mission pipeline so quota exhaustion can't skip it.
+            if mission_title:
+                _finalize_mission(instance, mission_title, project_name, claude_exit)
 
             # Post-mission pipeline
             set_status(koan_root, f"Run {run_num}/{max_runs} — post-mission processing")
@@ -1165,10 +1176,6 @@ def main_loop():
                 log("error", f"Post-mission processing error: {e}")
 
             _cleanup_temp(stdout_file, stderr_file)
-
-            # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
-            if mission_title:
-                _finalize_mission(instance, mission_title, project_name, claude_exit)
 
             # Report result
             if claude_exit == 0:
@@ -1291,16 +1298,21 @@ def _reset_usage_session(instance: str):
 def _update_mission_in_file(instance: str, mission_title: str, *, failed: bool = False):
     """Move mission from Pending to Done/Failed via locked write (idempotent)."""
     try:
+        from app.missions import complete_mission, fail_mission
         from app.utils import modify_missions_file
         missions_path = Path(instance, "missions.md")
         if not missions_path.exists():
             return
-        if failed:
-            from app.missions import fail_mission
-            modify_missions_file(missions_path, lambda c: fail_mission(c, mission_title))
-        else:
-            from app.missions import complete_mission
-            modify_missions_file(missions_path, lambda c: complete_mission(c, mission_title))
+        transform = fail_mission if failed else complete_mission
+        before = [None]
+
+        def tracked(content):
+            before[0] = content
+            return transform(content, mission_title)
+
+        after = modify_missions_file(missions_path, tracked)
+        if before[0] is not None and after == before[0]:
+            log("warning", f"Mission not found in Pending (no change): {mission_title[:80]}")
     except Exception as e:
         label = "fail" if failed else "complete"
         log("error", f"Could not {label} mission in missions.md: {e}")
@@ -1330,13 +1342,18 @@ def _run_skill_mission(
 
     Returns the process exit code (0 = success).
     """
+    from app.debug import debug_log
+
     mission_start = int(time.time())
+    skill_cwd = os.path.join(koan_root, "koan")
+    debug_log(f"[run] skill exec: cmd={' '.join(skill_cmd)}")
+    debug_log(f"[run] skill exec: cwd={skill_cwd}")
     skill_stdout = ""
     skill_stderr = ""
     try:
         result = subprocess.run(
             skill_cmd,
-            cwd=os.path.join(koan_root, "koan"),
+            cwd=skill_cwd,
             capture_output=True,
             text=True,
             timeout=600,
@@ -1344,15 +1361,23 @@ def _run_skill_mission(
         exit_code = result.returncode
         skill_stdout = result.stdout or ""
         skill_stderr = result.stderr or ""
+        debug_log(
+            f"[run] skill exec: exit_code={exit_code} "
+            f"stdout_len={len(skill_stdout)} stderr_len={len(skill_stderr)}"
+        )
+        if exit_code != 0 and skill_stderr:
+            debug_log(f"[run] skill stderr: {skill_stderr[:2000]}")
         if skill_stdout:
             print(skill_stdout)
         if skill_stderr:
             print(skill_stderr, file=sys.stderr)
     except subprocess.TimeoutExpired:
         log("error", "Skill runner timed out (10min)")
+        debug_log("[run] skill exec: TIMEOUT (600s)")
         exit_code = 1
     except Exception as e:
         log("error", f"Skill runner failed: {e}")
+        debug_log(f"[run] skill exec: EXCEPTION {e}")
         exit_code = 1
 
     # Write output to temp files for post-mission processing
@@ -1381,6 +1406,8 @@ def _run_skill_mission(
         log("error", f"Post-mission error: {e}")
 
     _cleanup_temp(stdout_file, stderr_file)
+    duration = int(time.time()) - mission_start
+    debug_log(f"[run] skill exec: done in {duration}s, exit_code={exit_code}")
     return exit_code
 
 

@@ -40,6 +40,22 @@ class TestNormalizeKey:
     def test_dash_with_extra_spaces(self):
         assert _normalize_key("-  Fix the bug") == "Fix the bug"
 
+    def test_strips_project_tag(self):
+        assert _normalize_key("- [project:koan] /plan Add dark mode") == "/plan Add dark mode"
+
+    def test_strips_projet_tag_french(self):
+        assert _normalize_key("- [projet:koan] Fix auth") == "Fix auth"
+
+    def test_strips_project_tag_with_hyphens(self):
+        assert _normalize_key("- [project:my-app] Fix bug") == "Fix bug"
+
+    def test_strips_project_tag_with_underscores(self):
+        assert _normalize_key("- [project:my_app] Fix bug") == "Fix bug"
+
+    def test_same_key_with_and_without_tag(self):
+        """Mission with and without project tag should normalize to same key."""
+        assert _normalize_key("- [project:koan] Fix auth") == _normalize_key("- Fix auth")
+
 
 # ---------------------------------------------------------------------------
 # record_execution / get_execution_count
@@ -190,3 +206,11 @@ class TestMissionHistoryIntegration:
         """Multi-line missions are normalized to first line."""
         record_execution(instance_dir, "- Fix bug\n  with details\n  more", "koan", 0)
         assert get_execution_count(instance_dir, "- Fix bug") == 1
+
+    def test_project_tagged_missions_share_counter(self, instance_dir):
+        """Same mission with different project tags shares one dedup counter."""
+        record_execution(instance_dir, "- [project:koan] Fix auth", "koan", 1)
+        record_execution(instance_dir, "- Fix auth", "koan", 1)
+        record_execution(instance_dir, "- [projet:koan] Fix auth", "koan", 1)
+        assert get_execution_count(instance_dir, "- Fix auth") == 3
+        assert should_skip_mission(instance_dir, "- [project:koan] Fix auth") is True

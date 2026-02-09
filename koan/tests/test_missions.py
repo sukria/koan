@@ -1173,3 +1173,64 @@ class TestParseSectionsFailed:
 
     def test_default_skeleton_has_failed(self):
         assert "## Failed" in DEFAULT_SKELETON
+
+
+# ---------------------------------------------------------------------------
+# complete_mission / fail_mission — sub-header edge cases (Bug #1 fix)
+# ---------------------------------------------------------------------------
+
+class TestCompleteMissionWithSubHeaders:
+    """Verify text-based removal handles ### project:X sub-headers correctly."""
+
+    CONTENT_WITH_SUBHEADERS = (
+        "# Missions\n\n"
+        "## Pending\n\n"
+        "### project:alpha\n"
+        "- Fix auth in alpha\n"
+        "- Add tests for alpha\n\n"
+        "### project:beta\n"
+        "- Fix auth in beta\n\n"
+        "## Done\n\n"
+        "- Old task ✅ (2025-01-01 12:00)\n"
+    )
+
+    def test_complete_first_subheader_mission(self):
+        result = complete_mission(self.CONTENT_WITH_SUBHEADERS, "Fix auth in alpha")
+        sections = parse_sections(result)
+        pending_text = "\n".join(sections["pending"])
+        assert "Fix auth in alpha" not in pending_text
+        done_text = "\n".join(sections["done"])
+        assert "Fix auth in alpha" in done_text
+
+    def test_complete_second_subheader_mission(self):
+        result = complete_mission(self.CONTENT_WITH_SUBHEADERS, "Fix auth in beta")
+        sections = parse_sections(result)
+        pending_text = "\n".join(sections["pending"])
+        assert "Fix auth in beta" not in pending_text
+        done_text = "\n".join(sections["done"])
+        assert "Fix auth in beta" in done_text
+
+    def test_remaining_missions_preserved_after_subheader_complete(self):
+        result = complete_mission(self.CONTENT_WITH_SUBHEADERS, "Fix auth in alpha")
+        sections = parse_sections(result)
+        pending_text = "\n".join(sections["pending"])
+        assert "Add tests for alpha" in pending_text
+        assert "Fix auth in beta" in pending_text
+
+    def test_fail_with_subheaders(self):
+        result = fail_mission(self.CONTENT_WITH_SUBHEADERS, "Fix auth in beta")
+        sections = parse_sections(result)
+        pending_text = "\n".join(sections["pending"])
+        assert "Fix auth in beta" not in pending_text
+        failed_text = "\n".join(sections["failed"])
+        assert "Fix auth in beta" in failed_text
+
+    def test_complete_with_multiple_subheaders_all_preserved(self):
+        """Completing one mission doesn't disrupt other sub-header groups."""
+        result = complete_mission(self.CONTENT_WITH_SUBHEADERS, "Add tests for alpha")
+        sections = parse_sections(result)
+        pending_text = "\n".join(sections["pending"])
+        assert "Fix auth in alpha" in pending_text
+        assert "Fix auth in beta" in pending_text
+        done_text = "\n".join(sections["done"])
+        assert "Add tests for alpha" in done_text

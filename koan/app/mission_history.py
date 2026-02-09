@@ -8,7 +8,7 @@ import json
 import time
 from pathlib import Path
 
-from app.utils import atomic_write
+from app.utils import _PROJECT_TAG_STRIP_RE, atomic_write
 
 
 _HISTORY_FILE = "mission_history.json"
@@ -20,9 +20,15 @@ def _history_path(instance_dir: str) -> Path:
 
 
 def _normalize_key(mission_text: str) -> str:
-    """Normalize mission text to a stable key for matching."""
+    """Normalize mission text to a stable key for matching.
+
+    Strips leading ``- ``, ``[project:X]`` / ``[projet:X]`` tags, and
+    whitespace so the same mission recorded with or without a project tag
+    shares one dedup counter.
+    """
     line = mission_text.strip().split("\n")[0]
     line = line.lstrip("- ").strip()
+    line = _PROJECT_TAG_STRIP_RE.sub("", line).strip()
     return line
 
 

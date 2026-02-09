@@ -531,6 +531,26 @@ def list_pending(content: str) -> List[str]:
     return sections["pending"]
 
 
+def _find_item_extent(lines: List[str], item_start: int, section_end: int) -> int:
+    """Return the exclusive end index for a ``- `` item and its continuations."""
+    end = item_start + 1
+    for j in range(item_start + 1, section_end):
+        stripped = lines[j].strip()
+        if stripped == "" or stripped.startswith("- ") or stripped.startswith("#"):
+            break
+        end = j + 1
+    return end
+
+
+def _splice_pending_item(
+    lines: List[str], remove_start: int, remove_end: int,
+) -> Tuple[str, str]:
+    """Remove lines[remove_start:remove_end] and return (content, removed)."""
+    removed_text = "\n".join(lines[remove_start:remove_end])
+    new_lines = lines[:remove_start] + lines[remove_end:]
+    return normalize_content("\n".join(new_lines)), removed_text
+
+
 def _remove_pending_by_index(
     content: str, target_idx: int,
 ) -> Optional[Tuple[str, str]]:
@@ -546,29 +566,14 @@ def _remove_pending_by_index(
 
     start, end = boundaries["pending"]
     pending_count = 0
-    remove_start = None
-    remove_end = None
 
     for i in range(start + 1, end):
-        stripped = lines[i].strip()
-        if stripped.startswith("- "):
+        if lines[i].strip().startswith("- "):
             if pending_count == target_idx:
-                remove_start = i
-                remove_end = i + 1
-                for j in range(i + 1, end):
-                    next_stripped = lines[j].strip()
-                    if next_stripped == "" or next_stripped.startswith("- ") or next_stripped.startswith("#"):
-                        break
-                    remove_end = j + 1
-                break
+                return _splice_pending_item(lines, i, _find_item_extent(lines, i, end))
             pending_count += 1
 
-    if remove_start is None:
-        return None
-
-    removed_text = "\n".join(lines[remove_start:remove_end])
-    new_lines = lines[:remove_start] + lines[remove_end:]
-    return normalize_content("\n".join(new_lines)), removed_text
+    return None
 
 
 def cancel_pending_mission(content: str, identifier: str) -> Tuple[str, str]:
@@ -619,6 +624,32 @@ def cancel_pending_mission(content: str, identifier: str) -> Tuple[str, str]:
     return result[0], target_text
 
 
+def _remove_pending_by_text(
+    content: str, needle: str,
+) -> Optional[Tuple[str, str]]:
+    """Remove the first pending ``- `` item containing *needle*.
+
+    Scans raw lines in the Pending section instead of going through
+    ``parse_sections`` indexes, so ``### project:X`` sub-headers
+    don't cause mismatches.
+
+    Returns ``(updated_content, removed_text)`` or ``None`` when no match.
+    """
+    lines = content.splitlines()
+    boundaries = find_section_boundaries(lines)
+    if "pending" not in boundaries:
+        return None
+
+    start, end = boundaries["pending"]
+
+    for i in range(start + 1, end):
+        stripped = lines[i].strip()
+        if stripped.startswith("- ") and needle in stripped:
+            return _splice_pending_item(lines, i, _find_item_extent(lines, i, end))
+
+    return None
+
+
 def _move_pending_to_section(
     content: str, mission_text: str, section_key: str, marker: str, header: str,
 ) -> str:
@@ -627,21 +658,8 @@ def _move_pending_to_section(
     Shared implementation for complete_mission() and fail_mission().
     Returns content unchanged if the mission is not found in Pending.
     """
-    pending = list_pending(content)
-    if not pending:
-        return content
-
-    target_idx = None
     needle = mission_text.strip()
-    for i, item in enumerate(pending):
-        if needle in item:
-            target_idx = i
-            break
-
-    if target_idx is None:
-        return content
-
-    result = _remove_pending_by_index(content, target_idx)
+    result = _remove_pending_by_text(content, needle)
     if result is None:
         return content
 
