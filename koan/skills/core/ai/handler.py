@@ -1,8 +1,6 @@
 """Koan /ai skill -- queue an AI exploration mission."""
 
-import os
 import random
-import shlex
 from pathlib import Path
 from typing import List, Tuple
 
@@ -28,25 +26,11 @@ def handle(ctx):
         known = ", ".join(n for n, _ in projects)
         return f"Unknown project '{target}'. Known: {known}"
 
-    # Build CLI command (same pattern as /rebase, /plan, /check, /claude.md)
-    koan_root = ctx.koan_root
-    instance_dir = ctx.instance_dir
-    cmd = (
-        f"cd {koan_root}/koan && "
-        f"{koan_root}/.venv/bin/python3 -m app.ai_runner "
-        f"--project-path {shlex.quote(path)} "
-        f"--project-name {shlex.quote(name)} "
-        f"--instance-dir {shlex.quote(str(instance_dir))}"
-    )
-
-    # Queue the mission
+    # Queue the mission with clean format
     from app.utils import insert_pending_mission
 
-    mission_entry = (
-        f"- [project:{name}] AI exploration "
-        f"\u2014 run: `{cmd}`"
-    )
-    missions_path = instance_dir / "missions.md"
+    mission_entry = f"- [project:{name}] /ai {name}"
+    missions_path = ctx.instance_dir / "missions.md"
     insert_pending_mission(missions_path, mission_entry)
 
     return f"AI exploration queued for {name}"

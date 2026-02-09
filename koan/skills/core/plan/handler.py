@@ -1,7 +1,6 @@
 """Kōan plan skill -- queue a plan mission."""
 
 import re
-import shlex
 
 
 # GitHub issue URL pattern
@@ -80,7 +79,6 @@ def _parse_project_arg(args):
 
 def _resolve_project_path(project_name, fallback=False):
     """Resolve project name to its local path."""
-    import os
     from pathlib import Path
     from app.utils import get_known_projects
 
@@ -114,19 +112,7 @@ def _queue_new_plan(ctx, project_name, idea):
 
     project_label = project_name or _project_name_for_path(project_path)
 
-    koan_root = ctx.koan_root
-    idea_escaped = shlex.quote(idea)
-    cmd = (
-        f"cd {koan_root}/koan && "
-        f"{koan_root}/.venv/bin/python3 -m app.plan_runner "
-        f"--project-path {shlex.quote(project_path)} "
-        f"--idea {idea_escaped}"
-    )
-
-    mission_entry = (
-        f"- [project:{project_label}] Plan: {idea[:80]} "
-        f"\u2014 run: `{cmd}`"
-    )
+    mission_entry = f"- [project:{project_label}] /plan {idea}"
     missions_path = ctx.instance_dir / "missions.md"
     insert_pending_mission(missions_path, mission_entry)
 
@@ -145,18 +131,7 @@ def _queue_issue_plan(ctx, match):
     project_path = _resolve_project_path(repo, fallback=True)
     project_label = _project_name_for_path(project_path) if project_path else repo
 
-    koan_root = ctx.koan_root
-    cmd = (
-        f"cd {koan_root}/koan && "
-        f"{koan_root}/.venv/bin/python3 -m app.plan_runner "
-        f"--project-path {shlex.quote(project_path or '.')} "
-        f"--issue-url {issue_url}"
-    )
-
-    mission_entry = (
-        f"- [project:{project_label}] Plan iteration on issue #{issue_number} "
-        f"({owner}/{repo}) \u2014 run: `{cmd}`"
-    )
+    mission_entry = f"- [project:{project_label}] /plan {issue_url}"
     missions_path = ctx.instance_dir / "missions.md"
     insert_pending_mission(missions_path, mission_entry)
 

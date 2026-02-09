@@ -1,7 +1,5 @@
 """Kōan claudemd skill -- queue a CLAUDE.md refresh mission."""
 
-import shlex
-
 
 def handle(ctx):
     """Handle /claude.md <project-name> command.
@@ -27,31 +25,18 @@ def handle(ctx):
 
     # Resolve project path
     known = get_known_projects()
-    project_path = None
     matched_name = None
     for name, path in known:
         if name.lower() == project_name:
-            project_path = path
             matched_name = name
             break
 
-    if not project_path:
+    if not matched_name:
         names = ", ".join(n for n, _ in known) or "none"
         return f"Project '{project_name}' not found. Known projects: {names}"
 
-    # Build CLI command (quote paths to prevent shell injection)
-    koan_root = ctx.koan_root
-    cmd = (
-        f"cd {shlex.quote(str(koan_root) + '/koan')} && "
-        f"{shlex.quote(str(koan_root) + '/.venv/bin/python3')} -m app.claudemd_refresh "
-        f"{shlex.quote(str(project_path))} --project-name {shlex.quote(matched_name)}"
-    )
-
-    # Queue the mission
-    mission_entry = (
-        f"- [project:{matched_name}] Refresh CLAUDE.md "
-        f"\u2014 run: `{cmd}`"
-    )
+    # Queue the mission with clean format
+    mission_entry = f"- [project:{matched_name}] /claude.md {matched_name}"
     missions_path = ctx.instance_dir / "missions.md"
     insert_pending_mission(missions_path, mission_entry)
 

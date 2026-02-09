@@ -92,7 +92,7 @@ class TestMissionQueuing:
             mock_insert.assert_called_once()
             mission_entry = mock_insert.call_args[0][1]
             assert "[project:koan]" in mission_entry
-            assert "PR #42" in mission_entry
+            assert "/rebase https://github.com/sukria/koan/pull/42" in mission_entry
 
     def test_url_with_fragment_accepted(self, handler, ctx):
         ctx.args = "https://github.com/sukria/koan/pull/42#discussion_r123"
@@ -122,7 +122,7 @@ class TestMissionQueuing:
             assert result == "Rebase queued for PR #42 (sukria/koan)"
 
     def test_mission_entry_format(self, handler, ctx):
-        """Verify mission text contains project tag, PR URL, and CLI command."""
+        """Verify mission text contains project tag and clean /rebase format."""
         ctx.args = "https://github.com/sukria/koan/pull/42"
         with patch("app.utils.resolve_project_path", return_value="/home/koan"), \
              patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]), \
@@ -130,10 +130,9 @@ class TestMissionQueuing:
             handler.handle(ctx)
             entry = mock_insert.call_args[0][1]
             assert entry.startswith("- [project:koan]")
-            assert "sukria/koan" in entry
-            assert "python3 -m app.rebase_pr" in entry
-            assert "--project-path /home/koan" in entry
-            assert "https://github.com/sukria/koan/pull/42" in entry
+            assert "/rebase https://github.com/sukria/koan/pull/42" in entry
+            assert "run:" not in entry
+            assert "python3 -m" not in entry
 
     def test_single_project_fallback(self, handler, ctx):
         """When resolve_project_path returns a path not in projects list,

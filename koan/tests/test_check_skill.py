@@ -86,18 +86,18 @@ class TestHandlePrQueuing:
             handler.handle(ctx)
             entry = mock_insert.call_args[0][1]
             assert "[project:koan]" in entry
-            assert "Check PR #42" in entry
-            assert "app.check_runner" in entry
+            assert "/check https://github.com/sukria/koan/pull/42" in entry
+            assert "run:" not in entry
 
-    def test_pr_mission_has_run_command(self, handler, ctx):
+    def test_pr_mission_uses_clean_format(self, handler, ctx):
         ctx.args = "https://github.com/sukria/koan/pull/42"
         with patch("app.utils.insert_pending_mission") as mock_insert, \
              patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]):
             handler.handle(ctx)
             entry = mock_insert.call_args[0][1]
-            assert "run: `" in entry
-            assert "--instance-dir" in entry
-            assert "--koan-root" in entry
+            assert entry.startswith("- [project:koan]")
+            assert "/check " in entry
+            assert "python3 -m" not in entry
 
     def test_pr_mission_contains_url(self, handler, ctx):
         ctx.args = "https://github.com/sukria/koan/pull/42"
@@ -137,8 +137,8 @@ class TestHandleIssueQueuing:
             handler.handle(ctx)
             entry = mock_insert.call_args[0][1]
             assert "[project:koan]" in entry
-            assert "Check issue #42" in entry
-            assert "app.check_runner" in entry
+            assert "/check https://github.com/sukria/koan/issues/42" in entry
+            assert "run:" not in entry
 
     def test_issue_mission_has_correct_url(self, handler, ctx):
         ctx.args = "https://github.com/sukria/koan/issues/42"

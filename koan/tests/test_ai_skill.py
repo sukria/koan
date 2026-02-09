@@ -251,48 +251,16 @@ class TestHandle:
 
     @patch("app.utils.get_known_projects")
     @patch("app.utils.insert_pending_mission")
-    def test_mission_entry_has_run_command(
+    def test_mission_entry_uses_clean_skill_format(
         self, mock_insert, mock_get, handler, ctx, tmp_path
     ):
-        """Mission entry must contain run: backtick with CLI command."""
+        """Mission entry uses clean /ai format (no run: command)."""
         mock_get.return_value = [("test", str(tmp_path))]
         handler.handle(ctx)
         entry = mock_insert.call_args[0][1]
-        assert "run: `" in entry
-        assert "app.ai_runner" in entry
-
-    @patch("app.utils.get_known_projects")
-    @patch("app.utils.insert_pending_mission")
-    def test_mission_entry_cli_has_project_path(
-        self, mock_insert, mock_get, handler, ctx, tmp_path
-    ):
-        """CLI command includes --project-path."""
-        mock_get.return_value = [("test", str(tmp_path))]
-        handler.handle(ctx)
-        entry = mock_insert.call_args[0][1]
-        assert "--project-path" in entry
-
-    @patch("app.utils.get_known_projects")
-    @patch("app.utils.insert_pending_mission")
-    def test_mission_entry_cli_has_project_name(
-        self, mock_insert, mock_get, handler, ctx, tmp_path
-    ):
-        """CLI command includes --project-name."""
-        mock_get.return_value = [("test", str(tmp_path))]
-        handler.handle(ctx)
-        entry = mock_insert.call_args[0][1]
-        assert "--project-name" in entry
-
-    @patch("app.utils.get_known_projects")
-    @patch("app.utils.insert_pending_mission")
-    def test_mission_entry_cli_has_instance_dir(
-        self, mock_insert, mock_get, handler, ctx, tmp_path
-    ):
-        """CLI command includes --instance-dir."""
-        mock_get.return_value = [("test", str(tmp_path))]
-        handler.handle(ctx)
-        entry = mock_insert.call_args[0][1]
-        assert "--instance-dir" in entry
+        assert "/ai test" in entry
+        assert "run:" not in entry
+        assert "python3 -m" not in entry
 
     @patch("app.utils.get_known_projects")
     @patch("app.utils.insert_pending_mission")

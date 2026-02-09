@@ -931,6 +931,56 @@ def main_loop():
             print(bold_green(f">>> Current project: {project_name}") + f" ({project_path})")
             print()
 
+            # --- Check for skill-dispatched mission ---
+            # Missions starting with /command (e.g. "/plan Add dark mode")
+            # are dispatched directly to the skill's CLI runner, bypassing
+            # the Claude agent.
+            if mission_title:
+                from app.skill_dispatch import dispatch_skill_mission
+                skill_cmd = dispatch_skill_mission(
+                    mission_text=mission_title,
+                    project_name=project_name,
+                    project_path=project_path,
+                    koan_root=koan_root,
+                    instance_dir=instance,
+                )
+                if skill_cmd:
+                    log("mission", "Decision: SKILL DISPATCH (direct runner)")
+                    print(f"  Mission: {mission_title}")
+                    print(f"  Project: {project_name}")
+                    print(f"  Runner: {' '.join(skill_cmd[:4])}...")
+                    print()
+                    set_status(koan_root, f"Run {run_num}/{max_runs} — skill dispatch on {project_name}")
+                    _notify(instance, f"🚀 Run {run_num}/{max_runs} — [{project_name}] Skill: {mission_title}")
+
+                    exit_code = _run_skill_mission(
+                        skill_cmd=skill_cmd,
+                        koan_root=koan_root,
+                        instance=instance,
+                        project_name=project_name,
+                        project_path=project_path,
+                        run_num=run_num,
+                        mission_title=mission_title,
+                        autonomous_mode=autonomous_mode,
+                    )
+
+                    if exit_code == 0:
+                        log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
+                    else:
+                        _notify(instance, f"❌ Run {run_num}/{max_runs} — [{project_name}] Skill failed: {mission_title}")
+
+                    _commit_instance(instance)
+                    count += 1
+
+                    if _has_pending_missions(instance):
+                        log("koan", "Pending missions — skipping sleep")
+                    else:
+                        set_status(koan_root, f"Idle — sleeping ({time.strftime('%H:%M')})")
+                        wake = _interruptible_sleep(interval, koan_root, instance)
+                        if wake == "mission":
+                            log("koan", "New mission detected during sleep — waking up early")
+                    continue
+
             # Lifecycle notification
             if mission_title:
                 log("mission", "Decision: MISSION mode (assigned)")
@@ -1163,6 +1213,74 @@ def _reset_usage_session(instance: str):
         log("health", "Usage session counters reset after resume")
     except Exception:
         pass
+
+
+def _run_skill_mission(
+    skill_cmd: list,
+    koan_root: str,
+    instance: str,
+    project_name: str,
+    project_path: str,
+    run_num: int,
+    mission_title: str,
+    autonomous_mode: str,
+) -> int:
+    """Execute a skill-dispatched mission directly via subprocess.
+
+    Returns the process exit code (0 = success).
+    """
+    mission_start = int(time.time())
+    skill_stdout = ""
+    skill_stderr = ""
+    try:
+        result = subprocess.run(
+            skill_cmd,
+            cwd=os.path.join(koan_root, "koan"),
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        exit_code = result.returncode
+        skill_stdout = result.stdout or ""
+        skill_stderr = result.stderr or ""
+        if skill_stdout:
+            print(skill_stdout)
+        if skill_stderr:
+            print(skill_stderr, file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        log("error", "Skill runner timed out (10min)")
+        exit_code = 1
+    except Exception as e:
+        log("error", f"Skill runner failed: {e}")
+        exit_code = 1
+
+    # Write output to temp files for post-mission processing
+    fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")
+    fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
+    os.close(fd_out)
+    os.close(fd_err)
+    Path(stdout_file).write_text(skill_stdout)
+    Path(stderr_file).write_text(skill_stderr)
+
+    try:
+        from app.mission_runner import run_post_mission
+        run_post_mission(
+            instance_dir=instance,
+            project_name=project_name,
+            project_path=project_path,
+            run_num=run_num,
+            exit_code=exit_code,
+            stdout_file=stdout_file,
+            stderr_file=stderr_file,
+            mission_title=mission_title,
+            autonomous_mode=autonomous_mode or "implement",
+            start_time=mission_start,
+        )
+    except Exception as e:
+        log("error", f"Post-mission error: {e}")
+
+    _cleanup_temp(stdout_file, stderr_file)
+    return exit_code
 
 
 def _cleanup_temp(*files):

@@ -93,10 +93,9 @@ class TestMissionQueuing:
             handler.handle(ctx)
             entry = mock_insert.call_args[0][1]
             assert entry.startswith("- [project:koan]")
-            assert "Refresh CLAUDE.md" in entry
-            assert "python3 -m app.claudemd_refresh" in entry
-            assert "/home/koan" in entry
-            assert "--project-name koan" in entry
+            assert "/claude.md koan" in entry
+            assert "run:" not in entry
+            assert "python3 -m" not in entry
 
     def test_case_insensitive_project_match(self, handler, ctx):
         ctx.args = "KOAN"
@@ -123,14 +122,14 @@ class TestMissionQueuing:
             missions_path = mock_insert.call_args[0][0]
             assert missions_path == ctx.instance_dir / "missions.md"
 
-    def test_koan_root_in_cli_command(self, handler, ctx):
+    def test_clean_format_no_koan_root(self, handler, ctx):
         ctx.args = "koan"
         with patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]), \
              patch("app.utils.insert_pending_mission") as mock_insert:
             handler.handle(ctx)
             entry = mock_insert.call_args[0][1]
-            # CLI command should reference koan_root for the venv
-            assert str(ctx.koan_root) in entry
+            # Clean format doesn't embed koan_root — dispatch resolves it
+            assert "/claude.md koan" in entry
 
     def test_multiple_projects_selects_correct_one(self, handler, ctx):
         ctx.args = "web"
@@ -141,7 +140,7 @@ class TestMissionQueuing:
             assert "queued" in result.lower()
             entry = mock_insert.call_args[0][1]
             assert "[project:web]" in entry
-            assert "/home/web" in entry
+            assert "/claude.md web" in entry
 
 
 # ---------------------------------------------------------------------------

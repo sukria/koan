@@ -1,7 +1,6 @@
 """Koan /check skill -- queue a check mission for a PR or issue."""
 
 import re
-import shlex
 
 
 # PR URL: https://github.com/owner/repo/pull/123
@@ -61,25 +60,11 @@ def handle(ctx):
     # Resolve project name for the mission tag
     project_name = _resolve_project_name(repo)
 
-    # Build CLI command
-    koan_root = ctx.koan_root
-    instance_dir = ctx.instance_dir
-    cmd = (
-        f"cd {koan_root}/koan && "
-        f"{koan_root}/.venv/bin/python3 -m app.check_runner "
-        f"{shlex.quote(url)} "
-        f"--instance-dir {shlex.quote(str(instance_dir))} "
-        f"--koan-root {shlex.quote(str(koan_root))}"
-    )
-
-    # Queue the mission
+    # Queue the mission with clean format
     from app.utils import insert_pending_mission
 
-    mission_entry = (
-        f"- [project:{project_name}] Check {label} "
-        f"\u2014 run: `{cmd}`"
-    )
-    missions_path = instance_dir / "missions.md"
+    mission_entry = f"- [project:{project_name}] /check {url}"
+    missions_path = ctx.instance_dir / "missions.md"
     insert_pending_mission(missions_path, mission_entry)
 
     return f"\U0001f50d Check queued for {label}"

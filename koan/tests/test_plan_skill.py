@@ -197,46 +197,44 @@ class TestQueueNewPlan:
             assert "queued" in result.lower() or "Plan queued" in result
             # Check mission was written
             missions = (ctx.instance_dir / "missions.md").read_text()
-            assert "Plan:" in missions
-            assert "dark mode" in missions
-            assert "plan_runner" in missions
+            assert "/plan Add dark mode" in missions
+            assert "[project:koan]" in missions
 
     def test_unknown_project_returns_error(self, handler, ctx):
         with patch("app.utils.get_known_projects", return_value=[("koan", "/path")]):
             result = handler._queue_new_plan(ctx, "unknown", "idea")
             assert "not found" in result
 
-    def test_mission_contains_run_command(self, handler, ctx):
+    def test_mission_uses_clean_format(self, handler, ctx):
         with patch("app.utils.get_known_projects", return_value=[("koan", "/p")]):
             handler._queue_new_plan(ctx, "koan", "Add auth")
             missions = (ctx.instance_dir / "missions.md").read_text()
-            assert "run:" in missions
-            assert "--idea" in missions
-            assert "--project-path" in missions
+            assert "/plan Add auth" in missions
+            assert "run:" not in missions
+            assert "python3 -m" not in missions
 
     def test_default_project_when_none(self, handler, ctx):
         with patch("app.utils.get_known_projects", return_value=[("koan", "/path/koan")]):
             result = handler._queue_new_plan(ctx, None, "Add feature")
             assert "queued" in result.lower() or "Plan queued" in result
             missions = (ctx.instance_dir / "missions.md").read_text()
-            assert "plan_runner" in missions
+            assert "/plan Add feature" in missions
 
-    def test_idea_truncated_in_mission(self, handler, ctx):
+    def test_idea_in_mission(self, handler, ctx):
         long_idea = "A" * 200
         with patch("app.utils.get_known_projects", return_value=[("koan", "/p")]):
             handler._queue_new_plan(ctx, "koan", long_idea)
             missions = (ctx.instance_dir / "missions.md").read_text()
-            # Mission title should be truncated
-            assert "Plan:" in missions
+            assert "/plan " in missions
+            assert "A" * 50 in missions
 
-    def test_idea_with_special_chars_escaped(self, handler, ctx):
+    def test_idea_with_special_chars(self, handler, ctx):
         idea = "Add auth with 'quotes' and $vars"
         with patch("app.utils.get_known_projects", return_value=[("koan", "/p")]):
             handler._queue_new_plan(ctx, "koan", idea)
             missions = (ctx.instance_dir / "missions.md").read_text()
-            assert "plan_runner" in missions
-            # Should not have unescaped quotes breaking the command
-            assert "run:" in missions
+            # Clean format preserves the idea text as-is
+            assert "/plan Add auth with 'quotes' and $vars" in missions
 
 
 # ---------------------------------------------------------------------------
@@ -253,8 +251,7 @@ class TestQueueIssuePlan:
             assert "#64" in result
             assert "queued" in result.lower()
             missions = (ctx.instance_dir / "missions.md").read_text()
-            assert "issue #64" in missions
-            assert "--issue-url" in missions
+            assert "/plan https://github.com/sukria/koan/issues/64" in missions
 
     def test_mission_contains_url(self, handler, ctx):
         match = handler._ISSUE_URL_RE.search(

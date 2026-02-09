@@ -61,19 +61,8 @@ def handle(ctx):
     if not project_name:
         project_name = repo
 
-    # Build CLI command for the mission
-    koan_root = ctx.koan_root
-    cmd = (
-        f"cd {koan_root}/koan && "
-        f"{koan_root}/.venv/bin/python3 -m app.recreate_pr "
-        f"{pr_url} --project-path {project_path}"
-    )
-
-    # Queue the mission
-    mission_entry = (
-        f"- [project:{project_name}] Recreate PR #{pr_number} "
-        f"({owner}/{repo}) \u2014 run: `{cmd}`"
-    )
+    # Queue the mission with clean format
+    mission_entry = f"- [project:{project_name}] /recreate {pr_url}"
     missions_path = ctx.instance_dir / "missions.md"
     insert_pending_mission(missions_path, mission_entry)
 
