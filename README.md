@@ -207,6 +207,7 @@ projects:
 ```
 
 **Notes:**
+- `KOAN_CLI_PROVIDER` is the recommended environment variable (fallback to `CLI_PROVIDER` supported)
 - When Copilot lacks JSON output, Kōan falls back to plain text parsing
 - Max-turns absence means conversations run until model completion
 - Debug mode (`KOAN_DEBUG=1`) logs when unsupported features are requested

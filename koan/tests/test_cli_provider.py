@@ -395,6 +395,56 @@ class TestProviderResolution:
         p2 = get_provider()
         assert type(p1) is not type(p2)
 
+    @patch.dict("os.environ", {"CLI_PROVIDER": "copilot"}, clear=True)
+    @patch("app.utils.load_config", return_value={})
+    def test_fallback_to_cli_provider(self, mock_config, capsys):
+        """CLI_PROVIDER fallback works when KOAN_CLI_PROVIDER is not set."""
+        # Import after patching env to reset the warning flag
+        import app.utils
+        app.utils._cli_provider_warned = False
+
+        assert get_provider_name() == "copilot"
+        captured = capsys.readouterr()
+        assert "CLI_PROVIDER is deprecated" in captured.out
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude", "CLI_PROVIDER": "copilot"})
+    def test_koan_cli_provider_takes_priority(self, capsys):
+        """KOAN_CLI_PROVIDER takes priority over CLI_PROVIDER."""
+        import app.utils
+        app.utils._cli_provider_warned = False
+
+        assert get_provider_name() == "claude"
+        captured = capsys.readouterr()
+        # Should not warn since KOAN_CLI_PROVIDER is set
+        assert "deprecated" not in captured.out
+
+    @patch.dict("os.environ", {"CLI_PROVIDER": "claude"}, clear=True)
+    @patch("app.utils.load_config", return_value={})
+    def test_fallback_warning_only_once(self, mock_config, capsys):
+        """Deprecation warning is shown only once per process."""
+        import app.utils
+        app.utils._cli_provider_warned = False
+
+        # First call should warn
+        get_provider_name()
+        captured1 = capsys.readouterr()
+        assert "CLI_PROVIDER is deprecated" in captured1.out
+
+        # Second call should not warn
+        reset_provider()
+        get_provider_name()
+        captured2 = capsys.readouterr()
+        assert "deprecated" not in captured2.out
+
+    @patch.dict("os.environ", {}, clear=True)
+    @patch("app.utils.load_config", return_value={})
+    def test_empty_when_neither_set(self, mock_config):
+        """Falls back to default when neither env var is set."""
+        import os
+        os.environ.pop("KOAN_CLI_PROVIDER", None)
+        os.environ.pop("CLI_PROVIDER", None)
+        assert get_provider_name() == "claude"
+
 
 # ---------------------------------------------------------------------------
 # Module-level convenience functions

@@ -75,6 +75,37 @@ def load_config() -> dict:
         return {}
 
 
+# Track whether we've already logged the deprecation warning
+_cli_provider_warned = False
+
+
+def get_cli_provider_env() -> str:
+    """Get CLI provider from environment variables.
+
+    Reads KOAN_CLI_PROVIDER (primary) with fallback to CLI_PROVIDER (deprecated).
+    Logs a deprecation warning once per process if the fallback is used.
+
+    Returns:
+        The environment variable value (lowercase, stripped), or empty string if neither is set.
+    """
+    global _cli_provider_warned
+
+    # Primary: KOAN_CLI_PROVIDER
+    value = os.environ.get("KOAN_CLI_PROVIDER", "").strip().lower()
+    if value:
+        return value
+
+    # Fallback: CLI_PROVIDER (deprecated)
+    fallback = os.environ.get("CLI_PROVIDER", "").strip().lower()
+    if fallback:
+        if not _cli_provider_warned:
+            print("[utils] Warning: CLI_PROVIDER is deprecated. Use KOAN_CLI_PROVIDER instead.")
+            _cli_provider_warned = True
+        return fallback
+
+    return ""
+
+
 def parse_project(text: str) -> Tuple[Optional[str], str]:
     """Extract [project:name] or [projet:name] from text.
 

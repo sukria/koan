@@ -118,7 +118,7 @@ Extensible command plugin system. Each skill lives in `skills/<scope>/<skill-nam
 
 - Claude always creates **`<prefix>/*` branches** (default `koan/`, configurable via `branch_prefix` in `config.yaml`), never commits to main
 - Project config via `projects.yaml` at KOAN_ROOT (primary), with `KOAN_PROJECTS` env var as fallback. Supports per-project overrides for `cli_provider`, `models`, `tools`, and `git_auto_merge`.
-- Environment config via `.env` file and `KOAN_*` variables for secrets and system settings
+- Environment config via `.env` file and `KOAN_*` variables for secrets and system settings. **CLI provider** is configured via `KOAN_CLI_PROVIDER` env var (primary), with fallback to `CLI_PROVIDER` for backward compatibility. The centralized `get_cli_provider_env()` helper in `utils.py` handles this resolution.
 - Multi-project support: up to 50 projects, each with isolated memory under `memory/projects/{name}/`
 - Tests use temp directories and isolated env vars — no real Telegram calls
 - `system-prompt.md` defines the Claude agent's identity, priorities, and autonomous mode rules
