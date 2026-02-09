@@ -62,17 +62,39 @@ def _list_ideas(missions_file):
 def _add_idea(missions_file, text):
     """Add a new idea to the backlog."""
     from app.missions import insert_idea
+    from app.utils import (
+        parse_project,
+        detect_project_from_text,
+        get_known_projects,
+        modify_missions_file,
+    )
 
-    # Parse project tag if present
-    from app.utils import parse_project
+    # Check for explicit [project:name] tag first
     project, clean_text = parse_project(text)
+
+    # Auto-detect project from first word (e.g. "/idea koan some text")
+    if not project:
+        project, detected_text = detect_project_from_text(text)
+        if project:
+            clean_text = detected_text
+
+    # Multi-project setup with no project specified → ask user
+    if not project:
+        known = get_known_projects()
+        if len(known) > 1:
+            project_list = "\n".join(f"  - {name}" for name, _path in known)
+            first_name = known[0][0]
+            return (
+                f"Which project for this idea?\n\n"
+                f"{project_list}\n\n"
+                f"Reply with the project, e.g.:\n"
+                f"  /idea {first_name} {text[:80]}"
+            )
 
     if project:
         entry = f"- [project:{project}] {clean_text}"
     else:
         entry = f"- {clean_text}"
-
-    from app.utils import modify_missions_file
 
     modify_missions_file(missions_file, lambda content: insert_idea(content, entry))
 
@@ -80,7 +102,11 @@ def _add_idea(missions_file, text):
     if len(clean_text) > 100:
         display += "..."
 
-    return f"💡 Idea saved: {display}"
+    ack = "💡 Idea saved"
+    if project:
+        ack += f" (project: {project})"
+    ack += f": {display}"
+    return ack
 
 
 def _delete_idea(missions_file, index):
