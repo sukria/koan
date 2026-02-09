@@ -72,36 +72,56 @@ class TestLog:
 # ---------------------------------------------------------------------------
 
 class TestParseProjects:
-    def test_multi_project(self, tmp_path):
+    """Tests for parse_projects() — delegates to get_known_projects().
+
+    Since parse_projects() now reads from projects.yaml > KOAN_PROJECTS,
+    tests must set env vars or create projects.yaml.
+    """
+
+    def test_multi_project(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         from app.run import parse_projects
         p1 = tmp_path / "a"
         p2 = tmp_path / "b"
         p1.mkdir()
         p2.mkdir()
-        result = parse_projects(f"a:{p1};b:{p2}")
+        monkeypatch.setenv("KOAN_PROJECTS", f"a:{p1};b:{p2}")
+        result = parse_projects()
         assert len(result) == 2
         assert result[0] == ("a", str(p1))
         assert result[1] == ("b", str(p2))
 
-    def test_single_project(self, tmp_path):
+    def test_single_project_via_env(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         from app.run import parse_projects
         p = tmp_path / "proj"
         p.mkdir()
-        result = parse_projects("", str(p))
+        monkeypatch.setenv("KOAN_PROJECTS", f"proj:{p}")
+        result = parse_projects()
         assert len(result) == 1
-        assert result[0] == ("default", str(p))
+        assert result[0] == ("proj", str(p))
 
-    def test_no_project_exits(self):
+    def test_no_project_exits(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        monkeypatch.delenv("KOAN_PROJECTS", raising=False)
         from app.run import parse_projects
         with pytest.raises(SystemExit):
-            parse_projects("", "")
+            parse_projects()
 
-    def test_nonexistent_path_exits(self, tmp_path):
+    def test_nonexistent_path_exits(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        monkeypatch.setenv("KOAN_PROJECTS", f"bad:{tmp_path}/nonexistent")
         from app.run import parse_projects
         with pytest.raises(SystemExit):
-            parse_projects(f"bad:{tmp_path}/nonexistent")
+            parse_projects()
 
-    def test_too_many_projects(self, tmp_path):
+    def test_too_many_projects(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         from app.run import parse_projects
         # 51 projects
         dirs = []
@@ -109,8 +129,26 @@ class TestParseProjects:
             d = tmp_path / f"p{i}"
             d.mkdir()
             dirs.append(f"p{i}:{d}")
+        monkeypatch.setenv("KOAN_PROJECTS", ";".join(dirs))
         with pytest.raises(SystemExit):
-            parse_projects(";".join(dirs))
+            parse_projects()
+
+    def test_projects_yaml_used(self, tmp_path, monkeypatch):
+        """parse_projects reads from projects.yaml when available."""
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+        from app.run import parse_projects
+        p = tmp_path / "myproject"
+        p.mkdir()
+        (tmp_path / "projects.yaml").write_text(f"""
+projects:
+  myproject:
+    path: "{p}"
+""")
+        monkeypatch.delenv("KOAN_PROJECTS", raising=False)
+        result = parse_projects()
+        assert len(result) == 1
+        assert result[0][0] == "myproject"
 
 
 # ---------------------------------------------------------------------------

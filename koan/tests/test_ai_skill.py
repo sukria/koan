@@ -162,15 +162,8 @@ class TestGetProjects:
         assert projects[0][0] == "foo"
 
     @patch("app.utils.get_known_projects", side_effect=Exception("no yaml"))
-    def test_fallback_to_project_path(self, mock_get, handler, ctx, tmp_path, monkeypatch):
-        monkeypatch.setenv("KOAN_PROJECT_PATH", str(tmp_path))
-        projects = handler._get_projects(ctx)
-        assert len(projects) == 1
-        assert projects[0][0] == tmp_path.name
-
-    @patch("app.utils.get_known_projects", side_effect=Exception("no yaml"))
-    def test_empty_when_nothing_configured(self, mock_get, handler, ctx, monkeypatch):
-        monkeypatch.setenv("KOAN_PROJECT_PATH", "")
+    def test_returns_empty_on_exception(self, mock_get, handler, ctx, monkeypatch):
+        """When get_known_projects raises, returns empty list."""
         projects = handler._get_projects(ctx)
         assert projects == []
 
@@ -209,8 +202,7 @@ class TestResolveProject:
 
 class TestHandle:
     @patch("app.utils.get_known_projects", return_value=[])
-    def test_no_projects_returns_message(self, mock_get, handler, ctx, monkeypatch):
-        monkeypatch.setenv("KOAN_PROJECT_PATH", "")
+    def test_no_projects_returns_message(self, mock_get, handler, ctx):
         result = handler.handle(ctx)
         assert "No projects" in result
 

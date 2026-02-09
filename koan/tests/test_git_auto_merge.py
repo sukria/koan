@@ -45,8 +45,8 @@ class TestGetAutoMergeConfig:
         assert result["strategy"] == "squash"
         assert len(result["rules"]) == 1
 
-    def test_project_overrides_enabled(self):
-        """Project can override enabled flag."""
+    def test_config_yaml_projects_section_ignored(self):
+        """config.yaml projects section is ignored — overrides come from projects.yaml."""
         config = {
             "git_auto_merge": {"enabled": True, "base_branch": "main", "strategy": "squash"},
             "projects": {
@@ -57,65 +57,29 @@ class TestGetAutoMergeConfig:
         }
         result = get_auto_merge_config(config, "frontend")
 
-        assert result["enabled"] is False
-        assert result["base_branch"] == "main"  # Inherited
-        assert result["strategy"] == "squash"  # Inherited
+        # projects: section in config.yaml is no longer consulted
+        assert result["enabled"] is True  # Global, not overridden
+        assert result["base_branch"] == "main"
+        assert result["strategy"] == "squash"
 
-    def test_project_overrides_base_branch(self):
-        """Project can override base_branch."""
-        config = {
-            "git_auto_merge": {"enabled": True, "base_branch": "main", "strategy": "squash"},
+    @patch("app.projects_config.load_projects_config")
+    def test_projects_yaml_overrides(self, mock_load):
+        """Per-project overrides come from projects.yaml."""
+        mock_load.return_value = {
+            "defaults": {"git_auto_merge": {"enabled": True, "base_branch": "main", "strategy": "squash"}},
             "projects": {
                 "backend": {
-                    "git_auto_merge": {"base_branch": "develop"}
+                    "path": "/p",
+                    "git_auto_merge": {"base_branch": "develop", "strategy": "merge"}
                 }
             }
         }
+        config = {"git_auto_merge": {"enabled": True, "base_branch": "main", "strategy": "squash"}}
         result = get_auto_merge_config(config, "backend")
 
-        assert result["enabled"] is True  # Inherited
-        assert result["base_branch"] == "develop"  # Overridden
-        assert result["strategy"] == "squash"  # Inherited
-
-    def test_project_overrides_strategy(self):
-        """Project can override merge strategy."""
-        config = {
-            "git_auto_merge": {"enabled": True, "base_branch": "main", "strategy": "squash"},
-            "projects": {
-                "backend": {
-                    "git_auto_merge": {"strategy": "merge"}
-                }
-            }
-        }
-        result = get_auto_merge_config(config, "backend")
-
-        assert result["strategy"] == "merge"  # Overridden
-        assert result["base_branch"] == "main"  # Inherited
-
-    def test_project_overrides_rules(self):
-        """Project rules replace global rules entirely."""
-        config = {
-            "git_auto_merge": {
-                "enabled": True,
-                "base_branch": "main",
-                "rules": [{"pattern": "koan/*", "auto_merge": True}]
-            },
-            "projects": {
-                "backend": {
-                    "git_auto_merge": {
-                        "rules": [
-                            {"pattern": "koan/hotfix-*", "auto_merge": True, "base_branch": "main"},
-                            {"pattern": "koan/*", "auto_merge": True, "base_branch": "develop"}
-                        ]
-                    }
-                }
-            }
-        }
-        result = get_auto_merge_config(config, "backend")
-
-        assert len(result["rules"]) == 2  # Project rules replace global
-        assert result["rules"][0]["pattern"] == "koan/hotfix-*"
-        assert result["rules"][1]["pattern"] == "koan/*"
+        assert result["base_branch"] == "develop"  # Overridden via projects.yaml
+        assert result["strategy"] == "merge"  # Overridden via projects.yaml
+        assert result["enabled"] is True  # Inherited from defaults
 
     def test_missing_config_section(self):
         """When git_auto_merge section missing, return safe defaults."""
@@ -379,8 +343,8 @@ class TestGetAuthorEnv:
 # --- Integration Tests ---
 
 class TestIntegration:
-    def test_full_config_resolution_koan_project(self):
-        """Test full config resolution for koan project."""
+    def test_full_config_resolution_global_only(self):
+        """Test full config resolution uses global config.yaml settings."""
         config = {
             "git_auto_merge": {
                 "enabled": True,
@@ -388,15 +352,6 @@ class TestIntegration:
                 "strategy": "squash",
                 "rules": [{"pattern": "koan/*", "auto_merge": True, "delete_after_merge": True}]
             },
-            "projects": {
-                "koan": {
-                    "git_auto_merge": {
-                        "enabled": True,
-                        "base_branch": "main",
-                        "strategy": "squash"
-                    }
-                }
-            }
         }
 
         merged = get_auto_merge_config(config, "koan")
@@ -406,8 +361,8 @@ class TestIntegration:
         assert base_branch == "main"
         assert merged["strategy"] == "squash"
 
-    def test_full_config_resolution_backend_project(self):
-        """Test full config resolution for backend project with overrides."""
+    def test_config_yaml_projects_section_ignored_in_integration(self):
+        """config.yaml projects section is ignored; only global settings used."""
         config = {
             "git_auto_merge": {
                 "enabled": True,
@@ -420,10 +375,6 @@ class TestIntegration:
                     "git_auto_merge": {
                         "base_branch": "develop",
                         "strategy": "merge",
-                        "rules": [
-                            {"pattern": "koan/hotfix-*", "auto_merge": True, "base_branch": "main"},
-                            {"pattern": "koan/*", "auto_merge": True, "base_branch": "develop"}
-                        ]
                     }
                 }
             }
@@ -431,17 +382,10 @@ class TestIntegration:
 
         merged = get_auto_merge_config(config, "backend")
 
-        # Hotfix should go to main
-        should_merge1, _, base1 = should_auto_merge(merged, "koan/hotfix-cors")
-        assert should_merge1 is True
-        assert base1 == "main"
-
-        # Regular branch should go to develop
-        should_merge2, _, base2 = should_auto_merge(merged, "koan/feature-auth")
-        assert should_merge2 is True
-        assert base2 == "develop"
-
-        assert merged["strategy"] == "merge"  # Overridden
+        # config.yaml projects: section is ignored — uses global values
+        assert merged["base_branch"] == "main"
+        assert merged["strategy"] == "squash"
+        assert len(merged["rules"]) == 1
 
 
 # --- run_git ---

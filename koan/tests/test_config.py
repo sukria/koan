@@ -275,7 +275,11 @@ class TestGetAutoMergeConfig:
         assert result["enabled"] is False
         assert result["strategy"] == "rebase"
 
-    def test_project_override(self):
+    def test_config_yaml_projects_section_ignored(self):
+        """config.yaml projects: section is no longer used for per-project overrides.
+
+        Per-project auto-merge config is now exclusively in projects.yaml.
+        """
         from app.config import get_auto_merge_config
 
         config = {
@@ -284,7 +288,8 @@ class TestGetAutoMergeConfig:
         }
         result = get_auto_merge_config(config, "myproject")
         assert result["enabled"] is True
-        assert result["strategy"] == "merge"
+        # Should use global config, not the projects section override
+        assert result["strategy"] == "squash"
 
 
 # --- backward compatibility ---

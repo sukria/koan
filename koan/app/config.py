@@ -12,6 +12,7 @@ Note: load_config() itself lives in utils.py to avoid circular imports.
 Functions here call it via import to ensure mocks propagate correctly.
 """
 
+import os
 from typing import List, Optional
 
 
@@ -273,7 +274,9 @@ def get_output_flags_for_shell(fmt: str) -> str:
 def get_auto_merge_config(config: dict, project_name: str) -> dict:
     """Get auto-merge config with per-project override support.
 
-    Merges global defaults with project-specific overrides.
+    Resolution order:
+    1. projects.yaml (if it exists) — per-project git_auto_merge
+    2. config.yaml — global git_auto_merge only
 
     Args:
         config: Full config dict from load_config()
@@ -282,13 +285,21 @@ def get_auto_merge_config(config: dict, project_name: str) -> dict:
     Returns:
         Merged config with keys: enabled, base_branch, strategy, rules
     """
-    global_cfg = config.get("git_auto_merge", {})
-    project_cfg = config.get("projects", {}).get(project_name, {}).get("git_auto_merge", {})
+    # Try projects.yaml first
+    try:
+        from app.projects_config import load_projects_config, get_project_auto_merge
+        koan_root = os.environ.get("KOAN_ROOT", "")
+        projects_config = load_projects_config(koan_root) if koan_root else None
+        if projects_config and project_name in projects_config.get("projects", {}):
+            return get_project_auto_merge(projects_config, project_name)
+    except Exception:
+        pass
 
-    # Deep merge: project overrides global
+    # Fall back to config.yaml global settings
+    global_cfg = config.get("git_auto_merge", {})
     return {
-        "enabled": project_cfg.get("enabled", global_cfg.get("enabled", True)),
-        "base_branch": project_cfg.get("base_branch", global_cfg.get("base_branch", "main")),
-        "strategy": project_cfg.get("strategy", global_cfg.get("strategy", "squash")),
-        "rules": project_cfg.get("rules", global_cfg.get("rules", []))
+        "enabled": global_cfg.get("enabled", True),
+        "base_branch": global_cfg.get("base_branch", "main"),
+        "strategy": global_cfg.get("strategy", "squash"),
+        "rules": global_cfg.get("rules", []),
     }

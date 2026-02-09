@@ -99,7 +99,7 @@ def _resolve_project_path(project_name, fallback=False):
     if projects:
         return projects[0][1]
 
-    return os.environ.get("KOAN_PROJECT_PATH", "")
+    return ""
 
 
 def _queue_new_plan(ctx, project_name, idea):

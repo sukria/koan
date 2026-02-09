@@ -62,11 +62,28 @@ def get_installation_status() -> dict:
             and "your-chat-id" not in env_content
         )
         status["projects_configured"] = (
-            ("KOAN_PROJECT_PATH=" in env_content or "KOAN_PROJECTS=" in env_content)
-            and "/path/to" not in env_content
+            (KOAN_ROOT / "projects.yaml").exists()
+            or (
+                "KOAN_PROJECTS=" in env_content
+                and "/path/to" not in env_content
+            )
         )
 
     return status
+
+
+def _load_wizard_projects() -> list:
+    """Load project list for wizard display.
+
+    Reuses get_known_projects() (projects.yaml > KOAN_PROJECTS).
+    Returns list of dicts with 'name' and 'path' keys.
+    """
+    from app.utils import get_known_projects
+
+    try:
+        return [{"name": name, "path": path} for name, path in get_known_projects()]
+    except Exception:
+        return []
 
 
 def create_instance_dir() -> bool:
@@ -287,20 +304,7 @@ def step_projects():
     """Step 3: Project paths configuration."""
     status = get_installation_status()
 
-    # Parse existing projects
-    projects_str = get_env_var("KOAN_PROJECTS") or ""
-    project_path = get_env_var("KOAN_PROJECT_PATH") or ""
-
-    projects = []
-    if projects_str and "/path/to" not in projects_str:
-        for entry in projects_str.split(";"):
-            if ":" in entry:
-                name, path = entry.split(":", 1)
-                projects.append({"name": name, "path": path})
-    elif project_path and "/path/to" not in project_path:
-        # Try to infer name from path
-        name = Path(project_path).name
-        projects.append({"name": name, "path": project_path})
+    projects = _load_wizard_projects()
 
     return render_template("wizard/projects.html",
         status=status,
@@ -345,7 +349,7 @@ def validate_project():
 
 @app.route("/step/projects/save", methods=["POST"])
 def save_projects():
-    """Save project configuration."""
+    """Save project configuration to projects.yaml."""
     data = request.get_json()
     projects = data.get("projects", [])
 
@@ -358,23 +362,32 @@ def save_projects():
         if not path.exists() or not path.is_dir():
             return jsonify({"ok": False, "error": f"Invalid path: {p.get('path')}"})
 
-    if len(projects) == 1:
-        # Single project mode
-        update_env_var("KOAN_PROJECT_PATH", str(Path(projects[0]["path"]).expanduser()))
-        # Comment out KOAN_PROJECTS
-        if ENV_FILE.exists():
-            content = ENV_FILE.read_text()
-            content = re.sub(r'^KOAN_PROJECTS=', '# KOAN_PROJECTS=', content, flags=re.MULTILINE)
-            ENV_FILE.write_text(content)
-    else:
-        # Multi-project mode
-        projects_str = ";".join(f"{p['name']}:{Path(p['path']).expanduser()}" for p in projects)
-        update_env_var("KOAN_PROJECTS", projects_str)
-        # Comment out KOAN_PROJECT_PATH
-        if ENV_FILE.exists():
-            content = ENV_FILE.read_text()
-            content = re.sub(r'^KOAN_PROJECT_PATH=', '# KOAN_PROJECT_PATH=', content, flags=re.MULTILINE)
-            ENV_FILE.write_text(content)
+    # Build projects.yaml content
+    import yaml
+
+    config = {
+        "defaults": {
+            "git_auto_merge": {
+                "enabled": False,
+                "base_branch": "main",
+                "strategy": "squash",
+            }
+        },
+        "projects": {},
+    }
+    for p in sorted(projects, key=lambda x: x.get("name", "").lower()):
+        name = p.get("name", Path(p["path"]).name)
+        config["projects"][name] = {"path": str(Path(p["path"]).expanduser())}
+
+    projects_yaml = KOAN_ROOT / "projects.yaml"
+    header = (
+        "# projects.yaml — Project configuration for Kōan\n"
+        "#\n"
+        "# See projects.example.yaml for full documentation.\n\n"
+    )
+    projects_yaml.write_text(
+        header + yaml.dump(config, default_flow_style=False, sort_keys=False)
+    )
 
     return jsonify({"ok": True})
 
@@ -384,19 +397,7 @@ def step_ready():
     """Step 4: Ready to launch!"""
     status = get_installation_status()
 
-    # Get configured values for display
-    projects_str = get_env_var("KOAN_PROJECTS") or ""
-    project_path = get_env_var("KOAN_PROJECT_PATH") or ""
-
-    projects = []
-    if projects_str and "/path/to" not in projects_str:
-        for entry in projects_str.split(";"):
-            if ":" in entry:
-                name, path = entry.split(":", 1)
-                projects.append({"name": name, "path": path})
-    elif project_path and "/path/to" not in project_path:
-        name = Path(project_path).name
-        projects.append({"name": name, "path": project_path})
+    projects = _load_wizard_projects()
 
     return render_template("wizard/ready.html",
         status=status,

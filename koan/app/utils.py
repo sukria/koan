@@ -194,12 +194,25 @@ def modify_missions_file(missions_path: Path, transform):
 
 
 def get_known_projects() -> list:
-    """Return sorted list of (name, path) tuples from KOAN_PROJECTS env var.
+    """Return sorted list of (name, path) tuples.
 
-    Format: name:path;name2:path2
-    Falls back to KOAN_PROJECT_PATH with name "default" for single-project mode.
-    Returns empty list if neither is set.
+    Resolution order:
+    1. projects.yaml (if file exists at KOAN_ROOT)
+    2. KOAN_PROJECTS env var (fallback)
+
+    Returns empty list if none is configured.
     """
+    # 1. Try projects.yaml
+    try:
+        from app.projects_config import load_projects_config, get_projects_from_config
+        config = load_projects_config(str(KOAN_ROOT))
+        if config is not None:
+            return get_projects_from_config(config)
+    except Exception:
+        # Invalid YAML or import error — fall through to env var
+        pass
+
+    # 2. KOAN_PROJECTS env var
     projects_str = os.environ.get("KOAN_PROJECTS", "")
     if projects_str:
         result = []
@@ -209,10 +222,6 @@ def get_known_projects() -> list:
                 name, path = pair.split(":", 1)
                 result.append((name.strip(), path.strip()))
         return sorted(result, key=lambda x: x[0].lower())
-
-    single_path = os.environ.get("KOAN_PROJECT_PATH", "")
-    if single_path:
-        return [("default", single_path)]
 
     return []
 
@@ -224,7 +233,6 @@ def resolve_project_path(repo_name: str) -> Optional[str]:
     1. Exact match on project name (case-insensitive)
     2. Match on directory basename (case-insensitive)
     3. Fallback to single project if only one configured
-    4. KOAN_PROJECT_PATH env var
     """
     projects = get_known_projects()
 
@@ -241,10 +249,6 @@ def resolve_project_path(repo_name: str) -> Optional[str]:
     # Fallback to single project
     if len(projects) == 1:
         return projects[0][1]
-
-    project_path = os.environ.get("KOAN_PROJECT_PATH", "")
-    if project_path:
-        return project_path
 
     return None
 

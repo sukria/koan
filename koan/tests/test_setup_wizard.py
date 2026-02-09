@@ -317,10 +317,10 @@ class TestProjectValidation:
 
 
 class TestProjectSave:
-    """Tests for saving project configuration."""
+    """Tests for saving project configuration to projects.yaml."""
 
     def test_save_single_project(self, wizard_app):
-        """Single project should use KOAN_PROJECT_PATH."""
+        """Single project should create projects.yaml."""
         client, root = wizard_app
 
         # Init and create project dir
@@ -336,11 +336,15 @@ class TestProjectSave:
         data = json.loads(response.data)
         assert data["ok"] is True
 
-        env_content = (root / ".env").read_text()
-        assert f"KOAN_PROJECT_PATH={project_dir}" in env_content
+        import yaml
+        projects_yaml = root / "projects.yaml"
+        assert projects_yaml.exists()
+        config = yaml.safe_load(projects_yaml.read_text())
+        assert "myproject" in config["projects"]
+        assert config["projects"]["myproject"]["path"] == str(project_dir)
 
     def test_save_multiple_projects(self, wizard_app):
-        """Multiple projects should use KOAN_PROJECTS."""
+        """Multiple projects should create projects.yaml with all entries."""
         client, root = wizard_app
 
         # Init and create project dirs
@@ -363,8 +367,14 @@ class TestProjectSave:
         data = json.loads(response.data)
         assert data["ok"] is True
 
-        env_content = (root / ".env").read_text()
-        assert f"KOAN_PROJECTS=proj1:{project1};proj2:{project2}" in env_content
+        import yaml
+        projects_yaml = root / "projects.yaml"
+        assert projects_yaml.exists()
+        config = yaml.safe_load(projects_yaml.read_text())
+        assert "proj1" in config["projects"]
+        assert "proj2" in config["projects"]
+        assert config["projects"]["proj1"]["path"] == str(project1)
+        assert config["projects"]["proj2"]["path"] == str(project2)
 
 
 class TestSetupExecution:

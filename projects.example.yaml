@@ -1,0 +1,38 @@
+# projects.yaml — Project configuration for Kōan
+#
+# Place this file at your KOAN_ROOT (next to .env).
+# Not versioned — copy from projects.example.yaml and customize.
+#
+# Each project entry MUST have a 'path'. All other fields are optional
+# and inherit from 'defaults' if not specified.
+#
+# This file replaces KOAN_PROJECTS / KOAN_PROJECT_PATH env vars.
+# If projects.yaml exists, env vars are ignored (but still work as fallback
+# if you delete this file).
+
+defaults:
+  # These apply to every project unless overridden
+  git_auto_merge:
+    enabled: false
+    base_branch: "main"
+    strategy: "squash"
+  # cli_provider: "claude"          # Future: per-project provider
+  # model: ""                       # Future: per-project model
+
+projects:
+  # Example: your main project
+  myapp:
+    path: "/Users/yourname/workspace/myapp"
+    # git_auto_merge:
+    #   enabled: true
+    #   strategy: "merge"
+
+  # Example: a backend project with custom base branch
+  # backend:
+  #   path: "/Users/yourname/workspace/backend"
+  #   git_auto_merge:
+  #     base_branch: "staging"
+
+  # Example: minimal config (inherits all defaults — only path required)
+  # frontend:
+  #   path: "/Users/yourname/workspace/frontend"

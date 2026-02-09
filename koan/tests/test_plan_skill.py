@@ -170,10 +170,10 @@ class TestResolveProjectPath:
                     return_value=[("koan", "/first"), ("web", "/second")]):
             assert handler._resolve_project_path(None) == "/first"
 
-    def test_no_projects_falls_back_to_env(self, handler):
-        with patch("app.utils.get_known_projects", return_value=[]), \
-             patch.dict("os.environ", {"KOAN_PROJECT_PATH": "/from/env"}):
-            assert handler._resolve_project_path(None) == "/from/env"
+    def test_no_projects_returns_empty(self, handler):
+        """Without projects, _resolve_project_path returns empty string."""
+        with patch("app.utils.get_known_projects", return_value=[]):
+            assert handler._resolve_project_path(None) == ""
 
     def test_directory_basename_match(self, handler):
         with patch("app.utils.get_known_projects",

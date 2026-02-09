@@ -67,7 +67,7 @@ def validate_projects(
         Error message string if validation fails, None if valid.
     """
     if not projects:
-        return "No projects configured. Set KOAN_PROJECT_PATH or KOAN_PROJECTS env var."
+        return "No projects configured. Create projects.yaml or set KOAN_PROJECTS env var."
 
     if len(projects) > max_projects:
         return f"Max {max_projects} projects allowed. You have {len(projects)}."

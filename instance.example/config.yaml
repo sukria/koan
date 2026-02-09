@@ -116,12 +116,5 @@ usage:
   session_token_limit: 500000   # Tokens per 5h session window
   weekly_token_limit: 5000000   # Tokens per 7-day window
 
-# Per-project overrides
-# Override git_auto_merge settings for specific projects
-# Example: if you have a project named "myapp" configured via KOAN_PROJECTS
-# projects:
-#   myapp:
-#     git_auto_merge:
-#       enabled: true
-#       base_branch: "main"
-#       strategy: "squash"
+# Per-project overrides are now configured in projects.yaml.
+# See projects.example.yaml for documentation.

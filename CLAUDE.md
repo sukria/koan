@@ -43,7 +43,9 @@ Communication between processes happens through shared files in `instance/` with
 
 **Core data & config:**
 - **`missions.py`** — Single source of truth for `missions.md` parsing (sections: Pending / In Progress / Done; French equivalents also accepted). Missions can be tagged `[project:name]`.
-- **`utils.py`** — File locking (thread + file locks), config loading, atomic writes, `get_branch_prefix()`, `get_known_projects()`
+- **`projects_config.py`** — Project configuration loader for `projects.yaml`. `load_projects_config()`, `get_projects_from_config()`, `get_project_config()` (merged defaults + overrides), `get_project_auto_merge()`.
+- **`projects_migration.py`** — One-shot migration from env vars (`KOAN_PROJECTS`/`KOAN_PROJECT_PATH`) to `projects.yaml`. Runs at startup if `projects.yaml` doesn't exist.
+- **`utils.py`** — File locking (thread + file locks), config loading, atomic writes, `get_branch_prefix()`, `get_known_projects()` (projects.yaml > KOAN_PROJECTS)
 
 **Agent loop pipeline** (called from `run.py`):
 - **`iteration_manager.py`** — Per-iteration decision-making: usage refresh, mode selection, recurring injection, mission picking, project resolution.
@@ -113,8 +115,9 @@ Extensible command plugin system. Each skill lives in `skills/<scope>/<skill-nam
 ## Conventions
 
 - Claude always creates **`<prefix>/*` branches** (default `koan/`, configurable via `branch_prefix` in `config.yaml`), never commits to main
-- Environment config via `.env` file and `KOAN_*` variables (e.g., `KOAN_PROJECTS=name:path;name2:path2`)
-- Multi-project support: up to 5 projects, each with isolated memory under `memory/projects/{name}/`
+- Project config via `projects.yaml` at KOAN_ROOT (primary), with `KOAN_PROJECTS` env var as fallback
+- Environment config via `.env` file and `KOAN_*` variables for secrets and system settings
+- Multi-project support: up to 50 projects, each with isolated memory under `memory/projects/{name}/`
 - Tests use temp directories and isolated env vars — no real Telegram calls
 - `system-prompt.md` defines the Claude agent's identity, priorities, and autonomous mode rules
 - **No inline prompts in Python code** — LLM prompts MUST be extracted to `.md` files. Skill-bound prompts go in `skills/<scope>/<name>/prompts/` and are loaded via `load_skill_prompt()`. Infrastructure prompts used by `koan/app/` modules stay in `koan/system-prompts/` and are loaded via `load_prompt()`.

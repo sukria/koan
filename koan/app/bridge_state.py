@@ -25,7 +25,20 @@ MISSIONS_FILE = INSTANCE_DIR / "missions.md"
 OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
 TELEGRAM_HISTORY_FILE = INSTANCE_DIR / "telegram-history.jsonl"
 TOPICS_FILE = INSTANCE_DIR / "previous-discussions-topics.json"
-PROJECT_PATH = os.environ.get("KOAN_PROJECT_PATH", "")
+
+def _resolve_default_project_path() -> str:
+    """Get the first project's path for CLI cwd fallback."""
+    try:
+        from app.utils import get_known_projects
+        projects = get_known_projects()
+        if projects:
+            return projects[0][1]
+    except Exception:
+        pass
+    return ""
+
+
+PROJECT_PATH = _resolve_default_project_path()
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 

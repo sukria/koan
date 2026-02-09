@@ -1683,8 +1683,7 @@ class TestHandlePr:
             instance_dir=tmp_path,
             args="https://github.com/sukria/unknown-repo/pull/1",
         )
-        with patch.dict("os.environ", {"KOAN_PROJECT_PATH": ""}):
-            result = mod.handle(ctx)
+        result = mod.handle(ctx)
         assert "Could not find local project" in result
 
     @patch("app.command_handlers.send_telegram")

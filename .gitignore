@@ -27,3 +27,4 @@ venv/
 .vscode/
 .idea/
 .last-review-sha
+projects.yaml

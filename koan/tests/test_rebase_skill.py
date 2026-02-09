@@ -189,11 +189,12 @@ class TestResolveProjectPath:
         with patch("app.utils.get_known_projects", return_value=[("a", "/a"), ("b", "/b")]):
             assert resolve_project_path("xyz") is None
 
-    def test_env_fallback(self):
+    def test_no_env_fallback(self):
+        """KOAN_PROJECT_PATH env var is no longer used as fallback."""
         from app.utils import resolve_project_path
         with patch("app.utils.get_known_projects", return_value=[("a", "/a"), ("b", "/b")]), \
              patch.dict("os.environ", {"KOAN_PROJECT_PATH": "/from/env"}):
-            assert resolve_project_path("xyz") == "/from/env"
+            assert resolve_project_path("xyz") is None
 
 
 # ---------------------------------------------------------------------------

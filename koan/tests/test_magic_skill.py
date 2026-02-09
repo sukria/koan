@@ -27,7 +27,6 @@ class TestGetProjects:
         from skills.core.magic.handler import _get_projects
 
         monkeypatch.delenv("KOAN_PROJECTS", raising=False)
-        monkeypatch.delenv("KOAN_PROJECT_PATH", raising=False)
 
         ctx = _make_ctx(tmp_path, tmp_path)
         with patch("app.utils.get_known_projects", return_value=[]):
@@ -64,13 +63,9 @@ class TestGetProjects:
 
         assert result == []
 
-    def test_fallback_to_koan_project_path(self, tmp_path, monkeypatch):
+    def test_returns_empty_on_exception(self, tmp_path, monkeypatch):
+        """When get_known_projects() raises, returns empty list."""
         from skills.core.magic.handler import _get_projects
-
-        project_path = tmp_path / "fallback"
-        project_path.mkdir()
-
-        monkeypatch.setenv("KOAN_PROJECT_PATH", str(project_path))
 
         ctx = _make_ctx(tmp_path, tmp_path)
         with patch(
@@ -79,8 +74,7 @@ class TestGetProjects:
         ):
             result = _get_projects(ctx)
 
-        assert len(result) == 1
-        assert result[0][0] == "fallback"
+        assert result == []
 
 
 class TestResolveProject:
@@ -262,7 +256,6 @@ class TestHandle:
         from skills.core.magic.handler import handle
 
         monkeypatch.delenv("KOAN_PROJECTS", raising=False)
-        monkeypatch.delenv("KOAN_PROJECT_PATH", raising=False)
 
         ctx = _make_ctx(tmp_path, tmp_path)
         with patch("app.utils.get_known_projects", return_value=[]):

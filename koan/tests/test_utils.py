@@ -665,16 +665,15 @@ class TestGetKnownProjects:
         assert result[0][0] == "alpha"
         assert result[1][0] == "zebra"
 
-    def test_fallback_to_project_path(self, monkeypatch):
+    def test_project_path_no_longer_supported(self, monkeypatch):
+        """KOAN_PROJECT_PATH is no longer a fallback for get_known_projects()."""
         monkeypatch.delenv("KOAN_PROJECTS", raising=False)
         monkeypatch.setenv("KOAN_PROJECT_PATH", "/single/path")
         from app.utils import get_known_projects
-        result = get_known_projects()
-        assert result == [("default", "/single/path")]
+        assert get_known_projects() == []
 
     def test_empty_when_no_config(self, monkeypatch):
         monkeypatch.delenv("KOAN_PROJECTS", raising=False)
-        monkeypatch.delenv("KOAN_PROJECT_PATH", raising=False)
         from app.utils import get_known_projects
         assert get_known_projects() == []
 
