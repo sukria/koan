@@ -22,6 +22,11 @@ defaults:
   # Can also be set globally in config.yaml or via KOAN_CLI_PROVIDER env var.
   # cli_provider: "claude"
 
+  # GitHub CLI identity — which gh account to use for this project.
+  # Overrides the global GITHUB_USER env var on a per-project basis.
+  # The user must be pre-authenticated with: gh auth login --user <username>
+  # github_user: ""
+
   # Model overrides — control which models are used per project.
   # Keys match config.yaml models section: mission, chat, lightweight,
   # fallback, review_mode. Empty string = use default model.
@@ -71,3 +76,8 @@ projects:
   # copilot-project:
   #   path: "/Users/yourname/workspace/copilot-project"
   #   cli_provider: "copilot"
+
+  # Example: a project with a specific GitHub identity
+  # work-project:
+  #   path: "/Users/yourname/workspace/work-project"
+  #   github_user: "your-work-github-account"

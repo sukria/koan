@@ -26,8 +26,26 @@ import sys
 from typing import Optional, Dict
 
 
-def get_github_user() -> str:
-    """Return the configured GITHUB_USER, or empty string if not set."""
+def get_github_user(project_name: str = "") -> str:
+    """Return the GitHub user for a project, falling back to GITHUB_USER env.
+
+    Resolution order:
+    1. Per-project github_user from projects.yaml (if project_name given)
+    2. GITHUB_USER environment variable
+    3. Empty string (no user configured)
+    """
+    if project_name:
+        try:
+            from app.projects_config import load_projects_config, get_project_github_user
+            koan_root = os.environ.get("KOAN_ROOT", "")
+            if koan_root:
+                config = load_projects_config(koan_root)
+                if config:
+                    project_user = get_project_github_user(config, project_name)
+                    if project_user:
+                        return project_user
+        except Exception:
+            pass
     return os.environ.get("GITHUB_USER", "").strip()
 
 
@@ -56,16 +74,16 @@ def get_gh_token(username: str) -> Optional[str]:
         return None
 
 
-def get_gh_env() -> Dict[str, str]:
+def get_gh_env(project_name: str = "") -> Dict[str, str]:
     """Return environment variables for gh CLI commands.
 
-    If GITHUB_USER is configured, retrieves the token and returns
-    a dict with GH_TOKEN set. Otherwise returns an empty dict.
+    If a GitHub user is configured (per-project or global), retrieves
+    the token and returns a dict with GH_TOKEN set.
 
     This is designed to be merged into subprocess.run() env:
         env = {**os.environ, **get_gh_env()}
     """
-    username = get_github_user()
+    username = get_github_user(project_name)
     if not username:
         return {}
 
@@ -80,18 +98,27 @@ def get_gh_env() -> Dict[str, str]:
     return {}
 
 
-def setup_github_auth() -> bool:
+def setup_github_auth(project_name: str = "") -> bool:
     """Setup GitHub authentication for the session.
 
-    Reads GITHUB_USER, retrieves token, sets GH_TOKEN in os.environ.
+    Reads github_user from projects.yaml (per-project) or GITHUB_USER
+    env var (global), retrieves token, sets GH_TOKEN in os.environ.
     Sends a Telegram alert if the token retrieval fails.
 
+    Args:
+        project_name: Optional project name for per-project user lookup.
+
     Returns:
-        True if auth was set up successfully (or GITHUB_USER not configured).
-        False if GITHUB_USER is set but token retrieval failed.
+        True if auth was set up successfully (or no user configured).
+        False if a user is set but token retrieval failed.
     """
-    username = get_github_user()
+    username = get_github_user(project_name)
     if not username:
+        if project_name:
+            # Per-project switch with no configured user — clear any
+            # previously set GH_TOKEN from a prior project switch, so
+            # gh CLI falls back to its default auth.
+            os.environ.pop("GH_TOKEN", None)
         return True  # No user configured, nothing to do
 
     token = get_gh_token(username)

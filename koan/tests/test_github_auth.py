@@ -36,6 +36,37 @@ class TestGetGithubUser:
         monkeypatch.setenv("GITHUB_USER", "")
         assert get_github_user() == ""
 
+    @patch("app.projects_config.get_project_github_user", return_value="project-bot")
+    @patch("app.projects_config.load_projects_config")
+    def test_per_project_user_overrides_env(self, mock_config, mock_project_user, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", "/tmp/test-koan")
+        monkeypatch.setenv("GITHUB_USER", "global-bot")
+        mock_config.return_value = {"projects": {"myapp": {"path": "/tmp"}}}
+        assert get_github_user("myapp") == "project-bot"
+
+    @patch("app.projects_config.get_project_github_user", return_value="")
+    @patch("app.projects_config.load_projects_config")
+    def test_per_project_empty_falls_back_to_env(self, mock_config, mock_project_user, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", "/tmp/test-koan")
+        monkeypatch.setenv("GITHUB_USER", "global-bot")
+        mock_config.return_value = {"projects": {"myapp": {"path": "/tmp"}}}
+        assert get_github_user("myapp") == "global-bot"
+
+    def test_no_project_name_uses_env(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_USER", "global-bot")
+        assert get_github_user("") == "global-bot"
+
+    @patch("app.projects_config.load_projects_config", return_value=None)
+    def test_per_project_no_config_falls_back_to_env(self, mock_config, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", "/tmp/test-koan")
+        monkeypatch.setenv("GITHUB_USER", "global-bot")
+        assert get_github_user("myapp") == "global-bot"
+
+    def test_per_project_no_koan_root_falls_back_to_env(self, monkeypatch):
+        monkeypatch.delenv("KOAN_ROOT", raising=False)
+        monkeypatch.setenv("GITHUB_USER", "global-bot")
+        assert get_github_user("myapp") == "global-bot"
+
 
 # ── get_gh_token ─────────────────────────────────────────────────
 
@@ -99,6 +130,14 @@ class TestGetGhEnv:
         result = get_gh_env()
         assert result == {"GH_TOKEN": "existing-token-123"}
 
+    @patch("app.github_auth.get_github_user", return_value="project-bot")
+    @patch("app.github_auth.get_gh_token", return_value="ghp_project_token")
+    def test_per_project_user_token(self, mock_token, mock_user, monkeypatch):
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        result = get_gh_env("myapp")
+        mock_user.assert_called_with("myapp")
+        assert result == {"GH_TOKEN": "ghp_project_token"}
+
 
 # ── setup_github_auth ────────────────────────────────────────────
 
@@ -131,6 +170,33 @@ class TestSetupGithubAuth:
         monkeypatch.delenv("GH_TOKEN", raising=False)
         with patch("app.notify.send_telegram", side_effect=Exception("network error")):
             assert setup_github_auth() is False
+
+    @patch("app.github_auth.get_github_user", return_value="project-bot")
+    @patch("app.github_auth.get_gh_token", return_value="ghp_proj_token")
+    def test_per_project_auth(self, mock_token, mock_user, monkeypatch):
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        assert setup_github_auth("myapp") is True
+        mock_user.assert_called_with("myapp")
+        assert os.environ.get("GH_TOKEN") == "ghp_proj_token"
+
+    @patch("app.github_auth.get_github_user", return_value="")
+    def test_per_project_no_user_returns_true(self, mock_user, monkeypatch):
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        assert setup_github_auth("myapp") is True
+
+    @patch("app.github_auth.get_github_user", return_value="")
+    def test_clears_gh_token_when_no_user(self, mock_user, monkeypatch):
+        """Switching to a project with no github_user clears stale GH_TOKEN."""
+        monkeypatch.setenv("GH_TOKEN", "stale-token-from-prev-project")
+        assert setup_github_auth("myapp") is True
+        assert "GH_TOKEN" not in os.environ
+
+    def test_does_not_clear_gh_token_without_project(self, monkeypatch):
+        """Initial startup without project_name preserves existing GH_TOKEN."""
+        monkeypatch.delenv("GITHUB_USER", raising=False)
+        monkeypatch.setenv("GH_TOKEN", "manual-token")
+        assert setup_github_auth() is True
+        assert os.environ.get("GH_TOKEN") == "manual-token"
 
 
 # ── CLI entry point ──────────────────────────────────────────────

@@ -786,6 +786,10 @@ def main_loop():
             os.environ["KOAN_CURRENT_PROJECT"] = project_name
             os.environ["KOAN_CURRENT_PROJECT_PATH"] = project_path
 
+            # Switch GitHub identity for this project (per-project or global)
+            from app.github_auth import setup_github_auth
+            setup_github_auth(project_name)
+
             print(bold_green(f">>> Current project: {project_name}") + f" ({project_path})")
             print()
 

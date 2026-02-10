@@ -186,6 +186,16 @@ def get_project_models(config: dict, project_name: str) -> dict:
     return models
 
 
+def get_project_github_user(config: dict, project_name: str) -> str:
+    """Get GitHub user for a project from projects.yaml.
+
+    Returns the github_user string or empty string if not configured
+    (meaning: use the global GITHUB_USER env var).
+    """
+    project_cfg = get_project_config(config, project_name)
+    return str(project_cfg.get("github_user", "")).strip()
+
+
 def get_project_tools(config: dict, project_name: str) -> dict:
     """Get tool restrictions for a project from projects.yaml.
 

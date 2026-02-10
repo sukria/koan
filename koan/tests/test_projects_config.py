@@ -10,6 +10,7 @@ from app.projects_config import (
     get_project_config,
     get_project_auto_merge,
     get_project_cli_provider,
+    get_project_github_user,
     get_project_models,
     get_project_tools,
     validate_project_paths,
@@ -695,6 +696,66 @@ class TestGetProjectCliProvider:
             "projects": {"app": {"path": "/app", "cli_provider": "  copilot  "}},
         }
         assert get_project_cli_provider(config, "app") == "copilot"
+
+
+# ---------------------------------------------------------------------------
+# get_project_github_user
+# ---------------------------------------------------------------------------
+
+
+class TestGetProjectGithubUser:
+    """Tests for get_project_github_user() — per-project GitHub identity."""
+
+    def test_returns_project_github_user(self):
+        config = {
+            "projects": {"app": {"path": "/app", "github_user": "app-bot"}},
+        }
+        assert get_project_github_user(config, "app") == "app-bot"
+
+    def test_inherits_default_github_user(self):
+        config = {
+            "defaults": {"github_user": "global-bot"},
+            "projects": {"app": {"path": "/app"}},
+        }
+        assert get_project_github_user(config, "app") == "global-bot"
+
+    def test_project_overrides_default(self):
+        config = {
+            "defaults": {"github_user": "global-bot"},
+            "projects": {"app": {"path": "/app", "github_user": "app-bot"}},
+        }
+        assert get_project_github_user(config, "app") == "app-bot"
+
+    def test_returns_empty_when_not_configured(self):
+        config = {
+            "projects": {"app": {"path": "/app"}},
+        }
+        assert get_project_github_user(config, "app") == ""
+
+    def test_unknown_project_returns_default(self):
+        config = {
+            "defaults": {"github_user": "global-bot"},
+            "projects": {"app": {"path": "/app"}},
+        }
+        assert get_project_github_user(config, "unknown") == "global-bot"
+
+    def test_strips_whitespace(self):
+        config = {
+            "projects": {"app": {"path": "/app", "github_user": "  bot-name  "}},
+        }
+        assert get_project_github_user(config, "app") == "bot-name"
+
+    def test_multiple_projects_different_users(self):
+        config = {
+            "projects": {
+                "work": {"path": "/work", "github_user": "work-account"},
+                "personal": {"path": "/personal", "github_user": "personal-account"},
+                "shared": {"path": "/shared"},
+            },
+        }
+        assert get_project_github_user(config, "work") == "work-account"
+        assert get_project_github_user(config, "personal") == "personal-account"
+        assert get_project_github_user(config, "shared") == ""
 
 
 # ---------------------------------------------------------------------------
