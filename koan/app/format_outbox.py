@@ -154,12 +154,20 @@ def format_for_telegram(raw_content: str, soul: str, prefs: str,
     if lang_instruction:
         prompt += f"\n\n{lang_instruction}"
 
+    # Get KOAN_ROOT for proper working directory
+    import os
+    koan_root = os.environ.get("KOAN_ROOT", "")
+    if not koan_root:
+        print("[format_outbox] KOAN_ROOT not set, using current directory", file=sys.stderr)
+        koan_root = None
+
     try:
         # Call CLI to format the message (lightweight model)
         models = get_model_config()
         cmd = build_full_command(prompt=prompt, model=models["lightweight"])
         result = subprocess.run(
             cmd,
+            cwd=koan_root,
             input=None,  # Prompt is self-contained
             capture_output=True,
             text=True,

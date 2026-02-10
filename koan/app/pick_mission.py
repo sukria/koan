@@ -51,6 +51,10 @@ def build_prompt(
 
 def call_claude(prompt: str) -> str:
     """Call Claude CLI with the picker prompt. Returns raw text output."""
+    # Get KOAN_ROOT for proper working directory
+    import os
+    koan_root = os.environ.get("KOAN_ROOT", "")
+
     models = get_model_config()
     cmd = build_full_command(
         prompt=prompt,
@@ -60,6 +64,7 @@ def call_claude(prompt: str) -> str:
     )
     result = subprocess.run(
         cmd,
+        cwd=koan_root if koan_root else None,
         capture_output=True,
         text=True,
         timeout=60,

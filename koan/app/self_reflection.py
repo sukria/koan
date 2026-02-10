@@ -111,12 +111,17 @@ def run_reflection(instance_dir: Path) -> str:
     """
     prompt = build_reflection_prompt(instance_dir)
 
+    # Get KOAN_ROOT for proper working directory
+    import os
+    koan_root = os.environ.get("KOAN_ROOT", "")
+
     try:
         from app.claude_step import strip_cli_noise
 
         cmd = build_full_command(prompt=prompt, max_turns=1)
         result = subprocess.run(
             cmd,
+            cwd=koan_root if koan_root else None,
             capture_output=True, text=True, timeout=60,
             check=False
         )

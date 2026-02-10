@@ -522,7 +522,7 @@ def handle_pause(
                 cmd=cmd,
                 stdout_file=os.devnull,
                 stderr_file=os.devnull,
-                cwd=instance,
+                cwd=koan_root,
             )
             log("pause", "Contemplative session ended.")
         except KeyboardInterrupt:
@@ -681,7 +681,7 @@ def main_loop():
                         project_name=project_name,
                         session_info=f"Run {run_num}/{max_runs} on {project_name}. Mode: {plan['autonomous_mode']}.",
                     )
-                    run_claude_task(cmd, os.devnull, os.devnull, cwd=instance)
+                    run_claude_task(cmd, os.devnull, os.devnull, cwd=koan_root)
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:

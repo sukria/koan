@@ -55,6 +55,13 @@ def run_ritual(ritual_type: str, instance_dir: Path) -> bool:
         print(f"[rituals] {e}", file=sys.stderr)
         return False
 
+    # Get KOAN_ROOT for proper working directory
+    import os
+    koan_root = os.environ.get("KOAN_ROOT", "")
+    if not koan_root:
+        print("[rituals] KOAN_ROOT not set", file=sys.stderr)
+        return False
+
     try:
         cmd = build_full_command(
             prompt=prompt,
@@ -63,6 +70,7 @@ def run_ritual(ritual_type: str, instance_dir: Path) -> bool:
         )
         result = subprocess.run(
             cmd,
+            cwd=koan_root,
             capture_output=True, text=True, timeout=90,
             check=False
         )
