@@ -295,6 +295,7 @@ class TestProjectValidation:
         assert data["is_git_repo"] is True
 
 
+    @pytest.mark.skipif(os.getuid() == 0, reason="root ignores file permissions")
     def test_validate_non_writable_path(self, wizard_app):
         """Non-writable directory should fail validation."""
         client, root = wizard_app

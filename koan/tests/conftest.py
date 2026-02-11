@@ -12,6 +12,9 @@ def isolate_env(monkeypatch):
     monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "fake-token")
     monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123456")
     monkeypatch.delenv("KOAN_PROJECTS", raising=False)
+    # Prevent host CLI provider env vars from leaking into tests
+    monkeypatch.delenv("CLI_PROVIDER", raising=False)
+    monkeypatch.delenv("KOAN_CLI_PROVIDER", raising=False)
 
 
 @pytest.fixture
