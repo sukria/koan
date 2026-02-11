@@ -613,14 +613,21 @@ class TestMainLoop:
     @patch("app.run.acquire_pid")
     @patch("app.run.release_pid")
     def test_stop_file_exits_loop(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
+        """Stop file created DURING loop causes clean exit."""
         from app.run import main_loop
 
         os.environ["KOAN_ROOT"] = str(koan_root)
         os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
-
-        # Create stop file
-        (koan_root / ".koan-stop").touch()
         (koan_root / ".koan-project").write_text("test")
+
+        # Create .koan-stop AFTER startup clears it — simulate /stop while running
+        original_startup = mock_startup.side_effect
+
+        def startup_then_stop(*args, **kwargs):
+            (koan_root / ".koan-stop").touch()
+            return (5, 10, "koan/")
+
+        mock_startup.side_effect = startup_then_stop
 
         with patch("app.run._notify"):
             main_loop()
@@ -628,6 +635,73 @@ class TestMainLoop:
         # Should have exited cleanly
         mock_release.assert_called()
         assert not (koan_root / ".koan-stop").exists()
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pid")
+    @patch("app.run.release_pid")
+    def test_stale_stop_file_cleared_on_startup(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
+        """Stale .koan-stop from a previous make stop is cleared on startup.
+
+        Regression test: `make stop` creates .koan-stop. If run.py was not
+        running, the file persists. Next `make run` should NOT immediately
+        exit — the stale file must be cleared before entering the loop.
+        """
+        from app.run import main_loop
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+        (koan_root / ".koan-project").write_text("test")
+
+        # Simulate stale .koan-stop from a previous `make stop`
+        (koan_root / ".koan-stop").write_text("STOP")
+
+        # Mock plan_iteration to create a new stop file on first call
+        # (so the loop doesn't run forever) — but the KEY test is that
+        # the stale file didn't cause an immediate exit before startup
+        call_count = [0]
+
+        def startup_creates_stop(*args, **kwargs):
+            call_count[0] += 1
+            # Create stop on startup — this time it's a "fresh" signal
+            (koan_root / ".koan-stop").touch()
+            return (5, 10, "koan/")
+
+        mock_startup.side_effect = startup_creates_stop
+
+        with patch("app.run._notify"):
+            main_loop()
+
+        # Startup ran (proves we didn't exit immediately from the stale file)
+        assert call_count[0] == 1
+        mock_startup.assert_called_once()
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pid")
+    @patch("app.run.release_pid")
+    def test_stale_stop_file_absent_no_error(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
+        """No crash when .koan-stop doesn't exist at startup (normal case)."""
+        from app.run import main_loop
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+        (koan_root / ".koan-project").write_text("test")
+
+        # No .koan-stop exists — verify no error from unlink(missing_ok=True)
+        assert not (koan_root / ".koan-stop").exists()
+
+        # Create stop on startup so the loop exits
+        def startup_then_stop(*args, **kwargs):
+            (koan_root / ".koan-stop").touch()
+            return (5, 10, "koan/")
+
+        mock_startup.side_effect = startup_then_stop
+
+        with patch("app.run._notify"):
+            main_loop()
+
+        mock_startup.assert_called_once()
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))

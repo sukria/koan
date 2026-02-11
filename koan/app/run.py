@@ -655,6 +655,11 @@ def main_loop():
     # Acquire PID
     acquire_pid(Path(koan_root), "run", os.getpid())
 
+    # Clear stale .koan-stop from a previous session.
+    # If `make stop` or `/stop` ran while run.py was NOT running, the signal
+    # file persists and would cause an immediate exit on next startup.
+    Path(koan_root, ".koan-stop").unlink(missing_ok=True)
+
     # Install SIGINT handler
     signal.signal(signal.SIGINT, _on_sigint)
 
