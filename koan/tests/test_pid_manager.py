@@ -14,6 +14,8 @@ from app.pid_manager import (
     _pidfile_path,
     _read_pid,
     _is_process_alive,
+    _detect_provider,
+    _needs_ollama,
     acquire_pidfile,
     release_pidfile,
     acquire_pid,
@@ -21,7 +23,9 @@ from app.pid_manager import (
     check_pidfile,
     stop_processes,
     start_runner,
+    start_awake,
     start_ollama,
+    start_all,
     start_stack,
     PROCESS_NAMES,
 )
@@ -780,71 +784,262 @@ class TestStartOllama:
 
 
 # ---------------------------------------------------------------------------
-# start_stack
+# start_awake
 # ---------------------------------------------------------------------------
 
 
-class TestStartStack:
-    def test_starts_all_three_components(self, tmp_path):
-        """start_stack launches ollama, awake, and run."""
-        mock_proc = MagicMock()
-        mock_proc.pid = 100
+class TestStartAwake:
+    def test_returns_already_running_if_pid_exists(self, tmp_path):
+        pidfile = tmp_path / ".koan-pid-awake"
+        pidfile.write_text(str(os.getpid()))
 
-        with patch("app.pid_manager.start_ollama", return_value=(True, "ollama started (PID 100)")) as mock_ollama, \
-             patch("app.pid_manager.subprocess.Popen") as mock_popen, \
-             patch("app.pid_manager.check_pidfile", return_value=None), \
-             patch("app.pid_manager.start_runner", return_value=(True, "Agent loop started (PID 300)")):
-            results = start_stack(tmp_path)
+        ok, msg = start_awake(tmp_path)
+        assert ok is False
+        assert "already running" in msg.lower()
+
+    def test_launches_subprocess_with_correct_args(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen") as mock_popen:
+            with patch("app.pid_manager.check_pidfile", side_effect=[None, None, None, None, None]):
+                start_awake(tmp_path, verify_timeout=0.5)
+
+        mock_popen.assert_called_once()
+        call_args = mock_popen.call_args
+        assert call_args[0][0][1] == "app/awake.py"
+        assert call_args[1]["start_new_session"] is True
+        assert call_args[1]["cwd"] == str(tmp_path / "koan")
+        assert call_args[1]["env"]["KOAN_ROOT"] == str(tmp_path)
+
+    def test_returns_success_when_pid_appears(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen"):
+            with patch("app.pid_manager.check_pidfile", side_effect=[None, None, 99]):
+                ok, msg = start_awake(tmp_path, verify_timeout=2.0)
+
+        assert ok is True
+        assert "PID 99" in msg
+
+    def test_returns_warning_when_pid_not_detected(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen"):
+            with patch("app.pid_manager.check_pidfile", return_value=None):
+                ok, msg = start_awake(tmp_path, verify_timeout=0.5)
+
+        assert ok is False
+        assert "PID not detected" in msg
+
+    def test_returns_failure_on_popen_exception(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen", side_effect=OSError("No such file")):
+            ok, msg = start_awake(tmp_path)
+
+        assert ok is False
+        assert "Failed to launch" in msg
+
+
+# ---------------------------------------------------------------------------
+# _detect_provider / _needs_ollama
+# ---------------------------------------------------------------------------
+
+
+class TestDetectProvider:
+    def test_returns_claude_by_default(self, tmp_path):
+        with patch("app.pid_manager._detect_provider") as mock:
+            mock.return_value = "claude"
+            assert _detect_provider(tmp_path) == "claude"
+
+    def test_returns_configured_provider(self, tmp_path):
+        with patch("app.provider.get_provider_name", return_value="copilot"):
+            assert _detect_provider(tmp_path) == "copilot"
+
+    def test_returns_claude_on_import_error(self, tmp_path):
+        """If provider module can't be imported, fall back to claude."""
+        import importlib
+        import app.pid_manager as pm
+
+        # Save and remove the cached provider module
+        original = sys.modules.get("app.provider")
+        sys.modules["app.provider"] = None
+        try:
+            result = pm._detect_provider(tmp_path)
+        finally:
+            if original is not None:
+                sys.modules["app.provider"] = original
+            else:
+                sys.modules.pop("app.provider", None)
+        assert result == "claude"
+
+    def test_returns_local_when_configured(self, tmp_path):
+        with patch("app.provider.get_provider_name", return_value="local"):
+            assert _detect_provider(tmp_path) == "local"
+
+
+class TestNeedsOllama:
+    def test_local_needs_ollama(self):
+        assert _needs_ollama("local") is True
+
+    def test_ollama_needs_ollama(self):
+        assert _needs_ollama("ollama") is True
+
+    def test_claude_does_not_need_ollama(self):
+        assert _needs_ollama("claude") is False
+
+    def test_copilot_does_not_need_ollama(self):
+        assert _needs_ollama("copilot") is False
+
+
+# ---------------------------------------------------------------------------
+# start_all
+# ---------------------------------------------------------------------------
+
+
+class TestStartAll:
+    def test_claude_starts_awake_and_run_only(self, tmp_path):
+        """Claude provider should start 2 processes, no ollama."""
+        with patch("app.pid_manager.start_awake", return_value=(True, "Bridge started (PID 10)")) as mock_awake, \
+             patch("app.pid_manager.start_runner", return_value=(True, "Agent loop started (PID 20)")) as mock_run, \
+             patch("app.pid_manager.start_ollama") as mock_ollama:
+            results = start_all(tmp_path, provider="claude")
+
+        assert "ollama" not in results
+        assert results["awake"] == (True, "Bridge started (PID 10)")
+        assert results["run"] == (True, "Agent loop started (PID 20)")
+        mock_ollama.assert_not_called()
+        mock_awake.assert_called_once()
+        mock_run.assert_called_once()
+
+    def test_copilot_starts_awake_and_run_only(self, tmp_path):
+        """Copilot provider should start 2 processes, no ollama."""
+        with patch("app.pid_manager.start_awake", return_value=(True, "ok")), \
+             patch("app.pid_manager.start_runner", return_value=(True, "ok")), \
+             patch("app.pid_manager.start_ollama") as mock_ollama:
+            results = start_all(tmp_path, provider="copilot")
+
+        assert "ollama" not in results
+        mock_ollama.assert_not_called()
+
+    def test_local_starts_all_three(self, tmp_path):
+        """Local provider should start ollama + awake + run."""
+        with patch("app.pid_manager.start_ollama", return_value=(True, "ollama started (PID 5)")) as mock_ollama, \
+             patch("app.pid_manager.start_awake", return_value=(True, "Bridge started (PID 10)")), \
+             patch("app.pid_manager.start_runner", return_value=(True, "Agent loop started (PID 20)")):
+            results = start_all(tmp_path, provider="local")
 
         assert "ollama" in results
         assert "awake" in results
         assert "run" in results
         mock_ollama.assert_called_once()
 
-    def test_reports_already_running_awake(self, tmp_path):
-        pidfile = tmp_path / ".koan-pid-awake"
-        pidfile.write_text(str(os.getpid()))
-
-        with patch("app.pid_manager.start_ollama", return_value=(True, "ok")), \
+    def test_auto_detects_provider(self, tmp_path):
+        """When provider is None, auto-detect from config."""
+        with patch("app.pid_manager._detect_provider", return_value="copilot") as mock_detect, \
+             patch("app.pid_manager.start_awake", return_value=(True, "ok")), \
              patch("app.pid_manager.start_runner", return_value=(True, "ok")):
-            results = start_stack(tmp_path)
+            results = start_all(tmp_path)
 
-        ok, msg = results["awake"]
-        assert ok is False
-        assert "Already running" in msg
+        mock_detect.assert_called_once_with(tmp_path)
+        assert "ollama" not in results
+
+    def test_auto_detects_local_starts_ollama(self, tmp_path):
+        """Auto-detect local provider should start ollama."""
+        with patch("app.pid_manager._detect_provider", return_value="local"), \
+             patch("app.pid_manager.start_ollama", return_value=(True, "ok")), \
+             patch("app.pid_manager.start_awake", return_value=(True, "ok")), \
+             patch("app.pid_manager.start_runner", return_value=(True, "ok")):
+            results = start_all(tmp_path)
+
+        assert "ollama" in results
+
+    def test_continues_if_awake_fails(self, tmp_path):
+        """If awake fails, run should still be attempted."""
+        with patch("app.pid_manager.start_awake", return_value=(False, "PID not detected")), \
+             patch("app.pid_manager.start_runner", return_value=(True, "ok")):
+            results = start_all(tmp_path, provider="claude")
+
+        ok_awake, _ = results["awake"]
+        assert ok_awake is False
+        ok_run, _ = results["run"]
+        assert ok_run is True
 
     def test_continues_if_ollama_fails(self, tmp_path):
         """If ollama fails, awake and run should still be attempted."""
         with patch("app.pid_manager.start_ollama", return_value=(False, "not found")), \
-             patch("app.pid_manager.subprocess.Popen"), \
-             patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager.start_awake", return_value=(True, "ok")), \
              patch("app.pid_manager.start_runner", return_value=(True, "ok")):
-            results = start_stack(tmp_path)
+            results = start_all(tmp_path, provider="local")
 
         ok_ollama, _ = results["ollama"]
         assert ok_ollama is False
         ok_run, _ = results["run"]
         assert ok_run is True
 
-    def test_all_components_already_running(self, tmp_path):
+    def test_all_already_running(self, tmp_path):
         """If everything is already running, report correctly."""
-        for name in ("ollama", "awake", "run"):
-            pidfile = tmp_path / f".koan-pid-{name}"
-            pidfile.write_text(str(os.getpid()))
-
-        with patch("app.pid_manager.start_ollama", return_value=(False, f"already running (PID {os.getpid()})")), \
-             patch("app.pid_manager.start_runner", return_value=(False, f"Agent loop already running (PID {os.getpid()})")):
-            results = start_stack(tmp_path)
+        with patch("app.pid_manager.start_ollama", return_value=(False, "already running (PID 1)")), \
+             patch("app.pid_manager.start_awake", return_value=(False, "Bridge already running (PID 2)")), \
+             patch("app.pid_manager.start_runner", return_value=(False, "Agent loop already running (PID 3)")):
+            results = start_all(tmp_path, provider="local")
 
         for name in ("ollama", "awake", "run"):
             ok, msg = results[name]
             assert ok is False
-            assert "already running" in msg.lower() or "Already running" in msg
+            assert "already running" in msg.lower()
 
 
 # ---------------------------------------------------------------------------
-# CLI: start-ollama and start-stack
+# start_stack (backward compat — delegates to start_all)
 # ---------------------------------------------------------------------------
+
+
+class TestStartStack:
+    def test_delegates_to_start_all_with_local_provider(self, tmp_path):
+        """start_stack should call start_all with provider='local'."""
+        with patch("app.pid_manager.start_all", return_value={"ollama": (True, "ok"), "awake": (True, "ok"), "run": (True, "ok")}) as mock:
+            results = start_stack(tmp_path)
+
+        mock.assert_called_once_with(tmp_path, provider="local")
+        assert "ollama" in results
+
+    def test_returns_all_three_components(self, tmp_path):
+        with patch("app.pid_manager.start_ollama", return_value=(True, "ok")), \
+             patch("app.pid_manager.start_awake", return_value=(True, "ok")), \
+             patch("app.pid_manager.start_runner", return_value=(True, "ok")):
+            results = start_stack(tmp_path)
+
+        assert "ollama" in results
+        assert "awake" in results
+        assert "run" in results
+
+
+# ---------------------------------------------------------------------------
+# CLI: start-all, start-ollama, and start-stack
+# ---------------------------------------------------------------------------
+
+
+class TestCLIStartAll:
+    def _run_cli(self, *args):
+        cmd = [sys.executable, "-m", "app.pid_manager"] + list(args)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(Path(__file__).parent.parent)
+        return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+    def test_start_all_with_claude_provider(self, tmp_path):
+        """start-all claude should show awake and run, no ollama."""
+        result = self._run_cli("start-all", str(tmp_path), "claude")
+        # Should have output for awake and run (both will fail — no koan/ dir)
+        assert "awake:" in result.stdout
+        assert "run:" in result.stdout
+        # Should NOT have ollama
+        assert "ollama:" not in result.stdout
+
+    def test_start_all_with_local_provider(self, tmp_path):
+        """start-all local should show ollama, awake, and run."""
+        result = self._run_cli("start-all", str(tmp_path), "local")
+        assert "ollama:" in result.stdout
+        assert "awake:" in result.stdout or "run:" in result.stdout
+
+    def test_start_all_auto_detect(self, tmp_path):
+        """start-all without provider arg should auto-detect."""
+        result = self._run_cli("start-all", str(tmp_path))
+        # Default is claude — should have awake + run, no ollama
+        assert "awake:" in result.stdout
+        assert "run:" in result.stdout
 
 
 class TestCLIOllama:

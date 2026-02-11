@@ -10,11 +10,12 @@ Kōan is an autonomous background agent that uses idle Claude API quota to work 
 
 ```bash
 make setup          # Create venv, install dependencies
-make run            # Start main agent loop
-make awake          # Start Telegram bridge (fast-response polling)
-make ollama         # Start full Ollama stack (ollama serve + awake + run)
+make start          # Start full stack (auto-detects provider: awake+run or ollama+awake+run)
 make stop           # Stop all running processes (run + awake + ollama)
 make status         # Show running process status
+make run            # Start main agent loop (foreground)
+make awake          # Start Telegram bridge (foreground)
+make ollama         # Start full Ollama stack (ollama serve + awake + run)
 make dashboard      # Start Flask web dashboard (port 5001)
 make test           # Run full test suite (pytest)
 make say m="..."    # Send test message as if from Telegram
@@ -67,7 +68,7 @@ Communication between processes happens through shared files in `instance/` with
 - **`notify.py`** — Telegram notification helper with flood protection
 
 **Process management:**
-- **`pid_manager.py`** — Exclusive PID file enforcement for run and awake processes. Also provides `start_runner()` (launch agent loop as detached subprocess) and `stop_processes()` (graceful SIGTERM with force-kill fallback)
+- **`pid_manager.py`** — Exclusive PID file enforcement for run, awake, and ollama processes. Provides `start_all()` (unified stack launcher with provider auto-detection), `start_runner()`, `start_awake()`, `start_ollama()`, and `stop_processes()` (graceful SIGTERM with force-kill fallback)
 - **`pause_manager.py`** — Pause state management (`.koan-pause` / `.koan-pause-reason` files)
 - **`restart_manager.py`** — File-based restart signaling between bridge and run loop (`.koan-restart`)
 - **`focus_manager.py`** — Focus mode management (`.koan-focus` JSON); skips contemplative sessions when active
