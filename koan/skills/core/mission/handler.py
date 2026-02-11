@@ -36,7 +36,7 @@ def handle(ctx):
 
     if not project:
         known = get_known_projects()
-        if len(known) > 1:
+        if len(known) > 1 and not urgent:
             project_list = "\n".join(f"  - {name}" for name, _path in known)
             first_name = known[0][0]
             return (
