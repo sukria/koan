@@ -1,6 +1,13 @@
 """Kōan review skill -- queue a code review mission."""
 
-import re
+from app.github_url_parser import parse_github_url
+from app.github_skill_helpers import (
+    extract_github_url,
+    format_project_not_found_error,
+    format_success_message,
+    queue_github_mission,
+    resolve_project_for_repo,
+)
 
 
 def handle(ctx):
@@ -20,38 +27,25 @@ def handle(ctx):
             "Queues a code review mission."
         )
 
-    # Accept both PR and issue URLs
-    url_match = re.search(r'https?://github\.com/[^\s]+/(?:pull|issues)/\d+', args)
-    if not url_match:
+    result = extract_github_url(args, url_type="pr-or-issue")
+    if not result:
         return (
             "\u274c No valid GitHub PR or issue URL found.\n"
             "Ex: /review https://github.com/owner/repo/pull/123"
         )
 
-    url = url_match.group(0).split("#")[0]
+    url, _ = result
 
-    from app.utils import get_known_projects, insert_pending_mission, project_name_for_path, resolve_project_path
+    try:
+        owner, repo, url_type, number = parse_github_url(url)
+    except ValueError as e:
+        return f"\u274c {e}"
 
-    # Parse owner/repo/number from URL
-    parts = re.match(r'https?://github\.com/([^/]+)/([^/]+)/(?:pull|issues)/(\d+)', url)
-    if not parts:
-        return "\u274c Could not parse URL."
-
-    owner, repo, number = parts.group(1), parts.group(2), parts.group(3)
-
-    project_path = resolve_project_path(repo, owner=owner)
+    project_path, project_name = resolve_project_for_repo(repo, owner=owner)
     if not project_path:
-        known = ", ".join(n for n, _ in get_known_projects()) or "none"
-        return (
-            f"\u274c Could not find local project matching repo '{repo}'.\n"
-            f"Known projects: {known}"
-        )
+        return format_project_not_found_error(repo)
 
-    project_name = project_name_for_path(project_path)
+    queue_github_mission(ctx, "review", url, project_name)
 
-    mission_entry = f"- [project:{project_name}] /review {url}"
-    missions_path = ctx.instance_dir / "missions.md"
-    insert_pending_mission(missions_path, mission_entry)
-
-    url_type = "PR" if "/pull/" in url else "issue"
-    return f"Review queued for {url_type} #{number} ({owner}/{repo})"
+    type_label = "PR" if url_type == "pull" else "issue"
+    return f"Review queued for {format_success_message(type_label, number, owner, repo)}"

@@ -25,32 +25,11 @@ from app.claude_step import (
     run_claude_step as _run_claude_step,
 )
 from app.github import run_gh
+from app.github_url_parser import parse_pr_url
 from app.rebase_pr import fetch_pr_context
 
 # Matches skill names like `atoomic.refactor` or my.review (with or without backticks)
 _SKILL_RE = re.compile(r'`?([a-zA-Z0-9_-]+\.(?:refactor|review))\b`?')
-
-
-def parse_pr_url(url: str) -> Tuple[str, str, str]:
-    """Extract owner, repo, and PR number from a GitHub PR URL.
-
-    Accepts formats:
-        https://github.com/owner/repo/pull/123
-        https://github.com/owner/repo/pull/123#...
-
-    Returns:
-        (owner, repo, pr_number) as strings.
-
-    Raises:
-        ValueError: If the URL doesn't match expected format.
-    """
-    match = re.match(
-        r"https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)",
-        url.strip(),
-    )
-    if not match:
-        raise ValueError(f"Invalid PR URL: {url}")
-    return match.group(1), match.group(2), match.group(3)
 
 
 def _load_prompt(name: str, skill_dir: Path = None, **kwargs) -> str:

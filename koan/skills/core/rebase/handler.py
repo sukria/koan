@@ -1,6 +1,13 @@
 """Kōan rebase skill -- queue a PR rebase mission."""
 
-import re
+from app.github_url_parser import parse_pr_url
+from app.github_skill_helpers import (
+    extract_github_url,
+    format_project_not_found_error,
+    format_success_message,
+    queue_github_mission,
+    resolve_project_for_repo,
+)
 
 
 def handle(ctx):
@@ -22,38 +29,24 @@ def handle(ctx):
             "reads comments for context, and force-pushes the result."
         )
 
-    # Extract URL from args
-    url_match = re.search(r'https?://github\.com/[^\s]+/pull/\d+', args)
-    if not url_match:
+    result = extract_github_url(args, url_type="pr")
+    if not result:
         return (
             "\u274c No valid GitHub PR URL found.\n"
             "Ex: /rebase https://github.com/owner/repo/pull/123"
         )
 
-    pr_url = url_match.group(0).split("#")[0]
-
-    from app.pr_review import parse_pr_url
-    from app.utils import get_known_projects, insert_pending_mission, project_name_for_path, resolve_project_path
+    pr_url, _ = result
 
     try:
         owner, repo, pr_number = parse_pr_url(pr_url)
     except ValueError as e:
-        return str(e)
+        return f"\u274c {e}"
 
-    # Determine project path and name
-    project_path = resolve_project_path(repo, owner=owner)
+    project_path, project_name = resolve_project_for_repo(repo, owner=owner)
     if not project_path:
-        known = ", ".join(n for n, _ in get_known_projects()) or "none"
-        return (
-            f"\u274c Could not find local project matching repo '{repo}'.\n"
-            f"Known projects: {known}"
-        )
+        return format_project_not_found_error(repo)
 
-    project_name = project_name_for_path(project_path)
+    queue_github_mission(ctx, "rebase", pr_url, project_name)
 
-    # Queue the mission with clean format
-    mission_entry = f"- [project:{project_name}] /rebase {pr_url}"
-    missions_path = ctx.instance_dir / "missions.md"
-    insert_pending_mission(missions_path, mission_entry)
-
-    return f"Rebase queued for PR #{pr_number} ({owner}/{repo})"
+    return f"Rebase queued for {format_success_message('PR', pr_number, owner, repo)}"

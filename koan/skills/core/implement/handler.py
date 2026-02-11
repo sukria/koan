@@ -1,6 +1,13 @@
 """Kōan implement skill -- queue an implementation mission for a GitHub issue."""
 
-import re
+from app.github_url_parser import parse_issue_url
+from app.github_skill_helpers import (
+    extract_github_url,
+    format_project_not_found_error,
+    format_success_message,
+    queue_github_mission,
+    resolve_project_for_repo,
+)
 
 
 def handle(ctx):
@@ -20,46 +27,24 @@ def handle(ctx):
             "Queues a mission to implement the described issue."
         )
 
-    # Extract URL from args
-    url_match = re.search(r'https?://github\.com/[^\s]+/issues/\d+', args)
-    if not url_match:
+    result = extract_github_url(args, url_type="issue")
+    if not result:
         return (
             "\u274c No valid GitHub issue URL found.\n"
             "Ex: /implement https://github.com/owner/repo/issues/123"
         )
 
-    issue_url = url_match.group(0).split("#")[0]
+    issue_url, context = result
 
-    # Extract additional context (everything after the URL)
-    context = args[url_match.end():].strip()
+    try:
+        owner, repo, issue_number = parse_issue_url(issue_url)
+    except ValueError as e:
+        return f"\u274c {e}"
 
-    from app.utils import get_known_projects, insert_pending_mission, project_name_for_path, resolve_project_path
-
-    # Parse owner/repo from URL
-    parts = re.match(r'https?://github\.com/([^/]+)/([^/]+)/issues/(\d+)', issue_url)
-    if not parts:
-        return "\u274c Could not parse issue URL."
-
-    owner, repo, issue_number = parts.group(1), parts.group(2), parts.group(3)
-
-    project_path = resolve_project_path(repo, owner=owner)
+    project_path, project_name = resolve_project_for_repo(repo, owner=owner)
     if not project_path:
-        known = ", ".join(n for n, _ in get_known_projects()) or "none"
-        return (
-            f"\u274c Could not find local project matching repo '{repo}'.\n"
-            f"Known projects: {known}"
-        )
+        return format_project_not_found_error(repo)
 
-    project_name = project_name_for_path(project_path)
+    queue_github_mission(ctx, "implement", issue_url, project_name, context)
 
-    # Build mission entry
-    mission_text = f"/implement {issue_url}"
-    if context:
-        mission_text += f" {context}"
-
-    mission_entry = f"- [project:{project_name}] {mission_text}"
-    missions_path = ctx.instance_dir / "missions.md"
-    insert_pending_mission(missions_path, mission_entry)
-
-    suffix = f" — {context}" if context else ""
-    return f"Implementation queued for issue #{issue_number} ({owner}/{repo}){suffix}"
+    return f"Implementation queued for {format_success_message('issue', issue_number, owner, repo, context)}"
