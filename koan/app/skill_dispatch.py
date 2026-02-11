@@ -53,6 +53,18 @@ _PROJECT_TAG_RE = re.compile(r"^\[projec?t:([a-zA-Z0-9_-]+)\]\s*")
 _PROJECT_WORD_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
+def _is_known_project(name: str) -> bool:
+    """Check if a name matches a known project (case-insensitive)."""
+    try:
+        from app.utils import get_known_projects
+        lower = name.lower()
+        return any(n.lower() == lower for n, _ in get_known_projects())
+    except Exception as e:
+        from app.debug import debug_log
+        debug_log(f"[skill_dispatch] _is_known_project: error loading projects: {e}")
+        return False
+
+
 def _strip_project_prefix(text: str) -> Tuple[str, str]:
     """Strip an optional project prefix from mission text.
 
@@ -71,14 +83,16 @@ def _strip_project_prefix(text: str) -> Tuple[str, str]:
         return tag_match.group(1), stripped[tag_match.end():].strip()
 
     # 2. Raw word prefix: "koan /plan ..."
-    # Only accept lowercase identifiers as project-id prefixes to avoid
-    # matching regular English words (e.g. "Fix /plan bug").
+    # Only accept known project names to avoid matching common English
+    # words (e.g. "the /keyword ..." was incorrectly parsed as project="the").
     parts = stripped.split(None, 1)
     if (len(parts) >= 2
             and not parts[0].startswith("/")
             and parts[1].startswith("/")
             and _PROJECT_WORD_RE.match(parts[0])):
-        return parts[0], parts[1]
+        candidate = parts[0]
+        if _is_known_project(candidate):
+            return candidate, parts[1]
 
     # 3. No prefix
     return "", stripped

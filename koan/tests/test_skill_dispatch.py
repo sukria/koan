@@ -469,7 +469,11 @@ class TestIsSkillMissionWithPrefix:
     def test_projet_tag_prefix(self):
         assert is_skill_mission("[projet:koan] /plan Add dark mode") is True
 
-    def test_raw_project_word_prefix(self):
+    def test_raw_project_word_prefix(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
         assert is_skill_mission("koan /plan Add dark mode") is True
 
     def test_project_tag_no_slash(self):
@@ -483,8 +487,24 @@ class TestIsSkillMissionWithPrefix:
     def test_project_tag_scoped_command(self):
         assert is_skill_mission("[project:koan] /core.plan Fix bug") is True
 
-    def test_raw_prefix_ai(self):
+    def test_raw_prefix_ai(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("myproject", "/workspace/myproject")],
+        )
         assert is_skill_mission("myproject /ai") is True
+
+    def test_raw_word_not_project_rejected(self):
+        """Common English word before /command should NOT match as project."""
+        assert is_skill_mission("the /keyword at the beginning") is False
+
+    def test_raw_word_unknown_project_rejected(self, monkeypatch):
+        """Unknown project name before /command should not match."""
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
+        assert is_skill_mission("unknown /plan test") is False
 
 
 # ---------------------------------------------------------------------------
@@ -504,13 +524,21 @@ class TestParseSkillMissionWithPrefix:
         assert cmd == "rebase"
         assert args == "https://github.com/x/y/pull/1"
 
-    def test_raw_project_word_prefix(self):
+    def test_raw_project_word_prefix(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
         pid, cmd, args = parse_skill_mission("koan /plan Add dark mode")
         assert pid == "koan"
         assert cmd == "plan"
         assert args == "Add dark mode"
 
-    def test_raw_word_prefix_no_args(self):
+    def test_raw_word_prefix_no_args(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
         pid, cmd, args = parse_skill_mission("koan /ai")
         assert pid == "koan"
         assert cmd == "ai"
@@ -535,6 +563,24 @@ class TestParseSkillMissionWithPrefix:
         assert cmd == ""
         assert args == "Fix the bug"
 
+    def test_raw_word_not_project_no_prefix(self):
+        """Non-project word before /command — whole text returned as-is."""
+        pid, cmd, args = parse_skill_mission("the /keyword at the beginning")
+        assert pid == ""
+        assert cmd == ""
+        assert args == "the /keyword at the beginning"
+
+    def test_raw_word_unknown_project_no_prefix(self, monkeypatch):
+        """Unknown project name — whole text returned as-is."""
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
+        pid, cmd, args = parse_skill_mission("unknown /plan test")
+        assert pid == ""
+        assert cmd == ""
+        assert args == "unknown /plan test"
+
 
 # ---------------------------------------------------------------------------
 # dispatch_skill_mission — project-id prefix handling
@@ -558,7 +604,11 @@ class TestDispatchSkillMissionWithPrefix:
         assert cmd is not None
         assert "app.plan_runner" in cmd
 
-    def test_raw_word_prefix_dispatches(self):
+    def test_raw_word_prefix_dispatches(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
         cmd = self._dispatch("koan /plan Add dark mode")
         assert cmd is not None
         assert "app.plan_runner" in cmd
@@ -567,8 +617,12 @@ class TestDispatchSkillMissionWithPrefix:
         cmd = self._dispatch("[project:koan] Fix the login bug")
         assert cmd is None
 
-    def test_project_id_used_as_fallback(self):
+    def test_project_id_used_as_fallback(self, monkeypatch):
         """When project_name is empty, parsed project_id is used."""
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
         cmd = self._dispatch("koan /ai", project_name="", project_path="/workspace/koan")
         assert cmd is not None
         assert "app.ai_runner" in cmd
@@ -580,3 +634,98 @@ class TestDispatchSkillMissionWithPrefix:
         cmd = self._dispatch("[project:other] /ai", project_name="koan", project_path="/workspace/koan")
         assert cmd is not None
         assert "koan" in cmd
+
+
+# ---------------------------------------------------------------------------
+# _is_known_project
+# ---------------------------------------------------------------------------
+
+class TestIsKnownProject:
+    def test_known_project(self, monkeypatch):
+        from app.skill_dispatch import _is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan"), ("Clone", "/workspace/Clone")],
+        )
+        assert _is_known_project("koan") is True
+        assert _is_known_project("Clone") is True
+
+    def test_case_insensitive(self, monkeypatch):
+        from app.skill_dispatch import _is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("Clone", "/workspace/Clone")],
+        )
+        assert _is_known_project("clone") is True
+        assert _is_known_project("CLONE") is True
+
+    def test_unknown_project(self, monkeypatch):
+        from app.skill_dispatch import _is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
+        assert _is_known_project("unknown") is False
+
+    def test_common_english_words_rejected(self, monkeypatch):
+        from app.skill_dispatch import _is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/workspace/koan")],
+        )
+        for word in ("the", "fix", "add", "when", "let", "we"):
+            assert _is_known_project(word) is False
+
+    def test_error_returns_false(self, monkeypatch):
+        from app.skill_dispatch import _is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: (_ for _ in ()).throw(RuntimeError("config error")),
+        )
+        assert _is_known_project("koan") is False
+
+
+# ---------------------------------------------------------------------------
+# Fallthrough guard: skill missions that fail dispatch should not go to Claude
+# ---------------------------------------------------------------------------
+
+class TestSkillMissionFallthroughGuard:
+    """Verify that is_skill_mission correctly identifies missions that
+    should NOT fall through to the Claude agent when dispatch returns None."""
+
+    def test_unrecognized_slash_command_is_skill(self):
+        """A /nonexistent command should still be detected as a skill mission."""
+        assert is_skill_mission("/nonexistent do things") is True
+
+    def test_regular_mission_not_skill(self):
+        assert is_skill_mission("Fix the login bug") is False
+
+    def test_mission_with_slash_in_middle_not_skill(self):
+        """Slash in the middle of text is not a skill command."""
+        assert is_skill_mission("Fix the /plan bug") is False
+
+    def test_dispatch_returns_none_for_unknown_runner(self):
+        """dispatch_skill_mission returns None for unrecognized commands."""
+        cmd = dispatch_skill_mission(
+            mission_text="/nonexistent do things",
+            project_name="koan",
+            project_path="/workspace/koan",
+            koan_root="/koan",
+            instance_dir="/koan/instance",
+        )
+        assert cmd is None
+
+    def test_is_skill_mission_plus_dispatch_none_is_fallthrough_case(self):
+        """This is the combination that triggers the fallthrough guard in run.py."""
+        mission = "/nonexistent do things"
+        assert is_skill_mission(mission) is True
+        cmd = dispatch_skill_mission(
+            mission_text=mission,
+            project_name="koan",
+            project_path="/workspace/koan",
+            koan_root="/koan",
+            instance_dir="/koan/instance",
+        )
+        assert cmd is None
+        # In run.py, this case now fails the mission instead of
+        # falling through to Claude agent

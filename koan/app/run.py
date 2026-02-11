@@ -901,7 +901,7 @@ def _run_iteration(
     if mission_title:
         from app.debug import debug_log as _debug_log
         _debug_log(f"[run] checking skill dispatch for: {mission_title}")
-        from app.skill_dispatch import dispatch_skill_mission
+        from app.skill_dispatch import dispatch_skill_mission, is_skill_mission
         skill_cmd = dispatch_skill_mission(
             mission_text=mission_title,
             project_name=project_name,
@@ -947,6 +947,18 @@ def _run_iteration(
                     wake = _interruptible_sleep(interval, koan_root, instance)
                 if wake == "mission":
                     log("koan", "New mission detected during sleep — waking up early")
+            return
+        elif is_skill_mission(mission_title):
+            # Skill mission but no runner matched — fail it instead
+            # of falling through to Claude (which would re-queue it).
+            # Note: is_skill_mission() is called again intentionally —
+            # dispatch returns None for both "not a skill" and "unknown
+            # runner", and we need to distinguish the two cases here.
+            _debug_log(f"[run] skill mission unhandled, failing: {mission_title[:200]}")
+            log("warning", f"Skill mission has no runner, failing: {mission_title[:80]}")
+            _notify(instance, f"⚠️ [{project_name}] Unknown skill command: {mission_title[:80]}")
+            _finalize_mission(instance, mission_title, project_name, exit_code=1)
+            _commit_instance(instance)
             return
 
     # Lifecycle notification
@@ -1292,8 +1304,11 @@ def _run_skill_mission(
             f"[run] skill exec: exit_code={exit_code} "
             f"stdout_len={len(skill_stdout)} stderr_len={len(skill_stderr)}"
         )
-        if exit_code != 0 and skill_stderr:
-            debug_log(f"[run] skill stderr: {skill_stderr[:2000]}")
+        if exit_code != 0:
+            if skill_stdout:
+                debug_log(f"[run] skill stdout: {skill_stdout[:2000]}")
+            if skill_stderr:
+                debug_log(f"[run] skill stderr: {skill_stderr[:2000]}")
         if skill_stdout:
             print(skill_stdout)
         if skill_stderr:
