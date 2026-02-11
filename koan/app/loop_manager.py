@@ -16,6 +16,7 @@ CLI interface:
 """
 
 import argparse
+import logging
 import os
 import sys
 import time
@@ -156,6 +157,120 @@ Mode: {mode}
     return str(pending_path)
 
 
+# --- GitHub notification processing ---
+
+# Throttle: minimum seconds between GitHub notification checks
+_GITHUB_CHECK_INTERVAL = 60
+_last_github_check: float = 0
+
+log = logging.getLogger(__name__)
+
+
+def process_github_notifications(
+    koan_root: str,
+    instance_dir: str,
+) -> int:
+    """Check GitHub notifications and create missions from @mentions.
+
+    Respects throttling (max once per 60s) and feature toggle.
+
+    Args:
+        koan_root: Path to koan root directory.
+        instance_dir: Path to instance directory.
+
+    Returns:
+        Number of missions created.
+    """
+    global _last_github_check
+
+    now = time.time()
+    if now - _last_github_check < _GITHUB_CHECK_INTERVAL:
+        return 0
+
+    _last_github_check = now
+
+    try:
+        from app.github_config import get_github_commands_enabled, get_github_max_age_hours, get_github_nickname
+        from app.utils import load_config
+
+        config = load_config()
+        if not get_github_commands_enabled(config):
+            return 0
+
+        nickname = get_github_nickname(config)
+        if not nickname:
+            return 0
+
+        bot_username = os.environ.get("GITHUB_USER", nickname)
+
+        from app.github_command_handler import (
+            extract_issue_number_from_notification,
+            post_error_reply,
+            process_single_notification,
+            resolve_project_from_notification,
+        )
+        from app.github_notifications import fetch_unread_notifications
+        from app.projects_config import load_projects_config
+        from app.skills import SkillRegistry, get_default_skills_dir
+        from app.utils import get_known_projects
+
+        # Build known repos set for filtering
+        known_repos = set()
+        projects_config = load_projects_config(koan_root)
+        if projects_config:
+            for name, proj in projects_config.get("projects", {}).items():
+                gh_url = proj.get("github_url", "")
+                if gh_url:
+                    known_repos.add(gh_url)
+
+        # Load skills registry
+        registry = SkillRegistry(get_default_skills_dir())
+        # Also load instance skills
+        instance_skills = Path(instance_dir) / "skills"
+        if instance_skills.is_dir():
+            instance_registry = SkillRegistry(instance_skills)
+            for skill in instance_registry.list_all():
+                registry._register(skill)
+
+        max_age = get_github_max_age_hours(config)
+        notifications = fetch_unread_notifications(known_repos or None)
+
+        missions_created = 0
+        for notif in notifications:
+            success, error = process_single_notification(
+                notif, registry, config, projects_config,
+                bot_username, max_age,
+            )
+
+            if success:
+                missions_created += 1
+            elif error:
+                # Post error reply
+                project_info = resolve_project_from_notification(notif)
+                issue_num = extract_issue_number_from_notification(notif)
+                if project_info and issue_num:
+                    _, owner, repo = project_info
+                    comment = None
+                    try:
+                        from app.github_notifications import get_comment_from_notification
+                        comment = get_comment_from_notification(notif)
+                    except Exception:
+                        pass
+                    if comment:
+                        comment_id = str(comment.get("id", ""))
+                        if comment_id:
+                            post_error_reply(owner, repo, issue_num, comment_id, error)
+
+        if missions_created > 0:
+            log.info("GitHub: created %d mission(s) from @mentions", missions_created)
+
+        return missions_created
+
+    except Exception as e:
+        log.warning("GitHub notification check failed: %s", e)
+        return 0
+
+
 # --- Interruptible sleep ---
 
 
@@ -183,8 +298,8 @@ def interruptible_sleep(
 ) -> str:
     """Sleep for a given interval, waking early on events.
 
-    Checks for stop, pause, restart, shutdown files and pending missions
-    every check_interval seconds.
+    Checks for stop, pause, restart, shutdown files, pending missions,
+    and GitHub notifications every check_interval seconds.
 
     Args:
         interval: Total sleep duration in seconds.
@@ -210,6 +325,10 @@ def interruptible_sleep(
             return "restart"
         if _check_signal_file(koan_root, ".koan-shutdown"):
             return "shutdown"
+
+        # Check GitHub notifications (throttled to once per 60s)
+        if process_github_notifications(koan_root, instance_dir) > 0:
+            return "mission"
 
     return "timeout"
 
