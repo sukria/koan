@@ -260,56 +260,99 @@ def start_ollama(koan_root: Path, verify_timeout: float = 5.0) -> tuple:
     return False, "ollama launched but exited immediately — check ollama logs"
 
 
-def start_stack(koan_root: Path) -> dict:
-    """Start the full ollama stack: ollama serve + awake + run.
+def start_awake(koan_root: Path, verify_timeout: float = 3.0) -> tuple:
+    """Start the Telegram bridge (awake.py) as a detached subprocess.
+
+    Returns (success: bool, message: str).
+    """
+    pid = check_pidfile(koan_root, "awake")
+    if pid:
+        return False, f"Bridge already running (PID {pid})"
+
+    python = sys.executable
+    koan_dir = koan_root / "koan"
+    env = {**os.environ, "KOAN_ROOT": str(koan_root), "PYTHONPATH": "."}
+
+    try:
+        subprocess.Popen(
+            [python, "app/awake.py"],
+            cwd=str(koan_dir),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as e:
+        return False, f"Failed to launch bridge: {e}"
+
+    deadline = time.monotonic() + verify_timeout
+    while time.monotonic() < deadline:
+        new_pid = check_pidfile(koan_root, "awake")
+        if new_pid:
+            return True, f"Bridge started (PID {new_pid})"
+        time.sleep(0.3)
+
+    return False, "Bridge launched but PID not detected — check logs"
+
+
+def _detect_provider(koan_root: Path) -> str:
+    """Detect the configured CLI provider.
+
+    Uses the provider package resolution (env var > config.yaml > default).
+    Returns provider name: "claude", "copilot", "local", or "ollama".
+    """
+    try:
+        # Lazy import to avoid circular deps and keep pid_manager lightweight
+        from app.provider import get_provider_name
+        return get_provider_name()
+    except Exception:
+        return "claude"
+
+
+def _needs_ollama(provider: str) -> bool:
+    """Return True if the provider requires ollama serve."""
+    return provider in ("local", "ollama")
+
+
+def start_all(koan_root: Path, provider: str = None) -> dict:
+    """Start the full Kōan stack for the configured provider.
+
+    Auto-detects the provider if not specified.
+    - claude/copilot: starts awake + run (2 processes)
+    - local/ollama: starts ollama + awake + run (3 processes)
 
     Returns dict mapping component name to (success, message).
     """
+    if provider is None:
+        provider = _detect_provider(koan_root)
+
     results = {}
 
-    # 1. Start ollama serve
-    ok, msg = start_ollama(koan_root)
-    results["ollama"] = (ok, msg)
+    # 1. Start ollama serve if needed
+    if _needs_ollama(provider):
+        ok, msg = start_ollama(koan_root)
+        results["ollama"] = (ok, msg)
+        if ok:
+            time.sleep(1)
 
-    # Give ollama a moment to bind its port
-    if ok:
-        time.sleep(1)
+    # 2. Start awake (Telegram bridge)
+    ok, msg = start_awake(koan_root)
+    results["awake"] = (ok, msg)
 
-    # 2. Start awake (Telegram bridge) in background
-    awake_pid = check_pidfile(koan_root, "awake")
-    if awake_pid:
-        results["awake"] = (False, f"Already running (PID {awake_pid})")
-    else:
-        python = sys.executable
-        koan_dir = koan_root / "koan"
-        env = {**os.environ, "KOAN_ROOT": str(koan_root), "PYTHONPATH": "."}
-        try:
-            subprocess.Popen(
-                [python, "app/awake.py"],
-                cwd=str(koan_dir),
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            # Wait for awake PID
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline:
-                new_pid = check_pidfile(koan_root, "awake")
-                if new_pid:
-                    results["awake"] = (True, f"Bridge started (PID {new_pid})")
-                    break
-                time.sleep(0.3)
-            else:
-                results["awake"] = (False, "Launched but PID not detected")
-        except Exception as e:
-            results["awake"] = (False, f"Failed to launch: {e}")
-
-    # 3. Start agent loop (run.py) in background
+    # 3. Start agent loop (run.py)
     ok, msg = start_runner(koan_root)
     results["run"] = (ok, msg)
 
     return results
+
+
+def start_stack(koan_root: Path) -> dict:
+    """Start the full ollama stack: ollama serve + awake + run.
+
+    Kept for backward compatibility with `make ollama`.
+    Delegates to start_all() with provider="local".
+    """
+    return start_all(koan_root, provider="local")
 
 
 def _wait_for_exit(pid: int, timeout: float) -> bool:
@@ -382,6 +425,19 @@ def stop_processes(koan_root: Path, timeout: float = 5.0) -> dict:
     return results
 
 
+def _print_stack_results(results: dict) -> int:
+    """Print stack start results and return exit code (0=ok, 1=failure)."""
+    any_failed = False
+    for name in ("ollama", "awake", "run"):
+        if name not in results:
+            continue
+        ok, msg = results[name]
+        print(f"  {name}: {msg}")
+        if not ok and "already running" not in msg.lower():
+            any_failed = True
+    return 1 if any_failed else 0
+
+
 # --- CLI interface ---
 if __name__ == "__main__":
     if len(sys.argv) < 3:
@@ -423,17 +479,16 @@ if __name__ == "__main__":
         print(f"  {msg}")
         sys.exit(0 if ok else 1)
 
+    if action == "start-all":
+        root = Path(sys.argv[2])
+        provider = sys.argv[3] if len(sys.argv) > 3 else None
+        results = start_all(root, provider=provider)
+        sys.exit(_print_stack_results(results))
+
     if action == "start-stack":
         root = Path(sys.argv[2])
         results = start_stack(root)
-        any_failed = False
-        for name in ("ollama", "awake", "run"):
-            ok, msg = results.get(name, (False, "skipped"))
-            status = "ok" if ok else "FAILED"
-            print(f"  {name}: {msg}")
-            if not ok and "already running" not in msg.lower():
-                any_failed = True
-        sys.exit(1 if any_failed else 0)
+        sys.exit(_print_stack_results(results))
 
     if action == "status-all":
         root = Path(sys.argv[2])
