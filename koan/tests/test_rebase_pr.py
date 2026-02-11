@@ -161,6 +161,40 @@ class TestCheckoutPrBranch:
         with patch("app.claude_step.subprocess.run", side_effect=mock_run):
             _checkout_pr_branch("koan/fix", "/project")
 
+    def test_falls_back_to_upstream(self):
+        """If origin fetch fails, tries upstream."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            result = MagicMock(returncode=0, stdout="", stderr="")
+            # origin fetch fails
+            if cmd[:3] == ["git", "fetch", "origin"]:
+                raise RuntimeError("remote ref not found")
+            return result
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            _checkout_pr_branch("feat/upstream-only", "/project")
+
+        fetch_cmds = [c for c in calls if c[:2] == ["git", "fetch"]]
+        assert ["git", "fetch", "origin", "feat/upstream-only"] in fetch_cmds
+        assert ["git", "fetch", "upstream", "feat/upstream-only"] in fetch_cmds
+
+        # Reset should use upstream, not origin
+        reset_cmds = [c for c in calls if c[:2] == ["git", "reset"]]
+        assert len(reset_cmds) == 1
+        assert "upstream/feat/upstream-only" in reset_cmds[0][-1]
+
+    def test_raises_if_both_remotes_fail(self):
+        """If both origin and upstream fail, raises RuntimeError."""
+        def mock_run(cmd, **kwargs):
+            if cmd[:2] == ["git", "fetch"]:
+                raise RuntimeError("remote ref not found")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            with pytest.raises(RuntimeError, match="not found on origin or upstream"):
+                _checkout_pr_branch("nonexistent", "/project")
+
 
 # ---------------------------------------------------------------------------
 # _rebase_onto_target (local helper)
@@ -350,6 +384,53 @@ class TestFetchPrContext:
         context = fetch_pr_context("o", "r", "1")
         assert context["title"] == ""
         assert context["base"] == "main"
+
+    @patch("app.github.subprocess.run")
+    def test_diff_fetch_failure_graceful(self, mock_run):
+        """Large PR diffs (HTTP 406) should not crash the entire fetch."""
+        mock_run.side_effect = [
+            # Metadata succeeds
+            MagicMock(returncode=0, stdout=json.dumps({
+                "title": "Big PR",
+                "headRefName": "feat/big",
+                "baseRefName": "main",
+                "state": "OPEN",
+                "author": {"login": "dev"},
+                "url": "https://github.com/o/r/pull/1",
+            })),
+            # Diff fails (HTTP 406 — too large)
+            MagicMock(returncode=1, stderr="HTTP 406: diff exceeded maximum"),
+            # Comments succeed
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+        ]
+        context = fetch_pr_context("o", "r", "1")
+        assert context["title"] == "Big PR"
+        assert context["branch"] == "feat/big"
+        assert context["diff"] == ""  # Graceful fallback
+
+    @patch("app.github.subprocess.run")
+    def test_comments_fetch_failure_graceful(self, mock_run):
+        """API failures on comments should not crash the fetch."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps({
+                "title": "PR", "headRefName": "br", "baseRefName": "main",
+                "state": "OPEN", "author": {"login": "dev"},
+                "url": "https://github.com/o/r/pull/1",
+            })),
+            MagicMock(returncode=0, stdout="+diff"),
+            # All comment APIs fail
+            MagicMock(returncode=1, stderr="rate limited"),
+            MagicMock(returncode=1, stderr="rate limited"),
+            MagicMock(returncode=1, stderr="rate limited"),
+        ]
+        context = fetch_pr_context("o", "r", "1")
+        assert context["branch"] == "br"
+        assert context["diff"] == "+diff"
+        assert context["review_comments"] == ""
+        assert context["reviews"] == ""
+        assert context["issue_comments"] == ""
 
 
 # ---------------------------------------------------------------------------

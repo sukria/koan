@@ -36,29 +36,41 @@ def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
         "title,body,headRefName,baseRefName,state,author,url",
     )
 
-    # Fetch PR diff
-    diff = run_gh("pr", "diff", pr_number, "--repo", full_repo)
+    # Fetch PR diff (may fail for very large PRs — GitHub HTTP 406)
+    try:
+        diff = run_gh("pr", "diff", pr_number, "--repo", full_repo)
+    except RuntimeError:
+        diff = ""
 
     # Fetch review comments (inline code comments)
-    comments_json = run_gh(
-        "api", f"repos/{full_repo}/pulls/{pr_number}/comments",
-        "--paginate", "--jq",
-        r'.[] | "[\(.path):\(.line // .original_line)] @\(.user.login): \(.body)"',
-    )
+    try:
+        comments_json = run_gh(
+            "api", f"repos/{full_repo}/pulls/{pr_number}/comments",
+            "--paginate", "--jq",
+            r'.[] | "[\(.path):\(.line // .original_line)] @\(.user.login): \(.body)"',
+        )
+    except RuntimeError:
+        comments_json = ""
 
     # Fetch PR-level review comments (top-level reviews)
-    reviews_json = run_gh(
-        "api", f"repos/{full_repo}/pulls/{pr_number}/reviews",
-        "--paginate", "--jq",
-        r'.[] | select(.body != "") | "@\(.user.login) (\(.state)): \(.body)"',
-    )
+    try:
+        reviews_json = run_gh(
+            "api", f"repos/{full_repo}/pulls/{pr_number}/reviews",
+            "--paginate", "--jq",
+            r'.[] | select(.body != "") | "@\(.user.login) (\(.state)): \(.body)"',
+        )
+    except RuntimeError:
+        reviews_json = ""
 
     # Fetch issue-level comments (conversation thread)
-    issue_comments = run_gh(
-        "api", f"repos/{full_repo}/issues/{pr_number}/comments",
-        "--paginate", "--jq",
-        r'.[] | "@\(.user.login): \(.body)"',
-    )
+    try:
+        issue_comments = run_gh(
+            "api", f"repos/{full_repo}/issues/{pr_number}/comments",
+            "--paginate", "--jq",
+            r'.[] | "@\(.user.login): \(.body)"',
+        )
+    except RuntimeError:
+        issue_comments = ""
 
     try:
         metadata = json.loads(pr_json)
@@ -295,8 +307,19 @@ def _get_current_branch(project_path: str) -> str:
 
 
 def _checkout_pr_branch(branch: str, project_path: str) -> None:
-    """Checkout the PR branch, fetching from origin first."""
-    _run_git(["git", "fetch", "origin", branch], cwd=project_path)
+    """Checkout the PR branch, fetching from origin or upstream."""
+    # Try origin first, then upstream (for cross-repo PRs)
+    fetch_remote = "origin"
+    try:
+        _run_git(["git", "fetch", "origin", branch], cwd=project_path)
+    except Exception:
+        try:
+            _run_git(["git", "fetch", "upstream", branch], cwd=project_path)
+            fetch_remote = "upstream"
+        except Exception:
+            raise RuntimeError(
+                f"Branch `{branch}` not found on origin or upstream"
+            )
 
     # Try to checkout — may already exist locally
     try:
@@ -304,13 +327,13 @@ def _checkout_pr_branch(branch: str, project_path: str) -> None:
     except Exception:
         # Branch doesn't exist locally — create tracking branch
         _run_git(
-            ["git", "checkout", "-b", branch, f"origin/{branch}"],
+            ["git", "checkout", "-b", branch, f"{fetch_remote}/{branch}"],
             cwd=project_path,
         )
 
-    # Reset to origin's version to ensure clean state
+    # Reset to remote's version to ensure clean state
     _run_git(
-        ["git", "reset", "--hard", f"origin/{branch}"],
+        ["git", "reset", "--hard", f"{fetch_remote}/{branch}"],
         cwd=project_path,
     )
 
