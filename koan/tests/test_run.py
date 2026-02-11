@@ -181,6 +181,53 @@ class TestSetStatus:
 
 
 # ---------------------------------------------------------------------------
+# Test: _build_startup_status
+# ---------------------------------------------------------------------------
+
+class TestBuildStartupStatus:
+    def test_active_when_not_paused(self, tmp_path):
+        from app.run import _build_startup_status
+        result = _build_startup_status(str(tmp_path))
+        assert "Active" in result
+        assert "ready to work" in result
+        assert "/resume" not in result
+
+    def test_paused_with_quota_reason_and_display(self, tmp_path):
+        from app.run import _build_startup_status
+        (tmp_path / ".koan-pause").touch()
+        (tmp_path / ".koan-pause-reason").write_text("quota\n1739300000\nresets 10am (Europe/Paris)\n")
+        result = _build_startup_status(str(tmp_path))
+        assert "Paused" in result
+        assert "quota" in result
+        assert "resets 10am (Europe/Paris)" in result
+        assert "/resume" in result
+
+    def test_paused_with_max_runs_no_display(self, tmp_path):
+        from app.run import _build_startup_status
+        (tmp_path / ".koan-pause").touch()
+        (tmp_path / ".koan-pause-reason").write_text("max_runs\n1739300000\n\n")
+        result = _build_startup_status(str(tmp_path))
+        assert "Paused" in result
+        assert "max_runs" in result
+        assert "/resume" in result
+
+    def test_paused_with_no_reason_file(self, tmp_path):
+        from app.run import _build_startup_status
+        (tmp_path / ".koan-pause").touch()
+        result = _build_startup_status(str(tmp_path))
+        assert "Paused" in result
+        assert "/resume" in result
+
+    def test_paused_with_empty_reason_file(self, tmp_path):
+        from app.run import _build_startup_status
+        (tmp_path / ".koan-pause").touch()
+        (tmp_path / ".koan-pause-reason").write_text("")
+        result = _build_startup_status(str(tmp_path))
+        assert "Paused" in result
+        assert "/resume" in result
+
+
+# ---------------------------------------------------------------------------
 # Test: SignalState
 # ---------------------------------------------------------------------------
 

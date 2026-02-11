@@ -150,6 +150,28 @@ def set_status(koan_root: str, message: str):
         log("error", f"Failed to write status: {e}")
 
 
+def _build_startup_status(koan_root: str) -> str:
+    """Build a human-readable status line for startup notification.
+
+    Returns a status string like:
+    - "✅ Active — ready to work"
+    - "⏸️ Paused (quota) — resets 10am (Europe/Paris). Use /resume to unpause."
+    - "⏸️ Paused (max_runs) — use /resume to unpause."
+    """
+    from app.pause_manager import get_pause_state
+
+    if not Path(koan_root, ".koan-pause").exists():
+        return "✅ Active — ready to work"
+
+    state = get_pause_state(koan_root)
+    if state and state.display:
+        return f"⏸️ Paused ({state.reason}) — {state.display}. Use /resume to unpause."
+    elif state:
+        return f"⏸️ Paused ({state.reason}) — use /resume to unpause."
+    else:
+        return "⏸️ Paused — use /resume to unpause."
+
+
 # ---------------------------------------------------------------------------
 # Signal handling — double-tap CTRL-C
 # ---------------------------------------------------------------------------
@@ -432,15 +454,16 @@ def run_startup(koan_root: str, instance: str, projects: list):
             log("init", f"Warning: GitHub auth failed for {os.environ['GITHUB_USER']}")
 
     # Startup notification
-    set_status(koan_root, "Starting up")
     log("init", f"Starting. Max runs: {max_runs}, interval: {interval}s")
 
     project_list = "\n".join(f"  • {n}" for n, _ in sorted(projects))
-    pause_note = " Currently PAUSED." if Path(koan_root, ".koan-pause").exists() else ""
+    status_line = _build_startup_status(koan_root)
+    set_status(koan_root, status_line)
     _notify(instance, (
         f"Kōan starting — {max_runs} max runs, {interval}s interval.\n"
         f"Projects:\n{project_list}\n"
-        f"Current: {projects[0][0]}.{pause_note}"
+        f"Current: {projects[0][0]}.\n"
+        f"Status: {status_line}"
     ))
 
     with protected_phase("Git sync"):
