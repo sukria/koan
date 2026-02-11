@@ -698,10 +698,61 @@ def _move_pending_to_section(
     return normalize_content(updated + f"\n## {header}\n\n{entry}\n")
 
 
+def _flush_in_progress_to_done(content: str) -> str:
+    """Move all In Progress missions to Done.
+
+    Sanity enforcement: only one mission should be in progress at a time.
+    When a new mission is about to start, any stale In Progress missions
+    are automatically completed with a timestamp.
+    """
+    sections = parse_sections(content)
+    stale = sections.get("in_progress", [])
+    if not stale:
+        return content
+
+    for item in stale:
+        # Extract the first line for the needle
+        first_line = item.split("\n")[0].strip()
+        if first_line.startswith("- "):
+            first_line = first_line[2:]
+        content = _move_in_progress_to_done(content, first_line)
+
+    return content
+
+
+def _move_in_progress_to_done(content: str, needle: str) -> str:
+    """Move a single mission from In Progress to Done with a timestamp."""
+    result = _remove_item_by_text(content, needle, "in_progress")
+    if result is None:
+        return content
+
+    updated = result[0]
+    removed = result[1].strip()
+    display = removed.removeprefix("- ") if removed.startswith("- ") else removed
+
+    timestamp = time.strftime("%Y-%m-%d %H:%M")
+    entry = f"- {display} \u2705 ({timestamp})"
+
+    lines = updated.splitlines()
+    boundaries = find_section_boundaries(lines)
+    if "done" in boundaries:
+        start, end = boundaries["done"]
+        insert_at = start + 1
+        while insert_at < end and lines[insert_at].strip() == "":
+            insert_at += 1
+        lines.insert(insert_at, entry)
+        return normalize_content("\n".join(lines))
+
+    return normalize_content(updated + f"\n## Done\n\n{entry}\n")
+
+
 def start_mission(content: str, mission_text: str) -> str:
     """Move a mission from Pending to In Progress (no timestamp).
 
     Used at the beginning of mission execution to mark it as active.
+    As a sanity enforcement, any existing In Progress missions are moved
+    to Done before the new mission is inserted — only one mission can be
+    in progress at a time.
     Returns content unchanged if the mission is not found in Pending.
     """
     needle = mission_text.strip()
@@ -713,6 +764,9 @@ def start_mission(content: str, mission_text: str) -> str:
     removed = result[1].strip()
     # Keep the original line text (with project tag etc), no timestamp/marker
     entry = removed if removed.startswith("- ") else f"- {removed}"
+
+    # Sanity enforcement: move any existing In Progress missions to Done
+    updated = _flush_in_progress_to_done(updated)
 
     lines = updated.splitlines()
     boundaries = find_section_boundaries(lines)

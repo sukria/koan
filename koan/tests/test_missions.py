@@ -16,6 +16,7 @@ from app.missions import (
     normalize_content,
     reorder_mission,
     start_mission,
+    _flush_in_progress_to_done,
     DEFAULT_SKELETON,
 )
 
@@ -1305,7 +1306,8 @@ class TestStartMission:
         # Should not have a YYYY-MM-DD HH:MM timestamp
         assert not re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", in_progress_text)
 
-    def test_existing_in_progress_preserved(self):
+    def test_existing_in_progress_flushed_to_done(self):
+        """Sanity enforcement: existing In Progress missions move to Done."""
         content = (
             "# Missions\n\n"
             "## Pending\n\n"
@@ -1316,10 +1318,13 @@ class TestStartMission:
         )
         result = start_mission(content, "New task")
         sections = parse_sections(result)
-        assert len(sections["in_progress"]) == 2
-        in_progress_text = "\n".join(sections["in_progress"])
-        assert "Already running task" in in_progress_text
-        assert "New task" in in_progress_text
+        # Only the new task should be In Progress
+        assert len(sections["in_progress"]) == 1
+        assert "New task" in sections["in_progress"][0]
+        # The old task should have been moved to Done
+        done_text = "\n".join(sections["done"])
+        assert "Already running task" in done_text
+        assert "\u2705" in done_text
 
 
 # ---------------------------------------------------------------------------
@@ -1625,3 +1630,282 @@ class TestModifyMissionsFileReturn:
 
         result = modify_missions_file(missions_path, lambda c: c)
         assert result == original
+
+
+# ---------------------------------------------------------------------------
+# _flush_in_progress_to_done — sanity enforcement
+# ---------------------------------------------------------------------------
+
+class TestFlushInProgressToDone:
+    """Tests for _flush_in_progress_to_done() — ensures only one mission
+    can be In Progress at a time."""
+
+    def test_empty_in_progress_noop(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- Task\n\n"
+            "## In Progress\n\n"
+            "## Done\n"
+        )
+        result = _flush_in_progress_to_done(content)
+        assert result == normalize_content(content)
+
+    def test_single_in_progress_moved_to_done(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- Stale mission\n\n"
+            "## Done\n"
+        )
+        result = _flush_in_progress_to_done(content)
+        sections = parse_sections(result)
+        assert len(sections["in_progress"]) == 0
+        done_text = "\n".join(sections["done"])
+        assert "Stale mission" in done_text
+        assert "\u2705" in done_text
+
+    def test_multiple_in_progress_all_moved(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- First stale\n"
+            "- Second stale\n"
+            "- Third stale\n\n"
+            "## Done\n"
+        )
+        result = _flush_in_progress_to_done(content)
+        sections = parse_sections(result)
+        assert len(sections["in_progress"]) == 0
+        assert len(sections["done"]) == 3
+        done_text = "\n".join(sections["done"])
+        assert "First stale" in done_text
+        assert "Second stale" in done_text
+        assert "Third stale" in done_text
+
+    def test_preserves_project_tags(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- [project:koan] Stale koan mission\n\n"
+            "## Done\n"
+        )
+        result = _flush_in_progress_to_done(content)
+        sections = parse_sections(result)
+        done_entry = sections["done"][0]
+        assert "[project:koan]" in done_entry
+        assert "Stale koan mission" in done_entry
+
+    def test_preserves_existing_done(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- Stale\n\n"
+            "## Done\n\n"
+            "- Old done task\n"
+        )
+        result = _flush_in_progress_to_done(content)
+        sections = parse_sections(result)
+        done_text = "\n".join(sections["done"])
+        assert "Old done task" in done_text
+        assert "Stale" in done_text
+
+    def test_creates_done_section_if_missing(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- Stale mission\n"
+        )
+        result = _flush_in_progress_to_done(content)
+        assert "## Done" in result
+        sections = parse_sections(result)
+        assert len(sections["in_progress"]) == 0
+        assert len(sections["done"]) == 1
+
+    def test_timestamp_added_to_flushed_missions(self):
+        import re
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- Stale mission\n\n"
+            "## Done\n"
+        )
+        result = _flush_in_progress_to_done(content)
+        sections = parse_sections(result)
+        done_entry = sections["done"][0]
+        assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", done_entry)
+
+
+# ---------------------------------------------------------------------------
+# start_mission — sanity enforcement (In Progress cleanup)
+# ---------------------------------------------------------------------------
+
+class TestStartMissionSanityEnforcement:
+    """Tests that start_mission() flushes stale In Progress missions to Done."""
+
+    def test_single_stale_in_progress_flushed(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- New mission\n\n"
+            "## In Progress\n\n"
+            "- Old stale mission\n\n"
+            "## Done\n"
+        )
+        result = start_mission(content, "New mission")
+        sections = parse_sections(result)
+        assert len(sections["in_progress"]) == 1
+        assert "New mission" in sections["in_progress"][0]
+        done_text = "\n".join(sections["done"])
+        assert "Old stale mission" in done_text
+        assert "\u2705" in done_text
+
+    def test_multiple_stale_in_progress_all_flushed(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- Fresh task\n\n"
+            "## In Progress\n\n"
+            "- Stale A\n"
+            "- Stale B\n"
+            "- Stale C\n\n"
+            "## Done\n"
+        )
+        result = start_mission(content, "Fresh task")
+        sections = parse_sections(result)
+        assert len(sections["in_progress"]) == 1
+        assert "Fresh task" in sections["in_progress"][0]
+        assert len(sections["done"]) == 3
+        done_text = "\n".join(sections["done"])
+        assert "Stale A" in done_text
+        assert "Stale B" in done_text
+        assert "Stale C" in done_text
+
+    def test_no_stale_in_progress_still_works(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- New task\n\n"
+            "## In Progress\n\n"
+            "## Done\n"
+        )
+        result = start_mission(content, "New task")
+        sections = parse_sections(result)
+        assert len(sections["in_progress"]) == 1
+        assert "New task" in sections["in_progress"][0]
+        assert len(sections["done"]) == 0
+
+    def test_stale_mission_preserves_project_tag_in_done(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- New task\n\n"
+            "## In Progress\n\n"
+            "- [project:backend] Old backend work\n\n"
+            "## Done\n"
+        )
+        result = start_mission(content, "New task")
+        sections = parse_sections(result)
+        done_entry = sections["done"][0]
+        assert "[project:backend]" in done_entry
+        assert "Old backend work" in done_entry
+
+    def test_full_lifecycle_with_sanity_enforcement(self):
+        """Simulate: mission A starts, then mission B starts without A finishing."""
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- Mission A\n"
+            "- Mission B\n\n"
+            "## In Progress\n\n"
+            "## Done\n"
+        )
+        # Start mission A
+        after_a = start_mission(content, "Mission A")
+        sections = parse_sections(after_a)
+        assert len(sections["in_progress"]) == 1
+        assert "Mission A" in sections["in_progress"][0]
+
+        # Start mission B without completing A — A should be flushed to Done
+        after_b = start_mission(after_a, "Mission B")
+        sections = parse_sections(after_b)
+        assert len(sections["in_progress"]) == 1
+        assert "Mission B" in sections["in_progress"][0]
+        assert len(sections["done"]) == 1
+        assert "Mission A" in sections["done"][0]
+        assert "\u2705" in sections["done"][0]
+
+    def test_sanity_enforcement_preserves_pending(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- Task to start\n"
+            "- Remaining task\n\n"
+            "## In Progress\n\n"
+            "- Stale task\n\n"
+            "## Done\n"
+        )
+        result = start_mission(content, "Task to start")
+        sections = parse_sections(result)
+        assert len(sections["pending"]) == 1
+        assert "Remaining task" in sections["pending"][0]
+
+    def test_sanity_enforcement_preserves_existing_done(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- New task\n\n"
+            "## In Progress\n\n"
+            "- Stale task\n\n"
+            "## Done\n\n"
+            "- Previously done task\n"
+        )
+        result = start_mission(content, "New task")
+        sections = parse_sections(result)
+        done_text = "\n".join(sections["done"])
+        assert "Previously done task" in done_text
+        assert "Stale task" in done_text
+
+    def test_nonexistent_mission_skips_sanity_check(self):
+        """If mission not found in Pending, no sanity check runs."""
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- Should stay here\n\n"
+            "## Done\n"
+        )
+        result = start_mission(content, "Nonexistent")
+        sections = parse_sections(result)
+        # In Progress should be untouched since start_mission returned early
+        assert len(sections["in_progress"]) == 1
+        assert "Should stay here" in sections["in_progress"][0]
+
+    def test_sequential_starts_always_flush(self):
+        """Starting 3 missions sequentially: only the last should be in progress."""
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- Alpha\n"
+            "- Beta\n"
+            "- Gamma\n\n"
+            "## In Progress\n\n"
+            "## Done\n"
+        )
+        r1 = start_mission(content, "Alpha")
+        r2 = start_mission(r1, "Beta")
+        r3 = start_mission(r2, "Gamma")
+        sections = parse_sections(r3)
+        assert len(sections["pending"]) == 0
+        assert len(sections["in_progress"]) == 1
+        assert "Gamma" in sections["in_progress"][0]
+        assert len(sections["done"]) == 2
+        done_text = "\n".join(sections["done"])
+        assert "Alpha" in done_text
+        assert "Beta" in done_text
