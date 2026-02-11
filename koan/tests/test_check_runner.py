@@ -577,20 +577,24 @@ class TestHelpers:
 
     def test_resolve_project_name_known(self):
         from app.check_runner import _resolve_project_name
-        with patch("app.utils.get_known_projects",
-                    return_value=[("koan", "/home/koan")]):
+        with patch("app.utils.resolve_project_path",
+                    return_value="/home/koan"), \
+             patch("app.utils.project_name_for_path",
+                    return_value="koan"):
             assert _resolve_project_name("koan") == "koan"
 
     def test_resolve_project_name_unknown(self):
         from app.check_runner import _resolve_project_name
-        with patch("app.utils.get_known_projects",
-                    return_value=[("other", "/other")]):
+        with patch("app.utils.resolve_project_path",
+                    return_value=None):
             assert _resolve_project_name("myrepo") == "myrepo"
 
     def test_resolve_project_name_case_insensitive(self):
         from app.check_runner import _resolve_project_name
-        with patch("app.utils.get_known_projects",
-                    return_value=[("Koan", "/home/koan")]):
+        with patch("app.utils.resolve_project_path",
+                    return_value="/home/koan"), \
+             patch("app.utils.project_name_for_path",
+                    return_value="Koan"):
             assert _resolve_project_name("koan") == "Koan"
 
 

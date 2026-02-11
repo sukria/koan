@@ -322,7 +322,9 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
                     if isinstance(project, dict):
                         gh_url = project.get("github_url", "")
                         if gh_url and gh_url.lower() == target:
-                            return project.get("path", "")
+                            path = project.get("path")
+                            if path:
+                                return path
         except Exception:
             pass
 

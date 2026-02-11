@@ -190,8 +190,8 @@ def _queue_rebase(owner, repo, pr_number, missions_path,
     """Queue a rebase mission for the PR."""
     from app.utils import insert_pending_mission, resolve_project_path
 
-    project_path = resolve_project_path(repo)
-    project_name = _resolve_project_name(repo)
+    project_path = resolve_project_path(repo, owner=owner)
+    project_name = _resolve_project_name(repo, owner=owner)
 
     cmd = (
         f"cd {koan_root}/koan && "
@@ -212,7 +212,7 @@ def _queue_pr_review(owner, repo, pr_number, missions_path):
     """Queue a PR review mission."""
     from app.utils import insert_pending_mission
 
-    project_name = _resolve_project_name(repo)
+    project_name = _resolve_project_name(repo, owner=owner)
     pr_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
 
     entry = (
@@ -282,11 +282,11 @@ def _queue_plan(owner, repo, issue_number, title, instance_dir, koan_root):
     from app.utils import insert_pending_mission
     import shlex
 
-    project_name = _resolve_project_name(repo)
+    project_name = _resolve_project_name(repo, owner=owner)
     issue_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
     missions_path = instance_dir / "missions.md"
 
-    project_path = _resolve_project_path(repo)
+    project_path = _resolve_project_path(repo, owner=owner)
     if project_path:
         cmd = (
             f"cd {koan_root}/koan && "
@@ -309,20 +309,20 @@ def _queue_plan(owner, repo, issue_number, title, instance_dir, koan_root):
     insert_pending_mission(missions_path, entry)
 
 
-def _resolve_project_name(repo):
+def _resolve_project_name(repo, owner=None):
     """Resolve a repo name to a known project name."""
-    from app.utils import get_known_projects
+    from app.utils import project_name_for_path, resolve_project_path
 
-    for name, path in get_known_projects():
-        if name.lower() == repo.lower():
-            return name
+    project_path = resolve_project_path(repo, owner=owner)
+    if project_path:
+        return project_name_for_path(project_path)
     return repo
 
 
-def _resolve_project_path(repo):
+def _resolve_project_path(repo, owner=None):
     """Resolve a repo name to its local project path."""
     from app.utils import resolve_project_path
-    return resolve_project_path(repo)
+    return resolve_project_path(repo, owner=owner)
 
 
 # ---------------------------------------------------------------------------

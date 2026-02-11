@@ -1066,83 +1066,84 @@ def _run_iteration(
         set_status(koan_root, f"Run {run_num}/{max_runs} — {autonomous_mode.upper()} on {project_name}")
 
     mission_start = int(time.time())
-    stdout_file = tempfile.mktemp(prefix="koan-out-")
-    stderr_file = tempfile.mktemp(prefix="koan-err-")
-
-    # Build CLI command (provider-agnostic with per-project overrides)
-    from app.mission_runner import build_mission_command
-    from app.debug import debug_log as _debug_log
-    cmd = build_mission_command(
-        prompt=prompt,
-        autonomous_mode=autonomous_mode,
-        extra_flags="",
-        project_name=project_name,
-    )
-
-    _debug_log(f"[run] cli: cmd={' '.join(cmd[:6])}... cwd={project_path}")
-    claude_exit = run_claude_task(cmd, stdout_file, stderr_file, cwd=project_path)
-    _debug_log(f"[run] cli: exit_code={claude_exit}")
-
-    # Parse and display output
+    fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")
+    fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
+    os.close(fd_out)
+    os.close(fd_err)
     try:
-        from app.mission_runner import parse_claude_output
-        with open(stdout_file) as f:
-            raw = f.read()
-        text = parse_claude_output(raw)
-        print(text)
-    except Exception:
-        try:
-            with open(stdout_file) as f:
-                print(f.read())
-        except Exception:
-            pass
-
-    # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
-    # Done BEFORE post-mission pipeline so quota exhaustion can't skip it.
-    if mission_title:
-        _finalize_mission(instance, mission_title, project_name, claude_exit)
-
-    # Post-mission pipeline
-    set_status(koan_root, f"Run {run_num}/{max_runs} — post-mission processing")
-    try:
-        from app.mission_runner import run_post_mission
-        post_result = run_post_mission(
-            instance_dir=instance,
+        # Build CLI command (provider-agnostic with per-project overrides)
+        from app.mission_runner import build_mission_command
+        from app.debug import debug_log as _debug_log
+        cmd = build_mission_command(
+            prompt=prompt,
+            autonomous_mode=autonomous_mode,
+            extra_flags="",
             project_name=project_name,
-            project_path=project_path,
-            run_num=run_num,
-            exit_code=claude_exit,
-            stdout_file=stdout_file,
-            stderr_file=stderr_file,
-            mission_title=mission_title,
-            autonomous_mode=autonomous_mode or "implement",
-            start_time=mission_start,
         )
 
-        if post_result.get("pending_archived"):
-            log("health", "pending.md archived to journal (Claude didn't clean up)")
-        if post_result.get("auto_merge_branch"):
-            log("git", f"Auto-merge checked for {post_result['auto_merge_branch']}")
+        _debug_log(f"[run] cli: cmd={' '.join(cmd[:6])}... cwd={project_path}")
+        claude_exit = run_claude_task(cmd, stdout_file, stderr_file, cwd=project_path)
+        _debug_log(f"[run] cli: exit_code={claude_exit}")
 
-        if post_result.get("quota_exhausted"):
-            # quota_info is a (reset_display, resume_message) tuple
-            quota_info = post_result.get("quota_info")
-            if quota_info and isinstance(quota_info, (list, tuple)) and len(quota_info) >= 2:
-                reset_display, resume_msg = quota_info[0], quota_info[1]
-            else:
-                reset_display, resume_msg = "", "Auto-resume in ~5h"
-            log("quota", f"Quota reached. {reset_display}")
-            _commit_instance(instance, f"koan: quota exhausted {time.strftime('%Y-%m-%d-%H:%M')}")
-            _notify(instance, (
-                f"⚠️ Claude quota exhausted. {reset_display}\n\n"
-                f"Kōan paused after {count} runs. {resume_msg} or use /resume to restart manually."
-            ))
-            _cleanup_temp(stdout_file, stderr_file)
-            return
-    except Exception as e:
-        log("error", f"Post-mission processing error: {e}")
+        # Parse and display output
+        try:
+            from app.mission_runner import parse_claude_output
+            with open(stdout_file) as f:
+                raw = f.read()
+            text = parse_claude_output(raw)
+            print(text)
+        except Exception:
+            try:
+                with open(stdout_file) as f:
+                    print(f.read())
+            except Exception:
+                pass
 
-    _cleanup_temp(stdout_file, stderr_file)
+        # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
+        # Done BEFORE post-mission pipeline so quota exhaustion can't skip it.
+        if mission_title:
+            _finalize_mission(instance, mission_title, project_name, claude_exit)
+
+        # Post-mission pipeline
+        set_status(koan_root, f"Run {run_num}/{max_runs} — post-mission processing")
+        try:
+            from app.mission_runner import run_post_mission
+            post_result = run_post_mission(
+                instance_dir=instance,
+                project_name=project_name,
+                project_path=project_path,
+                run_num=run_num,
+                exit_code=claude_exit,
+                stdout_file=stdout_file,
+                stderr_file=stderr_file,
+                mission_title=mission_title,
+                autonomous_mode=autonomous_mode or "implement",
+                start_time=mission_start,
+            )
+
+            if post_result.get("pending_archived"):
+                log("health", "pending.md archived to journal (Claude didn't clean up)")
+            if post_result.get("auto_merge_branch"):
+                log("git", f"Auto-merge checked for {post_result['auto_merge_branch']}")
+
+            if post_result.get("quota_exhausted"):
+                # quota_info is a (reset_display, resume_message) tuple
+                quota_info = post_result.get("quota_info")
+                if quota_info and isinstance(quota_info, (list, tuple)) and len(quota_info) >= 2:
+                    reset_display, resume_msg = quota_info[0], quota_info[1]
+                else:
+                    reset_display, resume_msg = "", "Auto-resume in ~5h"
+                log("quota", f"Quota reached. {reset_display}")
+                _commit_instance(instance, f"koan: quota exhausted {time.strftime('%Y-%m-%d-%H:%M')}")
+                _notify(instance, (
+                    f"⚠️ Claude quota exhausted. {reset_display}\n\n"
+                    f"Kōan paused after {count} runs. {resume_msg} or use /resume to restart manually."
+                ))
+                return
+        except Exception as e:
+            log("error", f"Post-mission processing error: {e}")
+    finally:
+        _cleanup_temp(stdout_file, stderr_file)
 
     # Report result — always notify on completion (success or failure)
     if claude_exit == 0:
@@ -1362,6 +1363,7 @@ def _run_skill_mission(
             capture_output=True,
             text=True,
             timeout=600,
+            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN),
         )
         exit_code = result.returncode
         skill_stdout = result.stdout or ""
