@@ -146,8 +146,8 @@ def set_status(koan_root: str, message: str):
     """Write loop status for /status and dashboard."""
     try:
         atomic_write(Path(koan_root, ".koan-status"), message)
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Failed to write status: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -337,16 +337,16 @@ def run_startup(koan_root: str, instance: str, projects: list):
     # Print banner
     try:
         print_agent_banner(f"agent loop — {cli_provider}")
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Banner display failed: {e}")
 
     with protected_phase("Startup checks"):
         # Crash recovery
         log("health", "Checking for interrupted missions...")
         try:
             recover_missions(instance)
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Crash recovery failed: {e}")
 
         # Auto-migrate env vars to projects.yaml (one-shot, idempotent)
         try:
@@ -354,8 +354,8 @@ def run_startup(koan_root: str, instance: str, projects: list):
             migration_msgs = run_migration(koan_root)
             for msg in migration_msgs:
                 log("init", f"[migration] {msg}")
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Projects migration failed: {e}")
 
         # Auto-populate github_url in projects.yaml from git remotes
         try:
@@ -363,8 +363,8 @@ def run_startup(koan_root: str, instance: str, projects: list):
             gh_msgs = ensure_github_urls(koan_root)
             for msg in gh_msgs:
                 log("init", f"[github-urls] {msg}")
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"GitHub URL population failed: {e}")
 
         # Sanity checks (all modules in koan/sanity/, alphabetical order)
         log("health", "Running sanity checks...")
@@ -374,30 +374,30 @@ def run_startup(koan_root: str, instance: str, projects: list):
                 if modified:
                     for change in changes:
                         log("health", f"  [{name}] {change}")
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Sanity checks failed: {e}")
 
         # Memory cleanup
         log("health", "Running memory cleanup...")
         try:
             from app.memory_manager import run_cleanup
             run_cleanup(instance)
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Memory cleanup failed: {e}")
 
         # Mission history cleanup
         try:
             from app.mission_history import cleanup_old_entries
             cleanup_old_entries(instance)
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Mission history cleanup failed: {e}")
 
         # Health check
         log("health", "Checking Telegram bridge health...")
         try:
             check_and_alert(koan_root, max_age=120)
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Health check failed: {e}")
 
     with protected_phase("Self-reflection check"):
         log("health", "Checking self-reflection trigger...")
@@ -407,8 +407,8 @@ def run_startup(koan_root: str, instance: str, projects: list):
                  instance, "--notify"],
                 capture_output=True, timeout=60,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Self-reflection check failed: {e}")
 
     # Start on pause
     if get_start_on_pause() and not Path(koan_root, ".koan-pause").exists():
@@ -449,8 +449,8 @@ def run_startup(koan_root: str, instance: str, projects: list):
             try:
                 gs = GitSync(instance, name, path)
                 gs.sync_and_report()
-            except Exception:
-                pass
+            except Exception as e:
+                log("error", f"Git sync failed for {name}: {e}")
 
     # Daily report
     try:
@@ -458,16 +458,16 @@ def run_startup(koan_root: str, instance: str, projects: list):
             [sys.executable, Path(koan_root, "koan/app/daily_report.py").as_posix()],
             capture_output=True, timeout=60,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Daily report failed: {e}")
 
     with protected_phase("Morning ritual"):
         log("init", "Running morning ritual...")
         try:
             from app.rituals import run_ritual
             run_ritual("morning", Path(instance))
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Morning ritual failed: {e}")
 
     return max_runs, interval, branch_prefix
 
@@ -481,8 +481,8 @@ def _notify(instance: str, message: str):
     try:
         from app.notify import format_and_send
         format_and_send(message, instance_dir=instance)
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Notification failed: {e}")
 
 
 def _notify_mission_end(
@@ -509,8 +509,8 @@ def _notify_mission_end(
             summary = get_mission_summary(instance, project_name, max_chars=300)
             if summary:
                 msg += f"\n\n{summary}"
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Mission summary extraction failed: {e}")
     else:
         prefix = "❌"
         label = mission_title if mission_title else "Run"
@@ -542,8 +542,8 @@ def _commit_instance(instance: str, message: str = ""):
                 ["git", "push", "origin", "main"],
                 cwd=instance, capture_output=True, timeout=30,
             )
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Instance commit/push failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -566,8 +566,8 @@ def handle_pause(
             _reset_usage_session(instance)
             _notify(instance, f"🔄 Kōan auto-resumed: {resume_msg}. Starting fresh (0/{max_runs} runs).")
             return "resume"
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Auto-resume check failed: {e}")
 
     # Manual resume (pause file already removed — /resume handler already
     # resets session counters for quota pauses, but we reset here too as
@@ -587,8 +587,8 @@ def handle_pause(
             capture_output=True, text=True, timeout=5,
         )
         in_focus = result.returncode == 0
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Focus mode check failed in pause: {e}")
 
     if roll < 50 and not in_focus:
         log("pause", "A thought stirs...")
@@ -703,8 +703,8 @@ def main_loop():
                     if mtime > start_time:
                         log("koan", "Restart requested. Exiting for re-launch...")
                         sys.exit(42)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log("error", f"Restart signal check failed: {e}")
 
             # --- Pause mode ---
             if Path(koan_root, ".koan-pause").exists():
@@ -741,8 +741,8 @@ def main_loop():
         current = "unknown"
         try:
             current = Path(koan_root, ".koan-project").read_text().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Failed to read last project: {e}")
         _notify(instance, f"Kōan interrupted after {count} runs. Last project: {current}.")
     finally:
         # Cleanup
@@ -785,8 +785,8 @@ def _run_iteration(
     last_project = ""
     try:
         last_project = Path(koan_root, ".koan-project").read_text().strip()
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Failed to read last project file: {e}")
     plan = plan_iteration(
         instance_dir=instance,
         koan_root=koan_root,
@@ -795,6 +795,14 @@ def _run_iteration(
         projects=projects,
         last_project=last_project,
     )
+
+    # --- Iteration decision summary (always visible in logs) ---
+    log("koan", f"Iteration plan: action={plan['action']}, "
+        f"project={plan['project_name']}, mode={plan['autonomous_mode']}, "
+        f"budget={plan['available_pct']}%"
+        f"{', mission=' + plan['mission_title'][:60] if plan['mission_title'] else ''}")
+    if plan.get("error"):
+        log("error", f"Iteration plan error: {plan['error']}")
 
     # Display usage
     log("quota", "Usage Status:")
@@ -884,8 +892,8 @@ def _run_iteration(
                  instance, project_name],
                 capture_output=True, timeout=120,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Retrospective sending failed: {e}")
         # Compute a proper future reset timestamp to avoid instant auto-resume
         reset_ts = None
         reset_display = ""
@@ -896,8 +904,8 @@ def _run_iteration(
             # Build display info for the pause reason file
             state = _load_state(usage_state_path)
             reset_display = f"session reset in ~{_estimate_reset_time(state.get('session_start', ''), 5)}"
-        except Exception:
-            pass
+        except Exception as e:
+            log("error", f"Reset time estimation failed: {e}")
         if reset_ts is None:
             reset_ts = int(time.time()) + 5 * 3600  # fallback: now + 5h
         from app.pause_manager import create_pause
@@ -1056,8 +1064,8 @@ def _run_iteration(
             autonomous_mode=autonomous_mode or "implement",
             mission_title=mission_title,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Failed to create pending.md: {e}")
 
     # Execute Claude
     if mission_title:
@@ -1092,12 +1100,12 @@ def _run_iteration(
                 raw = f.read()
             text = parse_claude_output(raw)
             print(text)
-        except Exception:
+        except Exception as e:
             try:
                 with open(stdout_file) as f:
                     print(f.read())
-            except Exception:
-                pass
+            except Exception as e2:
+                log("error", f"Failed to read CLI output: {e}, {e2}")
 
         # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
         # Done BEFORE post-mission pipeline so quota exhaustion can't skip it.
@@ -1165,8 +1173,8 @@ def _run_iteration(
                 try:
                     gs = GitSync(instance, name, path)
                     gs.sync_and_report()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log("error", f"Periodic git sync failed for {name}: {e}")
 
     # Max runs check
     if count + 1 >= max_runs:
@@ -1175,8 +1183,8 @@ def _run_iteration(
             try:
                 from app.rituals import run_ritual
                 run_ritual("evening", Path(instance))
-            except Exception:
-                pass
+            except Exception as e:
+                log("error", f"Evening ritual failed: {e}")
         log("pause", "Entering pause mode (auto-resume in 5h).")
         subprocess.run(
             [sys.executable, "-m", "app.pause_manager", "create", koan_root, "max_runs"],
@@ -1255,7 +1263,8 @@ def _has_pending_missions(instance: str) -> bool:
     try:
         from app.loop_manager import check_pending_missions
         return check_pending_missions(instance)
-    except Exception:
+    except Exception as e:
+        log("error", f"Pending missions check failed: {e}")
         return False
 
 
@@ -1266,7 +1275,8 @@ def _interruptible_sleep(interval: int, koan_root: str, instance: str) -> str:
         return interruptible_sleep(interval, koan_root, instance)
     except KeyboardInterrupt:
         raise
-    except Exception:
+    except Exception as e:
+        log("error", f"Interruptible sleep failed: {e}")
         time.sleep(min(interval, 30))
         return "timeout"
 
@@ -1284,8 +1294,8 @@ def _reset_usage_session(instance: str):
         usage_md = Path(instance, "usage.md")
         cmd_reset_session(usage_state, usage_md)
         log("health", "Usage session counters reset after resume")
-    except Exception:
-        pass
+    except Exception as e:
+        log("error", f"Usage session reset failed: {e}")
 
 
 def _start_mission_in_file(instance: str, mission_title: str):
