@@ -31,7 +31,7 @@ class TestRunGit:
 
     def test_returns_empty_on_timeout(self):
         """run_git returns empty on timeout."""
-        with patch("app.git_sync.subprocess.run", side_effect=subprocess.TimeoutExpired("git", 10)):
+        with patch("app.git_sync._run_git_core", return_value=(1, "", "Git command timed out")):
             assert run_git("/tmp", "status") == ""
 
 

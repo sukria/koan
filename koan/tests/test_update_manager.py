@@ -1,6 +1,5 @@
 """Tests for update_manager.py — git operations for code updates."""
 
-import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
@@ -53,28 +52,28 @@ class TestUpdateResult:
 class TestRunGit:
     """Tests for _run_git() helper."""
 
-    @patch("app.update_manager.subprocess.run")
-    def test_calls_git_with_args(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
-        _run_git(["status"], Path("/repo"))
-        mock_run.assert_called_once_with(
-            ["git", "status"],
-            capture_output=True,
-            text=True,
-            cwd=Path("/repo"),
+    @patch("app.update_manager._run_git_core")
+    def test_calls_git_with_args(self, mock_core):
+        mock_core.return_value = (0, "ok", "")
+        result = _run_git(["status"], Path("/repo"))
+        mock_core.assert_called_once_with(
+            "status",
+            cwd="/repo",
             timeout=60,
         )
+        assert result.returncode == 0
+        assert result.stdout == "ok"
 
 
 class TestGetCurrentBranch:
     """Tests for _get_current_branch()."""
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_branch_name(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="main\n")
         assert _get_current_branch(Path("/repo")) == "main"
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_none_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert _get_current_branch(Path("/repo")) is None
@@ -83,12 +82,12 @@ class TestGetCurrentBranch:
 class TestGetShortSha:
     """Tests for _get_short_sha()."""
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_sha(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="abc1234\n")
         assert _get_short_sha(Path("/repo")) == "abc1234"
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_unknown_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert _get_short_sha(Path("/repo")) == "unknown"
@@ -97,12 +96,12 @@ class TestGetShortSha:
 class TestIsDirty:
     """Tests for _is_dirty()."""
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_clean_repo(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         assert _is_dirty(Path("/repo")) is False
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_dirty_repo(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout=" M file.py\n")
         assert _is_dirty(Path("/repo")) is True
@@ -111,27 +110,27 @@ class TestIsDirty:
 class TestFindUpstreamRemote:
     """Tests for _find_upstream_remote()."""
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_prefers_upstream(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="origin\nupstream\n")
         assert _find_upstream_remote(Path("/repo")) == "upstream"
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_falls_back_to_origin(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="origin\n")
         assert _find_upstream_remote(Path("/repo")) == "origin"
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_first_remote(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="fork\n")
         assert _find_upstream_remote(Path("/repo")) == "fork"
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_none_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert _find_upstream_remote(Path("/repo")) is None
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_none_when_no_remotes(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         assert _find_upstream_remote(Path("/repo")) is None
@@ -140,12 +139,12 @@ class TestFindUpstreamRemote:
 class TestCountCommitsBetween:
     """Tests for _count_commits_between()."""
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_count(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="7\n")
         assert _count_commits_between(Path("/repo"), "abc", "def") == 7
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_returns_zero_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         assert _count_commits_between(Path("/repo"), "abc", "def") == 0
@@ -154,7 +153,7 @@ class TestCountCommitsBetween:
 class TestPullUpstream:
     """Tests for pull_upstream() — the main update orchestration."""
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_successful_update(self, mock_run):
         """Happy path: clean repo, on main, upstream exists, pull succeeds."""
         mock_run.side_effect = [
@@ -174,7 +173,7 @@ class TestPullUpstream:
         assert result.old_commit == "abc1234"
         assert result.new_commit == "def5678"
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_already_up_to_date(self, mock_run):
         """No new commits — same SHA before and after."""
         mock_run.side_effect = [
@@ -192,7 +191,7 @@ class TestPullUpstream:
         assert result.changed is False
         assert result.commits_pulled == 0
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_no_remote_found(self, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="abc1234\n"),   # _get_short_sha
@@ -203,7 +202,7 @@ class TestPullUpstream:
         assert result.success is False
         assert "No git remote" in result.error
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_stashes_dirty_work(self, mock_run):
         """Dirty working tree gets stashed before checkout."""
         mock_run.side_effect = [
@@ -225,7 +224,7 @@ class TestPullUpstream:
         assert result.success is True
         assert result.stashed is True
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_stash_failure(self, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="abc1234\n"),
@@ -238,7 +237,7 @@ class TestPullUpstream:
         assert result.success is False
         assert "stash" in result.error.lower()
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_checkout_main_failure(self, mock_run):
         """Checkout main fails — should restore state."""
         mock_run.side_effect = [
@@ -253,7 +252,7 @@ class TestPullUpstream:
         assert result.success is False
         assert "checkout" in result.error.lower()
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_fetch_failure(self, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="abc1234\n"),
@@ -267,7 +266,7 @@ class TestPullUpstream:
         assert result.success is False
         assert "fetch" in result.error.lower()
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_pull_failure(self, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="abc1234\n"),
@@ -282,23 +281,23 @@ class TestPullUpstream:
         assert result.success is False
         assert "pull" in result.error.lower()
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_skips_checkout_when_already_on_main(self, mock_run):
         """No checkout command issued when already on main."""
         calls = []
-        def track_calls(args, **kwargs):
+        def track_calls(args, cwd=None):
             calls.append(args)
-            if args == ["git", "rev-parse", "--short", "HEAD"]:
+            if args == ["rev-parse", "--short", "HEAD"]:
                 return MagicMock(returncode=0, stdout="abc1234\n")
-            if args == ["git", "remote"]:
+            if args == ["remote"]:
                 return MagicMock(returncode=0, stdout="upstream\n")
-            if args == ["git", "status", "--porcelain"]:
+            if args == ["status", "--porcelain"]:
                 return MagicMock(returncode=0, stdout="")
-            if args == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
                 return MagicMock(returncode=0, stdout="main\n")
-            if args[:2] == ["git", "fetch"]:
+            if args[:1] == ["fetch"]:
                 return MagicMock(returncode=0, stdout="")
-            if args[:2] == ["git", "pull"]:
+            if args[:1] == ["pull"]:
                 return MagicMock(returncode=0, stdout="Already up to date.\n")
             return MagicMock(returncode=0, stdout="")
 
@@ -309,25 +308,25 @@ class TestPullUpstream:
         checkout_calls = [c for c in calls if "checkout" in c]
         assert len(checkout_calls) == 0
 
-    @patch("app.update_manager.subprocess.run")
+    @patch("app.update_manager._run_git")
     def test_restores_branch_on_fetch_failure(self, mock_run):
         """When fetch fails on a non-main branch, checkout back to original."""
         calls = []
-        def track_calls(args, **kwargs):
+        def track_calls(args, cwd=None):
             calls.append(args)
-            if args == ["git", "rev-parse", "--short", "HEAD"]:
+            if args == ["rev-parse", "--short", "HEAD"]:
                 return MagicMock(returncode=0, stdout="abc1234\n")
-            if args == ["git", "remote"]:
+            if args == ["remote"]:
                 return MagicMock(returncode=0, stdout="upstream\n")
-            if args == ["git", "status", "--porcelain"]:
+            if args == ["status", "--porcelain"]:
                 return MagicMock(returncode=0, stdout="")
-            if args == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
                 return MagicMock(returncode=0, stdout="koan/feature\n")
-            if args == ["git", "checkout", "main"]:
+            if args == ["checkout", "main"]:
                 return MagicMock(returncode=0, stdout="")
-            if args[:2] == ["git", "fetch"]:
+            if args[:1] == ["fetch"]:
                 return MagicMock(returncode=1, stdout="", stderr="network error")
-            if args == ["git", "checkout", "koan/feature"]:
+            if args == ["checkout", "koan/feature"]:
                 return MagicMock(returncode=0, stdout="")
             return MagicMock(returncode=0, stdout="")
 
@@ -336,5 +335,5 @@ class TestPullUpstream:
         result = pull_upstream(Path("/repo"))
         assert result.success is False
         # Should have attempted to restore original branch
-        checkout_restore = [c for c in calls if c == ["git", "checkout", "koan/feature"]]
+        checkout_restore = [c for c in calls if c == ["checkout", "koan/feature"]]
         assert len(checkout_restore) == 1

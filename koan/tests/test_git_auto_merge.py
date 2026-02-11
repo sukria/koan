@@ -393,35 +393,36 @@ class TestIntegration:
 class TestRunGit:
     def test_success(self):
         """run_git returns exit code, stdout, stderr."""
-        with patch("app.git_auto_merge.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="output\n", stderr="")
+        with patch("app.git_auto_merge._run_git_core") as mock_core:
+            mock_core.return_value = (0, "output", "")
             code, out, err = run_git("/tmp", "status")
             assert code == 0
             assert out == "output"
             assert err == ""
-            mock_run.assert_called_once_with(
-                ["git", "status"], cwd="/tmp", capture_output=True, text=True, timeout=30, env=None
+            mock_core.assert_called_once_with(
+                "status", cwd="/tmp", timeout=30, env=None
             )
 
     def test_failure(self):
         """run_git returns non-zero on failure."""
-        with patch("app.git_auto_merge.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="fatal: error")
+        with patch("app.git_auto_merge._run_git_core") as mock_core:
+            mock_core.return_value = (128, "", "fatal: error")
             code, out, err = run_git("/tmp", "checkout", "main")
             assert code == 128
             assert err == "fatal: error"
 
     def test_timeout(self):
-        """run_git handles subprocess timeout."""
-        import subprocess as sp
-        with patch("app.git_auto_merge.subprocess.run", side_effect=sp.TimeoutExpired("git", 30)):
+        """run_git handles subprocess timeout (via git_utils)."""
+        with patch("app.git_auto_merge._run_git_core") as mock_core:
+            mock_core.return_value = (1, "", "Git command timed out")
             code, out, err = run_git("/tmp", "fetch")
             assert code == 1
             assert "timed out" in err
 
     def test_exception(self):
-        """run_git handles generic exceptions."""
-        with patch("app.git_auto_merge.subprocess.run", side_effect=OSError("no git")):
+        """run_git handles generic exceptions (via git_utils)."""
+        with patch("app.git_auto_merge._run_git_core") as mock_core:
+            mock_core.return_value = (1, "", "no git")
             code, out, err = run_git("/tmp", "status")
             assert code == 1
             assert "no git" in err

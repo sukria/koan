@@ -13,7 +13,6 @@ Supports:
 
 import fnmatch
 import os
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +20,7 @@ from typing import Dict, Optional, Tuple, List
 
 # Import config utilities
 from app.config import get_auto_merge_config
+from app.git_utils import run_git as _run_git_core
 from app.utils import load_config
 
 
@@ -31,29 +31,10 @@ from app.utils import load_config
 def run_git(cwd: str, *args, env: Optional[Dict[str, str]] = None) -> Tuple[int, str, str]:
     """Run a git command and return (exit_code, stdout, stderr).
 
-    Args:
-        cwd: Working directory for the git command.
-        *args: Git subcommand and arguments.
-        env: Optional extra environment variables to set for this command.
-             Merged on top of the current environment.
+    Thin wrapper around git_utils.run_git() preserving the (cwd, *args) signature
+    for backward compatibility with existing callers and tests.
     """
-    try:
-        run_env = None
-        if env:
-            run_env = {**os.environ, **env}
-        result = subprocess.run(
-            ["git"] + list(args),
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=run_env
-        )
-        return result.returncode, result.stdout.strip(), result.stderr.strip()
-    except subprocess.TimeoutExpired:
-        return 1, "", "Git command timed out"
-    except Exception as e:
-        return 1, "", str(e)
+    return _run_git_core(*args, cwd=cwd, timeout=30, env=env)
 
 
 def get_branch_commit_messages(project_path: str, branch: str, base_branch: str) -> List[str]:

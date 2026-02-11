@@ -1,0 +1,80 @@
+"""
+Kōan -- Shared git command helpers.
+
+Centralizes subprocess-based git invocation used across the codebase.
+Replaces 5 separate run_git() implementations with two unified functions:
+
+- run_git(): Returns (returncode, stdout, stderr) tuple. Never raises.
+- run_git_strict(): Returns stdout string. Raises RuntimeError on failure.
+"""
+
+import os
+import subprocess
+from typing import Dict, Optional, Tuple
+
+
+def run_git(
+    *args: str,
+    cwd: str = None,
+    timeout: int = 30,
+    env: Optional[Dict[str, str]] = None,
+) -> Tuple[int, str, str]:
+    """Run a git command and return (returncode, stdout, stderr).
+
+    Args:
+        *args: Git subcommand and arguments (e.g. "status", "--porcelain").
+        cwd: Working directory for the git command.
+        timeout: Command timeout in seconds (default: 30).
+        env: Optional extra environment variables, merged on top of os.environ.
+
+    Returns:
+        (returncode, stdout, stderr) tuple. Never raises on git failures.
+    """
+    try:
+        run_env = None
+        if env:
+            run_env = {**os.environ, **env}
+        result = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=run_env,
+        )
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return 1, "", "Git command timed out"
+    except Exception as e:
+        return 1, "", str(e)
+
+
+def run_git_strict(
+    *args: str,
+    cwd: str = None,
+    timeout: int = 60,
+) -> str:
+    """Run a git command, raise RuntimeError on failure.
+
+    Args:
+        *args: Git subcommand and arguments (e.g. "fetch", "origin", "main").
+        cwd: Working directory for the git command.
+        timeout: Command timeout in seconds (default: 60).
+
+    Returns:
+        Stripped stdout on success.
+
+    Raises:
+        RuntimeError: If git exits with non-zero status.
+    """
+    result = subprocess.run(
+        ["git"] + list(args),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        cmd_str = " ".join(["git"] + list(args))
+        raise RuntimeError(f"git failed: {cmd_str} — {result.stderr[:200]}")
+    return result.stdout.strip()

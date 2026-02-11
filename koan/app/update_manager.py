@@ -10,10 +10,21 @@ Used by the /update command to ensure both bridge and run loop
 run the latest code after a restart.
 """
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from app.git_utils import run_git as _run_git_core
+
+
+class _GitResult:
+    """Minimal CompletedProcess-like object for backward compat."""
+    __slots__ = ("returncode", "stdout", "stderr")
+
+    def __init__(self, returncode: int, stdout: str, stderr: str):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 @dataclass
@@ -41,15 +52,14 @@ class UpdateResult:
         return f"Updated: {self.old_commit} → {self.new_commit} ({self.commits_pulled} new commit{'s' if self.commits_pulled != 1 else ''})"
 
 
-def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    """Run a git command and return the result."""
-    return subprocess.run(
-        ["git"] + args,
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-        timeout=60,
-    )
+def _run_git(args: list[str], cwd: Path) -> _GitResult:
+    """Run a git command and return the result.
+
+    Thin wrapper around git_utils.run_git() preserving the
+    CompletedProcess-like interface for existing callers.
+    """
+    rc, stdout, stderr = _run_git_core(*args, cwd=str(cwd), timeout=60)
+    return _GitResult(rc, stdout, stderr)
 
 
 def _get_current_branch(koan_root: Path) -> Optional[str]:
