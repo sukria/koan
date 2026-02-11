@@ -3,6 +3,15 @@
 import re
 
 
+def _needs_ollama() -> bool:
+    """Return True if the configured provider requires ollama serve."""
+    try:
+        from app.provider import get_provider_name
+        return get_provider_name() in ("local", "ollama")
+    except Exception:
+        return False
+
+
 def handle(ctx):
     """Dispatch to the appropriate subcommand."""
     cmd = ctx.command_name
@@ -52,6 +61,15 @@ def _handle_status(ctx) -> str:
             parts.append(f"  🎯 Focus: missions only ({focus_state.remaining_display()} remaining)")
     except Exception:
         pass
+
+    # Show process health when ollama is needed
+    if _needs_ollama():
+        from app.pid_manager import check_pidfile
+        ollama_pid = check_pidfile(koan_root, "ollama")
+        if ollama_pid:
+            parts.append(f"  🦙 Ollama: running (PID {ollama_pid})")
+        else:
+            parts.append(f"  🦙 Ollama: not running")
 
     status_file = koan_root / ".koan-status"
     if status_file.exists():
@@ -124,6 +142,15 @@ def _handle_ping(ctx) -> str:
     else:
         lines.append("❌ Bridge: not running")
         lines.append("  make awake &")
+
+    # --- Ollama status (only for local/ollama providers) ---
+    if _needs_ollama():
+        ollama_pid = check_pidfile(koan_root, "ollama")
+        if ollama_pid:
+            lines.append(f"✅ Ollama: alive (PID {ollama_pid})")
+        else:
+            lines.append("❌ Ollama: not running")
+            lines.append("  ollama serve &")
 
     return "\n".join(lines)
 
