@@ -166,6 +166,72 @@ _last_github_check: float = 0
 log = logging.getLogger(__name__)
 
 
+def _load_github_config(config: dict, koan_root: str, instance_dir: str) -> Optional[dict]:
+    """Load and validate GitHub configuration.
+    
+    Returns:
+        Dict with config data or None if feature is disabled/invalid
+    """
+    from app.github_config import get_github_commands_enabled, get_github_max_age_hours, get_github_nickname
+    
+    if not get_github_commands_enabled(config):
+        return None
+    
+    nickname = get_github_nickname(config)
+    if not nickname:
+        return None
+    
+    bot_username = os.environ.get("GITHUB_USER", nickname)
+    max_age = get_github_max_age_hours(config)
+    
+    return {
+        "nickname": nickname,
+        "bot_username": bot_username,
+        "max_age": max_age,
+    }
+
+
+def _build_skill_registry(instance_dir: str):
+    """Build combined skill registry from core and instance skills.
+    
+    Returns:
+        Populated SkillRegistry
+    """
+    from app.skills import SkillRegistry, get_default_skills_dir
+    
+    registry = SkillRegistry(get_default_skills_dir())
+    
+    # Load instance skills
+    instance_skills = Path(instance_dir) / "skills"
+    if instance_skills.is_dir():
+        instance_registry = SkillRegistry(instance_skills)
+        for skill in instance_registry.list_all():
+            registry._register(skill)
+    
+    return registry
+
+
+def _get_known_repos_from_projects(koan_root: str) -> Optional[set]:
+    """Extract known repo names from projects config.
+    
+    Returns:
+        Set of "owner/repo" strings or None for all repos
+    """
+    from app.projects_config import load_projects_config
+    
+    projects_config = load_projects_config(koan_root)
+    if not projects_config:
+        return None
+    
+    known_repos = set()
+    for name, proj in projects_config.get("projects", {}).items():
+        gh_url = proj.get("github_url", "")
+        if gh_url:
+            known_repos.add(gh_url)
+    
+    return known_repos or None
+
+
 def process_github_notifications(
     koan_root: str,
     instance_dir: str,
@@ -190,76 +256,42 @@ def process_github_notifications(
     _last_github_check = now
 
     try:
-        from app.github_config import get_github_commands_enabled, get_github_max_age_hours, get_github_nickname
         from app.utils import load_config
-
-        config = load_config()
-        if not get_github_commands_enabled(config):
-            return 0
-
-        nickname = get_github_nickname(config)
-        if not nickname:
-            return 0
-
-        bot_username = os.environ.get("GITHUB_USER", nickname)
-
-        from app.github_command_handler import (
-            extract_issue_number_from_notification,
-            post_error_reply,
-            process_single_notification,
-            resolve_project_from_notification,
-        )
-        from app.github_notifications import fetch_unread_notifications
         from app.projects_config import load_projects_config
-        from app.skills import SkillRegistry, get_default_skills_dir
-        from app.utils import get_known_projects
+        
+        config = load_config()
+        github_config = _load_github_config(config, koan_root, instance_dir)
+        if not github_config:
+            return 0
 
-        # Build known repos set for filtering
-        known_repos = set()
+        # Load components
+        registry = _build_skill_registry(instance_dir)
+        known_repos = _get_known_repos_from_projects(koan_root)
         projects_config = load_projects_config(koan_root)
-        if projects_config:
-            for name, proj in projects_config.get("projects", {}).items():
-                gh_url = proj.get("github_url", "")
-                if gh_url:
-                    known_repos.add(gh_url)
 
-        # Load skills registry
-        registry = SkillRegistry(get_default_skills_dir())
-        # Also load instance skills
-        instance_skills = Path(instance_dir) / "skills"
-        if instance_skills.is_dir():
-            instance_registry = SkillRegistry(instance_skills)
-            for skill in instance_registry.list_all():
-                registry._register(skill)
-
-        max_age = get_github_max_age_hours(config)
-        notifications = fetch_unread_notifications(known_repos or None)
+        # Fetch and process notifications
+        from app.github_notifications import fetch_unread_notifications
+        from app.github_command_handler import (
+            process_single_notification,
+            post_error_reply,
+            resolve_project_from_notification,
+            extract_issue_number_from_notification,
+        )
+        
+        notifications = fetch_unread_notifications(known_repos)
 
         missions_created = 0
         for notif in notifications:
             success, error = process_single_notification(
                 notif, registry, config, projects_config,
-                bot_username, max_age,
+                github_config["bot_username"], github_config["max_age"],
             )
 
             if success:
                 missions_created += 1
             elif error:
                 # Post error reply
-                project_info = resolve_project_from_notification(notif)
-                issue_num = extract_issue_number_from_notification(notif)
-                if project_info and issue_num:
-                    _, owner, repo = project_info
-                    comment = None
-                    try:
-                        from app.github_notifications import get_comment_from_notification
-                        comment = get_comment_from_notification(notif)
-                    except Exception:
-                        pass
-                    if comment:
-                        comment_id = str(comment.get("id", ""))
-                        if comment_id:
-                            post_error_reply(owner, repo, issue_num, comment_id, error)
+                _post_error_for_notification(notif, error)
 
         if missions_created > 0:
             log.info("GitHub: created %d mission(s) from @mentions", missions_created)
@@ -269,6 +301,33 @@ def process_github_notifications(
     except Exception as e:
         log.warning("GitHub notification check failed: %s", e)
         return 0
+
+
+def _post_error_for_notification(notif: dict, error: str) -> None:
+    """Post error reply to a notification if possible."""
+    from app.github_command_handler import (
+        post_error_reply,
+        resolve_project_from_notification,
+        extract_issue_number_from_notification,
+    )
+    from app.github_notifications import get_comment_from_notification
+    
+    project_info = resolve_project_from_notification(notif)
+    issue_num = extract_issue_number_from_notification(notif)
+    
+    if not project_info or not issue_num:
+        return
+    
+    _, owner, repo = project_info
+    
+    try:
+        comment = get_comment_from_notification(notif)
+        if comment:
+            comment_id = str(comment.get("id", ""))
+            if comment_id:
+                post_error_reply(owner, repo, issue_num, comment_id, error)
+    except Exception:
+        pass  # Silently fail error posting
 
 
 # --- Interruptible sleep ---

@@ -180,9 +180,14 @@ class TestAddReaction:
 
 class TestCheckUserPermission:
     @patch("app.github_notifications.api")
-    def test_wildcard_allows_all(self, mock_api):
+    def test_wildcard_with_write_access(self, mock_api):
+        mock_api.return_value = json.dumps({"permission": "write"})
         assert check_user_permission("o", "r", "anyone", ["*"]) is True
-        mock_api.assert_not_called()
+
+    @patch("app.github_notifications.api")
+    def test_wildcard_read_only_denied(self, mock_api):
+        mock_api.return_value = json.dumps({"permission": "read"})
+        assert check_user_permission("o", "r", "anyone", ["*"]) is False
 
     @patch("app.github_notifications.api")
     def test_not_in_allowlist(self, mock_api):

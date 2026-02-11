@@ -13,6 +13,18 @@ ISSUE_URL_PATTERN = r'https?://github\.com/([^/]+)/([^/]+)/issues/(\d+)'
 PR_OR_ISSUE_PATTERN = r'https?://github\.com/([^/]+)/([^/]+)/(pull|issues)/(\d+)'
 
 
+def _clean_url(url: str) -> str:
+    """Clean a URL by removing fragments and whitespace.
+    
+    Args:
+        url: The URL to clean
+        
+    Returns:
+        Cleaned URL without fragment or surrounding whitespace
+    """
+    return url.split("#")[0].strip()
+
+
 def parse_pr_url(url: str) -> Tuple[str, str, str]:
     """Extract owner, repo, and PR number from a GitHub PR URL.
 
@@ -25,7 +37,7 @@ def parse_pr_url(url: str) -> Tuple[str, str, str]:
     Raises:
         ValueError: If the URL doesn't match expected PR format
     """
-    clean_url = url.split("#")[0].strip()
+    clean_url = _clean_url(url)
     match = re.match(PR_URL_PATTERN, clean_url)
     if not match:
         raise ValueError(f"Invalid PR URL: {url}")
@@ -44,7 +56,7 @@ def parse_issue_url(url: str) -> Tuple[str, str, str]:
     Raises:
         ValueError: If the URL doesn't match expected issue format
     """
-    clean_url = url.split("#")[0].strip()
+    clean_url = _clean_url(url)
     match = re.match(ISSUE_URL_PATTERN, clean_url)
     if not match:
         raise ValueError(f"Invalid issue URL: {url}")
@@ -63,7 +75,7 @@ def parse_github_url(url: str) -> Tuple[str, str, str, str]:
     Raises:
         ValueError: If the URL doesn't match expected format
     """
-    clean_url = url.split("#")[0].strip()
+    clean_url = _clean_url(url)
     match = re.match(PR_OR_ISSUE_PATTERN, clean_url)
     if not match:
         raise ValueError(f"Invalid GitHub URL: {url}")

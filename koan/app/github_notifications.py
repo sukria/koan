@@ -231,15 +231,11 @@ def check_user_permission(owner: str, repo: str, username: str,
     Returns:
         True if authorized.
     """
-    # Wildcard allows everyone
-    if "*" in allowed_users:
-        return True
-
-    # Check allowlist
-    if username not in allowed_users:
+    # Check allowlist (unless wildcard)
+    if "*" not in allowed_users and username not in allowed_users:
         return False
 
-    # Verify write access via GitHub API
+    # Always verify at least write access via GitHub API
     try:
         raw = api(f"repos/{owner}/{repo}/collaborators/{username}/permission")
         data = json.loads(raw) if raw else {}
@@ -295,7 +291,7 @@ def extract_comment_metadata(comment_url: str) -> Optional[Tuple[str, str, str]]
     Returns:
         Tuple of (owner, repo, comment_id) or None.
     """
-    # API URL format
+    # Try API URL format first
     match = re.match(
         r'https?://api\.github\.com/repos/([^/]+)/([^/]+)/issues/comments/(\d+)',
         comment_url,
@@ -303,7 +299,7 @@ def extract_comment_metadata(comment_url: str) -> Optional[Tuple[str, str, str]]
     if match:
         return match.group(1), match.group(2), match.group(3)
 
-    # Web URL format
+    # Try web URL format
     match = re.match(
         r'https?://github\.com/([^/]+)/([^/]+)/(?:issues|pull)/\d+#issuecomment-(\d+)',
         comment_url,

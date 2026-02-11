@@ -66,6 +66,26 @@ def get_github_enabled_commands(registry: SkillRegistry) -> List[str]:
     return sorted(commands)
 
 
+def _extract_url_from_context(context: str) -> Optional[Tuple[str, str]]:
+    """Extract URL from context text if present.
+    
+    Args:
+        context: Context text that may contain a URL
+        
+    Returns:
+        Tuple of (url, remaining_context) or None if no URL found
+    """
+    url_match = re.search(r'https?://github\.com/\S+', context)
+    if not url_match:
+        return None
+    
+    url = url_match.group(0)
+    # Remove URL from context
+    remaining = context[:url_match.start()].strip() + " " + context[url_match.end():].strip()
+    remaining = remaining.strip()
+    return url, remaining
+
+
 def build_mission_from_command(
     skill,
     command_name: str,
@@ -90,11 +110,9 @@ def build_mission_from_command(
     web_url = api_url_to_web_url(subject_url) if subject_url else ""
 
     # Check if context contains a URL — if so, use that instead
-    url_in_context = re.search(r'https?://github\.com/\S+', context)
+    url_in_context = _extract_url_from_context(context)
     if url_in_context:
-        web_url = url_in_context.group(0)
-        context = context[:url_in_context.start()].strip() + " " + context[url_in_context.end():].strip()
-        context = context.strip()
+        web_url, context = url_in_context
 
     # Build mission text
     parts = [f"/{command_name}"]
@@ -133,6 +151,84 @@ def resolve_project_from_notification(notification: dict) -> Optional[Tuple[str,
     return project_name, owner, repo
 
 
+def _should_skip_notification(notification: dict, bot_username: str, max_age_hours: int) -> bool:
+    """Check if notification should be skipped (stale or self-mention).
+    
+    Args:
+        notification: Notification dict
+        bot_username: Bot's GitHub username
+        max_age_hours: Maximum age threshold
+        
+    Returns:
+        True if should skip
+    """
+    # Check staleness
+    if is_notification_stale(notification, max_age_hours):
+        mark_notification_read(str(notification.get("id", "")))
+        return True
+    
+    # Get comment
+    comment = get_comment_from_notification(notification)
+    if not comment:
+        return True
+    
+    # Skip self-mentions
+    if is_self_mention(comment, bot_username):
+        mark_notification_read(str(notification.get("id", "")))
+        return True
+    
+    return False
+
+
+def _validate_and_parse_command(
+    notification: dict,
+    comment: dict,
+    config: dict,
+    registry: SkillRegistry,
+    bot_username: str,
+    owner: str,
+    repo: str,
+) -> Tuple[Optional[object], Optional[str], str]:
+    """Validate command and parse from comment.
+    
+    Args:
+        notification: Notification dict
+        comment: Comment dict
+        config: Config dict
+        registry: Skills registry
+        bot_username: Bot's GitHub username
+        owner: Repository owner
+        repo: Repository name
+        
+    Returns:
+        Tuple of (skill, command_name, context). 
+        skill is None if command is invalid or already processed.
+        command_name is None if already processed/no valid mention.
+    """
+    comment_id = str(comment.get("id", ""))
+    
+    # Check if already processed
+    if check_already_processed(comment_id, bot_username, owner, repo):
+        mark_notification_read(str(notification.get("id", "")))
+        return None, None, ""
+    
+    # Parse command from comment
+    nickname = get_github_nickname(config)
+    command_result = parse_mention_command(comment.get("body", ""), nickname)
+    if not command_result:
+        mark_notification_read(str(notification.get("id", "")))
+        return None, None, ""
+    
+    command_name, context = command_result
+    
+    # Validate command
+    skill = validate_command(command_name, registry)
+    if not skill:
+        return None, command_name, context  # Invalid command, but we have the name for error message
+    
+    return skill, command_name, context
+
+
 def process_single_notification(
     notification: dict,
     registry: SkillRegistry,
@@ -156,23 +252,15 @@ def process_single_notification(
     Returns:
         Tuple of (success, error_message). error_message is None on success.
     """
-    # Check staleness
-    if is_notification_stale(notification, max_age_hours):
-        mark_notification_read(str(notification.get("id", "")))
-        return False, None  # Silently skip stale notifications
+    # Early exit checks
+    if _should_skip_notification(notification, bot_username, max_age_hours):
+        return False, None
 
-    # Get the triggering comment
+    # Get the triggering comment (already fetched in _should_skip_notification, but kept for clarity)
     comment = get_comment_from_notification(notification)
     if not comment:
         return False, None
 
-    # Skip self-mentions
-    if is_self_mention(comment, bot_username):
-        mark_notification_read(str(notification.get("id", "")))
-        return False, None
-
-    # Extract comment metadata
-    comment_id = str(comment.get("id", ""))
     comment_author = comment.get("user", {}).get("login", "")
 
     # Resolve project
@@ -182,36 +270,26 @@ def process_single_notification(
 
     project_name, owner, repo = project_info
 
-    # Check if already processed
-    if check_already_processed(comment_id, bot_username, owner, repo):
-        mark_notification_read(str(notification.get("id", "")))
+    # Validate and parse command
+    skill, command_name, context = _validate_and_parse_command(
+        notification, comment, config, registry, bot_username, owner, repo
+    )
+    
+    # If command_name is None, already processed or no valid mention
+    if command_name is None:
         return False, None
-
-    # Parse command from comment
-    nickname = get_github_nickname(config)
-    command_result = parse_mention_command(comment.get("body", ""), nickname)
-    if not command_result:
-        mark_notification_read(str(notification.get("id", "")))
-        return False, None
-
-    command_name, context = command_result
-
-    # Validate command
-    skill = validate_command(command_name, registry)
-    if not skill:
+    
+    # If skill is None but we have a command_name, it's an invalid command
+    if skill is None:
         available = ", ".join(get_github_enabled_commands(registry))
-        error = f"Unknown command '{command_name}'. Available: {available}"
-        return False, error
+        return False, f"Unknown command '{command_name}'. Available: {available}"
 
     # Check permissions
     allowed_users = get_github_authorized_users(config, project_name, projects_config)
     if not check_user_permission(owner, repo, comment_author, allowed_users):
         return False, "Permission denied. Only users with write access can trigger bot commands."
 
-    # Add reaction BEFORE creating mission (marks as processed)
-    add_reaction(owner, repo, comment_id)
-
-    # Build and insert mission
+    # Build and insert mission BEFORE reacting (so crash doesn't lose command)
     mission_entry = build_mission_from_command(
         skill, command_name, context, notification, project_name,
     )
@@ -223,6 +301,10 @@ def process_single_notification(
     koan_root = os.environ.get("KOAN_ROOT", "")
     missions_path = Path(koan_root) / "instance" / "missions.md"
     insert_pending_mission(missions_path, mission_entry)
+
+    # React AFTER mission is persisted (marks as processed)
+    comment_id = str(comment.get("id", ""))
+    add_reaction(owner, repo, comment_id)
 
     # Mark notification as read
     mark_notification_read(str(notification.get("id", "")))

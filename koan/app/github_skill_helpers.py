@@ -5,10 +5,11 @@ Common utilities for skills that interact with GitHub PRs and issues:
 - Project resolution
 - Mission queuing
 - Response formatting
+- Unified skill handling
 """
 
 import re
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 
 
@@ -120,3 +121,104 @@ def format_success_message(url_type: str, number: str, owner: str, repo: str, co
     if context:
         msg += f" — {context}"
     return msg
+
+
+def handle_github_skill(
+    ctx,
+    command: str,
+    url_type: str,
+    parse_func: Callable[[str], Tuple[str, str, str]],
+    success_prefix: str,
+) -> str:
+    """Unified handler for GitHub-based skills (review, implement, refactor).
+    
+    This consolidates the common pattern used by review, implement, and refactor skills:
+    1. Extract and validate GitHub URL
+    2. Parse URL to get owner/repo/number
+    3. Resolve to local project
+    4. Queue mission
+    5. Return success message
+    
+    Args:
+        ctx: Skill context
+        command: Command name (e.g., "review", "implement", "refactor")
+        url_type: URL type filter ("pr", "issue", or "pr-or-issue")
+        parse_func: Function to parse the URL, returns (owner, repo, number) or (owner, repo, type, number)
+        success_prefix: Prefix for success message (e.g., "Review queued")
+        
+    Returns:
+        Success or error message string
+    """
+    args = ctx.args.strip()
+    
+    if not args:
+        return _format_usage_message(command, url_type)
+    
+    # Extract URL from arguments
+    result = extract_github_url(args, url_type=url_type)
+    if not result:
+        return _format_no_url_error(url_type)
+    
+    url, context = result
+    
+    # Parse URL
+    try:
+        parsed = parse_func(url)
+    except ValueError as e:
+        return f"\u274c {e}"
+    
+    # Handle different parse result formats
+    if len(parsed) == 3:
+        owner, repo, number = parsed
+        type_label = "PR" if "pull" in url else "issue"
+    else:
+        owner, repo, url_type_result, number = parsed
+        type_label = "PR" if url_type_result == "pull" else "issue"
+    
+    # Resolve project
+    project_path, project_name = resolve_project_for_repo(repo, owner=owner)
+    if not project_path:
+        return format_project_not_found_error(repo)
+    
+    # Queue mission
+    queue_github_mission(ctx, command, url, project_name, context)
+    
+    # Return success message
+    return f"{success_prefix} for {format_success_message(type_label, number, owner, repo, context)}"
+
+
+def _format_usage_message(command: str, url_type: str) -> str:
+    """Format usage message for GitHub skills."""
+    if url_type == "issue":
+        examples = [
+            f"Ex: /{command} https://github.com/sukria/koan/issues/42",
+            f"Ex: /{command} https://github.com/sukria/koan/issues/42 phase 1 only",
+        ]
+        description = "issue"
+    elif url_type == "pr":
+        examples = [
+            f"Ex: /{command} https://github.com/sukria/koan/pull/42",
+        ]
+        description = "PR"
+    else:  # pr-or-issue
+        examples = [
+            f"Ex: /{command} https://github.com/sukria/koan/pull/42",
+            f"Ex: /{command} https://github.com/sukria/koan/issues/42",
+        ]
+        description = "github-url"
+    
+    usage_line = f"Usage: /{command} <{description}> [context]"
+    examples_text = "\n".join(examples)
+    return f"{usage_line}\n{examples_text}\n\nQueues a {command} mission."
+
+
+def _format_no_url_error(url_type: str) -> str:
+    """Format error for missing GitHub URL."""
+    if url_type == "issue":
+        example = "https://github.com/owner/repo/issues/123"
+    elif url_type == "pr":
+        example = "https://github.com/owner/repo/pull/123"
+    else:
+        example = "https://github.com/owner/repo/pull/123"
+    
+    return f"\u274c No valid GitHub URL found.\nEx: {example}"

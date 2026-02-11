@@ -20,26 +20,18 @@ Per-project override in projects.yaml:
 from typing import List, Optional
 
 
-def _get_github_section(config: dict) -> dict:
-    """Extract the 'github' section from config.yaml.
-
-    Returns empty dict if not present.
-    """
-    return config.get("github", {}) or {}
-
-
 def get_github_nickname(config: dict) -> str:
     """Get the bot's GitHub @mention nickname from config.yaml.
 
     Returns empty string if not configured.
     """
-    github = _get_github_section(config)
+    github = config.get("github") or {}
     return str(github.get("nickname", "")).strip()
 
 
 def get_github_commands_enabled(config: dict) -> bool:
     """Check if GitHub notification commands are enabled in config.yaml."""
-    github = _get_github_section(config)
+    github = config.get("github") or {}
     return bool(github.get("commands_enabled", False))
 
 
@@ -61,7 +53,7 @@ def get_github_authorized_users(config: dict, project_name: Optional[str] = None
             return project_users
 
     # Fall back to global config.yaml
-    github = _get_github_section(config)
+    github = config.get("github") or {}
     users = github.get("authorized_users", [])
     return users if isinstance(users, list) else []
 
@@ -72,7 +64,7 @@ def get_github_max_age_hours(config: dict) -> int:
     Notifications older than this are ignored (stale protection).
     Default: 24 hours.
     """
-    github = _get_github_section(config)
+    github = config.get("github") or {}
     try:
         return int(github.get("max_age_hours", 24))
     except (ValueError, TypeError):
