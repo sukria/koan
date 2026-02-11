@@ -13,6 +13,7 @@ from app.plan_runner import (
     _generate_iteration_plan,
     _run_claude_plan,
     _is_error_output,
+    _strip_preamble,
     _get_repo_info,
     _fetch_issue_context,
     _format_comments,
@@ -475,6 +476,16 @@ class TestRunClaudePlan:
         with pytest.raises(RuntimeError, match="Something went wrong"):
             _run_claude_plan("prompt", "/project")
 
+    @patch("app.cli_provider.run_command",
+           return_value=(
+               "● Read files\nExcellent! Now I have all the context I need.\n"
+               "\nClean title\n\n### Summary"
+           ))
+    def test_strips_preamble_from_output(self, mock_cmd):
+        result = _run_claude_plan("prompt", "/project")
+        assert result.startswith("Clean title")
+        assert "● Read" not in result
+
 
 # ---------------------------------------------------------------------------
 # _is_error_output
@@ -512,6 +523,124 @@ class TestIsErrorOutput:
         assert _is_error_output(
             "### Error Handling\n\nWe should handle errors gracefully."
         ) is False
+
+
+# ---------------------------------------------------------------------------
+# _strip_preamble
+# ---------------------------------------------------------------------------
+
+class TestStripPreamble:
+    def test_strips_now_i_have_context(self):
+        output = (
+            "I searched the codebase for relevant files.\n"
+            "Excellent! Now I have all the context I need. "
+            "Let me create the comprehensive plan:\n"
+            "\n"
+            "Add dark mode support\n"
+            "\n"
+            "### Summary\n"
+            "\nThis plan adds dark mode."
+        )
+        result = _strip_preamble(output)
+        assert result.startswith("Add dark mode support")
+        assert "I searched" not in result
+        assert "Excellent" not in result
+
+    def test_strips_let_me_create_plan(self):
+        output = (
+            "Reading files...\n"
+            "Let me create the structured plan:\n"
+            "\n"
+            "Fix auth module\n"
+            "\n"
+            "### Summary"
+        )
+        result = _strip_preamble(output)
+        assert result.startswith("Fix auth module")
+
+    def test_strips_heres_the_plan(self):
+        output = (
+            "Some exploration output\n"
+            "Here's the comprehensive plan:\n"
+            "\n"
+            "Improve logging\n"
+            "\n"
+            "### Summary"
+        )
+        result = _strip_preamble(output)
+        assert result.startswith("Improve logging")
+
+    def test_strips_here_is_the_plan(self):
+        output = "Here is the implementation plan:\n\nTitle\n\n### Summary"
+        result = _strip_preamble(output)
+        assert result.startswith("Title")
+
+    def test_no_preamble_returns_unchanged(self):
+        output = "Add dark mode\n\n### Summary\n\nDetails"
+        assert _strip_preamble(output) == output
+
+    def test_empty_string(self):
+        assert _strip_preamble("") == ""
+
+    def test_none_returns_none(self):
+        assert _strip_preamble(None) is None
+
+    def test_multiple_preamble_lines_uses_last(self):
+        output = (
+            "Let me create the plan:\n"
+            "Actually, let me generate the plan with more detail:\n"
+            "\n"
+            "Real title\n"
+            "### Summary"
+        )
+        result = _strip_preamble(output)
+        assert result.startswith("Real title")
+
+    def test_preamble_only_returns_original(self):
+        """If stripping leaves nothing, return original."""
+        output = "Now I have all the context I need."
+        result = _strip_preamble(output)
+        assert result == output
+
+    def test_long_copilot_preamble(self):
+        """Simulate Copilot tool-use output followed by plan."""
+        lines = [
+            "● Read README.md",
+            "  Contents of README...",
+            "● Glob **/*.py",
+            "  Found 42 files",
+            "● Read src/main.py",
+            "  def main():",
+            "    pass",
+            "",
+            "Excellent! Now I have the context I need. "
+            "Let me create the comprehensive plan:",
+            "",
+            "Add comprehensive test suite",
+            "",
+            "### Summary",
+            "",
+            "This plan adds tests.",
+        ]
+        output = "\n".join(lines)
+        result = _strip_preamble(output)
+        assert result.startswith("Add comprehensive test suite")
+        assert "● Read" not in result
+
+    def test_case_insensitive(self):
+        output = "HERE IS THE PLAN:\n\nTitle\n\n### Summary"
+        result = _strip_preamble(output)
+        assert result.startswith("Title")
+
+    def test_ill_create_plan(self):
+        output = "I'll create the plan now.\n\nTitle here\n\n### Summary"
+        result = _strip_preamble(output)
+        assert result.startswith("Title here")
+
+    def test_let_me_draft_the_plan(self):
+        output = "Let me draft the plan:\n\nDraft title\n\n### Summary"
+        result = _strip_preamble(output)
+        assert result.startswith("Draft title")
 
 
 # ---------------------------------------------------------------------------
@@ -720,6 +849,21 @@ class TestExtractTitle:
         """Title as plain first line (new prompt format)."""
         plan = "Add dark mode with theme persistence\n\n### Summary\n\nDetails"
         assert _extract_title(plan) == "Add dark mode with theme persistence"
+
+    def test_strips_bullet_prefix(self):
+        """Copilot-style ● prefix is stripped from title."""
+        assert _extract_title("● GitHub notifications\n\n### Summary") == "GitHub notifications"
+
+    def test_strips_arrow_prefix(self):
+        assert _extract_title("→ Fix auth module\n\nDetails") == "Fix auth module"
+        assert _extract_title("► Improve performance\n\nDetails") == "Improve performance"
+
+    def test_strips_multiple_noise_chars(self):
+        assert _extract_title(">> Some title\n\nBody") == "Some title"
+        assert _extract_title("●● Double bullet\n\nBody") == "Double bullet"
+
+    def test_noise_char_with_heading(self):
+        assert _extract_title("# ● Noisy heading\n\nBody") == "Noisy heading"
 
 
 # ---------------------------------------------------------------------------

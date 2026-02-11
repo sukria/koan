@@ -213,6 +213,46 @@ def _generate_iteration_plan(project_path, issue_context, skill_dir=None):
     return _run_claude_plan(prompt, project_path)
 
 
+# Regex matching preamble transition lines — everything up to and including
+# such a line is stripped from the CLI output so it doesn't pollute the
+# GitHub issue body.
+_PREAMBLE_RE = re.compile(
+    r"(?:now I have (?:all )?the context|"
+    r"let me create the (?:comprehensive |structured )?plan|"
+    r"here(?:'s| is) the (?:comprehensive |structured |implementation )?plan|"
+    r"I'll create the plan|"
+    r"let me (?:now )?(?:generate|write|draft|produce) the plan)",
+    re.IGNORECASE,
+)
+
+
+def _strip_preamble(output: str) -> str:
+    """Strip CLI exploration noise from the beginning of plan output.
+
+    Some CLI providers (notably Copilot) include tool-call output and
+    thinking text before the actual plan content. This function finds the
+    last preamble transition line and returns only the plan that follows.
+    """
+    if not output:
+        return output
+
+    lines = output.splitlines()
+
+    # Find the last line that matches a known preamble pattern.
+    # Everything up to and including that line is noise.
+    last_preamble_idx = -1
+    for i, line in enumerate(lines):
+        if _PREAMBLE_RE.search(line):
+            last_preamble_idx = i
+
+    if last_preamble_idx >= 0:
+        remaining = "\n".join(lines[last_preamble_idx + 1:]).strip()
+        if remaining:
+            return remaining
+
+    return output
+
+
 def _is_error_output(output: str) -> bool:
     """Detect CLI error patterns in output that should not be posted as a plan."""
     if not output:
@@ -236,7 +276,7 @@ def _run_claude_plan(prompt, project_path):
     )
     if _is_error_output(output):
         raise RuntimeError(output)
-    return output
+    return _strip_preamble(output)
 
 
 def _search_existing_issue(owner, repo, idea):
@@ -357,7 +397,7 @@ def _extract_title(plan_text):
 
     The plan prompt instructs Claude to write a short, descriptive title
     as the very first line (no # prefix). This function extracts that line,
-    stripping any accidental markdown formatting.
+    stripping any accidental markdown formatting or CLI noise characters.
     """
     lines = plan_text.strip().splitlines()
     for line in lines:
@@ -366,6 +406,8 @@ def _extract_title(plan_text):
             continue
         # Strip any markdown heading prefix the model may have added
         clean = re.sub(r'^#+\s*', '', line).strip()
+        # Strip CLI noise characters (bullets, arrows, decorative prefixes)
+        clean = re.sub(r'^[●•►▸▹▶◆◇○◎▪▫→⟶»>]+\s*', '', clean).strip()
         # Skip generic section headings that aren't real titles
         if clean.lower() in (
             "summary", "implementation plan", "plan",
