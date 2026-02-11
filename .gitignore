@@ -32,3 +32,6 @@ projects.yaml
 # wp-copilot-skills: Ignore symlinked agents (pointing to shared installation)
 .github/agents/wp.*
 .github/prompts/wp.*
+
+# Process log files
+logs/

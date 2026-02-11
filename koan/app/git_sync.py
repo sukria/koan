@@ -14,11 +14,12 @@ Usage:
     python3 git_sync.py <instance_dir> <project_name> <project_path>
 """
 
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List
+
+from app.git_utils import run_git as _run_git_core
 
 
 # ---------------------------------------------------------------------------
@@ -26,16 +27,13 @@ from typing import List
 # ---------------------------------------------------------------------------
 
 def run_git(cwd: str, *args: str) -> str:
-    """Run a git command and return stdout, or empty string on failure."""
-    try:
-        result = subprocess.run(
-            ["git"] + list(args),
-            capture_output=True, text=True, timeout=10,
-            cwd=cwd,
-        )
-        return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
+    """Run a git command and return stdout, or empty string on failure.
+
+    Thin wrapper around git_utils.run_git() preserving the original
+    string-return interface for backward compatibility.
+    """
+    rc, stdout, _ = _run_git_core(*args, cwd=cwd, timeout=10)
+    return stdout if rc == 0 else ""
 
 
 def _get_prefix() -> str:

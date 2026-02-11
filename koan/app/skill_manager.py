@@ -18,11 +18,12 @@ Manifest format (instance/skills.yaml):
 """
 
 import re
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+
+from app.git_utils import run_git as _run_git
 
 
 @dataclass
@@ -223,13 +224,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _run_git(*args, cwd=None, timeout=60) -> Tuple[int, str, str]:
-    """Run a git command and return (returncode, stdout, stderr)."""
-    cmd = ["git"] + list(args)
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd
-    )
-    return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -300,12 +294,14 @@ def install_skill_source(
 
     # Clone the repository
     rc, stdout, stderr = _run_git(
-        "clone", "--depth", "1", "--branch", ref, url, str(target_dir)
+        "clone", "--depth", "1", "--branch", ref, url, str(target_dir),
+        timeout=60,
     )
     if rc != 0:
         # Try without --branch (ref might be a commit or default branch)
         rc, stdout, stderr = _run_git(
-            "clone", "--depth", "1", url, str(target_dir)
+            "clone", "--depth", "1", url, str(target_dir),
+            timeout=60,
         )
         if rc != 0:
             return False, f"Git clone failed: {stderr[:300]}"

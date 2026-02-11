@@ -11,19 +11,21 @@ from typing import List, Optional
 
 from app.cli_provider import build_full_command, run_command
 from app.config import get_model_config
+from app.git_utils import run_git_strict
 
 # Backward-compatible alias — callers should import from app.cli_provider
 run_claude_command = run_command
 
 
 def _run_git(cmd: list, cwd: str = None, timeout: int = 60) -> str:
-    """Run a git command, raise on failure."""
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"git failed: {' '.join(cmd)} — {result.stderr[:200]}")
-    return result.stdout.strip()
+    """Run a git command, raise on failure.
+
+    Thin wrapper around git_utils.run_git_strict() preserving the
+    original interface where callers pass ["git", ...] as cmd.
+    """
+    # Strip leading "git" if present — run_git_strict prepends it
+    args = cmd[1:] if cmd and cmd[0] == "git" else cmd
+    return run_git_strict(*args, cwd=cwd, timeout=timeout)
 
 
 def _rebase_onto_target(base: str, project_path: str) -> Optional[str]:

@@ -140,8 +140,12 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 | Target | Description |
 |--------|-------------|
 | `make setup` | Create venv and install dependencies |
-| `make awake` | Start Telegram bridge |
-| `make run` | Start agent loop |
+| `make start` | Start full stack as background processes |
+| `make stop` | Stop all running processes |
+| `make status` | Show running process status |
+| `make logs` | Watch live output from all processes |
+| `make awake` | Start Telegram bridge (foreground) |
+| `make run` | Start agent loop (foreground) |
 | `make dashboard` | Start local web dashboard (port 5001) |
 | `make test` | Run test suite |
 | `make say m="..."` | Send a message as if from Telegram |

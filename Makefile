@@ -4,7 +4,7 @@ export
 .PHONY: install setup start stop status
 .PHONY: clean say migrate test sync-instance
 .PHONY: awake run errand-run errand-awake dashboard
-.PHONY: ollama
+.PHONY: ollama logs
 
 PYTHON_BIN ?= python3
 
@@ -57,6 +57,15 @@ errand-awake: setup
 ollama: setup
 	@echo "→ Starting Kōan with Ollama stack..."
 	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager start-stack $(PWD)
+
+logs:
+	@mkdir -p logs
+	@if [ ! -f logs/run.log ] && [ ! -f logs/awake.log ] && [ ! -f logs/ollama.log ]; then \
+		echo "No log files found. Start Kōan first with 'make start'."; \
+		exit 1; \
+	fi
+	@echo "→ Watching Kōan logs (Ctrl-C to stop watching — Kōan keeps running)"
+	@tail -F logs/run.log logs/awake.log logs/ollama.log 2>/dev/null
 
 install:
 	@echo "→ Starting Kōan Setup Wizard..."

@@ -13,6 +13,7 @@ make setup          # Create venv, install dependencies
 make start          # Start full stack (auto-detects provider: awake+run or ollama+awake+run)
 make stop           # Stop all running processes (run + awake + ollama)
 make status         # Show running process status
+make logs           # Watch live output from all processes
 make run            # Start main agent loop (foreground)
 make awake          # Start Telegram bridge (foreground)
 make ollama         # Start full Ollama stack (ollama serve + awake + run)
