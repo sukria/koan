@@ -678,8 +678,12 @@ def _move_pending_to_section(
 
     updated = result[0]
 
+    # Use original line text (preserves [project:X] tags) instead of needle.
+    removed = result[1].strip()
+    display = removed.removeprefix("- ") if removed.startswith("- ") else removed
+
     timestamp = time.strftime("%Y-%m-%d %H:%M")
-    entry = f"- {needle} {marker} ({timestamp})"
+    entry = f"- {display} {marker} ({timestamp})"
 
     lines = updated.splitlines()
     boundaries = find_section_boundaries(lines)

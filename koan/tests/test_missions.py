@@ -1498,3 +1498,130 @@ class TestMissionLifecycle:
         assert len(sections["pending"]) == 0
         assert len(sections["in_progress"]) == 0
         assert len(sections["done"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Project tag preservation in Done/Failed entries
+# ---------------------------------------------------------------------------
+
+class TestProjectTagPreservation:
+    """Done/Failed entries should preserve [project:X] tags from original text."""
+
+    CONTENT = (
+        "# Missions\n\n"
+        "## Pending\n\n"
+        "- [project:koan] /plan Add dark mode\n"
+        "- [project:backend] Fix the login bug\n\n"
+        "## In Progress\n\n"
+        "## Done\n\n"
+        "## Failed\n"
+    )
+
+    def test_complete_preserves_project_tag_from_pending(self):
+        result = complete_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(result)
+        done_entry = sections["done"][0]
+        assert "[project:koan]" in done_entry
+
+    def test_complete_preserves_project_tag_from_in_progress(self):
+        after_start = start_mission(self.CONTENT, "/plan Add dark mode")
+        result = complete_mission(after_start, "/plan Add dark mode")
+        sections = parse_sections(result)
+        done_entry = sections["done"][0]
+        assert "[project:koan]" in done_entry
+
+    def test_fail_preserves_project_tag_from_in_progress(self):
+        after_start = start_mission(self.CONTENT, "Fix the login bug")
+        result = fail_mission(after_start, "Fix the login bug")
+        sections = parse_sections(result)
+        failed_entry = sections["failed"][0]
+        assert "[project:backend]" in failed_entry
+
+    def test_complete_without_project_tag_works(self):
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- /plan Add dark mode\n\n"
+            "## Done\n"
+        )
+        result = complete_mission(content, "/plan Add dark mode")
+        sections = parse_sections(result)
+        assert len(sections["done"]) == 1
+        assert "/plan Add dark mode" in sections["done"][0]
+
+    def test_full_lifecycle_preserves_tag(self):
+        """End-to-end: Pending -> In Progress -> Done preserves project tag."""
+        after_start = start_mission(self.CONTENT, "/plan Add dark mode")
+        sections = parse_sections(after_start)
+        # In Progress entry preserves tag
+        assert "[project:koan]" in sections["in_progress"][0]
+
+        after_done = complete_mission(after_start, "/plan Add dark mode")
+        sections = parse_sections(after_done)
+        # Done entry preserves tag
+        done_entry = sections["done"][0]
+        assert "[project:koan]" in done_entry
+        assert "/plan Add dark mode" in done_entry
+        assert "\u2705" in done_entry
+
+    def test_skill_dispatch_lifecycle_preserves_tag(self):
+        """Simulate exact skill dispatch flow: mission queued with tag,
+        picked up (tag stripped from needle), started, completed."""
+        # Handler queues: "- [project:koan] /plan Fix auth module"
+        # pick_mission returns: "koan:/plan Fix auth module"
+        # mission_title becomes: "/plan Fix auth module" (tag stripped)
+        mission_title = "/plan Fix auth module"
+        content = (
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- [project:koan] /plan Fix auth module\n\n"
+            "## In Progress\n\n"
+            "## Done\n"
+        )
+
+        # Step 1: start_mission with stripped title
+        after_start = start_mission(content, mission_title)
+        sections = parse_sections(after_start)
+        assert len(sections["in_progress"]) == 1
+        assert "[project:koan]" in sections["in_progress"][0]
+
+        # Step 2: complete_mission with stripped title
+        after_done = complete_mission(after_start, mission_title)
+        sections = parse_sections(after_done)
+        assert len(sections["in_progress"]) == 0
+        assert len(sections["done"]) == 1
+        # Project tag must be preserved
+        assert "[project:koan]" in sections["done"][0]
+
+
+# ---------------------------------------------------------------------------
+# modify_missions_file return value
+# ---------------------------------------------------------------------------
+
+class TestModifyMissionsFileReturn:
+    """modify_missions_file must return transformed content for diagnostics."""
+
+    def test_returns_transformed_content(self, tmp_path):
+        missions_path = tmp_path / "missions.md"
+        missions_path.write_text(
+            "# Missions\n\n## Pending\n- test mission\n\n## Done\n"
+        )
+        from app.utils import modify_missions_file
+
+        result = modify_missions_file(
+            missions_path,
+            lambda c: complete_mission(c, "test mission"),
+        )
+        assert result is not None
+        assert "## Done" in result
+        assert "test mission" in result
+        assert "\u2705" in result
+
+    def test_returns_unchanged_on_noop(self, tmp_path):
+        missions_path = tmp_path / "missions.md"
+        original = "# Missions\n\n## Pending\n\n## Done\n"
+        missions_path.write_text(original)
+        from app.utils import modify_missions_file
+
+        result = modify_missions_file(missions_path, lambda c: c)
+        assert result == original
