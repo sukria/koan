@@ -357,6 +357,15 @@ def run_startup(koan_root: str, instance: str, projects: list):
         except Exception:
             pass
 
+        # Auto-populate github_url in projects.yaml from git remotes
+        try:
+            from app.projects_config import ensure_github_urls
+            gh_msgs = ensure_github_urls(koan_root)
+            for msg in gh_msgs:
+                log("init", f"[github-urls] {msg}")
+        except Exception:
+            pass
+
         # Sanity checks (all modules in koan/sanity/, alphabetical order)
         log("health", "Running sanity checks...")
         try:

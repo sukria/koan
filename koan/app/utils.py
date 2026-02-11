@@ -20,6 +20,7 @@ Backward-compatible re-exports are provided below.
 import fcntl
 import os
 import re
+import subprocess
 import tempfile
 import threading
 import yaml
@@ -141,6 +142,36 @@ def detect_project_from_text(text: str) -> Tuple[Optional[str], str]:
     return None, text
 
 
+# Pre-compiled regex for GitHub remote URL parsing (SSH and HTTPS)
+_GITHUB_REMOTE_RE = re.compile(r'github\.com[:/]([^/]+)/([^/\s.]+?)(?:\.git)?$')
+
+
+def get_github_remote(project_path: str) -> Optional[str]:
+    """Extract owner/repo from a project's git remote.
+
+    Tries 'origin' first, falls back to 'upstream'.
+    Returns "owner/repo" as a normalized lowercase string, or None on failure.
+    """
+    for remote in ("origin", "upstream"):
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", remote],
+                capture_output=True, text=True, timeout=5,
+                cwd=project_path,
+            )
+            if result.returncode != 0:
+                continue
+            url = result.stdout.strip()
+            match = _GITHUB_REMOTE_RE.search(url)
+            if match:
+                owner = match.group(1).lower()
+                repo = match.group(2).lower()
+                return f"{owner}/{repo}"
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            continue
+    return None
+
+
 def atomic_write(path: Path, content: str):
     """Write content to a file atomically using write-to-temp + rename.
 
@@ -257,28 +288,72 @@ def get_known_projects() -> list:
     return []
 
 
-def resolve_project_path(repo_name: str) -> Optional[str]:
+def project_name_for_path(project_path: str) -> str:
+    """Get the project name for a given local path.
+
+    Checks known projects first; falls back to the directory basename.
+    """
+    for name, path in get_known_projects():
+        if path == project_path:
+            return name
+    return Path(project_path).name
+
+
+def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optional[str]:
     """Find local project path matching a repository name.
 
     Tries in order:
-    1. Exact match on project name (case-insensitive)
-    2. Match on directory basename (case-insensitive)
-    3. Fallback to single project if only one configured
+    1. GitHub URL match (if owner provided): check github_url in projects.yaml
+    2. Exact match on project name (case-insensitive)
+    3. Match on directory basename (case-insensitive)
+    4. Auto-discover and retry (if owner provided): scan git remotes
+    5. Fallback to single project if only one configured
     """
     projects = get_known_projects()
+    target = f"{owner}/{repo_name}".lower() if owner else None
 
-    # Try exact match on project name
+    # 1. GitHub URL match via projects.yaml github_url field
+    if target:
+        try:
+            from app.projects_config import load_projects_config
+            config = load_projects_config(str(KOAN_ROOT))
+            if config:
+                for name, project in config.get("projects", {}).items():
+                    if isinstance(project, dict):
+                        gh_url = project.get("github_url", "")
+                        if gh_url and gh_url.lower() == target:
+                            return project.get("path", "")
+        except Exception:
+            pass
+
+    # 2. Exact match on project name
     for name, path in projects:
         if name.lower() == repo_name.lower():
             return path
 
-    # Try matching repo name against directory basename
+    # 3. Match on directory basename
     for name, path in projects:
         if Path(path).name.lower() == repo_name.lower():
             return path
 
-    # Fallback to single project
-    if len(projects) == 1:
+    # 4. Auto-discover from git remotes and retry
+    if target:
+        for name, path in projects:
+            gh_url = get_github_remote(path)
+            if gh_url and gh_url.lower() == target:
+                # Persist discovery to projects.yaml for future lookups
+                try:
+                    from app.projects_config import load_projects_config, save_projects_config
+                    config = load_projects_config(str(KOAN_ROOT))
+                    if config and name in config.get("projects", {}):
+                        config["projects"][name]["github_url"] = gh_url
+                        save_projects_config(str(KOAN_ROOT), config)
+                except Exception:
+                    pass
+                return path
+
+    # 5. Fallback to single project (skip when owner-specific lookup found nothing)
+    if not owner and len(projects) == 1:
         return projects[0][1]
 
     return None

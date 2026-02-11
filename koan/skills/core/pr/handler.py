@@ -44,7 +44,7 @@ def handle(ctx):
         return str(e)
 
     # Determine project path
-    project_path = resolve_project_path(repo)
+    project_path = resolve_project_path(repo, owner=owner)
     if not project_path:
         from app.utils import get_known_projects
         known = ", ".join(n for n, _ in get_known_projects()) or "none"

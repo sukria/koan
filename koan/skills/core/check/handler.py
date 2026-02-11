@@ -58,7 +58,7 @@ def handle(ctx):
         label = f"issue #{number} ({owner}/{repo})"
 
     # Resolve project name for the mission tag
-    project_name = _resolve_project_name(repo)
+    project_name = _resolve_project_name(repo, owner)
 
     # Queue the mission with clean format
     from app.utils import insert_pending_mission
@@ -70,11 +70,11 @@ def handle(ctx):
     return f"\U0001f50d Check queued for {label}"
 
 
-def _resolve_project_name(repo):
+def _resolve_project_name(repo, owner=None):
     """Resolve a repo name to a known project name."""
-    from app.utils import get_known_projects
+    from app.utils import project_name_for_path, resolve_project_path
 
-    for name, path in get_known_projects():
-        if name.lower() == repo.lower():
-            return name
+    project_path = resolve_project_path(repo, owner=owner)
+    if project_path:
+        return project_name_for_path(project_path)
     return repo

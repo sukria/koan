@@ -77,23 +77,30 @@ def _parse_project_arg(args):
     return None, args
 
 
-def _resolve_project_path(project_name, fallback=False):
-    """Resolve project name to its local path."""
-    from pathlib import Path
-    from app.utils import get_known_projects
+def _resolve_project_path(project_name, fallback=False, owner=None):
+    """Resolve project name to its local path.
 
-    projects = get_known_projects()
+    Delegates to utils.resolve_project_path() for name/owner matching,
+    but manages its own fallback logic (return first project if nothing matches).
+    """
+    from pathlib import Path
+    from app.utils import get_known_projects, resolve_project_path
 
     if project_name:
-        for name, path in projects:
+        if owner:
+            path = resolve_project_path(project_name, owner=owner)
+            if path:
+                return path
+        for name, path in get_known_projects():
             if name.lower() == project_name.lower():
                 return path
-        for name, path in projects:
+        for name, path in get_known_projects():
             if Path(path).name.lower() == project_name.lower():
                 return path
         if not fallback:
             return None
 
+    projects = get_known_projects()
     if projects:
         return projects[0][1]
 
@@ -128,7 +135,7 @@ def _queue_issue_plan(ctx, match):
     issue_number = match.group("number")
     issue_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
 
-    project_path = _resolve_project_path(repo, fallback=True)
+    project_path = _resolve_project_path(repo, fallback=True, owner=owner)
     project_label = _project_name_for_path(project_path) if project_path else repo
 
     mission_entry = f"- [project:{project_label}] /plan {issue_url}"
@@ -140,10 +147,5 @@ def _queue_issue_plan(ctx, match):
 
 def _project_name_for_path(project_path):
     """Get project name from path, checking known projects first."""
-    from pathlib import Path
-    from app.utils import get_known_projects
-
-    for name, path in get_known_projects():
-        if path == project_path:
-            return name
-    return Path(project_path).name
+    from app.utils import project_name_for_path
+    return project_name_for_path(project_path)

@@ -361,7 +361,7 @@ class TestHandlerCleanFormat:
         )
         monkeypatch.setattr(
             "app.utils.resolve_project_path",
-            lambda repo: "/workspace/koan",
+            lambda repo, owner=None: "/workspace/koan",
         )
         monkeypatch.setattr(
             "app.pr_review.parse_pr_url",
@@ -451,7 +451,7 @@ class TestHandlerCleanFormat:
         )
         monkeypatch.setattr(
             "app.utils.resolve_project_path",
-            lambda repo: "/workspace/koan",
+            lambda repo, owner=None: "/workspace/koan",
         )
         monkeypatch.setattr(
             "app.pr_review.parse_pr_url",

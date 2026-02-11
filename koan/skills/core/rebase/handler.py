@@ -33,7 +33,7 @@ def handle(ctx):
     pr_url = url_match.group(0).split("#")[0]
 
     from app.pr_review import parse_pr_url
-    from app.utils import get_known_projects, insert_pending_mission, resolve_project_path
+    from app.utils import get_known_projects, insert_pending_mission, project_name_for_path, resolve_project_path
 
     try:
         owner, repo, pr_number = parse_pr_url(pr_url)
@@ -41,7 +41,7 @@ def handle(ctx):
         return str(e)
 
     # Determine project path and name
-    project_path = resolve_project_path(repo)
+    project_path = resolve_project_path(repo, owner=owner)
     if not project_path:
         known = ", ".join(n for n, _ in get_known_projects()) or "none"
         return (
@@ -49,14 +49,7 @@ def handle(ctx):
             f"Known projects: {known}"
         )
 
-    # Resolve project name for the mission tag
-    project_name = None
-    for name, path in get_known_projects():
-        if path == project_path:
-            project_name = name
-            break
-    if not project_name:
-        project_name = repo
+    project_name = project_name_for_path(project_path)
 
     # Queue the mission with clean format
     mission_entry = f"- [project:{project_name}] /rebase {pr_url}"

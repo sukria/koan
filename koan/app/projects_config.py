@@ -198,3 +198,63 @@ def get_project_tools(config: dict, project_name: str) -> dict:
     if not isinstance(tools, dict):
         return {}
     return tools
+
+
+def save_projects_config(koan_root: str, config: dict) -> None:
+    """Write config back to projects.yaml atomically."""
+    from app.utils import atomic_write
+
+    config_path = Path(koan_root) / "projects.yaml"
+    header = (
+        "# projects.yaml — Project configuration for Kōan\n"
+        "# Auto-managed — manual edits are preserved.\n\n"
+    )
+    content = header + yaml.dump(config, default_flow_style=False, sort_keys=False)
+    atomic_write(config_path, content)
+
+
+def ensure_github_urls(koan_root: str) -> List[str]:
+    """Populate missing github_url fields in projects.yaml from git remotes.
+
+    Iterates all projects, calls get_github_remote() on any project without
+    a github_url field, and saves the discovered URL back to projects.yaml.
+
+    Returns a list of log messages for discovered URLs.
+    Does NOT overwrite existing github_url values.
+    """
+    config = load_projects_config(koan_root)
+    if config is None:
+        return []
+
+    projects = config.get("projects", {})
+    if not projects:
+        return []
+
+    from app.utils import get_github_remote
+
+    messages = []
+    modified = False
+
+    for name, project in projects.items():
+        if not isinstance(project, dict):
+            continue
+        if project.get("github_url"):
+            continue
+
+        path = project.get("path", "")
+        if not path or not Path(path).is_dir():
+            continue
+
+        github_url = get_github_remote(path)
+        if github_url:
+            project["github_url"] = github_url
+            messages.append(f"Discovered github_url for '{name}': {github_url}")
+            modified = True
+
+    if modified:
+        try:
+            save_projects_config(koan_root, config)
+        except OSError as e:
+            messages.append(f"Warning: could not save projects.yaml: {e}")
+
+    return messages

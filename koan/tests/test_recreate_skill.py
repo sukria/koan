@@ -152,15 +152,15 @@ class TestMissionQueuing:
 
     def test_single_project_fallback(self, handler, ctx):
         """When resolve_project_path returns a path not in projects list,
-        falls back to repo name for the project tag."""
+        falls back to directory basename for the project tag."""
         ctx.args = "https://github.com/other/myrepo/pull/7"
-        with patch("app.utils.resolve_project_path", return_value="/some/path"), \
+        with patch("app.utils.resolve_project_path", return_value="/some/myrepo"), \
              patch("app.utils.get_known_projects", return_value=[("onlyone", "/other/path")]), \
              patch("app.utils.insert_pending_mission") as mock_insert:
             result = handler.handle(ctx)
             assert "queued" in result.lower()
             entry = mock_insert.call_args[0][1]
-            # Falls back to repo name when path doesn't match
+            # Falls back to directory basename when path doesn't match known projects
             assert "[project:myrepo]" in entry
 
     def test_missions_path_uses_instance_dir(self, handler, ctx):

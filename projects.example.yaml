@@ -40,6 +40,7 @@ projects:
   # Example: your main project (minimal config — inherits all defaults)
   myapp:
     path: "/Users/yourname/workspace/myapp"
+    # github_url: "yourname/myapp"  # Auto-detected from git remote; override if needed
     # git_auto_merge:
     #   enabled: true
     #   strategy: "merge"
