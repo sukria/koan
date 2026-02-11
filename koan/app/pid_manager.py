@@ -324,6 +324,17 @@ def start_awake(koan_root: Path, verify_timeout: float = 3.0) -> tuple:
     return False, "Bridge launched but PID not detected — check logs"
 
 
+def get_status_processes(koan_root: Path) -> tuple:
+    """Return the process names to display in status output.
+
+    Only includes ollama when the CLI provider is local/ollama.
+    """
+    provider = _detect_provider(koan_root)
+    if _needs_ollama(provider):
+        return PROCESS_NAMES
+    return tuple(n for n in PROCESS_NAMES if n != "ollama")
+
+
 def _detect_provider(koan_root: Path) -> str:
     """Detect the configured CLI provider.
 
@@ -528,7 +539,7 @@ if __name__ == "__main__":
 
     if action == "status-all":
         root = Path(sys.argv[2])
-        for name in PROCESS_NAMES:
+        for name in get_status_processes(root):
             pid = check_pidfile(root, name)
             if pid:
                 print(f"  {name}: running (PID {pid})")

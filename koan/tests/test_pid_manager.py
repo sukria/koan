@@ -29,6 +29,7 @@ from app.pid_manager import (
     start_ollama,
     start_all,
     start_stack,
+    get_status_processes,
     _print_stack_results,
     PROCESS_NAMES,
 )
@@ -888,6 +889,42 @@ class TestNeedsOllama:
 
 
 # ---------------------------------------------------------------------------
+# get_status_processes
+# ---------------------------------------------------------------------------
+
+
+class TestGetStatusProcesses:
+    def test_excludes_ollama_for_claude(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            result = get_status_processes(tmp_path)
+        assert "run" in result
+        assert "awake" in result
+        assert "ollama" not in result
+
+    def test_excludes_ollama_for_copilot(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="copilot"):
+            result = get_status_processes(tmp_path)
+        assert "ollama" not in result
+
+    def test_includes_ollama_for_local(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="local"):
+            result = get_status_processes(tmp_path)
+        assert "ollama" in result
+        assert "run" in result
+        assert "awake" in result
+
+    def test_includes_ollama_for_ollama_provider(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="ollama"):
+            result = get_status_processes(tmp_path)
+        assert "ollama" in result
+
+    def test_returns_tuple(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            result = get_status_processes(tmp_path)
+        assert isinstance(result, tuple)
+
+
+# ---------------------------------------------------------------------------
 # start_all
 # ---------------------------------------------------------------------------
 
@@ -1069,8 +1106,21 @@ class TestCLIOllama:
         assert "ollama:" in result.stdout
         assert "awake:" in result.stdout or "run:" in result.stdout
 
-    def test_status_all_shows_ollama(self, tmp_path):
+    def test_status_all_hides_ollama_for_claude_provider(self, tmp_path):
+        """status-all should NOT show ollama when provider is claude (default)."""
         result = self._run_cli("status-all", str(tmp_path))
+        assert result.returncode == 0
+        assert "run: not running" in result.stdout
+        assert "awake: not running" in result.stdout
+        assert "ollama" not in result.stdout
+
+    def test_status_all_shows_ollama_for_local_provider(self, tmp_path):
+        """status-all should show ollama when provider is local."""
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(Path(__file__).parent.parent)
+        env["KOAN_CLI_PROVIDER"] = "local"
+        cmd = [sys.executable, "-m", "app.pid_manager", "status-all", str(tmp_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         assert result.returncode == 0
         assert "ollama: not running" in result.stdout
 
