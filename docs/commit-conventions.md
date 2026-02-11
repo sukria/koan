@@ -27,7 +27,7 @@ Changelog: <customer-facing change or empty>
 | **type** | ✅ | Semantic category of the change |
 | **scope** | Optional | Module, component, or functional area affected |
 | **subject** | ✅ | Imperative, lowercase summary (≤72 chars) |
-| **Case ID** | ✅ | JIRA ticket or GitHub issue reference (use `Case: N/A:` if none) |
+| **Case ID** | ✅ | JIRA ticket or GitHub issue reference (use `N/A` if none) |
 | **description** | ✅ | What changed and why, in one or more paragraphs |
 | **Co-Authored-By** | When applicable | Attribution for pair programming or AI assistance |
 | **Refs** | Optional | Related issues, PRs, or documentation links |
@@ -80,7 +80,7 @@ The scope is optional but recommended. It narrows the change to a specific area.
 | Scope | Area |
 |-------|------|
 | `bridge` | Telegram bridge (`awake.py`, `command_handlers.py`) |
-| `runner` / `run` | Agent loop (`run.py`, `mission_runner.py`) |
+| `run` | Agent loop (`run.py`, `mission_runner.py`) |
 | `missions` | Mission queue (`missions.py`) |
 | `skills` | Skill system (`skills.py`, individual skills) |
 | `config` | Configuration (`projects_config.py`, `config.yaml`) |
@@ -158,7 +158,7 @@ Primary case first.
 When no tracked issue exists (typo fixes, internal tooling, urgent hotfixes):
 
 ```
-Case: N/A:
+Case N/A:
 ```
 
 This is explicit — it means "no issue exists for this change," not "I forgot to add one."
@@ -277,7 +277,7 @@ Changelog: Fix duplicate mission entries when sending multiple commands rapidly
 ```
 refactor(run): replace 5 subprocess calls with direct imports
 
-Case: N/A:
+Case N/A:
 
 Replace subprocess.run() calls to Python scripts with direct function
 imports. Eliminates 5 shell invocations per iteration, reducing startup
@@ -345,7 +345,7 @@ Changelog: Fix noisy plan output in GitHub issues
 ```
 ci: add Python 3.14 to test matrix
 
-Case: N/A:
+Case N/A:
 
 Add Python 3.14-dev to the GitHub Actions CI matrix with
 allow-prereleases flag. No breaking changes detected.
@@ -397,7 +397,7 @@ Bad: `feat(bridge): KOAN-123 add restart support`
 
 ## Template
 
-Quick copy-paste template for your commits:
+Quick copy-paste template:
 
 ```
 <type>(<scope>): <subject>
@@ -406,8 +406,13 @@ Case <PROJ-123 or #123 or N/A>:
 
 <description of what changed and why>
 
-Co-Authored-By: <name> <<email>>
 Changelog: <customer-facing change or empty>
+```
+
+Optional footers (when applicable):
+```
+Co-Authored-By: <name> <<email>>
+Refs: <issue or PR links>
 ```
 
 ---
@@ -416,8 +421,8 @@ Changelog: <customer-facing change or empty>
 
 When Kōan or other AI agents write commit messages:
 
-1. **Extract case ID from mission context.** If the mission references a JIRA ticket or GitHub issue, use it. If not, write `Case: N/A:`.
-2. **Never invent case IDs.** A fake `Case KOAN-999:` is worse than `Case: N/A:`.
+1. **Extract case ID from mission context.** If the mission references a JIRA ticket or GitHub issue, use it. If not, write `Case N/A:`.
+2. **Never invent case IDs.** A fake `Case KOAN-999:` is worse than `Case N/A:`.
 3. **Always include Changelog.** Even if empty. This is mandatory.
 4. **Keep subjects semantic.** Describe the change in human terms, not implementation details.
 5. **Use Co-Authored-By.** AI-assisted commits should credit the AI tool used.

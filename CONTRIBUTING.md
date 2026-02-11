@@ -13,22 +13,12 @@ Thanks for your interest in contributing to Kōan! This document covers the basi
 
 All commits **must** follow the format defined in [`docs/commit-conventions.md`](docs/commit-conventions.md).
 
-Quick summary:
-```
-<type>(<scope>): <subject>
+Key requirements:
+- Use semantic type prefixes: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, etc.
+- Include a case ID (JIRA or GitHub issue) — use `Case N/A:` if none exists
+- **Changelog footer is mandatory** — even if empty
 
-Case <PROJ-123 or #123 or N/A>:
-
-<description>
-
-Changelog: <customer-facing change or empty>
-```
-
-- Use semantic type prefixes: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`, `build`, `revert`
-- Include a case ID (JIRA or GitHub issue) — use `Case: N/A:` if none exists
-- **Changelog is mandatory** — even if empty
-
-A commit message template is available:
+Enable the commit message template:
 ```bash
 git config commit.template .github/commit-msg-template.md
 ```
