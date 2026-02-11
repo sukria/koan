@@ -12,7 +12,8 @@ Kōan is an autonomous background agent that uses idle Claude API quota to work 
 make setup          # Create venv, install dependencies
 make run            # Start main agent loop
 make awake          # Start Telegram bridge (fast-response polling)
-make stop           # Stop all running processes (run + awake)
+make ollama         # Start full Ollama stack (ollama serve + awake + run)
+make stop           # Stop all running processes (run + awake + ollama)
 make status         # Show running process status
 make dashboard      # Start Flask web dashboard (port 5001)
 make test           # Run full test suite (pytest)
@@ -37,15 +38,15 @@ KOAN_ROOT=/tmp/test-koan .venv/bin/pytest koan/tests/test_missions.py -v
 Two parallel processes run independently:
 
 - **`awake.py`** (Telegram bridge): Polls Telegram every 3s. Classifies messages as "chat" (instant Claude reply) or "mission" (queued to `missions.md`). Flushes `outbox.md` messages back to Telegram. Command handling is split into `command_handlers.py`, shared state in `bridge_state.py`, colored log output in `bridge_log.py`.
-- **`run.py`** (agent loop): Picks pending missions from `missions.md`, executes via Claude Code CLI, writes journal entries and reports. Supports multi-project rotation. Uses `mission_runner.py` (execution pipeline), `loop_manager.py` (sleep/focus/validation), `quota_handler.py` (quota detection), `contemplative_runner.py` (reflection sessions).
+- **`run.py`** (agent loop): Pure-Python main loop with restart wrapper. Picks pending missions, transitions them through Pending→In Progress→Done/Failed lifecycle, executes via Claude Code CLI or direct skill dispatch. Signal handling uses double-tap CTRL-C protection (`protected_phase` context manager). Writes real-time status to `.koan-status`. Uses `mission_runner.py` (execution pipeline), `loop_manager.py` (sleep/focus/validation), `quota_handler.py` (quota detection), `contemplative_runner.py` (reflection sessions).
 
 Communication between processes happens through shared files in `instance/` with atomic writes (`utils.atomic_write()` using temp file + rename + `fcntl.flock()`). Exclusive process instances enforced via `pid_manager.py` (PID file + `fcntl.flock()`).
 
 ### Key modules (`koan/app/`)
 
 **Core data & config:**
-- **`missions.py`** — Single source of truth for `missions.md` parsing (sections: Pending / In Progress / Done; French equivalents also accepted). Missions can be tagged `[project:name]`.
-- **`projects_config.py`** — Project configuration loader for `projects.yaml`. `load_projects_config()`, `get_projects_from_config()`, `get_project_config()` (merged defaults + overrides), `get_project_auto_merge()`, `get_project_cli_provider()`, `get_project_models()`, `get_project_tools()`. Per-project overrides for CLI provider, model selection, and tool restrictions.
+- **`missions.py`** — Single source of truth for `missions.md` parsing (sections: Pending / In Progress / Done; French equivalents also accepted). Missions can be tagged `[project:name]`. Provides explicit lifecycle transitions: `start_mission()` (Pending→In Progress with stale-flush sanity enforcement), `complete_mission()`, `fail_mission()`.
+- **`projects_config.py`** — Project configuration loader for `projects.yaml`. `load_projects_config()`, `get_projects_from_config()`, `get_project_config()` (merged defaults + overrides), `get_project_auto_merge()`, `get_project_cli_provider()`, `get_project_models()`, `get_project_tools()`. Per-project overrides for CLI provider, model selection, and tool restrictions. `ensure_github_urls()` auto-populates `github_url` fields from git remotes at startup.
 - **`projects_migration.py`** — One-shot migration from env vars (`KOAN_PROJECTS`/`KOAN_PROJECT_PATH`) to `projects.yaml`. Runs at startup if `projects.yaml` doesn't exist.
 - **`utils.py`** — File locking (thread + file locks), config loading, atomic writes, `get_branch_prefix()`, `get_known_projects()` (projects.yaml > KOAN_PROJECTS)
 
@@ -56,6 +57,7 @@ Communication between processes happens through shared files in `instance/` with
 - **`contemplative_runner.py`** — Contemplative session runner (probability roll, prompt building, CLI invocation)
 - **`quota_handler.py`** — Quota exhaustion detection from CLI output; parses reset times, creates pause state, writes journal entries
 - **`prompt_builder.py`** — Agent prompt assembly for the agent loop
+- **`skill_dispatch.py`** — Direct skill execution from agent loop. Detects `/command` missions, parses project prefix and command, dispatches to skill-specific runners (plan, rebase, recreate, check, claudemd) bypassing the Claude agent
 
 **Bridge (Telegram):**
 - **`awake.py`** — Main bridge loop, Telegram polling, outbox flushing
@@ -65,7 +67,7 @@ Communication between processes happens through shared files in `instance/` with
 - **`notify.py`** — Telegram notification helper with flood protection
 
 **Process management:**
-- **`pid_manager.py`** — Exclusive PID file enforcement for run and awake processes
+- **`pid_manager.py`** — Exclusive PID file enforcement for run and awake processes. Also provides `start_runner()` (launch agent loop as detached subprocess) and `stop_processes()` (graceful SIGTERM with force-kill fallback)
 - **`pause_manager.py`** — Pause state management (`.koan-pause` / `.koan-pause-reason` files)
 - **`restart_manager.py`** — File-based restart signaling between bridge and run loop (`.koan-restart`)
 - **`focus_manager.py`** — Focus mode management (`.koan-focus` JSON); skips contemplative sessions when active
@@ -97,7 +99,7 @@ Communication between processes happens through shared files in `instance/` with
 Extensible command plugin system. Each skill lives in `skills/<scope>/<skill-name>/` with a `SKILL.md` (YAML frontmatter defining commands, aliases, metadata) and an optional `handler.py`.
 
 - **`skills.py`** — Registry that discovers SKILL.md files, parses frontmatter (custom lite YAML parser, no PyYAML), maps commands/aliases to skills, and dispatches execution.
-- **Core skills** live in `koan/skills/core/` (cancel, chat, check, claudemd, focus, idea, journal, language, list, live, magic, mission, plan, pr, priority, projects, rebase, recreate, recurring, reflect, shutdown, sparring, status, update, verbose)
+- **Core skills** live in `koan/skills/core/` (cancel, chat, check, claudemd, focus, idea, journal, language, list, live, magic, mission, plan, pr, priority, projects, rebase, recreate, recurring, reflect, shutdown, sparring, start, status, update, verbose)
 - **Custom skills** loaded from `instance/skills/<scope>/` — each scope directory can be a cloned Git repo for team sharing.
 - **Handler pattern**: `def handle(ctx: SkillContext) -> Optional[str]` — return string for Telegram reply, empty string for "already handled", None for no message.
 - **`worker: true`** flag in SKILL.md marks blocking skills (Claude calls, API requests) that run in a background thread.

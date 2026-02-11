@@ -77,9 +77,39 @@ KOAN_LOCAL_LLM_API_KEY=
 
 Environment variables override `config.yaml` values.
 
-### 3. Verify
+### 3. Start Everything
 
-Make sure your LLM server is running, then:
+If you're using Ollama, the easiest way to start Koan is:
+
+```bash
+make ollama
+```
+
+This single command starts all three components in the background:
+1. `ollama serve` — the LLM server
+2. The Telegram bridge (awake)
+3. The agent loop (run)
+
+To stop everything:
+
+```bash
+make stop
+```
+
+This stops all Koan processes including `ollama serve`.
+
+To check what's running:
+
+```bash
+make status
+```
+
+Environment variables from `.env` (like `OLLAMA_HOST`) are automatically
+loaded and passed to all components.
+
+### 4. Verify (Optional)
+
+If you want to manually verify the LLM server:
 
 ```bash
 # Quick test with curl

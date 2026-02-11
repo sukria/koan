@@ -4,6 +4,7 @@ export
 .PHONY: install setup start stop status
 .PHONY: clean say migrate test sync-instance
 .PHONY: awake run errand-run errand-awake dashboard
+.PHONY: ollama
 
 PYTHON_BIN ?= python3
 
@@ -51,6 +52,10 @@ errand-run: setup
 
 errand-awake: setup
 	caffeinate -i sh -c 'cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/awake.py'
+
+ollama: setup
+	@echo "→ Starting Kōan with Ollama stack..."
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager start-stack $(PWD)
 
 install:
 	@echo "→ Starting Kōan Setup Wizard..."
