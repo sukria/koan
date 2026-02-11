@@ -18,6 +18,7 @@ from app.plan_runner import (
     _format_comments,
     _extract_title,
     _extract_idea_from_issue,
+    _strip_title_line,
     _search_existing_issue,
     _extract_search_keywords,
     _run_new_plan,
@@ -710,8 +711,45 @@ class TestExtractTitle:
     def test_fallback(self):
         assert _extract_title("") == "Implementation Plan"
 
-    def test_strips_prefix(self):
-        assert _extract_title("### Summary") == "Summary"
+    def test_skips_generic_headings(self):
+        """Generic section headings like 'Summary' are skipped."""
+        assert _extract_title("### Summary\nReal plan title") == "Real plan title"
+        assert _extract_title("### Summary") == "Implementation Plan"
+
+    def test_first_line_title(self):
+        """Title as plain first line (new prompt format)."""
+        plan = "Add dark mode with theme persistence\n\n### Summary\n\nDetails"
+        assert _extract_title(plan) == "Add dark mode with theme persistence"
+
+
+# ---------------------------------------------------------------------------
+# _strip_title_line
+# ---------------------------------------------------------------------------
+
+class TestStripTitleLine:
+    def test_removes_first_line(self):
+        text = "My title\n\n### Summary\n\nDetails here"
+        result = _strip_title_line(text)
+        assert "My title" not in result
+        assert "### Summary" in result
+        assert "Details here" in result
+
+    def test_preserves_body(self):
+        text = "Title\n\n### Summary\n\nA paragraph.\n\n### Phases\n\nPhase 1"
+        result = _strip_title_line(text)
+        assert result.startswith("### Summary")
+
+    def test_empty_string(self):
+        assert _strip_title_line("") == ""
+
+    def test_title_only(self):
+        assert _strip_title_line("Just a title") == "Just a title"
+
+    def test_skips_leading_blank_lines(self):
+        text = "\n\nActual title\n\nBody content"
+        result = _strip_title_line(text)
+        assert "Actual title" not in result
+        assert "Body content" in result
 
 
 # ---------------------------------------------------------------------------
@@ -820,10 +858,35 @@ class TestPromptFiles:
         content = (PROMPTS_DIR / "plan-iterate.md").read_text()
         assert "Changes in this iteration" in content
         assert "comments" in content.lower()
-        assert "Implementation Steps" in content
+        assert "Implementation Phases" in content
         assert "phase" in content.lower()
 
     def test_plan_iterate_prompt_instructs_feedback_processing(self):
         content = (PROMPTS_DIR / "plan-iterate.md").read_text()
         assert "suggestion" in content.lower()
         assert "question" in content.lower()
+
+    def test_plan_prompt_requires_title_line(self):
+        """Plan prompt instructs Claude to write a descriptive title as first line."""
+        content = (PROMPTS_DIR / "plan.md").read_text()
+        assert "FIRST LINE" in content
+        assert "title" in content.lower()
+
+    def test_plan_iterate_prompt_requires_title_line(self):
+        """Iterate prompt also requires a title first line."""
+        content = (PROMPTS_DIR / "plan-iterate.md").read_text()
+        assert "FIRST LINE" in content
+
+    def test_plan_prompt_has_phase_format(self):
+        """Plan prompt uses #### Phase format with structured fields."""
+        content = (PROMPTS_DIR / "plan.md").read_text()
+        assert "#### Phase" in content
+        assert "**What**" in content
+        assert "**Done when**" in content
+
+    def test_plan_iterate_prompt_has_phase_format(self):
+        """Iterate prompt uses same #### Phase format."""
+        content = (PROMPTS_DIR / "plan-iterate.md").read_text()
+        assert "#### Phase" in content
+        assert "**What**" in content
+        assert "**Done when**" in content

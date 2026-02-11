@@ -329,7 +329,7 @@ class TestPlanPrompt:
 
     def test_prompt_has_required_sections(self):
         content = PLAN_PROMPT_PATH.read_text()
-        assert "Implementation Steps" in content
+        assert "Implementation Phases" in content
         assert "Corner Cases" in content
         assert "Open Questions" in content
         assert "Testing Strategy" in content

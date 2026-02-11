@@ -33,7 +33,21 @@ This plan will be posted as a GitHub issue — write it as a living document tha
 
 ## Output Format
 
-Write your plan in the following structure (use markdown, no code fences around the whole plan):
+Write your plan in the following structure (use markdown, no code fences around the whole plan).
+
+**CRITICAL**: The VERY FIRST LINE of your output must be a short, descriptive title
+on its own line (no `#` prefix, no formatting). This title will become the GitHub issue
+title, so make it specific and actionable. Good examples:
+- "Add dark mode with theme persistence and system preference detection"
+- "Consolidate project config into projects.yaml with auto-migration"
+- "Fix quota resume loop causing infinite pause/resume cycle"
+
+Bad examples (too vague):
+- "The plan is ready"
+- "Implementation plan"
+- "Improvements"
+
+After the title line, leave a blank line and then write the plan body:
 
 ### Summary
 
@@ -43,16 +57,22 @@ One paragraph explaining what this plan achieves and why it matters.
 
 Bulleted list of questions or decisions that need human input before proceeding. If none, write "None — ready to implement."
 
-### Implementation Steps
+### Implementation Phases
 
 Break the work into numbered **phases**. Each phase should be a self-contained unit of work that can be implemented and reviewed independently.
 
-For each phase:
-- A clear title (e.g., "Phase 1: Core data model")
-- What to do (specific file changes, new files, etc.)
-- Why (rationale for the approach)
-- Key details or gotchas
-- Acceptance criteria (how to know this phase is done)
+For each phase, use this format:
+
+#### Phase 1: Short descriptive title
+
+- **What**: Specific file changes, new files, etc.
+- **Why**: Rationale for the approach
+- **Gotchas**: Key details or risks specific to this phase
+- **Done when**: Acceptance criteria (how to know this phase is complete)
+
+#### Phase 2: Short descriptive title
+
+(same structure)
 
 ### Corner Cases
 
@@ -67,4 +87,4 @@ How to verify the implementation works correctly.
 Any risks with this approach and alternative approaches considered.
 
 Keep the plan actionable and specific to this codebase. Reference actual file paths and function names.
-Do NOT include any preamble or commentary outside the plan structure — just the plan itself.
+Do NOT include any preamble or commentary outside the plan structure — just the title line followed by the plan body.
