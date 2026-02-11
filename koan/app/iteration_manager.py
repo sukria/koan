@@ -29,6 +29,12 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 
+def _log_iteration(category: str, message: str):
+    """Log iteration events to stderr. Uses stderr to avoid polluting
+    stdout when iteration_manager runs as a subprocess (CLI mode outputs JSON)."""
+    print(f"[{category}] {message}", file=sys.stderr)
+
+
 def _refresh_usage(usage_state: Path, usage_md: Path, count: int):
     """Refresh usage.md from accumulated token state.
 
@@ -39,7 +45,7 @@ def _refresh_usage(usage_state: Path, usage_md: Path, count: int):
         from app.usage_estimator import cmd_refresh
         cmd_refresh(usage_state, usage_md)
     except Exception as e:
-        print(f"[iteration] Usage refresh error: {e}", file=sys.stderr)
+        _log_iteration("error", f"Usage refresh error: {e}")
 
 
 def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
@@ -77,7 +83,7 @@ def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
             "display_lines": display_lines,
         }
     except Exception as e:
-        print(f"[iteration] Usage tracker error: {e}", file=sys.stderr)
+        _log_iteration("error", f"Usage tracker error: {e}")
         return {
             "mode": "implement",
             "available_pct": 50,
@@ -102,7 +108,7 @@ def _inject_recurring(instance_dir: Path):
         missions_path = instance_dir / "missions.md"
         return check_and_inject(recurring_path, missions_path)
     except Exception as e:
-        print(f"[iteration] Recurring injection error: {e}", file=sys.stderr)
+        _log_iteration("error", f"Recurring injection error: {e}")
         return []
 
 
@@ -123,9 +129,44 @@ def _pick_mission(instance_dir: Path, projects_str: str, run_num: int,
             parts = result.split(":", 1)
             if len(parts) == 2:
                 return parts[0], parts[1]
+        # pick_mission returned empty — check if there really are pending missions
+        # that we're failing to pick (safety net for silent picker failures)
+        try:
+            from app.missions import count_pending
+            missions_path = instance_dir / "missions.md"
+            if missions_path.exists():
+                pending_count = count_pending(missions_path.read_text())
+                if pending_count > 0:
+                    _log_iteration("error",
+                        f"Mission picker returned nothing but {pending_count} "
+                        f"pending mission(s) exist — attempting direct extraction")
+                    from app.pick_mission import fallback_extract
+                    project, title = fallback_extract(missions_path, projects_str)
+                    if project and title:
+                        _log_iteration("mission", f"Direct fallback picked: [{project}] {title[:60]}")
+                        return project, title
+                    _log_iteration("error", "Direct fallback also failed to extract a mission")
+        except Exception as e2:
+            _log_iteration("error", f"Safety net mission pick failed: {e2}")
         return None, None
     except Exception as e:
-        print(f"[iteration] Mission picker error: {e}", file=sys.stderr)
+        _log_iteration("error", f"Mission picker error: {e}")
+        # Same safety net: try direct extraction on exception
+        try:
+            from app.missions import count_pending
+            from app.pick_mission import fallback_extract
+            missions_path = instance_dir / "missions.md"
+            if missions_path.exists():
+                pending_count = count_pending(missions_path.read_text())
+                if pending_count > 0:
+                    _log_iteration("error",
+                        f"Picker crashed but {pending_count} pending mission(s) exist — "
+                        f"attempting direct extraction")
+                    project, title = fallback_extract(missions_path, projects_str)
+                    if project and title:
+                        return project, title
+        except Exception as e:
+            _log_iteration("error", f"Fallback mission extract failed: {e}")
         return None, None
 
 
@@ -232,7 +273,8 @@ def _check_focus(koan_root: str):
     try:
         from app.focus_manager import check_focus
         return check_focus(koan_root)
-    except Exception:
+    except Exception as e:
+        _log_iteration("error", f"Focus check failed: {e}")
         return None
 
 
@@ -246,7 +288,8 @@ def _check_schedule():
     try:
         from app.schedule_manager import get_current_schedule
         return get_current_schedule()
-    except Exception:
+    except Exception as e:
+        _log_iteration("error", f"Schedule check failed: {e}")
         return None
 
 
@@ -311,6 +354,7 @@ def plan_iteration(
     decision_reason = decision["reason"]
     recommended_idx = decision["project_idx"]
     display_lines = decision["display_lines"]
+    _log_iteration("koan", f"Usage decision: mode={autonomous_mode}, available={available_pct}%")
 
     # Step 2b: Check schedule and cap mode based on deep_hours config.
     # This runs early (before mission pick) so the capped mode affects
@@ -331,8 +375,8 @@ def plan_iteration(
                     f"{decision_reason} (capped from {original_mode}: "
                     f"outside deep_hours schedule)"
                 )
-    except Exception:
-        pass
+    except Exception as e:
+        _log_iteration("error", f"Schedule mode cap check failed: {e}")
 
     # Step 3: Inject recurring missions
     recurring_injected = _inject_recurring(instance)
@@ -341,6 +385,10 @@ def plan_iteration(
     mission_project, mission_title = _pick_mission(
         instance, projects_str, run_num, autonomous_mode, last_project,
     )
+    if mission_project and mission_title:
+        _log_iteration("mission", f"Mission picked: [{mission_project}] {mission_title[:80]}")
+    else:
+        _log_iteration("koan", "No pending mission — entering autonomous mode")
 
     # Step 5: Resolve project
     if mission_project and mission_title:
@@ -379,6 +427,8 @@ def plan_iteration(
 
         # Check focus state once (used by both contemplative and focus_wait)
         focus_state = _check_focus(koan_root)
+        _log_iteration("koan", f"No mission picked — evaluating autonomous action "
+                       f"(mode={autonomous_mode}, focus_active={focus_state is not None})")
 
         # 6a: Contemplative chance (random reflection)
         try:
