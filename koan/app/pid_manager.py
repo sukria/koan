@@ -8,6 +8,11 @@ PID files live in $KOAN_ROOT:
   .koan-pid-awake  — Telegram bridge (awake.py)
   .koan-pid-ollama — ollama serve (external binary)
 
+Log files live in $KOAN_ROOT/logs/:
+  run.log          — agent loop output
+  awake.log        — Telegram bridge output
+  ollama.log       — ollama serve output
+
 Usage from Python:
     lock = acquire_pidfile(koan_root, "awake")
     # ... run main loop ...
@@ -28,6 +33,22 @@ from typing import Optional, IO
 def _pidfile_path(koan_root: Path, process_name: str) -> Path:
     """Return the PID file path for a given process type."""
     return koan_root / f".koan-pid-{process_name}"
+
+
+def _log_dir(koan_root: Path) -> Path:
+    """Return the logs directory, creating it if needed."""
+    d = koan_root / "logs"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def _open_log_file(koan_root: Path, process_name: str):
+    """Open a log file for a process, truncating previous content.
+
+    Returns an open file handle suitable for subprocess stdout/stderr.
+    """
+    log_path = _log_dir(koan_root) / f"{process_name}.log"
+    return open(log_path, "w")
 
 
 def _read_pid(pidfile: Path) -> Optional[int]:
@@ -196,18 +217,21 @@ def start_runner(koan_root: Path, verify_timeout: float = 3.0) -> tuple:
     python = sys.executable
     koan_dir = koan_root / "koan"
 
-    env = {**os.environ, "KOAN_ROOT": str(koan_root), "PYTHONPATH": "."}
+    env = {**os.environ, "KOAN_ROOT": str(koan_root), "PYTHONPATH": ".",
+           "KOAN_FORCE_COLOR": "1"}
 
+    log_fh = _open_log_file(koan_root, "run")
     try:
         subprocess.Popen(
             [python, "app/run.py"],
             cwd=str(koan_dir),
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
     except Exception as e:
+        log_fh.close()
         return False, f"Failed to launch: {e}"
 
     # Wait briefly for run.py to acquire its PID file
@@ -237,14 +261,16 @@ def start_ollama(koan_root: Path, verify_timeout: float = 5.0) -> tuple:
     if not ollama_bin:
         return False, "ollama not found in PATH — install with: brew install ollama"
 
+    log_fh = _open_log_file(koan_root, "ollama")
     try:
         proc = subprocess.Popen(
             [ollama_bin, "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
     except Exception as e:
+        log_fh.close()
         return False, f"Failed to launch ollama: {e}"
 
     # Write PID file — ollama serve is an external binary (no flock)
@@ -271,18 +297,21 @@ def start_awake(koan_root: Path, verify_timeout: float = 3.0) -> tuple:
 
     python = sys.executable
     koan_dir = koan_root / "koan"
-    env = {**os.environ, "KOAN_ROOT": str(koan_root), "PYTHONPATH": "."}
+    env = {**os.environ, "KOAN_ROOT": str(koan_root), "PYTHONPATH": ".",
+           "KOAN_FORCE_COLOR": "1"}
 
+    log_fh = _open_log_file(koan_root, "awake")
     try:
         subprocess.Popen(
             [python, "app/awake.py"],
             cwd=str(koan_dir),
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
     except Exception as e:
+        log_fh.close()
         return False, f"Failed to launch bridge: {e}"
 
     deadline = time.monotonic() + verify_timeout
@@ -435,6 +464,13 @@ def _print_stack_results(results: dict) -> int:
         print(f"  {name}: {msg}")
         if not ok and "already running" not in msg.lower():
             any_failed = True
+
+    if not any_failed:
+        print()
+        print("  Use 'make logs' to watch live output")
+        print("  Use 'make status' to check process status")
+        print("  Use 'make stop' to stop all processes")
+
     return 1 if any_failed else 0
 
 

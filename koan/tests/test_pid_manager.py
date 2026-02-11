@@ -16,6 +16,8 @@ from app.pid_manager import (
     _is_process_alive,
     _detect_provider,
     _needs_ollama,
+    _log_dir,
+    _open_log_file,
     acquire_pidfile,
     release_pidfile,
     acquire_pid,
@@ -27,6 +29,7 @@ from app.pid_manager import (
     start_ollama,
     start_all,
     start_stack,
+    _print_stack_results,
     PROCESS_NAMES,
 )
 
@@ -1075,3 +1078,146 @@ class TestCLIOllama:
         result = self._run_cli("stop-all", str(tmp_path))
         assert result.returncode == 0
         assert "ollama: not running" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Log file management
+# ---------------------------------------------------------------------------
+
+
+class TestLogDir:
+    def test_creates_logs_directory(self, tmp_path):
+        d = _log_dir(tmp_path)
+        assert d == tmp_path / "logs"
+        assert d.is_dir()
+
+    def test_idempotent_creation(self, tmp_path):
+        _log_dir(tmp_path)
+        _log_dir(tmp_path)
+        assert (tmp_path / "logs").is_dir()
+
+
+class TestOpenLogFile:
+    def test_creates_log_file(self, tmp_path):
+        fh = _open_log_file(tmp_path, "run")
+        fh.close()
+        assert (tmp_path / "logs" / "run.log").exists()
+
+    def test_truncates_existing_log(self, tmp_path):
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        log_file = log_dir / "awake.log"
+        log_file.write_text("old content\n")
+
+        fh = _open_log_file(tmp_path, "awake")
+        fh.write("new content\n")
+        fh.close()
+
+        assert log_file.read_text() == "new content\n"
+
+    def test_file_writable(self, tmp_path):
+        fh = _open_log_file(tmp_path, "ollama")
+        fh.write("test line\n")
+        fh.close()
+        assert (tmp_path / "logs" / "ollama.log").read_text() == "test line\n"
+
+
+class TestStarterLogFiles:
+    """Verify that start_runner/start_awake/start_ollama redirect to log files."""
+
+    def test_start_runner_creates_log_file(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen") as mock_popen, \
+             patch("app.pid_manager.check_pidfile", side_effect=[None, None, 42]):
+            start_runner(tmp_path, verify_timeout=1.0)
+
+        call_args = mock_popen.call_args
+        # stdout should be an open file (not DEVNULL)
+        stdout_arg = call_args[1]["stdout"]
+        assert hasattr(stdout_arg, "name")
+        assert "run.log" in stdout_arg.name
+        # stderr should be STDOUT (merged with stdout)
+        assert call_args[1]["stderr"] == subprocess.STDOUT
+
+    def test_start_runner_sets_force_color(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen") as mock_popen, \
+             patch("app.pid_manager.check_pidfile", side_effect=[None, None, 42]):
+            start_runner(tmp_path, verify_timeout=1.0)
+
+        env = mock_popen.call_args[1]["env"]
+        assert env.get("KOAN_FORCE_COLOR") == "1"
+
+    def test_start_awake_creates_log_file(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen") as mock_popen, \
+             patch("app.pid_manager.check_pidfile", side_effect=[None, None, 42]):
+            start_awake(tmp_path, verify_timeout=1.0)
+
+        call_args = mock_popen.call_args
+        stdout_arg = call_args[1]["stdout"]
+        assert hasattr(stdout_arg, "name")
+        assert "awake.log" in stdout_arg.name
+        assert call_args[1]["stderr"] == subprocess.STDOUT
+
+    def test_start_awake_sets_force_color(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen") as mock_popen, \
+             patch("app.pid_manager.check_pidfile", side_effect=[None, None, 42]):
+            start_awake(tmp_path, verify_timeout=1.0)
+
+        env = mock_popen.call_args[1]["env"]
+        assert env.get("KOAN_FORCE_COLOR") == "1"
+
+    def test_start_ollama_creates_log_file(self, tmp_path):
+        mock_proc = MagicMock()
+        mock_proc.pid = 54321
+
+        with patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+             patch("app.pid_manager.subprocess.Popen", return_value=mock_proc) as mock_popen, \
+             patch("app.pid_manager._is_process_alive", return_value=True):
+            start_ollama(tmp_path, verify_timeout=0.5)
+
+        call_args = mock_popen.call_args
+        stdout_arg = call_args[1]["stdout"]
+        assert hasattr(stdout_arg, "name")
+        assert "ollama.log" in stdout_arg.name
+        assert call_args[1]["stderr"] == subprocess.STDOUT
+
+    def test_start_runner_logs_dir_created(self, tmp_path):
+        with patch("app.pid_manager.subprocess.Popen"), \
+             patch("app.pid_manager.check_pidfile", side_effect=[None, None, 42]):
+            start_runner(tmp_path, verify_timeout=1.0)
+
+        assert (tmp_path / "logs").is_dir()
+
+
+class TestPrintStackResults:
+    def test_shows_ux_hints_on_success(self, capsys):
+        results = {
+            "awake": (True, "Bridge started (PID 42)"),
+            "run": (True, "Agent loop started (PID 43)"),
+        }
+        code = _print_stack_results(results)
+        assert code == 0
+        output = capsys.readouterr().out
+        assert "make logs" in output
+        assert "make status" in output
+        assert "make stop" in output
+
+    def test_no_hints_on_failure(self, capsys):
+        results = {
+            "awake": (False, "Failed to launch"),
+            "run": (True, "Agent loop started (PID 43)"),
+        }
+        code = _print_stack_results(results)
+        assert code == 1
+        output = capsys.readouterr().out
+        assert "make logs" not in output
+
+    def test_hints_shown_when_already_running(self, capsys):
+        """'already running' is not a failure — show hints."""
+        results = {
+            "awake": (False, "Bridge already running (PID 42)"),
+            "run": (True, "Agent loop started (PID 43)"),
+        }
+        code = _print_stack_results(results)
+        assert code == 0
+        output = capsys.readouterr().out
+        assert "make logs" in output

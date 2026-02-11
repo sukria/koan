@@ -66,6 +66,18 @@ class TestLog:
         out = capsys.readouterr().out
         assert "[custom]" in out
 
+    def test_force_color_env_enables_colors(self, capsys, monkeypatch):
+        """KOAN_FORCE_COLOR=1 enables ANSI colors even without TTY."""
+        monkeypatch.setenv("KOAN_FORCE_COLOR", "1")
+        from app.run import _init_colors, _COLORS
+        # Force re-init
+        import app.run as run_mod
+        run_mod._COLORS = {}
+        _init_colors()
+        colors = run_mod._COLORS
+        assert colors.get("reset") == "\033[0m"
+        assert colors.get("red") == "\033[31m"
+
 
 # ---------------------------------------------------------------------------
 # Test: parse_projects

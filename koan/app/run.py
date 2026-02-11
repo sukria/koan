@@ -63,7 +63,7 @@ _COLORS = {}
 def _init_colors():
     """Initialize ANSI color codes based on TTY detection."""
     global _COLORS
-    if sys.stdout.isatty():
+    if os.environ.get("KOAN_FORCE_COLOR", "") or sys.stdout.isatty():
         _COLORS = {
             "reset": "\033[0m",
             "bold": "\033[1m",
