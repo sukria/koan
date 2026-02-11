@@ -402,11 +402,15 @@ def run_startup(koan_root: str, instance: str, projects: list):
     with protected_phase("Self-reflection check"):
         log("health", "Checking self-reflection trigger...")
         try:
-            subprocess.run(
-                [sys.executable, Path(koan_root, "koan/app/self_reflection.py").as_posix(),
-                 instance, "--notify"],
-                capture_output=True, timeout=60,
+            from app.self_reflection import (
+                should_reflect, run_reflection, save_reflection, notify_outbox,
             )
+            inst_path = Path(instance)
+            if should_reflect(inst_path):
+                observations = run_reflection(inst_path)
+                if observations:
+                    save_reflection(inst_path, observations)
+                    notify_outbox(inst_path, observations)
         except Exception as e:
             log("error", f"Self-reflection check failed: {e}")
 
@@ -454,10 +458,8 @@ def run_startup(koan_root: str, instance: str, projects: list):
 
     # Daily report
     try:
-        subprocess.run(
-            [sys.executable, Path(koan_root, "koan/app/daily_report.py").as_posix()],
-            capture_output=True, timeout=60,
-        )
+        from app.daily_report import send_daily_report
+        send_daily_report()
     except Exception as e:
         log("error", f"Daily report failed: {e}")
 
@@ -582,11 +584,8 @@ def handle_pause(
     roll = random.randint(0, 99)
     in_focus = False
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "app.focus_manager", "check", koan_root],
-            capture_output=True, text=True, timeout=5,
-        )
-        in_focus = result.returncode == 0
+        from app.focus_manager import check_focus
+        in_focus = check_focus(koan_root) is not None
     except Exception as e:
         log("error", f"Focus mode check failed in pause: {e}")
 
@@ -887,11 +886,8 @@ def _run_iteration(
         print("  Action: Entering pause mode (will auto-resume when quota resets)")
         print()
         try:
-            subprocess.run(
-                [sys.executable, Path(koan_root, "koan/app/send_retrospective.py").as_posix(),
-                 instance, project_name],
-                capture_output=True, timeout=120,
-            )
+            from app.send_retrospective import create_retrospective
+            create_retrospective(Path(instance), project_name)
         except Exception as e:
             log("error", f"Retrospective sending failed: {e}")
         # Compute a proper future reset timestamp to avoid instant auto-resume
@@ -1186,10 +1182,8 @@ def _run_iteration(
             except Exception as e:
                 log("error", f"Evening ritual failed: {e}")
         log("pause", "Entering pause mode (auto-resume in 5h).")
-        subprocess.run(
-            [sys.executable, "-m", "app.pause_manager", "create", koan_root, "max_runs"],
-            capture_output=True, timeout=10,
-        )
+        from app.pause_manager import create_pause
+        create_pause(koan_root, "max_runs")
         _notify(instance, (
             f"⏸️ Kōan paused: {max_runs} runs completed. "
             "Auto-resume in 5h or use /resume to restart."
