@@ -217,35 +217,44 @@ def check_pidfile(koan_root: Path, process_name: str) -> Optional[int]:
 
 PROCESS_NAMES = ("run", "awake", "ollama")
 
+# Process startup verification timeouts
+DEFAULT_VERIFY_TIMEOUT = 3.0
+OLLAMA_VERIFY_TIMEOUT = 5.0
 
-def start_runner(koan_root: Path, verify_timeout: float = 3.0) -> tuple:
-    """Start the agent loop (run.py) as a detached subprocess.
 
-    Clears .koan-stop signal, launches run.py, and verifies startup
-    via PID file.
-
-    Returns (success: bool, message: str).
+def _launch_python_process(
+    koan_root: Path, script_name: str, process_name: str, verify_timeout: float
+) -> tuple:
+    """Launch a Python process in the background and verify startup.
+    
+    Args:
+        koan_root: Root path of the Kōan installation.
+        script_name: Python script filename (e.g., "app/run.py").
+        process_name: Process type identifier ("run" or "awake").
+        verify_timeout: Seconds to wait for PID file verification.
+    
+    Returns:
+        (success: bool, message: str)
     """
     # Already running?
-    pid = check_pidfile(koan_root, "run")
+    pid = check_pidfile(koan_root, process_name)
     if pid:
-        return False, f"Agent loop already running (PID {pid})"
+        return False, f"{process_name.capitalize()} already running (PID {pid})"
 
-    # Clear stop signal so run.py doesn't exit immediately
-    stop_file = koan_root / ".koan-stop"
-    stop_file.unlink(missing_ok=True)
-
-    # Build launch command — mirrors `make run`
+    # Build launch command
     python = sys.executable
     koan_dir = koan_root / "koan"
+    env = {
+        **os.environ,
+        "KOAN_ROOT": str(koan_root),
+        "PYTHONPATH": ".",
+        "KOAN_FORCE_COLOR": "1",
+    }
 
-    env = {**os.environ, "KOAN_ROOT": str(koan_root), "PYTHONPATH": ".",
-           "KOAN_FORCE_COLOR": "1"}
-
-    log_fh = _open_log_file(koan_root, "run")
+    log_fh = _open_log_file(koan_root, process_name)
     try:
         subprocess.Popen(
-            [python, "app/run.py"],
+            [python, script_name],
             cwd=str(koan_dir),
             env=env,
             stdout=log_fh,
@@ -256,18 +265,34 @@ def start_runner(koan_root: Path, verify_timeout: float = 3.0) -> tuple:
         log_fh.close()
         return False, f"Failed to launch: {e}"
 
-    # Wait briefly for run.py to acquire its PID file
+    # Wait briefly for process to acquire its PID file
     deadline = time.monotonic() + verify_timeout
     while time.monotonic() < deadline:
-        new_pid = check_pidfile(koan_root, "run")
+        new_pid = check_pidfile(koan_root, process_name)
         if new_pid:
-            return True, f"Agent loop started (PID {new_pid})"
+            label = "Agent loop" if process_name == "run" else "Bridge"
+            return True, f"{label} started (PID {new_pid})"
         time.sleep(0.3)
 
     return False, "Launched but PID not detected — check logs"
 
 
-def start_ollama(koan_root: Path, verify_timeout: float = 5.0) -> tuple:
+def start_runner(koan_root: Path, verify_timeout: float = DEFAULT_VERIFY_TIMEOUT) -> tuple:
+    """Start the agent loop (run.py) as a detached subprocess.
+
+    Clears .koan-stop signal, launches run.py, and verifies startup
+    via PID file.
+
+    Returns (success: bool, message: str).
+    """
+    # Clear stop signal so run.py doesn't exit immediately
+    stop_file = koan_root / ".koan-stop"
+    stop_file.unlink(missing_ok=True)
+
+    return _launch_python_process(koan_root, "app/run.py", "run", verify_timeout)
+
+
+def start_ollama(koan_root: Path, verify_timeout: float = OLLAMA_VERIFY_TIMEOUT) -> tuple:
     """Start ollama serve as a detached subprocess.
 
     Checks that ollama binary is available, not already running,
@@ -308,42 +333,12 @@ def start_ollama(koan_root: Path, verify_timeout: float = 5.0) -> tuple:
     return False, "ollama launched but exited immediately — check ollama logs"
 
 
-def start_awake(koan_root: Path, verify_timeout: float = 3.0) -> tuple:
+def start_awake(koan_root: Path, verify_timeout: float = DEFAULT_VERIFY_TIMEOUT) -> tuple:
     """Start the Telegram bridge (awake.py) as a detached subprocess.
 
     Returns (success: bool, message: str).
     """
-    pid = check_pidfile(koan_root, "awake")
-    if pid:
-        return False, f"Bridge already running (PID {pid})"
-
-    python = sys.executable
-    koan_dir = koan_root / "koan"
-    env = {**os.environ, "KOAN_ROOT": str(koan_root), "PYTHONPATH": ".",
-           "KOAN_FORCE_COLOR": "1"}
-
-    log_fh = _open_log_file(koan_root, "awake")
-    try:
-        subprocess.Popen(
-            [python, "app/awake.py"],
-            cwd=str(koan_dir),
-            env=env,
-            stdout=log_fh,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    except Exception as e:
-        log_fh.close()
-        return False, f"Failed to launch bridge: {e}"
-
-    deadline = time.monotonic() + verify_timeout
-    while time.monotonic() < deadline:
-        new_pid = check_pidfile(koan_root, "awake")
-        if new_pid:
-            return True, f"Bridge started (PID {new_pid})"
-        time.sleep(0.3)
-
-    return False, "Bridge launched but PID not detected — check logs"
+    return _launch_python_process(koan_root, "app/awake.py", "awake", verify_timeout)
 
 
 def get_status_processes(koan_root: Path) -> tuple:
@@ -376,6 +371,23 @@ def _needs_ollama(provider: str) -> bool:
     return provider in ("local", "ollama")
 
 
+def _show_startup_banner(koan_root: Path, provider: str) -> None:
+    """Display the unified startup banner with system information.
+    
+    Banner is cosmetic and never blocks startup. Logs errors to stderr
+    if banner fails to display.
+    """
+    try:
+        from app.banners import print_startup_banner
+        from app.startup_info import gather_startup_info
+        info = gather_startup_info(koan_root)
+        info["provider"] = provider
+        print_startup_banner(info)
+    except Exception as e:
+        # Banner is cosmetic — log but don't block startup
+        print(f"Warning: Failed to display startup banner: {e}", file=sys.stderr)
+
+
 def start_all(koan_root: Path, provider: str = None) -> dict:
     """Start the full Kōan stack for the configured provider.
 
@@ -387,6 +399,9 @@ def start_all(koan_root: Path, provider: str = None) -> dict:
     """
     if provider is None:
         provider = _detect_provider(koan_root)
+
+    # Display startup banner before launching processes
+    _show_startup_banner(koan_root, provider)
 
     results = {}
 

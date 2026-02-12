@@ -1,5 +1,6 @@
 """ASCII art banners for Kōan startup sequences."""
 
+import re
 from pathlib import Path
 
 # ANSI color codes
@@ -13,6 +14,12 @@ MAGENTA = "\033[35m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
 
+# ANSI escape pattern for visible-width calculation
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+# Layout constants
+PADDING_GAP = 4  # Gap between logo and info columns
+
 BANNERS_DIR = Path(__file__).parent
 
 
@@ -24,57 +31,156 @@ def _read_art(filename: str) -> str:
     return ""
 
 
+def _apply_replacements(line: str, replacements: dict, base_color: str) -> str:
+    """Apply color replacements to a line with a base color.
+    
+    Args:
+        line: The text line to colorize.
+        replacements: Dict mapping text to replace -> replacement color.
+        base_color: The base ANSI color for the entire line.
+    
+    Returns:
+        Colorized line with base color and specific replacements.
+    """
+    for text, color in replacements.items():
+        if text in line:
+            line = line.replace(text, f"{color}{text}{RESET}{base_color}")
+    return f"{base_color}{line}{RESET}"
+
+
 def colorize_agent(art: str) -> str:
     """Apply ANSI colors to the agent (run loop) banner."""
+    replacements = {
+        "◉": CYAN,  # Eyes glow cyan
+        "☢": YELLOW,  # Radioactive symbol in yellow
+    }
     lines = art.split("\n")
-    colored = []
-    for line in lines:
-        # Eyes glow cyan
-        line = line.replace("◉", f"{CYAN}◉{RESET}{DIM}{BLUE}")
-        # Radioactive symbol in yellow
-        line = line.replace("☢", f"{YELLOW}☢{RESET}{DIM}{BLUE}")
-        colored.append(f"{DIM}{BLUE}{line}{RESET}")
+    colored = [_apply_replacements(line, replacements, f"{DIM}{BLUE}") for line in lines]
     return "\n".join(colored)
 
 
 def colorize_bridge(art: str) -> str:
     """Apply ANSI colors to the bridge (awake) banner."""
+    replacements = {
+        "◇": CYAN,  # Signal waves in cyan
+        "◆": CYAN,
+        "→": GREEN,  # Arrows in green
+        "←": GREEN,
+    }
     lines = art.split("\n")
-    colored = []
-    for line in lines:
-        # Signal waves in cyan
-        line = line.replace("◇", f"{CYAN}◇{RESET}{DIM}{MAGENTA}")
-        line = line.replace("◆", f"{CYAN}◆{RESET}{DIM}{MAGENTA}")
-        # Arrows in green
-        line = line.replace("→", f"{GREEN}→{RESET}{DIM}{MAGENTA}")
-        line = line.replace("←", f"{GREEN}←{RESET}{DIM}{MAGENTA}")
-        colored.append(f"{DIM}{MAGENTA}{line}{RESET}")
+    colored = [_apply_replacements(line, replacements, f"{DIM}{MAGENTA}") for line in lines]
     return "\n".join(colored)
+
+
+def _print_banner(art_file: str, colorizer: callable, version_info: str = "") -> None:
+    """Print a banner with optional version info.
+    
+    Args:
+        art_file: Name of the ASCII art file to read.
+        colorizer: Function to apply colors to the art.
+        version_info: Optional version string to display alongside the banner.
+    """
+    art = _read_art(art_file)
+    if not art:
+        return
+    print()
+    print(colorizer(art), end="")
+    if version_info:
+        print(f"  {DIM}{WHITE}{version_info}{RESET}")
+    else:
+        print()
+    print()
 
 
 def print_agent_banner(version_info: str = "") -> None:
     """Print the agent loop startup banner."""
-    art = _read_art("agent.txt")
-    if not art:
-        return
-    print()
-    print(colorize_agent(art), end="")
-    if version_info:
-        print(f"  {DIM}{WHITE}{version_info}{RESET}")
-    else:
-        print()
-    print()
+    _print_banner("agent.txt", colorize_agent, version_info)
 
 
 def print_bridge_banner(version_info: str = "") -> None:
     """Print the bridge (awake) startup banner."""
-    art = _read_art("bridge.txt")
+    _print_banner("bridge.txt", colorize_bridge, version_info)
+
+
+def _visible_len(s: str) -> int:
+    """Return the visible length of a string, ignoring ANSI escape codes."""
+    return len(_ANSI_RE.sub("", s))
+
+
+def colorize_startup(art: str) -> str:
+    """Apply ANSI colors to the unified startup banner."""
+    replacements = {
+        "K Ō A N": f"{BOLD}{CYAN}",  # Title text in bold cyan
+        "cognitive sparring partner": f"{DIM}{WHITE}",  # Tagline in dim white
+        "─────────────────────": f"{DIM}{CYAN}",  # Separator line
+        "◉": CYAN,  # Eyes glow cyan
+        "☢": YELLOW,  # Radioactive symbol in yellow
+    }
+    lines = art.split("\n")
+    colored = [_apply_replacements(line, replacements, f"{DIM}{BLUE}") for line in lines]
+    return "\n".join(colored)
+
+
+def _format_info_lines(system_info: dict) -> list:
+    """Format system_info dict into display lines with labels.
+    
+    Args:
+        system_info: Dictionary with system information keys.
+    
+    Returns:
+        List of formatted info lines with ANSI colors.
+    """
+    label_map = [
+        ("provider", "Provider"),
+        ("projects", "Projects"),
+        ("skills", "Skills"),
+        ("soul", "Soul"),
+        ("messaging", "Messaging"),
+    ]
+    max_value_len = 50
+    lines = []
+    for key, label in label_map:
+        if key in system_info:
+            value = system_info[key]
+            if len(value) > max_value_len:
+                value = value[:max_value_len - 1] + "…"
+            lines.append(f"{DIM}{WHITE}{label}: {RESET}{CYAN}{value}{RESET}")
+    return lines
+
+
+def print_startup_banner(system_info: dict = None) -> None:
+    """Print the unified startup banner with optional system info.
+
+    Renders the logo on the left and system information on the right
+    in a two-column layout.
+    """
+    art = _read_art("startup.txt")
     if not art:
         return
+
+    colored_art = colorize_startup(art)
+    art_lines = colored_art.split("\n")
+    # Remove trailing empty lines for cleaner output
+    while art_lines and not art_lines[-1].strip():
+        art_lines.pop()
+
+    # Determine visible width of the art for alignment
+    max_art_width = max((_visible_len(l) for l in art_lines), default=0)
+    pad_width = max_art_width + PADDING_GAP
+
+    info_lines = _format_info_lines(system_info) if system_info else []
+
     print()
-    print(colorize_bridge(art), end="")
-    if version_info:
-        print(f"  {DIM}{WHITE}{version_info}{RESET}")
-    else:
-        print()
+    for i, art_line in enumerate(art_lines):
+        visible_w = _visible_len(art_line)
+        padding = " " * (pad_width - visible_w)
+        if i < len(info_lines):
+            print(f"{art_line}{padding}{info_lines[i]}")
+        else:
+            print(art_line)
+
+    # Print remaining info lines below the art if more info than art lines
+    for j in range(len(art_lines), len(info_lines)):
+        print(f"{' ' * pad_width}{info_lines[j]}")
+
     print()

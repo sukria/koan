@@ -1027,6 +1027,36 @@ class TestStartAll:
 # ---------------------------------------------------------------------------
 
 
+class TestShowStartupBanner:
+    """Test _show_startup_banner integration in start_all."""
+
+    def test_banner_called_before_processes(self, tmp_path):
+        """Startup banner should display before launching processes."""
+        call_order = []
+        with patch("app.pid_manager._show_startup_banner", side_effect=lambda *a: call_order.append("banner")), \
+             patch("app.pid_manager.start_awake", side_effect=lambda *a: (call_order.append("awake"), (True, "ok"))[-1]), \
+             patch("app.pid_manager.start_runner", side_effect=lambda *a: (call_order.append("run"), (True, "ok"))[-1]):
+            start_all(tmp_path, provider="claude")
+        assert call_order == ["banner", "awake", "run"]
+
+    def test_banner_exception_does_not_block_startup(self, tmp_path):
+        """If banner gathering fails, processes should still start."""
+        with patch("app.banners.print_startup_banner", side_effect=Exception("render error")), \
+             patch("app.pid_manager.start_awake", return_value=(True, "ok")), \
+             patch("app.pid_manager.start_runner", return_value=(True, "ok")):
+            results = start_all(tmp_path, provider="claude")
+        assert results["awake"] == (True, "ok")
+        assert results["run"] == (True, "ok")
+
+    def test_banner_receives_provider(self, tmp_path):
+        """_show_startup_banner should receive koan_root and detected provider."""
+        with patch("app.pid_manager._show_startup_banner") as mock_banner, \
+             patch("app.pid_manager.start_awake", return_value=(True, "ok")), \
+             patch("app.pid_manager.start_runner", return_value=(True, "ok")):
+            start_all(tmp_path, provider="copilot")
+        mock_banner.assert_called_once_with(tmp_path, "copilot")
+
+
 class TestStartStack:
     def test_delegates_to_start_all_with_local_provider(self, tmp_path):
         """start_stack should call start_all with provider='local'."""
