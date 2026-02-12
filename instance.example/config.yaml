@@ -113,6 +113,14 @@ git_auto_merge:
 #   deep_hours: "0-6"
 #   work_hours: "8-20"
 
+# Log rotation — controls backup behavior when processes restart
+# Previous logs are preserved as numbered backups (.log.1, .log.2, etc.)
+# Older backups (.log.2+) are gzip-compressed to save disk space
+# logs:
+#   max_backups: 3          # Number of old log files to keep (default: 3)
+#   max_size_mb: 50         # Max size per backup in MB (default: 50)
+#   compress: true          # Gzip-compress backups .log.2+ (default: true)
+
 # Usage estimation (auto-calibration from Claude JSON output)
 # Tune these limits based on your Claude plan by comparing
 # estimated % with actual /usage output in Claude CLI

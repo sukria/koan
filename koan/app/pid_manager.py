@@ -43,12 +43,34 @@ def _log_dir(koan_root: Path) -> Path:
 
 
 def _open_log_file(koan_root: Path, process_name: str):
-    """Open a log file for a process, truncating previous content.
+    """Open a log file for a process, rotating the previous log first.
+
+    Before truncating, backs up the existing log as .log.1, shifting older
+    backups (.log.1 → .log.2, etc.) and compressing old ones with gzip.
 
     Returns an open file handle suitable for subprocess stdout/stderr.
+    
+    IMPORTANT: Caller is responsible for closing the returned file handle.
+    The file handle should remain open for the lifetime of the subprocess
+    and be closed when the subprocess exits or is killed.
     """
+    from app.log_rotation import rotate_log, get_log_config
+    
     log_path = _log_dir(koan_root) / f"{process_name}.log"
-    return open(log_path, "w")
+    
+    # Load rotation config, with sensible defaults if config unavailable
+    config = None
+    try:
+        from app.utils import load_config
+        config = load_config()
+    except Exception:
+        pass  # Fall back to defaults
+    
+    cfg = get_log_config(config)
+    rotate_log(log_path, max_backups=cfg["max_backups"], compress=cfg["compress"])
+    
+    # Open with buffering disabled for immediate log visibility
+    return open(log_path, "w", buffering=1)
 
 
 def _read_pid(pidfile: Path) -> Optional[int]:
