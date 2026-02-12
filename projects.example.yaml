@@ -3,8 +3,23 @@
 # Place this file at your KOAN_ROOT (next to .env).
 # Not versioned — copy from projects.example.yaml and customize.
 #
-# Each project entry MUST have a 'path'. All other fields are optional
-# and inherit from 'defaults' if not specified.
+# THREE WAYS TO CONFIGURE PROJECTS:
+#
+# 1. Workspace only (zero config):
+#    Place a project or symlink in workspace/ — auto-discovered by directory name.
+#    Uses global defaults. No yaml entry needed.
+#
+# 2. Yaml only (explicit path):
+#    Define the project here with a 'path' field.
+#
+# 3. Workspace + yaml override (best of both):
+#    Place the project in workspace/ AND add a yaml entry here WITHOUT 'path'.
+#    The workspace provides the path, yaml provides custom settings.
+#
+# Precedence: If the same project name exists in both yaml (with path) and
+# workspace, the yaml path wins. A warning is shown at startup.
+#
+# Max 50 projects total (workspace + yaml combined).
 #
 # This file replaces KOAN_PROJECTS / KOAN_PROJECT_PATH env vars.
 # If projects.yaml exists, env vars are ignored (but still work as fallback
@@ -44,6 +59,15 @@ projects:
     # git_auto_merge:
     #   enabled: true
     #   strategy: "merge"
+
+  # Example: workspace project with yaml overrides (no path needed!)
+  # The project lives in workspace/my-lib (symlink or directory).
+  # This yaml entry only provides custom settings.
+  # my-lib:
+  #   models:
+  #     mission: "opus"          # Use Opus for complex work
+  #   git_auto_merge:
+  #     enabled: true
 
   # Example: a backend project with custom model and base branch
   # backend:
