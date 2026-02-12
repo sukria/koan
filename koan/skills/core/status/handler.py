@@ -2,6 +2,17 @@
 
 import re
 
+# Telegram lines wrap around 40-45 chars on mobile; 60 is a good balance
+# between readability and information density.
+_MAX_MISSION_DISPLAY_LEN = 60
+
+
+def _truncate(text: str, max_len: int = _MAX_MISSION_DISPLAY_LEN) -> str:
+    """Truncate mission text for Telegram display, adding ellipsis if needed."""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip() + "…"
+
 
 def _needs_ollama() -> bool:
     """Return True if the configured provider requires ollama serve."""
@@ -93,12 +104,12 @@ def _handle_status(ctx) -> str:
                         parts.append(f"  In progress: {len(in_progress)}")
                         for m in in_progress[:2]:
                             display = re.sub(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*', '', m)
-                            parts.append(f"    {display}")
+                            parts.append(f"    {_truncate(display)}")
                     if pending:
                         parts.append(f"  Pending: {len(pending)}")
                         for m in pending[:3]:
                             display = re.sub(r'\[projec?t:[a-zA-Z0-9_-]+\]\s*', '', m)
-                            parts.append(f"    {display}")
+                            parts.append(f"    {_truncate(display)}")
 
     return "\n".join(parts)
 

@@ -200,6 +200,85 @@ class TestHandleStatus:
         assert "koan" in result
         assert "webapp" in result
 
+    def test_long_mission_truncated(self, tmp_path):
+        """Long mission descriptions are truncated with ellipsis."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        long_desc = "a" * 100
+        missions = instance / "missions.md"
+        missions.write_text(
+            "# Missions\n\n"
+            "## Pending\n\n"
+            f"- [project:koan] {long_desc}\n\n"
+            "## In Progress\n\n"
+            f"- [project:koan] {long_desc}\n\n"
+            "## Done\n"
+        )
+        from skills.core.status.handler import _handle_status
+        ctx = _make_ctx("status", instance, tmp_path)
+        result = _handle_status(ctx)
+        # Full 100-char text should NOT appear
+        assert long_desc not in result
+        # Ellipsis should appear for truncated lines
+        assert "…" in result
+
+    def test_short_mission_not_truncated(self, tmp_path):
+        """Short mission descriptions are shown in full."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        missions = instance / "missions.md"
+        missions.write_text(
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- [project:koan] fix the small bug\n\n"
+            "## Done\n"
+        )
+        from skills.core.status.handler import _handle_status
+        ctx = _make_ctx("status", instance, tmp_path)
+        result = _handle_status(ctx)
+        assert "fix the small bug" in result
+        assert "…" not in result
+
+
+# ---------------------------------------------------------------------------
+# _truncate()
+# ---------------------------------------------------------------------------
+
+class TestTruncate:
+    """Test the _truncate() helper."""
+
+    def test_short_text_unchanged(self):
+        from skills.core.status.handler import _truncate
+        assert _truncate("hello world") == "hello world"
+
+    def test_exact_limit_unchanged(self):
+        from skills.core.status.handler import _truncate
+        text = "x" * 60
+        assert _truncate(text) == text
+
+    def test_over_limit_truncated(self):
+        from skills.core.status.handler import _truncate
+        text = "a" * 80
+        result = _truncate(text)
+        assert result.endswith("…")
+        assert len(result) == 61  # 60 chars + 1 ellipsis char
+
+    def test_custom_max_len(self):
+        from skills.core.status.handler import _truncate
+        result = _truncate("hello world", max_len=5)
+        assert result == "hello…"
+
+    def test_trailing_space_stripped_before_ellipsis(self):
+        from skills.core.status.handler import _truncate
+        # If truncation lands on a space, it should be stripped
+        result = _truncate("hello world this is long", max_len=6)
+        assert result == "hello…"
+
+    def test_empty_string(self):
+        from skills.core.status.handler import _truncate
+        assert _truncate("") == ""
+
 
 # ---------------------------------------------------------------------------
 # _handle_ping()
