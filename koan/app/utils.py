@@ -321,7 +321,7 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
     projects = get_known_projects()
     target = f"{owner}/{repo_name}".lower() if owner else None
 
-    # 1. GitHub URL match via projects.yaml github_url field
+    # 1. GitHub URL match via projects.yaml and in-memory cache
     if target:
         try:
             from app.projects_config import load_projects_config
@@ -334,6 +334,16 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
                             path = project.get("path")
                             if path:
                                 return path
+        except Exception:
+            pass
+        # Also check in-memory github_url cache (workspace projects)
+        try:
+            from app.projects_merged import get_github_url_cache
+            for proj_name, gh_url in get_github_url_cache().items():
+                if gh_url.lower() == target:
+                    for name, path in projects:
+                        if name == proj_name:
+                            return path
         except Exception:
             pass
 
@@ -352,13 +362,21 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
         for name, path in projects:
             gh_url = get_github_remote(path)
             if gh_url and gh_url.lower() == target:
-                # Persist discovery to projects.yaml for future lookups
+                # Persist discovery to projects.yaml for yaml projects
                 try:
                     from app.projects_config import load_projects_config, save_projects_config
                     config = load_projects_config(str(KOAN_ROOT))
                     if config and name in config.get("projects", {}):
-                        config["projects"][name]["github_url"] = gh_url
-                        save_projects_config(str(KOAN_ROOT), config)
+                        proj = config["projects"][name]
+                        if isinstance(proj, dict) and proj.get("path"):
+                            proj["github_url"] = gh_url
+                            save_projects_config(str(KOAN_ROOT), config)
+                except Exception:
+                    pass
+                # Also cache in memory (works for workspace projects)
+                try:
+                    from app.projects_merged import set_github_url
+                    set_github_url(name, gh_url)
                 except Exception:
                     pass
                 return path

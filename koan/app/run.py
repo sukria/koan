@@ -391,14 +391,25 @@ def run_startup(koan_root: str, instance: str, projects: list):
 
         # Initialize workspace + yaml merged project registry
         try:
-            from app.projects_merged import refresh_projects, get_warnings
+            from app.projects_merged import refresh_projects, get_warnings, set_github_url
             from app.projects_config import load_projects_config
             projects = refresh_projects(koan_root)
             cfg = load_projects_config(koan_root)
-            yaml_names = set((cfg or {}).get("projects", {}).keys())
-            ws_count = sum(1 for name, _ in projects if name not in yaml_names)
+            yaml_projects = (cfg or {}).get("projects", {})
+            yaml_names_with_path = {
+                n for n, p in yaml_projects.items()
+                if isinstance(p, dict) and p.get("path")
+            }
+            ws_count = sum(1 for name, _ in projects if name not in yaml_names_with_path)
             if ws_count:
                 log("init", f"[workspace] Discovered {ws_count} project(s) from workspace/")
+            # Populate github_url cache for workspace projects
+            for name, path in projects:
+                if name not in yaml_names_with_path:
+                    from app.utils import get_github_remote
+                    gh_url = get_github_remote(path)
+                    if gh_url:
+                        set_github_url(name, gh_url)
             for w in get_warnings():
                 log("warn", f"[workspace] {w}")
         except Exception as e:
