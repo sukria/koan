@@ -493,6 +493,203 @@ class TestCheckHelpers:
         assert check_pending_missions(str(tmp_path)) is False
 
 
+# --- Test GitHub notification backoff ---
+
+
+class TestGitHubNotificationBackoff:
+    """Test exponential backoff for GitHub notification polling."""
+
+    def setup_method(self):
+        """Reset backoff state before each test."""
+        from app.loop_manager import reset_github_backoff
+        reset_github_backoff()
+
+    def test_effective_interval_starts_at_base(self):
+        from app.loop_manager import _get_effective_check_interval, _GITHUB_CHECK_INTERVAL
+        assert _get_effective_check_interval() == _GITHUB_CHECK_INTERVAL
+
+    def test_effective_interval_doubles_on_empty(self):
+        import app.loop_manager as lm
+        lm._consecutive_empty_checks = 1
+        assert lm._get_effective_check_interval() == 120
+        lm._consecutive_empty_checks = 2
+        assert lm._get_effective_check_interval() == 240
+        lm._consecutive_empty_checks = 3
+        assert lm._get_effective_check_interval() == 300  # capped
+
+    def test_effective_interval_capped_at_max(self):
+        import app.loop_manager as lm
+        lm._consecutive_empty_checks = 10
+        assert lm._get_effective_check_interval() == lm._GITHUB_MAX_CHECK_INTERVAL
+
+    def test_reset_clears_state(self):
+        import app.loop_manager as lm
+        lm._consecutive_empty_checks = 5
+        lm._last_github_check = 999.0
+        lm.reset_github_backoff()
+        assert lm._consecutive_empty_checks == 0
+        assert lm._last_github_check == 0
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_empty_notifications_increments_backoff(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 300}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+            result = process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert result == 0
+        assert lm._consecutive_empty_checks == 1
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_found_notifications_resets_backoff(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        lm._consecutive_empty_checks = 3  # simulate previous backoff
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 300}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        fake_notif = {"id": "1", "subject": {"url": "https://api.github.com/repos/o/r/issues/1"}}
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_command_handler.process_single_notification", return_value=(True, None)):
+            result = process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert result == 1
+        assert lm._consecutive_empty_checks == 0
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_backoff_throttles_subsequent_checks(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 300}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        # First call: succeeds, sets backoff
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+            process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert lm._consecutive_empty_checks == 1
+        # Effective interval is now 120s
+
+        # Second call immediately after: should be throttled (last check was just now)
+        result = process_github_notifications(str(tmp_path), str(tmp_path))
+        assert result == 0
+        # Counter stays at 1 (throttled, didn't actually check)
+        assert lm._consecutive_empty_checks == 1
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_consecutive_empty_checks_accumulate(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 300}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        # Simulate multiple checks by resetting last_check each time
+        for i in range(4):
+            lm._last_github_check = 0  # force past throttle
+            with patch("app.projects_config.load_projects_config", return_value={}), \
+                 patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+                process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert lm._consecutive_empty_checks == 4
+        # After 4 empty: 60 * 2^4 = 960 → capped at 300
+        assert lm._get_effective_check_interval() == 300
+
+    def test_config_disabled_does_not_affect_backoff(self, tmp_path):
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        lm._consecutive_empty_checks = 2
+
+        with patch("app.utils.load_config", return_value={}), \
+             patch("app.loop_manager._load_github_config", return_value=None):
+            result = process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert result == 0
+        # Config disabled = early return, backoff unchanged
+        assert lm._consecutive_empty_checks == 2
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_notifications_with_no_missions_still_resets(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        """Notifications present but all fail to create missions — still resets backoff."""
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        lm._consecutive_empty_checks = 5
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 300}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        fake_notif = {"id": "1", "subject": {"url": "https://api.github.com/repos/o/r/issues/1"}}
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_command_handler.process_single_notification", return_value=(False, "error")), \
+             patch("app.loop_manager._post_error_for_notification"):
+            result = process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert result == 0
+        # Notifications were present (non-empty list), so backoff resets
+        assert lm._consecutive_empty_checks == 0
+
+    def test_exception_does_not_reset_backoff(self, tmp_path):
+        """Exception during check should not touch backoff state."""
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        lm._consecutive_empty_checks = 3
+
+        with patch("app.utils.load_config", side_effect=RuntimeError("boom")):
+            result = process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert result == 0
+        assert lm._consecutive_empty_checks == 3
+
+
 # --- Test CLI interface ---
 
 

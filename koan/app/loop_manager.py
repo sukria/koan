@@ -162,7 +162,10 @@ Mode: {mode}
 
 # Throttle: minimum seconds between GitHub notification checks
 _GITHUB_CHECK_INTERVAL = 60
+# Maximum backoff interval (5 minutes) when notifications are consistently empty
+_GITHUB_MAX_CHECK_INTERVAL = 300
 _last_github_check: float = 0
+_consecutive_empty_checks: int = 0
 
 log = logging.getLogger(__name__)
 
@@ -233,13 +236,31 @@ def _get_known_repos_from_projects(koan_root: str) -> Optional[set]:
     return known_repos or None
 
 
+def _get_effective_check_interval() -> int:
+    """Compute check interval with exponential backoff on consecutive empty results."""
+    if _consecutive_empty_checks <= 0:
+        return _GITHUB_CHECK_INTERVAL
+    return min(
+        _GITHUB_CHECK_INTERVAL * (2 ** _consecutive_empty_checks),
+        _GITHUB_MAX_CHECK_INTERVAL,
+    )
+
+
+def reset_github_backoff() -> None:
+    """Reset backoff state. Useful for tests and when external events suggest activity."""
+    global _last_github_check, _consecutive_empty_checks
+    _last_github_check = 0
+    _consecutive_empty_checks = 0
+
+
 def process_github_notifications(
     koan_root: str,
     instance_dir: str,
 ) -> int:
     """Check GitHub notifications and create missions from @mentions.
 
-    Respects throttling (max once per 60s) and feature toggle.
+    Respects throttling with exponential backoff: starts at 60s between checks,
+    doubles on each empty result (up to 300s), resets on finding notifications.
 
     Args:
         koan_root: Path to koan root directory.
@@ -248,10 +269,11 @@ def process_github_notifications(
     Returns:
         Number of missions created.
     """
-    global _last_github_check
+    global _last_github_check, _consecutive_empty_checks
 
     now = time.time()
-    if now - _last_github_check < _GITHUB_CHECK_INTERVAL:
+    effective_interval = _get_effective_check_interval()
+    if now - _last_github_check < effective_interval:
         return 0
 
     _last_github_check = now
@@ -294,8 +316,18 @@ def process_github_notifications(
                 # Post error reply
                 _post_error_for_notification(notif, error)
 
-        if missions_created > 0:
+        # Update backoff state
+        if missions_created > 0 or notifications:
+            _consecutive_empty_checks = 0
             log.info("GitHub: created %d mission(s) from @mentions", missions_created)
+        else:
+            _consecutive_empty_checks += 1
+            if _consecutive_empty_checks > 1:
+                log.debug(
+                    "GitHub: no notifications (%d consecutive), next check in %ds",
+                    _consecutive_empty_checks,
+                    _get_effective_check_interval(),
+                )
 
         return missions_created
 
