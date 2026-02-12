@@ -438,9 +438,16 @@ def run_startup(koan_root: str, instance: str, projects: list):
             log("error", f"Self-reflection check failed: {e}")
 
     # Start on pause
-    if get_start_on_pause() and not Path(koan_root, ".koan-pause").exists():
-        log("pause", "start_on_pause=true in config. Entering pause mode.")
-        Path(koan_root, ".koan-pause").touch()
+    if get_start_on_pause():
+        # Remove stale reason file to prevent auto-resume from a previous
+        # session's quota/max_runs pause.  Without this, handle_pause() →
+        # check_and_resume() reads the old reason, finds the cooldown
+        # elapsed, and immediately resumes — bypassing start_on_pause.
+        koan_root_path = Path(koan_root)
+        (koan_root_path / ".koan-pause-reason").unlink(missing_ok=True)
+        if not (koan_root_path / ".koan-pause").exists():
+            log("pause", "start_on_pause=true in config. Entering pause mode.")
+            (koan_root_path / ".koan-pause").touch()
 
     # Git identity
     koan_email = os.environ.get("KOAN_EMAIL", "")
