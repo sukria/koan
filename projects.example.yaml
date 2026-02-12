@@ -51,6 +51,23 @@ defaults:
   #   mission: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
   #   chat: ["Read", "Glob", "Grep"]
 
+  # Autonomous mode control — override the quota-based mode decision.
+  # Three options (all optional, can be combined):
+  #
+  # mode:     Absolute lock. Forces this mode regardless of quota/schedule.
+  #           Values: "review", "implement", "deep"
+  #
+  # max_mode: Ceiling. Prevents mode from exceeding this level.
+  #           e.g., max_mode: "review" ensures only review work, even with ample quota.
+  #
+  # min_mode: Floor. Ensures mode never drops below this level.
+  #           e.g., min_mode: "implement" guarantees at least implementation work.
+  #           Note: min_mode does NOT override WAIT (quota exhaustion is a safety limit).
+  #
+  # mode: "review"       # Lock to review-only
+  # max_mode: "implement" # Cap at implement (no deep work)
+  # min_mode: "implement" # At least implement (never just review)
+
 projects:
   # Example: your main project (minimal config — inherits all defaults)
   myapp:
@@ -89,6 +106,7 @@ projects:
   # Example: a read-only repo (audit/review only)
   # vendor-lib:
   #   path: "/Users/yourname/workspace/vendor-lib"
+  #   mode: "review"           # Lock to review mode — never write to vendor code
   #   tools:
   #     mission: ["Read", "Glob", "Grep"]  # Read-only — no modifications
 

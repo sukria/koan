@@ -9,6 +9,7 @@ Provides:
 - get_project_models(config, name) -> dict: Get model overrides for a project
 - get_project_tools(config, name) -> dict: Get tool restrictions for a project
 - get_project_github_authorized_users(config, name) -> list: Get GitHub authorized users
+- get_project_mode_config(config, name) -> dict: Get autonomous mode overrides
 
 File location: projects.yaml at KOAN_ROOT (next to .env).
 """
@@ -17,6 +18,11 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import yaml
+
+
+# Valid autonomous mode values (ordered by intensity)
+_VALID_MODES = ("review", "implement", "deep")
+_MODE_RANK = {m: i for i, m in enumerate(_VALID_MODES)}
 
 
 def load_projects_config(koan_root: str) -> Optional[dict]:
@@ -95,6 +101,38 @@ def _validate_config(config: dict) -> None:
         path = project.get("path")
         if path is not None and (not isinstance(path, str) or not path.strip()):
             raise ValueError(f"Project '{name}' has invalid path: {path!r}")
+
+    # Validate mode fields in defaults and all projects
+    _validate_mode_fields(config.get("defaults") or {}, "defaults")
+    for name, project in projects.items():
+        if isinstance(project, dict):
+            _validate_mode_fields(project, f"project '{name}'")
+
+
+def _validate_mode_fields(section: dict, label: str) -> None:
+    """Validate mode, max_mode, min_mode fields in a config section.
+
+    Raises ValueError on invalid values or min > max constraint violation.
+    """
+    for field in ("mode", "max_mode", "min_mode"):
+        value = section.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, str) or value.strip().lower() not in _VALID_MODES:
+            valid = ", ".join(_VALID_MODES)
+            raise ValueError(
+                f"{label}: invalid {field} '{value}'. Must be one of: {valid}"
+            )
+
+    min_mode = section.get("min_mode")
+    max_mode = section.get("max_mode")
+    if min_mode and max_mode:
+        min_rank = _MODE_RANK.get(min_mode.strip().lower(), 0)
+        max_rank = _MODE_RANK.get(max_mode.strip().lower(), 0)
+        if min_rank > max_rank:
+            raise ValueError(
+                f"{label}: min_mode '{min_mode}' is higher than max_mode '{max_mode}'"
+            )
 
 
 def validate_project_paths(config: dict) -> Optional[str]:
@@ -232,6 +270,31 @@ def get_project_github_authorized_users(config: dict, project_name: str) -> list
     github = project_cfg.get("github", {}) or {}
     users = github.get("authorized_users", [])
     return users if isinstance(users, list) else []
+
+
+def get_project_mode_config(config: dict, project_name: str) -> dict:
+    """Get autonomous mode overrides for a project from projects.yaml.
+
+    Returns a dict with keys:
+        mode: Absolute mode lock (str or None). Bypasses quota/schedule.
+        max_mode: Maximum allowed mode ceiling (str or None).
+        min_mode: Minimum guaranteed mode floor (str or None).
+
+    All values are lowered. None means "no override, use quota-based mode".
+    """
+    project_cfg = get_project_config(config, project_name)
+
+    def _normalize(value):
+        if value is None:
+            return None
+        s = str(value).strip().lower()
+        return s if s in _VALID_MODES else None
+
+    return {
+        "mode": _normalize(project_cfg.get("mode")),
+        "max_mode": _normalize(project_cfg.get("max_mode")),
+        "min_mode": _normalize(project_cfg.get("min_mode")),
+    }
 
 
 def save_projects_config(koan_root: str, config: dict) -> None:

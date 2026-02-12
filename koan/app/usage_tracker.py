@@ -247,6 +247,61 @@ class UsageTracker:
         return f"{mode}:{available:.0f}:{reason}:{project_idx}"
 
 
+_MODE_RANK = {"wait": 0, "review": 1, "implement": 2, "deep": 3}
+
+
+def resolve_mode_with_overrides(
+    quota_mode: str,
+    mode_config: dict,
+) -> tuple:
+    """Apply per-project mode overrides to the quota-based mode.
+
+    Args:
+        quota_mode: Mode from decide_mode() (wait/review/implement/deep)
+        mode_config: Dict with keys mode, max_mode, min_mode (from
+            get_project_mode_config). None values mean "no override".
+
+    Returns:
+        (resolved_mode, reason) tuple. reason explains any override applied.
+    """
+    lock = mode_config.get("mode")
+    max_mode = mode_config.get("max_mode")
+    min_mode = mode_config.get("min_mode")
+
+    # No overrides at all — fast path
+    if not lock and not max_mode and not min_mode:
+        return quota_mode, ""
+
+    # Absolute lock bypasses everything (including WAIT)
+    if lock:
+        if lock != quota_mode:
+            return lock, f"project-locked to {lock}"
+        return quota_mode, ""
+
+    resolved = quota_mode
+
+    # WAIT is a safety mechanism — min_mode does NOT override it
+    if resolved == "wait":
+        return "wait", ""
+
+    # Apply ceiling
+    if max_mode and _MODE_RANK.get(resolved, 0) > _MODE_RANK.get(max_mode, 3):
+        resolved = max_mode
+
+    # Apply floor (only if not WAIT)
+    if min_mode and _MODE_RANK.get(resolved, 0) < _MODE_RANK.get(min_mode, 0):
+        resolved = min_mode
+
+    reason = ""
+    if resolved != quota_mode:
+        if max_mode and _MODE_RANK.get(quota_mode, 0) > _MODE_RANK.get(max_mode, 3):
+            reason = f"capped to {max_mode} (max_mode)"
+        elif min_mode and _MODE_RANK.get(quota_mode, 0) < _MODE_RANK.get(min_mode, 0):
+            reason = f"raised to {min_mode} (min_mode)"
+
+    return resolved, reason
+
+
 def _get_budget_mode() -> str:
     """Read budget_mode from config.yaml → usage.budget_mode.
 

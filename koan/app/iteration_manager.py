@@ -273,6 +273,39 @@ def _check_schedule():
         return None
 
 
+def _apply_project_mode_overrides(
+    project_name: str,
+    current_mode: str,
+    current_reason: str,
+    koan_root: str,
+) -> tuple:
+    """Apply per-project mode overrides from projects.yaml.
+
+    Returns:
+        (resolved_mode, updated_reason) tuple
+    """
+    try:
+        from app.projects_config import load_projects_config, get_project_mode_config
+        from app.usage_tracker import resolve_mode_with_overrides
+
+        config = load_projects_config(koan_root)
+        if config is None:
+            return current_mode, current_reason
+
+        mode_config = get_project_mode_config(config, project_name)
+        resolved, override_reason = resolve_mode_with_overrides(current_mode, mode_config)
+
+        if override_reason:
+            _log_iteration("koan", f"Project mode override for '{project_name}': {override_reason}")
+            updated_reason = f"{current_reason} ({override_reason})"
+            return resolved, updated_reason
+
+        return current_mode, current_reason
+    except Exception as e:
+        _log_iteration("error", f"Project mode override check failed: {e}")
+        return current_mode, current_reason
+
+
 def plan_iteration(
     instance_dir: str,
     koan_root: str,
@@ -397,6 +430,11 @@ def plan_iteration(
         # No mission — autonomous mode
         mission_title = ""
         project_name, project_path = _get_project_by_index(projects, recommended_idx)
+
+    # Step 5b: Apply per-project mode overrides
+    autonomous_mode, decision_reason = _apply_project_mode_overrides(
+        project_name, autonomous_mode, decision_reason, koan_root,
+    )
 
     # Step 6: Determine action for autonomous mode
     action = "mission" if mission_title else "autonomous"
