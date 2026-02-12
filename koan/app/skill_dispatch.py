@@ -31,7 +31,7 @@ from app.github_url_parser import ISSUE_URL_PATTERN, PR_URL_PATTERN
 # Each entry: command_name -> (module_name, arg_builder_function_name)
 _SKILL_RUNNERS = {
     "plan": "app.plan_runner",
-    "implement": "app.implement_runner",
+    "implement": "skills.core.implement.implement_runner",
     "rebase": "app.rebase_pr",
     "recreate": "app.recreate_pr",
     "ai": "app.ai_runner",

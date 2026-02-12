@@ -7,8 +7,8 @@ latest plan comment), ignoring older content, and feeds it to Claude with
 an optional user-provided context (e.g. "Phase 1 to 3").
 
 CLI:
-    python3 -m app.implement_runner --project-path <path> --issue-url <url>
-    python3 -m app.implement_runner --project-path <path> --issue-url <url> --context "Phase 1 to 3"
+    python3 -m skills.core.implement.implement_runner --project-path <path> --issue-url <url>
+    python3 -m skills.core.implement.implement_runner --project-path <path> --issue-url <url> --context "Phase 1 to 3"
 """
 
 import re
@@ -241,9 +241,7 @@ def main(argv=None):
     )
     cli_args = parser.parse_args(argv)
 
-    skill_dir = (
-        Path(__file__).resolve().parent.parent / "skills" / "core" / "implement"
-    )
+    skill_dir = Path(__file__).resolve().parent
 
     success, summary = run_implement(
         project_path=cli_args.project_path,

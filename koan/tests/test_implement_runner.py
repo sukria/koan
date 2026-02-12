@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from app.github import fetch_issue_with_comments
-from app.implement_runner import (
+from skills.core.implement.implement_runner import (
     run_implement,
     _is_plan_content,
     _extract_latest_plan,
@@ -183,7 +183,7 @@ class TestBuildPrompt:
 
 class TestExecuteImplementation:
     def test_passes_correct_run_command_params(self):
-        with patch("app.implement_runner._build_prompt", return_value="prompt"), \
+        with patch("skills.core.implement.implement_runner._build_prompt", return_value="prompt"), \
              patch("app.cli_provider.run_command", return_value="ok") as mock_run:
             result = _execute_implementation(
                 "/project", "url", "t", "p", "c",
@@ -207,7 +207,7 @@ class TestRunImplement:
 
     def test_no_plan_found(self):
         notify = MagicMock()
-        with patch("app.implement_runner.fetch_issue_with_comments",
+        with patch("skills.core.implement.implement_runner.fetch_issue_with_comments",
                     return_value=("Title", "", [])):
             ok, msg = run_implement(
                 "/project",
@@ -220,9 +220,9 @@ class TestRunImplement:
     def test_successful_implementation(self):
         notify = MagicMock()
         body = "### Summary\nPlan\n#### Phase 1: Do it"
-        with patch("app.implement_runner.fetch_issue_with_comments",
+        with patch("skills.core.implement.implement_runner.fetch_issue_with_comments",
                     return_value=("Title", body, [])), \
-             patch("app.implement_runner._execute_implementation",
+             patch("skills.core.implement.implement_runner._execute_implementation",
                     return_value="Done"):
             ok, msg = run_implement(
                 "/project",
@@ -235,9 +235,9 @@ class TestRunImplement:
     def test_with_context(self):
         notify = MagicMock()
         body = "### Summary\nPlan\n#### Phase 1: Do it"
-        with patch("app.implement_runner.fetch_issue_with_comments",
+        with patch("skills.core.implement.implement_runner.fetch_issue_with_comments",
                     return_value=("Title", body, [])), \
-             patch("app.implement_runner._execute_implementation",
+             patch("skills.core.implement.implement_runner._execute_implementation",
                     return_value="Done") as mock_run:
             ok, msg = run_implement(
                 "/project",
@@ -254,7 +254,7 @@ class TestRunImplement:
 
     def test_fetch_failure(self):
         notify = MagicMock()
-        with patch("app.implement_runner.fetch_issue_with_comments",
+        with patch("skills.core.implement.implement_runner.fetch_issue_with_comments",
                     side_effect=RuntimeError("API error")):
             ok, msg = run_implement(
                 "/project",
@@ -267,9 +267,9 @@ class TestRunImplement:
     def test_claude_failure(self):
         notify = MagicMock()
         body = "### Summary\nPlan\n#### Phase 1: Do it"
-        with patch("app.implement_runner.fetch_issue_with_comments",
+        with patch("skills.core.implement.implement_runner.fetch_issue_with_comments",
                     return_value=("Title", body, [])), \
-             patch("app.implement_runner._execute_implementation",
+             patch("skills.core.implement.implement_runner._execute_implementation",
                     side_effect=RuntimeError("Timeout")):
             ok, msg = run_implement(
                 "/project",
@@ -282,9 +282,9 @@ class TestRunImplement:
     def test_empty_claude_output(self):
         notify = MagicMock()
         body = "### Summary\nPlan\n#### Phase 1: Do it"
-        with patch("app.implement_runner.fetch_issue_with_comments",
+        with patch("skills.core.implement.implement_runner.fetch_issue_with_comments",
                     return_value=("Title", body, [])), \
-             patch("app.implement_runner._execute_implementation",
+             patch("skills.core.implement.implement_runner._execute_implementation",
                     return_value=""):
             ok, msg = run_implement(
                 "/project",
@@ -298,9 +298,9 @@ class TestRunImplement:
         """When no context is given, default to 'Implement the full plan.'"""
         notify = MagicMock()
         body = "### Summary\nPlan\n#### Phase 1: Do it"
-        with patch("app.implement_runner.fetch_issue_with_comments",
+        with patch("skills.core.implement.implement_runner.fetch_issue_with_comments",
                     return_value=("Title", body, [])), \
-             patch("app.implement_runner._execute_implementation",
+             patch("skills.core.implement.implement_runner._execute_implementation",
                     return_value="Done") as mock_run:
             run_implement(
                 "/project",
@@ -315,9 +315,9 @@ class TestRunImplement:
         """Verify notification messages are sent correctly."""
         notify = MagicMock()
         body = "### Summary\nPlan\n#### Phase 1: Do it"
-        with patch("app.implement_runner.fetch_issue_with_comments",
+        with patch("skills.core.implement.implement_runner.fetch_issue_with_comments",
                     return_value=("Title", body, [])), \
-             patch("app.implement_runner._execute_implementation",
+             patch("skills.core.implement.implement_runner._execute_implementation",
                     return_value="Done"):
             run_implement(
                 "/project",
@@ -340,7 +340,7 @@ class TestRunImplement:
 
 class TestMain:
     def test_success_exit_code(self):
-        with patch("app.implement_runner.run_implement",
+        with patch("skills.core.implement.implement_runner.run_implement",
                     return_value=(True, "ok")):
             code = main([
                 "--project-path", "/project",
@@ -349,7 +349,7 @@ class TestMain:
             assert code == 0
 
     def test_failure_exit_code(self):
-        with patch("app.implement_runner.run_implement",
+        with patch("skills.core.implement.implement_runner.run_implement",
                     return_value=(False, "failed")):
             code = main([
                 "--project-path", "/project",
@@ -358,7 +358,7 @@ class TestMain:
             assert code == 1
 
     def test_context_arg_passed(self):
-        with patch("app.implement_runner.run_implement",
+        with patch("skills.core.implement.implement_runner.run_implement",
                     return_value=(True, "ok")) as mock:
             main([
                 "--project-path", "/project",
@@ -369,7 +369,7 @@ class TestMain:
             assert kwargs["context"] == "Phase 1 to 3"
 
     def test_context_defaults_to_none(self):
-        with patch("app.implement_runner.run_implement",
+        with patch("skills.core.implement.implement_runner.run_implement",
                     return_value=(True, "ok")) as mock:
             main([
                 "--project-path", "/project",
