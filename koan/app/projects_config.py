@@ -69,6 +69,17 @@ def _validate_config(config: dict) -> None:
     if len(projects) > 50:
         raise ValueError(f"Max 50 projects allowed. You have {len(projects)}.")
 
+    # Check for case-insensitive duplicates
+    seen_lower = {}
+    for name in projects.keys():
+        lower = name.lower()
+        if lower in seen_lower:
+            raise ValueError(
+                f"Duplicate project name (case-insensitive): "
+                f"'{seen_lower[lower]}' and '{name}'"
+            )
+        seen_lower[lower] = name
+
     for name, project in projects.items():
         if not isinstance(name, str):
             raise ValueError(f"Project name must be a string, got: {type(name).__name__}")

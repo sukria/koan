@@ -9,6 +9,7 @@ with the same name.
 
 import logging
 import threading
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -221,6 +222,10 @@ def populate_workspace_github_urls(koan_root: str) -> int:
             
         # Skip if already cached
         if get_github_url(name):
+            continue
+        
+        # Skip non-git directories to avoid timeout
+        if not (Path(path) / ".git").exists():
             continue
             
         # Discover and cache

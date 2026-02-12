@@ -46,4 +46,12 @@ projects:
 
 - Maximum 50 projects total (workspace + yaml combined)
 - Broken symlinks are skipped with a warning
+- Symlink loops are detected and skipped
 - Non-directory files are ignored
+
+## Symlink behavior
+
+- Symlinks are automatically resolved to their real paths
+- Symlinks can point anywhere on the filesystem (outside workspace/)
+- Broken or circular symlinks are silently skipped
+- The project name is the symlink name, not the target directory name

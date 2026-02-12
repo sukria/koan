@@ -52,19 +52,27 @@ def _validate_entry(entry: Path) -> Optional[str]:
         return None
     
     # Skip non-directory files (README.md, etc.)
-    if entry.is_file():
-        return None
+    # Wrapped in try/except for symlink loops where stat() fails
+    try:
+        if entry.is_file():
+            return None
+    except OSError:
+        pass
     
     # Resolve symlinks
     try:
         resolved = entry.resolve()
-    except OSError as e:
+    except (OSError, RuntimeError) as e:
         logger.warning("Workspace: cannot resolve '%s': %s", name, e)
         return None
     
     # Validate target is a directory
-    if not resolved.is_dir():
-        logger.warning("Workspace: '%s' points to non-directory: %s", name, resolved)
+    try:
+        if not resolved.is_dir():
+            logger.warning("Workspace: '%s' points to non-directory: %s", name, resolved)
+            return None
+    except OSError as e:
+        logger.warning("Workspace: cannot stat '%s': %s", name, e)
         return None
     
     return str(resolved)

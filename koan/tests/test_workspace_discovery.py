@@ -66,6 +66,20 @@ def test_broken_symlinks_skipped(workspace):
     assert result[0][0] == "good"
 
 
+def test_symlink_loops_skipped(workspace):
+    """Symlink loops are skipped without crashing."""
+    ws = workspace / "workspace"
+    link1 = ws / "loop1"
+    link2 = ws / "loop2"
+    link1.symlink_to(link2)
+    link2.symlink_to(link1)
+    (ws / "good").mkdir()
+
+    result = discover_workspace_projects(str(workspace))
+    assert len(result) == 1
+    assert result[0][0] == "good"
+
+
 def test_hidden_directories_skipped(workspace):
     """Directories starting with . are skipped."""
     ws = workspace / "workspace"
