@@ -16,7 +16,7 @@ This launches a web-based wizard that guides you through Telegram setup, project
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - Python 3.8+
-- A Telegram account (for the Telegram bridge)
+- A Telegram account or a Slack workspace (for messaging)
 
 ## Recommended
 
@@ -49,22 +49,16 @@ cp -r instance.example instance
 
 The `instance/` directory is your private data — it's gitignored and never pushed to the Kōan repo. You can version it in a separate private repo if you want persistence.
 
-### 2. Create a Telegram bot
+### 2. Set up a messaging platform
 
-1. Open Telegram, message [@BotFather](https://t.me/BotFather)
-2. Send `/newbot`, follow the prompts (choose a display name, then a username ending in `Bot`)
-3. BotFather gives you an HTTP API token — copy it and store it safely
-4. Open a chat with your new bot in Telegram and send any message (e.g. "hello")
-5. Get your chat ID:
+Kōan supports **Telegram** (default) and **Slack** for communication. Follow the setup guide for your preferred platform:
 
-```bash
-# Replace YOUR_TOKEN with your actual bot token
-curl -s "https://api.telegram.org/botYOUR_TOKEN/getUpdates" | python3 -m json.tool
-```
+| Platform | Setup Guide | Best For |
+|----------|-------------|----------|
+| **Telegram** (default) | [docs/messaging-telegram.md](docs/messaging-telegram.md) | Quick setup, works from any network |
+| **Slack** | [docs/messaging-slack.md](docs/messaging-slack.md) | Team collaboration, workspace integration |
 
-Look for `"chat": {"id": 123456789, ...}` in the response — that number is your chat ID.
-
-> **Security note:** Your bot token grants full control of the bot. Never commit it to a public repo. If you accidentally leak it, revoke it immediately with `/revoke` in BotFather.
+Both platforms are fully supported with the same feature set. Telegram is recommended for personal use (simpler setup), while Slack is ideal for team environments.
 
 ### 3. Set environment variables
 
@@ -72,14 +66,23 @@ Look for `"chat": {"id": 123456789, ...}` in the response — that number is you
 cp env.example .env
 ```
 
-Edit `.env` and fill in the **required** Telegram credentials:
+Edit `.env` and fill in the credentials for your chosen messaging provider.
 
+**For Telegram:**
 ```bash
 KOAN_TELEGRAM_TOKEN=123456789:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
 KOAN_TELEGRAM_CHAT_ID=987654321
 ```
 
-The `.env` file is gitignored — your secrets stay local.
+**For Slack:**
+```bash
+KOAN_MESSAGING_PROVIDER=slack
+KOAN_SLACK_BOT_TOKEN=xoxb-your-bot-token
+KOAN_SLACK_APP_TOKEN=xapp-your-app-token
+KOAN_SLACK_CHANNEL_ID=C01234ABCD
+```
+
+The `.env` file is gitignored — your secrets stay local. See the provider-specific setup guides above for detailed instructions on obtaining these credentials.
 
 ### 4. Configure projects
 
@@ -171,11 +174,17 @@ Your `missions.md` file references a project name that doesn't match your config
 1. Remove project tags from missions: `- My task` instead of `- [project:example] My task`
 2. Or ensure the project name matches your `projects.yaml` config
 
-### Telegram bot not responding
+### Messaging provider not responding
 
+**For Telegram:**
 1. Verify your token: `curl "https://api.telegram.org/botYOUR_TOKEN/getMe"` should return your bot info
 2. Verify your chat ID: Make sure `KOAN_TELEGRAM_CHAT_ID` matches the ID from the `getUpdates` call
 3. Check `make awake` is running without errors
+
+**For Slack:**
+1. Verify Socket Mode is enabled and the app token starts with `xapp-`
+2. Check that the bot is invited to the channel (`/invite @koan`)
+3. Review the logs for connection errors (`make logs`)
 
 ### Claude CLI errors
 
@@ -231,12 +240,23 @@ Alternatively: **System Settings → Energy → Prevent automatic sleeping when 
 
 ## Environment Variables Reference
 
-### Required
+### Required (Provider-Specific)
+
+**For Telegram** (default):
 
 | Variable | Description |
 |----------|-------------|
 | `KOAN_TELEGRAM_TOKEN` | Telegram bot token from @BotFather |
 | `KOAN_TELEGRAM_CHAT_ID` | Your Telegram chat ID |
+
+**For Slack**:
+
+| Variable | Description |
+|----------|-------------|
+| `KOAN_MESSAGING_PROVIDER` | Must be set to `slack` |
+| `KOAN_SLACK_BOT_TOKEN` | Bot User OAuth Token (starts with `xoxb-`) |
+| `KOAN_SLACK_APP_TOKEN` | App-Level Token (starts with `xapp-`) |
+| `KOAN_SLACK_CHANNEL_ID` | Channel ID where Kōan operates |
 
 > **Note:** Project paths are configured in `projects.yaml` (see step 4 above). The `KOAN_PROJECTS` env var is supported as a fallback.
 
