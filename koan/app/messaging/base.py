@@ -1,0 +1,92 @@
+"""Base classes for messaging providers.
+
+Defines the contract that all messaging providers must implement.
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class Message:
+    """Provider-agnostic message representation."""
+    text: str
+    role: str  # "user" or "assistant"
+    timestamp: str = ""
+    raw_data: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Update:
+    """Provider-agnostic update from polling."""
+    update_id: int
+    message: Optional[Message] = None
+    raw_data: Dict[str, Any] = field(default_factory=dict)
+
+
+class MessagingProvider(ABC):
+    """Abstract base class for messaging providers.
+
+    Each provider must implement send/receive operations and credential
+    validation. The provider is initialized once at startup and used
+    as a singleton throughout the process lifetime.
+    """
+
+    @abstractmethod
+    def send_message(self, text: str) -> bool:
+        """Send a message with provider-specific chunking.
+
+        Args:
+            text: Message text to send
+
+        Returns:
+            True if all chunks sent successfully
+        """
+
+    @abstractmethod
+    def poll_updates(self, offset: Optional[int] = None) -> List[Update]:
+        """Fetch new messages since the given offset.
+
+        Args:
+            offset: Provider-specific offset for pagination
+
+        Returns:
+            List of new updates (may be empty)
+        """
+
+    @abstractmethod
+    def get_provider_name(self) -> str:
+        """Return the provider identifier (e.g., 'telegram', 'slack')."""
+
+    @abstractmethod
+    def get_channel_id(self) -> str:
+        """Return the active channel/chat identifier."""
+
+    @abstractmethod
+    def configure(self) -> bool:
+        """Validate credentials at startup.
+
+        Returns:
+            True if configuration is valid
+
+        Should print clear error messages to stderr if credentials are missing.
+        """
+
+    def chunk_message(self, text: str, max_size: int = 4000) -> List[str]:
+        """Split a message into chunks respecting the provider's size limit.
+
+        Note: This is a simple character-based chunking. It does not
+        preserve word boundaries. Providers can override this method
+        if they need smarter chunking logic.
+
+        Args:
+            text: Full message text
+            max_size: Maximum characters per chunk
+
+        Returns:
+            List of text chunks (at least one, even for empty text)
+        """
+        if len(text) <= max_size:
+            return [text]
+        return [text[i:i + max_size] for i in range(0, len(text), max_size)]
