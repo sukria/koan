@@ -237,6 +237,33 @@ class TestBuildSkillCommand:
         cmd = self._build("unknown_skill", "args")
         assert cmd is None
 
+    def test_implement_with_issue_url(self):
+        url = "https://github.com/sukria/koan/issues/42"
+        cmd = self._build("implement", url)
+        assert cmd is not None
+        assert "app.implement_runner" in cmd
+        assert "--issue-url" in cmd
+        assert url in cmd
+        assert "--project-path" in cmd
+
+    def test_implement_with_context(self):
+        url = "https://github.com/sukria/koan/issues/42"
+        cmd = self._build("implement", f"{url} Phase 1 to 3")
+        assert cmd is not None
+        assert "--issue-url" in cmd
+        assert url in cmd
+        assert "--context" in cmd
+        assert "Phase 1 to 3" in cmd
+
+    def test_implement_no_url(self):
+        cmd = self._build("implement", "just some text")
+        assert cmd is None
+
+    def test_implement_url_only_no_context(self):
+        url = "https://github.com/sukria/koan/issues/99"
+        cmd = self._build("implement", url)
+        assert "--context" not in cmd
+
     def test_python_path(self):
         """Commands should use the venv python."""
         cmd = self._build("plan", "test idea")
@@ -290,6 +317,19 @@ class TestDispatchSkillMission:
         cmd = self._dispatch("/claudemd koan")
         assert cmd is not None
         assert "app.claudemd_refresh" in cmd
+
+    def test_implement_dispatch(self):
+        cmd = self._dispatch("/implement https://github.com/sukria/koan/issues/42")
+        assert cmd is not None
+        assert "app.implement_runner" in cmd
+        assert "--issue-url" in cmd
+
+    def test_implement_dispatch_with_context(self):
+        cmd = self._dispatch("/implement https://github.com/sukria/koan/issues/42 Phase 1 to 3")
+        assert cmd is not None
+        assert "app.implement_runner" in cmd
+        assert "--context" in cmd
+        assert "Phase 1 to 3" in cmd
 
     def test_regular_mission_returns_none(self):
         cmd = self._dispatch("Fix the login bug")

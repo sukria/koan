@@ -24,11 +24,14 @@ import os
 import re
 from typing import List, Optional, Tuple
 
+from app.github_url_parser import ISSUE_URL_PATTERN, PR_URL_PATTERN
+
 
 # Mapping of skill command names to their CLI runner modules.
 # Each entry: command_name -> (module_name, arg_builder_function_name)
 _SKILL_RUNNERS = {
     "plan": "app.plan_runner",
+    "implement": "app.implement_runner",
     "rebase": "app.rebase_pr",
     "recreate": "app.recreate_pr",
     "ai": "app.ai_runner",
@@ -39,19 +42,12 @@ _SKILL_RUNNERS = {
     "claude_md": "app.claudemd_refresh",
 }
 
-# PR URL pattern
-_PR_URL_RE = re.compile(
-    r"https?://github\.com/[^/]+/[^/]+/pull/\d+"
-)
-
-# Issue URL pattern
-_ISSUE_URL_RE = re.compile(
-    r"https?://github\.com/[^/]+/[^/]+/issues/\d+"
-)
-
-
 _PROJECT_TAG_RE = re.compile(r"^\[projec?t:([a-zA-Z0-9_-]+)\]\s*")
 _PROJECT_WORD_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+# Compiled patterns for URL matching
+_PR_URL_RE = re.compile(PR_URL_PATTERN)
+_ISSUE_URL_RE = re.compile(ISSUE_URL_PATTERN)
 
 
 def _is_known_project(name: str) -> bool:
@@ -195,6 +191,8 @@ def build_skill_command(
 
     if command == "plan":
         return _build_plan_cmd(base_cmd, args, project_path)
+    elif command == "implement":
+        return _build_implement_cmd(base_cmd, args, project_path)
     elif command in ("rebase", "recreate"):
         return _build_pr_url_cmd(base_cmd, args, project_path)
     elif command == "ai":
@@ -207,6 +205,25 @@ def build_skill_command(
     return None
 
 
+def _extract_issue_url_and_context(args: str) -> Optional[Tuple[str, str]]:
+    """Extract issue URL and remaining context from arguments.
+    
+    Args:
+        args: Argument string potentially containing an issue URL.
+        
+    Returns:
+        Tuple of (issue_url, context) or None if no URL found.
+        Context is the text after the URL, stripped.
+    """
+    issue_match = _ISSUE_URL_RE.search(args)
+    if not issue_match:
+        return None
+    
+    issue_url = issue_match.group(0)
+    context = args[issue_match.end():].strip()
+    return issue_url, context
+
+
 def _build_plan_cmd(
     base_cmd: List[str], args: str, project_path: str,
 ) -> List[str]:
@@ -214,11 +231,36 @@ def _build_plan_cmd(
     cmd = base_cmd + ["--project-path", project_path]
 
     # Detect issue URL vs free-text idea
-    issue_match = _ISSUE_URL_RE.search(args)
-    if issue_match:
-        cmd.extend(["--issue-url", issue_match.group(0)])
+    url_and_context = _extract_issue_url_and_context(args)
+    if url_and_context:
+        issue_url, _ = url_and_context
+        cmd.extend(["--issue-url", issue_url])
     else:
         cmd.extend(["--idea", args])
+
+    return cmd
+
+
+def _build_implement_cmd(
+    base_cmd: List[str], args: str, project_path: str,
+) -> Optional[List[str]]:
+    """Build implement_runner command.
+
+    Expects an issue URL and optional context text after it.
+    Example args: "https://github.com/o/r/issues/42 Phase 1 to 3"
+    """
+    url_and_context = _extract_issue_url_and_context(args)
+    if not url_and_context:
+        return None
+    
+    issue_url, context = url_and_context
+    cmd = base_cmd + [
+        "--project-path", project_path,
+        "--issue-url", issue_url,
+    ]
+
+    if context:
+        cmd.extend(["--context", context])
 
     return cmd
 
