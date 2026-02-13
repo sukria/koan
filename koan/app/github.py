@@ -5,6 +5,7 @@ subprocess plumbing.  Auth is handled externally by ``github_auth.py``
 which sets ``GH_TOKEN`` — this module has no auth logic.
 """
 
+import json
 import subprocess
 
 
@@ -106,3 +107,45 @@ def api(endpoint, method="GET", jq=None, input_data=None, cwd=None,
         args.extend(["-F", "body=@-"])
 
     return run_gh(*args, cwd=cwd, stdin_data=input_data)
+
+
+def fetch_issue_with_comments(owner, repo, issue_number):
+    """Fetch issue title, body and comments via gh API.
+
+    Args:
+        owner: Repository owner.
+        repo: Repository name.
+        issue_number: Issue number (as string or int).
+
+    Returns:
+        Tuple of (title, body, comments) where comments is a list of dicts
+        with keys: author, date, body.
+
+    Raises:
+        RuntimeError: If the gh API call fails.
+    """
+    issue_json = api(
+        f"repos/{owner}/{repo}/issues/{issue_number}",
+        jq='{"title": .title, "body": .body}',
+    )
+    try:
+        data = json.loads(issue_json)
+        title = data.get("title", "")
+        body = data.get("body", "")
+    except (json.JSONDecodeError, TypeError):
+        title = ""
+        body = issue_json
+
+    comments_json = api(
+        f"repos/{owner}/{repo}/issues/{issue_number}/comments",
+        jq='[.[] | {author: .user.login, date: .created_at, body: .body}]',
+    )
+
+    try:
+        comments = json.loads(comments_json)
+        if not isinstance(comments, list):
+            comments = []
+    except (json.JSONDecodeError, TypeError):
+        comments = []
+
+    return title, body, comments
