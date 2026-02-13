@@ -22,7 +22,7 @@ def _make_ctx(instance_dir, send_message=None):
     return ctx
 
 
-_P_SUB = "skills.core.sparring.handler.subprocess"
+_P_SUB = "app.cli_exec.run_cli"
 _P_PROMPT = "app.prompts.load_skill_prompt"
 _P_MODEL = "app.config.get_fast_reply_model"
 _P_SAVE = "app.conversation_history.save_conversation_message"
@@ -43,7 +43,7 @@ class TestSparringContextLoading:
         instance = tmp_path / "instance"
         instance.mkdir()
         (instance / "soul.md").write_text("I am Kōan.")
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response text")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response text")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -58,7 +58,7 @@ class TestSparringContextLoading:
         """Missing soul.md = empty string, no crash."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -76,7 +76,7 @@ class TestSparringContextLoading:
         global_dir = instance / "memory" / "global"
         global_dir.mkdir(parents=True)
         (global_dir / "strategy.md").write_text("Focus on koan first.")
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -94,7 +94,7 @@ class TestSparringContextLoading:
         global_dir = instance / "memory" / "global"
         global_dir.mkdir(parents=True)
         (global_dir / "emotional-memory.md").write_text("x" * 2000)
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -112,7 +112,7 @@ class TestSparringContextLoading:
         global_dir = instance / "memory" / "global"
         global_dir.mkdir(parents=True)
         (global_dir / "human-preferences.md").write_text("Prefers French.")
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -131,7 +131,7 @@ class TestSparringContextLoading:
             "# Missions\n\n## Pending\n\n- task A\n- task B\n\n"
             "## In Progress\n\n- active task\n\n## Done\n"
         )
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -147,7 +147,7 @@ class TestSparringContextLoading:
         """Missing missions.md = empty RECENT_MISSIONS."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -165,7 +165,7 @@ class TestSparringContextLoading:
         (instance / "missions.md").write_text(
             "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n- old\n"
         )
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -189,7 +189,7 @@ class TestSparringTimeHint:
         instance = tmp_path / "instance"
         instance.mkdir()
         mock_dt.now.return_value.hour = 9
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -205,7 +205,7 @@ class TestSparringTimeHint:
         instance = tmp_path / "instance"
         instance.mkdir()
         mock_dt.now.return_value.hour = 23
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -221,7 +221,7 @@ class TestSparringTimeHint:
         instance = tmp_path / "instance"
         instance.mkdir()
         mock_dt.now.return_value.hour = 14
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -237,7 +237,7 @@ class TestSparringTimeHint:
         instance = tmp_path / "instance"
         instance.mkdir()
         mock_dt.now.return_value.hour = 19
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -260,12 +260,12 @@ class TestSparringClaudeCall:
         """Claude is called with -p and --max-turns 1."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
 
-        cmd = mock_sub.run.call_args[0][0]
+        cmd = mock_sub.call_args[0][0]
         assert cmd[0] == "claude"
         assert "-p" in cmd
         assert "--max-turns" in cmd
@@ -278,12 +278,12 @@ class TestSparringClaudeCall:
         """When fast_reply_model is set, --model flag is added."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
 
-        cmd = mock_sub.run.call_args[0][0]
+        cmd = mock_sub.call_args[0][0]
         assert "--model" in cmd
         model_idx = cmd.index("--model")
         assert cmd[model_idx + 1] == "haiku"
@@ -295,12 +295,12 @@ class TestSparringClaudeCall:
         """When no fast_reply_model, no --model flag."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
 
-        cmd = mock_sub.run.call_args[0][0]
+        cmd = mock_sub.call_args[0][0]
         assert "--model" not in cmd
 
     @patch(_P_SUB)
@@ -310,12 +310,12 @@ class TestSparringClaudeCall:
         """Subprocess is called with timeout=60."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
 
-        kwargs = mock_sub.run.call_args[1]
+        kwargs = mock_sub.call_args[1]
         assert kwargs["timeout"] == 60
 
 
@@ -334,7 +334,7 @@ class TestSparringResponse:
         """Successful Claude output is returned."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Deep thought here")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Deep thought here")
 
         from skills.core.sparring.handler import handle
         result = handle(_make_ctx(instance))
@@ -348,7 +348,7 @@ class TestSparringResponse:
         """Bold and code block markers are removed from response."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(
+        mock_sub.return_value = MagicMock(
             returncode=0, stdout="**Bold** and ```code```"
         )
 
@@ -366,7 +366,7 @@ class TestSparringResponse:
         """Response is saved to telegram history."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Deep thought")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Deep thought")
 
         from skills.core.sparring.handler import handle
         handle(_make_ctx(instance))
@@ -383,7 +383,7 @@ class TestSparringResponse:
         """Non-zero exit code returns a fallback message."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(
+        mock_sub.return_value = MagicMock(
             returncode=1, stdout="", stderr="error"
         )
 
@@ -398,7 +398,7 @@ class TestSparringResponse:
         """Empty stdout returns fallback even with exit 0."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="  ")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="  ")
 
         from skills.core.sparring.handler import handle
         result = handle(_make_ctx(instance))
@@ -410,7 +410,7 @@ class TestSparringResponse:
         """Subprocess timeout returns a timeout message."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        with patch(_P_SUB + ".run", side_effect=subprocess.TimeoutExpired("claude", 60)):
+        with patch(_P_SUB, side_effect=subprocess.TimeoutExpired("claude", 60)):
             from skills.core.sparring.handler import handle
             result = handle(_make_ctx(instance))
         assert "Timeout" in result
@@ -421,7 +421,7 @@ class TestSparringResponse:
         """Generic exception returns error message."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        with patch(_P_SUB + ".run", side_effect=RuntimeError("something broke")):
+        with patch(_P_SUB, side_effect=RuntimeError("something broke")):
             from skills.core.sparring.handler import handle
             result = handle(_make_ctx(instance))
         assert "Error" in result
@@ -441,7 +441,7 @@ class TestSparringNotification:
         """Sends a thinking notification when send_message is available."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
         send = MagicMock()
 
         from skills.core.sparring.handler import handle
@@ -457,7 +457,7 @@ class TestSparringNotification:
         """No send_message function = no notification, no crash."""
         instance = tmp_path / "instance"
         instance.mkdir()
-        mock_sub.run.return_value = MagicMock(returncode=0, stdout="Response")
+        mock_sub.return_value = MagicMock(returncode=0, stdout="Response")
 
         from skills.core.sparring.handler import handle
         ctx = _make_ctx(instance, send_message=None)

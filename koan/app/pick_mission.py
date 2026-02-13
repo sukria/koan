@@ -62,9 +62,10 @@ def call_claude(prompt: str) -> str:
         max_turns=1,
         output_format="json",
     )
-    result = subprocess.run(
+    from app.cli_exec import run_cli
+
+    result = run_cli(
         cmd,
-        stdin=subprocess.DEVNULL,
         cwd=koan_root if koan_root else None,
         capture_output=True,
         text=True,

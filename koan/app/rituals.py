@@ -63,14 +63,15 @@ def run_ritual(ritual_type: str, instance_dir: Path) -> bool:
         return False
 
     try:
+        from app.cli_exec import run_cli
+
         cmd = build_full_command(
             prompt=prompt,
             allowed_tools=["Read", "Write", "Glob"],
             max_turns=7,
         )
-        result = subprocess.run(
+        result = run_cli(
             cmd,
-            stdin=subprocess.DEVNULL,
             cwd=koan_root,
             capture_output=True, text=True, timeout=90,
             check=False

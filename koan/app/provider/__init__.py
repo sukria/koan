@@ -204,9 +204,10 @@ def run_command(
         max_turns=max_turns,
     )
 
-    result = subprocess.run(
+    from app.cli_exec import run_cli
+
+    result = run_cli(
         cmd,
-        stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=timeout,
         cwd=project_path,
     )

@@ -60,7 +60,8 @@ def handle(ctx):
             max_turns=1,
             model=fast_model or "",
         )
-        result = subprocess.run(
+        from app.cli_exec import run_cli
+        result = run_cli(
             cmd,
             capture_output=True, text=True, timeout=90,
             cwd=path,

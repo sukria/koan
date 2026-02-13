@@ -71,7 +71,7 @@ class TestFallbackFormat:
 
 
 class TestFormatForTelegram:
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_returns_claude_output_on_success(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="Voici le résumé formaté.\n", stderr=""
@@ -80,7 +80,7 @@ class TestFormatForTelegram:
         assert result == "Voici le résumé formaté."
         mock_run.assert_called_once()
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_strips_markdown_from_claude_output(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="**bold** and ```code``` and __under__ and ~~strike~~", stderr=""
@@ -91,7 +91,7 @@ class TestFormatForTelegram:
         assert "__" not in result
         assert "~~" not in result
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_fallback_on_nonzero_returncode(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="error"
@@ -101,7 +101,7 @@ class TestFormatForTelegram:
         assert "#" not in result
         assert "Raw content" in result
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_fallback_on_empty_stdout(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="  \n  ", stderr=""
@@ -109,19 +109,19 @@ class TestFormatForTelegram:
         result = format_message("Some raw content", "soul", "")
         assert "Some raw content" in result
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_fallback_on_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=30)
         result = format_message("Raw", "soul", "")
         assert result == "Raw"
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_fallback_on_exception(self, mock_run):
         mock_run.side_effect = FileNotFoundError("claude not found")
         result = format_message("Raw", "soul", "")
         assert result == "Raw"
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_prompt_includes_soul_and_prefs(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         format_message("content", "my-soul", "my-prefs")
@@ -130,7 +130,7 @@ class TestFormatForTelegram:
         assert "my-soul" in prompt
         assert "my-prefs" in prompt
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_prompt_omits_prefs_when_empty(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         format_message("content", "soul", "")
@@ -138,7 +138,7 @@ class TestFormatForTelegram:
         prompt = call_args[2]
         assert "Human preferences:" not in prompt
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_prompt_includes_memory_context(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         format_message("content", "soul", "prefs", memory_context="Session 61: tests")
@@ -147,7 +147,7 @@ class TestFormatForTelegram:
         assert "Session 61: tests" in prompt
         assert "Recent memory context" in prompt
 
-    @patch("app.format_outbox.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_prompt_omits_memory_when_empty(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         format_message("content", "soul", "prefs", memory_context="")

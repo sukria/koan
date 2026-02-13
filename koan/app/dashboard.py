@@ -266,6 +266,8 @@ def chat_page():
 @app.route("/chat/send", methods=["POST"])
 def chat_send():
     """Send a message — either as mission or direct outbox message."""
+    from app.cli_exec import run_cli
+
     text = request.form.get("message", "").strip()
     mode = request.form.get("mode", "chat")  # chat or mission
 
@@ -302,7 +304,7 @@ def chat_send():
         )
 
         try:
-            result = subprocess.run(
+            result = run_cli(
                 cmd,
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=project_path,
@@ -329,7 +331,7 @@ def chat_send():
                 max_turns=1,
             )
             try:
-                result = subprocess.run(
+                result = run_cli(
                     lite_cmd,
                     capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                     cwd=project_path,

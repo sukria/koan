@@ -26,13 +26,13 @@ from app.claude_step import (
 class TestRunGit:
     """Tests for _run_git helper."""
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_success_returns_stdout(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="  abc123  \n")
         result = _run_git(["git", "rev-parse", "HEAD"])
         assert result == "abc123"
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_failure_raises(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=128, stderr="fatal: not a git repo"
@@ -40,7 +40,7 @@ class TestRunGit:
         with pytest.raises(RuntimeError, match="git failed"):
             _run_git(["git", "status"])
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_passes_cwd_and_timeout(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="ok")
         _run_git(["git", "status"], cwd="/tmp/test", timeout=30)
@@ -53,7 +53,7 @@ class TestRunGit:
             cwd="/tmp/test",
         )
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_error_message_truncates_stderr(self, mock_run):
         long_stderr = "x" * 500
         mock_run.return_value = MagicMock(returncode=1, stderr=long_stderr)
@@ -140,7 +140,7 @@ class TestRebaseOntoTarget:
             ["git", "fetch", "origin", "main"], cwd="/project"
         )
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     @patch("app.claude_step._run_git")
     def test_origin_fails_upstream_succeeds(self, mock_git, mock_subprocess):
         def side_effect(cmd, **kwargs):
@@ -152,14 +152,14 @@ class TestRebaseOntoTarget:
         result = _rebase_onto_target("main", "/project")
         assert result == "upstream"
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     @patch("app.claude_step._run_git")
     def test_both_fail_returns_none(self, mock_git, mock_subprocess):
         mock_git.side_effect = RuntimeError("fail")
         result = _rebase_onto_target("main", "/project")
         assert result is None
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     @patch("app.claude_step._run_git")
     def test_rebase_abort_called_on_failure(self, mock_git, mock_subprocess):
         mock_git.side_effect = RuntimeError("conflict")
@@ -179,7 +179,7 @@ class TestRebaseOntoTarget:
 class TestRunClaude:
     """Tests for run_claude — CLI invocation wrapper."""
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_success(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="  done  \n", stderr=""
@@ -189,7 +189,7 @@ class TestRunClaude:
         assert result["output"] == "done"
         assert result["error"] == ""
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_failure_with_stderr(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=1, stdout="partial", stderr="something broke"
@@ -199,7 +199,7 @@ class TestRunClaude:
         assert "Exit code 1" in result["error"]
         assert "something broke" in result["error"]
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_failure_no_stderr(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=1, stdout="", stderr=""
@@ -208,7 +208,7 @@ class TestRunClaude:
         assert result["success"] is False
         assert "no stderr" in result["error"]
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=600)
         result = run_claude(["claude", "-p", "test"], "/project")
@@ -216,20 +216,15 @@ class TestRunClaude:
         assert "Timeout" in result["error"]
         assert "600" in result["error"]
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_custom_timeout(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
         run_claude(["claude", "-p", "test"], "/project", timeout=120)
-        mock_run.assert_called_once_with(
-            ["claude", "-p", "test"],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd="/project",
-        )
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["timeout"] == 120
+        assert call_kwargs["cwd"] == "/project"
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_long_stderr_truncated(self, mock_run):
         long_err = "E" * 1000
         mock_run.return_value = MagicMock(
@@ -247,7 +242,7 @@ class TestCommitIfChanges:
     """Tests for commit_if_changes."""
 
     @patch("app.claude_step._run_git")
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_no_changes_returns_false(self, mock_run, mock_git):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
         result = commit_if_changes("/project", "test msg")
@@ -256,7 +251,7 @@ class TestCommitIfChanges:
         mock_git.assert_not_called()
 
     @patch("app.claude_step._run_git")
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_with_changes_commits(self, mock_run, mock_git):
         mock_run.return_value = MagicMock(
             stdout=" M file.py\n", returncode=0
@@ -270,7 +265,7 @@ class TestCommitIfChanges:
         )
 
     @patch("app.claude_step._run_git")
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.subprocess.run")
     def test_whitespace_only_status_is_no_changes(self, mock_run, mock_git):
         mock_run.return_value = MagicMock(stdout="   \n  ", returncode=0)
         result = commit_if_changes("/project", "msg")

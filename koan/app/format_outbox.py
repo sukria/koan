@@ -161,12 +161,12 @@ def format_message(raw_content: str, soul: str, prefs: str,
         print("[format_outbox] KOAN_ROOT not set, using current directory", file=sys.stderr)
 
     try:
-        # Call CLI to format the message (lightweight model)
+        from app.cli_exec import run_cli
+
         models = get_model_config()
         cmd = build_full_command(prompt=prompt, model=models["lightweight"])
-        result = subprocess.run(
+        result = run_cli(
             cmd,
-            stdin=subprocess.DEVNULL,
             cwd=koan_root,
             capture_output=True,
             text=True,

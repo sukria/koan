@@ -79,10 +79,11 @@ def run_claude(cmd: list, cwd: str, timeout: int = 600) -> dict:
     Returns:
         Dict with keys: success (bool), output (str), error (str).
     """
+    from app.cli_exec import run_cli
+
     try:
-        result = subprocess.run(
+        result = run_cli(
             cmd,
-            stdin=subprocess.DEVNULL,
             capture_output=True, text=True,
             timeout=timeout, cwd=cwd,
         )

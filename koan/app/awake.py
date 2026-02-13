@@ -306,6 +306,8 @@ def handle_chat(text: str):
     Uses restricted tools (Read/Glob/Grep by default) to prevent prompt
     injection attacks via Telegram messages. No Bash, Edit, or Write access.
     """
+    from app.cli_exec import run_cli
+
     # Save user message to history
     save_conversation_message(CONVERSATION_HISTORY_FILE, "user", text)
 
@@ -322,9 +324,8 @@ def handle_chat(text: str):
     )
 
     try:
-        result = subprocess.run(
+        result = run_cli(
             cmd,
-            stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )
@@ -353,9 +354,8 @@ def handle_chat(text: str):
             max_turns=1,
         )
         try:
-            result = subprocess.run(
+            result = run_cli(
                 lite_cmd,
-                stdin=subprocess.DEVNULL,
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=PROJECT_PATH or str(KOAN_ROOT),
             )

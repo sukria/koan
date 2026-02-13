@@ -117,11 +117,11 @@ def run_reflection(instance_dir: Path) -> str:
 
     try:
         from app.claude_step import strip_cli_noise
+        from app.cli_exec import run_cli
 
         cmd = build_full_command(prompt=prompt, max_turns=1)
-        result = subprocess.run(
+        result = run_cli(
             cmd,
-            stdin=subprocess.DEVNULL,
             cwd=koan_root if koan_root else None,
             capture_output=True, text=True, timeout=60,
             check=False

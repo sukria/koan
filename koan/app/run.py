@@ -282,10 +282,11 @@ def run_claude_task(
     _sig.task_running = True
     _sig.first_ctrl_c = 0
 
+    from app.cli_exec import popen_cli
+
     with open(stdout_file, "w") as out_f, open(stderr_file, "w") as err_f:
-        proc = subprocess.Popen(
+        proc, cleanup = popen_cli(
             cmd,
-            stdin=subprocess.DEVNULL,
             stdout=out_f,
             stderr=err_f,
             cwd=cwd,
@@ -293,23 +294,26 @@ def run_claude_task(
         )
         _sig.claude_proc = proc
 
-        # Wait for child, handling SIGINT interruptions gracefully
-        while True:
-            try:
-                proc.wait()
-                break
-            except (KeyboardInterrupt, InterruptedError):
-                # If task_running was cleared by on_sigint (double-tap),
-                # the child was terminated — wait for it to finish
-                if not _sig.task_running:
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait()
+        try:
+            # Wait for child, handling SIGINT interruptions gracefully
+            while True:
+                try:
+                    proc.wait()
                     break
-                # Single CTRL-C — keep waiting
-                continue
+                except (KeyboardInterrupt, InterruptedError):
+                    # If task_running was cleared by on_sigint (double-tap),
+                    # the child was terminated — wait for it to finish
+                    if not _sig.task_running:
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait()
+                        break
+                    # Single CTRL-C — keep waiting
+                    continue
+        finally:
+            cleanup()
 
     exit_code = proc.returncode
     _sig.claude_proc = None

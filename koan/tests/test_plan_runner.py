@@ -331,7 +331,7 @@ class TestRunIssuePlan:
 # ---------------------------------------------------------------------------
 
 class TestGeneratePlan:
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_returns_claude_output(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="## Plan\n\nStep 1", stderr=""
@@ -345,7 +345,7 @@ class TestGeneratePlan:
             result = _generate_plan("/project", "Add feature", skill_dir=skill_dir)
             assert "Step 1" in result
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_includes_context(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_skill_prompt") as mock_load, \
@@ -358,7 +358,7 @@ class TestGeneratePlan:
             _, kwargs = mock_load.call_args
             assert kwargs["CONTEXT"] == "prev"
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_raises_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="rate limited")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
@@ -369,7 +369,7 @@ class TestGeneratePlan:
             with pytest.raises(RuntimeError, match="invocation failed"):
                 _generate_plan("/project", "idea", skill_dir=Path("/fake"))
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_uses_read_only_tools(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \
@@ -379,7 +379,7 @@ class TestGeneratePlan:
             call_kwargs = mock_run.call_args[1]
             assert call_kwargs.get("cwd") == "/project"
 
-    @patch("app.claude_step.subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_no_skill_dir_uses_load_prompt(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_prompt", return_value="prompt") as mock_load, \
@@ -396,7 +396,7 @@ class TestGeneratePlan:
 # ---------------------------------------------------------------------------
 
 class TestGenerateIterationPlan:
-    @patch("subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_uses_plan_iterate_prompt(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="## Updated Plan", stderr=""
@@ -416,7 +416,7 @@ class TestGenerateIterationPlan:
                 skill_dir, "plan-iterate", ISSUE_CONTEXT="issue context here"
             )
 
-    @patch("subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_no_skill_dir_uses_load_prompt(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
         with patch("app.prompts.load_prompt") as mock_load, \
@@ -429,7 +429,7 @@ class TestGenerateIterationPlan:
                 "plan-iterate", ISSUE_CONTEXT="context"
             )
 
-    @patch("subprocess.run")
+    @patch("app.cli_exec.run_cli")
     def test_raises_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="error")
         with patch("app.prompts.load_skill_prompt", return_value="prompt"), \

@@ -484,6 +484,10 @@ def main():
 
     args = parser.parse_args()
 
+    # Support stdin-based prompt passing (security: avoids ps leaking)
+    if args.prompt == "@stdin":
+        args.prompt = sys.stdin.read()
+
     # Resolve config from env vars if not provided via args
     base_url = args.base_url or os.environ.get("KOAN_LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")
     model = args.model or os.environ.get("KOAN_LOCAL_LLM_MODEL", "")
