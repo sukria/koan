@@ -130,8 +130,9 @@ cp -r instance.example instance
 cp env.example .env
 # Edit .env with your Telegram bot token and project paths
 make setup
-make awake  # Terminal 1
-make run    # Terminal 2
+make start  # Run two daemons in background: runner and communication bridge
+make logs   # Tail the logs file from each daemon
+make stop   # stop the daemons
 ```
 
 See [INSTALL.md](INSTALL.md) for detailed setup instructions.
