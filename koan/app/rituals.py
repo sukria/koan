@@ -70,6 +70,7 @@ def run_ritual(ritual_type: str, instance_dir: Path) -> bool:
         )
         result = subprocess.run(
             cmd,
+            stdin=subprocess.DEVNULL,
             cwd=koan_root,
             capture_output=True, text=True, timeout=90,
             check=False

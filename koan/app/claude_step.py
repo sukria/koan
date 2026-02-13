@@ -81,6 +81,7 @@ def run_claude(cmd: list, cwd: str, timeout: int = 600) -> dict:
     try:
         result = subprocess.run(
             cmd,
+            stdin=subprocess.DEVNULL,
             capture_output=True, text=True,
             timeout=timeout, cwd=cwd,
         )

@@ -166,8 +166,8 @@ def format_message(raw_content: str, soul: str, prefs: str,
         cmd = build_full_command(prompt=prompt, model=models["lightweight"])
         result = subprocess.run(
             cmd,
+            stdin=subprocess.DEVNULL,
             cwd=koan_root,
-            input=None,  # Prompt is self-contained
             capture_output=True,
             text=True,
             timeout=30,

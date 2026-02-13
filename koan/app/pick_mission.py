@@ -64,6 +64,7 @@ def call_claude(prompt: str) -> str:
     )
     result = subprocess.run(
         cmd,
+        stdin=subprocess.DEVNULL,
         cwd=koan_root if koan_root else None,
         capture_output=True,
         text=True,

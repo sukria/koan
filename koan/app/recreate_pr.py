@@ -256,6 +256,7 @@ def _run_tests(project_path: str) -> Optional[str]:
     try:
         result = subprocess.run(
             ["make", "test"],
+            stdin=subprocess.DEVNULL,
             capture_output=True, text=True,
             timeout=300, cwd=project_path,
         )
