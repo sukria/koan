@@ -48,6 +48,7 @@ class TestGetGhToken:
         assert get_gh_token("my-bot") == "ghp_abc123token"
         mock_run.assert_called_once_with(
             ["gh", "auth", "token", "--user", "my-bot"],
+            stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=10,
         )
 

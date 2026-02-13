@@ -45,6 +45,7 @@ def get_gh_token(username: str) -> Optional[str]:
     try:
         result = subprocess.run(
             ["gh", "auth", "token", "--user", username],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=10,

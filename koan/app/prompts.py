@@ -36,6 +36,7 @@ def _read_prompt_with_git_fallback(path: Path) -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=5,
@@ -51,6 +52,7 @@ def _read_prompt_with_git_fallback(path: Path) -> str:
         try:
             result = subprocess.run(
                 ["git", "show", f"{remote}:{rel_path}"],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=5,

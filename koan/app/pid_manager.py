@@ -257,6 +257,7 @@ def _launch_python_process(
             [python, script_name],
             cwd=str(koan_dir),
             env=env,
+            stdin=subprocess.DEVNULL,
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -312,6 +313,7 @@ def start_ollama(koan_root: Path, verify_timeout: float = OLLAMA_VERIFY_TIMEOUT)
     try:
         proc = subprocess.Popen(
             [ollama_bin, "serve"],
+            stdin=subprocess.DEVNULL,
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,

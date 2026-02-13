@@ -156,6 +156,7 @@ def get_github_remote(project_path: str) -> Optional[str]:
         try:
             result = subprocess.run(
                 ["git", "remote", "get-url", remote],
+                stdin=subprocess.DEVNULL,
                 capture_output=True, text=True, timeout=5,
                 cwd=project_path,
             )

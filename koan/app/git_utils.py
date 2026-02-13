@@ -36,6 +36,7 @@ def run_git(
             run_env = {**os.environ, **env}
         result = subprocess.run(
             ["git"] + list(args),
+            stdin=subprocess.DEVNULL,
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -69,6 +70,7 @@ def run_git_strict(
     """
     result = subprocess.run(
         ["git"] + list(args),
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=timeout,

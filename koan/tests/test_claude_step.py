@@ -46,6 +46,7 @@ class TestRunGit:
         _run_git(["git", "status"], cwd="/tmp/test", timeout=30)
         mock_run.assert_called_once_with(
             ["git", "status"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,

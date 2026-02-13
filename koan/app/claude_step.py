@@ -45,6 +45,7 @@ def _rebase_onto_target(base: str, project_path: str) -> Optional[str]:
         except Exception:
             subprocess.run(
                 ["git", "rebase", "--abort"],
+                stdin=subprocess.DEVNULL,
                 capture_output=True, cwd=project_path,
             )
     return None

@@ -25,8 +25,9 @@ def run_gh(*args, cwd=None, timeout=30, stdin_data=None):
         RuntimeError: If the ``gh`` command exits with a non-zero code.
     """
     cmd = ["gh", *args]
+    stdin_kwarg = {"input": stdin_data} if stdin_data is not None else {"stdin": subprocess.DEVNULL}
     result = subprocess.run(
-        cmd, input=stdin_data,
+        cmd, **stdin_kwarg,
         capture_output=True, text=True, timeout=timeout, cwd=cwd,
     )
     if result.returncode != 0:
