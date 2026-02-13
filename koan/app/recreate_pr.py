@@ -71,6 +71,19 @@ def run_recreate(
     if not context["branch"]:
         return False, "Could not determine PR branch name."
 
+    # Guard: reject merged or closed PRs
+    pr_state = context.get("state", "").upper()
+    if pr_state == "MERGED":
+        return False, (
+            f"PR #{pr_number} is already merged into `{context['base']}`. "
+            f"/recreate is for open PRs whose branch has diverged."
+        )
+    if pr_state == "CLOSED":
+        return False, (
+            f"PR #{pr_number} is closed. "
+            f"/recreate is for open PRs whose branch has diverged."
+        )
+
     branch = context["branch"]
     base = context["base"]
     actions_log.append(f"Read PR #{pr_number}: \"{context['title']}\"")
@@ -111,7 +124,7 @@ def run_recreate(
     # -- Step 3: Reimplement the feature via Claude ----------------------------
     notify_fn(f"Reimplementing feature from PR #{pr_number}...")
 
-    _reimpl_feature(
+    reimpl_ok = _reimpl_feature(
         context, pr_number, project_path, actions_log,
         skill_dir=skill_dir,
     )
@@ -120,7 +133,13 @@ def run_recreate(
     has_changes = _has_commits_on_branch(work_branch, base, upstream_remote, project_path)
     if not has_changes:
         _safe_checkout(original_branch, project_path)
-        return False, "Recreation produced no changes. The feature may need manual implementation."
+        if not reimpl_ok:
+            reason = "Recreation produced no changes (reimplementation step failed)."
+        else:
+            reason = "Recreation produced no changes. The feature may need manual implementation."
+        if actions_log:
+            reason += "\n\nActions:\n" + "\n".join(f"- {a}" for a in actions_log)
+        return False, reason
 
     # -- Step 4: Run tests ----------------------------------------------------
     notify_fn("Running tests...")
@@ -222,10 +241,13 @@ def _reimpl_feature(
     project_path: str,
     actions_log: List[str],
     skill_dir: Optional[Path] = None,
-) -> None:
-    """Reimplement the feature via Claude, inspired by the original PR."""
+) -> bool:
+    """Reimplement the feature via Claude, inspired by the original PR.
+
+    Returns True if the step produced a commit, False otherwise.
+    """
     prompt = _build_recreate_prompt(context, skill_dir=skill_dir)
-    run_claude_step(
+    return run_claude_step(
         prompt=prompt,
         project_path=project_path,
         commit_msg=f"feat: recreate PR #{pr_number} — {context.get('title', 'reimplementation')}",

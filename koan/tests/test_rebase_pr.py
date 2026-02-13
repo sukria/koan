@@ -868,7 +868,9 @@ class TestMain:
     def test_main_conflict_falls_back_to_recreate(self):
         """On rebase conflict, main() should fall back to /recreate."""
         conflict_msg = "Rebase conflict on `main` (tried origin and upstream). Manual resolution required."
+        open_ctx = {"state": "OPEN", "branch": "feat", "base": "main"}
         with patch("app.rebase_pr.run_rebase", return_value=(False, conflict_msg)), \
+             patch("app.rebase_pr.fetch_pr_context", return_value=open_ctx), \
              patch("app.recreate_pr.run_recreate", return_value=(True, "PR #42 recreated.")) as mock_recreate:
             code = rebase_main([
                 "https://github.com/sukria/koan/pull/42",
@@ -895,7 +897,9 @@ class TestMain:
     def test_main_conflict_recreate_also_fails(self):
         """If recreate also fails after conflict, exit code should be 1."""
         conflict_msg = "Rebase conflict on `main` (tried origin and upstream). Manual resolution required."
+        open_ctx = {"state": "OPEN", "branch": "feat", "base": "main"}
         with patch("app.rebase_pr.run_rebase", return_value=(False, conflict_msg)), \
+             patch("app.rebase_pr.fetch_pr_context", return_value=open_ctx), \
              patch("app.recreate_pr.run_recreate", return_value=(False, "Recreation failed.")):
             code = rebase_main([
                 "https://github.com/sukria/koan/pull/42",
@@ -903,8 +907,46 @@ class TestMain:
             ])
             assert code == 1
 
+    def test_main_conflict_merged_pr_no_fallback(self):
+        """On conflict with a merged PR, should NOT fall back to recreate."""
+        conflict_msg = "Rebase conflict on `main` (tried origin and upstream). Manual resolution required."
+        merged_ctx = {"state": "MERGED", "branch": "feat", "base": "main"}
+        with patch("app.rebase_pr.run_rebase", return_value=(False, conflict_msg)), \
+             patch("app.rebase_pr.fetch_pr_context", return_value=merged_ctx), \
+             patch("app.recreate_pr.run_recreate") as mock_recreate:
+            code = rebase_main([
+                "https://github.com/sukria/koan/pull/42",
+                "--project-path", "/project",
+            ])
+            assert code == 1
+            mock_recreate.assert_not_called()
 
-class TestIsConflictFailure:
+    def test_main_conflict_closed_pr_no_fallback(self):
+        """On conflict with a closed PR, should NOT fall back to recreate."""
+        conflict_msg = "Rebase conflict on `main` (tried origin and upstream). Manual resolution required."
+        closed_ctx = {"state": "CLOSED", "branch": "feat", "base": "main"}
+        with patch("app.rebase_pr.run_rebase", return_value=(False, conflict_msg)), \
+             patch("app.rebase_pr.fetch_pr_context", return_value=closed_ctx), \
+             patch("app.recreate_pr.run_recreate") as mock_recreate:
+            code = rebase_main([
+                "https://github.com/sukria/koan/pull/42",
+                "--project-path", "/project",
+            ])
+            assert code == 1
+            mock_recreate.assert_not_called()
+
+    def test_main_conflict_fetch_failure_still_falls_back(self):
+        """If fetch_pr_context fails in fallback, proceed with recreate anyway."""
+        conflict_msg = "Rebase conflict on `main` (tried origin and upstream). Manual resolution required."
+        with patch("app.rebase_pr.run_rebase", return_value=(False, conflict_msg)), \
+             patch("app.rebase_pr.fetch_pr_context", side_effect=RuntimeError("API error")), \
+             patch("app.recreate_pr.run_recreate", return_value=(True, "PR #42 recreated.")) as mock_recreate:
+            code = rebase_main([
+                "https://github.com/sukria/koan/pull/42",
+                "--project-path", "/project",
+            ])
+            assert code == 0
+            mock_recreate.assert_called_once()
     def test_detects_conflict_message(self):
         msg = "Rebase conflict on `main` (tried origin and upstream). Manual resolution required."
         assert _is_conflict_failure(msg) is True
