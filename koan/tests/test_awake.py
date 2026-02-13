@@ -1092,6 +1092,28 @@ class TestMainLoop:
         captured = capsys.readouterr()
         assert "Shutting down" in captured.err
 
+    @patch("app.awake.clear_shutdown")
+    @patch("app.awake.is_shutdown_requested", return_value=True)
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates", return_value=[])
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    def test_main_exits_on_shutdown_signal(self, mock_config, mock_updates,
+                                            mock_handle, mock_flush,
+                                            mock_heartbeat, mock_shutdown,
+                                            mock_clear, capsys):
+        """Bridge exits cleanly when /shutdown signal is detected."""
+        from app.awake import main
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+        mock_shutdown.assert_called()
+        mock_clear.assert_called()
+        captured = capsys.readouterr()
+        assert "Shutdown requested" in captured.err
+
     @patch("app.awake.write_heartbeat")
     @patch("app.awake.flush_outbox")
     @patch("app.awake.handle_message")

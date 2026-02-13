@@ -52,6 +52,7 @@ from app.format_outbox import format_message, load_soul, load_human_prefs, load_
 from app.health_check import write_heartbeat
 from app.language_preference import get_language_instruction
 from app.notify import reset_flood_state, send_telegram
+from app.shutdown_manager import is_shutdown_requested, clear_shutdown
 from app.config import (
     get_chat_tools,
     get_tools_description,
@@ -592,6 +593,13 @@ def main():
                 log("init", "Restart signal detected. Re-executing...")
                 release_pidfile(pidfile_lock, KOAN_ROOT, "awake")
                 reexec_bridge()
+
+            # Check for /shutdown signal (timestamp-validated)
+            if is_shutdown_requested(str(KOAN_ROOT), startup_time):
+                log("init", "Shutdown requested. Exiting.")
+                clear_shutdown(str(KOAN_ROOT))
+                release_pidfile(pidfile_lock, KOAN_ROOT, "awake")
+                sys.exit(0)
 
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
