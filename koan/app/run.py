@@ -32,6 +32,7 @@ from typing import Optional
 from app.iteration_manager import plan_iteration
 from app.loop_manager import check_pending_missions, interruptible_sleep
 from app.pid_manager import acquire_pid, release_pid
+from app.shutdown_manager import is_shutdown_requested, clear_shutdown
 from app.utils import atomic_write
 
 
@@ -739,10 +740,11 @@ def main_loop():
     # Acquire PID
     acquire_pid(Path(koan_root), "run", os.getpid())
 
-    # Clear stale .koan-stop from a previous session.
+    # Clear stale signal files from a previous session.
     # If `make stop` or `/stop` ran while run.py was NOT running, the signal
     # file persists and would cause an immediate exit on next startup.
     Path(koan_root, ".koan-stop").unlink(missing_ok=True)
+    Path(koan_root, ".koan-shutdown").unlink(missing_ok=True)
 
     # Install SIGINT handler
     signal.signal(signal.SIGINT, _on_sigint)
@@ -768,6 +770,14 @@ def main_loop():
                 stop_file.unlink(missing_ok=True)
                 current = Path(koan_root, ".koan-project").read_text().strip()
                 _notify(instance, f"Kōan stopped on request after {count} runs. Last project: {current}.")
+                break
+
+            # --- Shutdown check (stops both agent loop and bridge) ---
+            if is_shutdown_requested(koan_root, start_time):
+                log("koan", "Shutdown requested. Exiting.")
+                clear_shutdown(koan_root)
+                current = Path(koan_root, ".koan-project").read_text().strip()
+                _notify(instance, f"Kōan shutdown after {count} runs. Last project: {current}.")
                 break
 
             # --- Restart check ---
