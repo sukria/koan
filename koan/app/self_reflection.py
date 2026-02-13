@@ -121,6 +121,7 @@ def run_reflection(instance_dir: Path) -> str:
         cmd = build_full_command(prompt=prompt, max_turns=1)
         result = subprocess.run(
             cmd,
+            stdin=subprocess.DEVNULL,
             cwd=koan_root if koan_root else None,
             capture_output=True, text=True, timeout=60,
             check=False

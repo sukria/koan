@@ -206,6 +206,7 @@ def run_command(
 
     result = subprocess.run(
         cmd,
+        stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=timeout,
         cwd=project_path,
     )

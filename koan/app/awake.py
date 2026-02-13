@@ -323,6 +323,7 @@ def handle_chat(text: str):
     try:
         result = subprocess.run(
             cmd,
+            stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=CHAT_TIMEOUT,
             cwd=PROJECT_PATH or str(KOAN_ROOT),
         )
@@ -353,6 +354,7 @@ def handle_chat(text: str):
         try:
             result = subprocess.run(
                 lite_cmd,
+                stdin=subprocess.DEVNULL,
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=PROJECT_PATH or str(KOAN_ROOT),
             )

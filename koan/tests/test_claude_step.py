@@ -221,6 +221,7 @@ class TestRunClaude:
         run_claude(["claude", "-p", "test"], "/project", timeout=120)
         mock_run.assert_called_once_with(
             ["claude", "-p", "test"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=120,

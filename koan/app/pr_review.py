@@ -377,6 +377,7 @@ def _run_tests(test_cmd: str, project_path: str) -> dict:
     try:
         result = subprocess.run(
             test_cmd,
+            stdin=subprocess.DEVNULL,
             shell=True,
             capture_output=True, text=True,
             timeout=300, cwd=project_path,

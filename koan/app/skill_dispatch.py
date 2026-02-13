@@ -343,10 +343,11 @@ def dispatch_skill_mission(
     """
     from app.debug import debug_log
 
-    debug_log(f"[skill_dispatch] dispatch: mission_text='{mission_text}'")
+    preview = f"{mission_text[:100]}..." if len(mission_text) > 100 else mission_text
+    debug_log(f"[skill_dispatch] dispatch: mission_text='{preview}'")
 
     if not is_skill_mission(mission_text):
-        debug_log("[skill_dispatch] dispatch: not a skill mission, returning None")
+        debug_log("[skill_dispatch] dispatch: regular mission (no /command prefix), proceeding to Claude")
         return None
 
     parsed_project, command, args = parse_skill_mission(mission_text)

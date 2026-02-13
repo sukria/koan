@@ -60,6 +60,22 @@ ERROR_NOTIFICATION_INTERVAL = 5
 
 _COLORS = {}
 
+# Standalone ANSI reset (no dependency on _COLORS initialization)
+_ANSI_RESET = "\033[0m"
+
+
+def _reset_terminal():
+    """Write an ANSI reset to stdout and flush, restoring default attributes.
+
+    Called on exit paths to ensure the terminal is not left with active
+    ANSI attributes (DIM, BOLD, color, etc.) after Kōan shuts down.
+    """
+    try:
+        sys.stdout.write(_ANSI_RESET)
+        sys.stdout.flush()
+    except Exception:
+        pass
+
 
 def _init_colors():
     """Initialize ANSI color codes based on TTY detection."""
@@ -268,6 +284,7 @@ def run_claude_task(
     with open(stdout_file, "w") as out_f, open(stderr_file, "w") as err_f:
         proc = subprocess.Popen(
             cmd,
+            stdin=subprocess.DEVNULL,
             stdout=out_f,
             stderr=err_f,
             cwd=cwd,
@@ -807,6 +824,7 @@ def main_loop():
         Path(koan_root, ".koan-status").unlink(missing_ok=True)
         release_pid(Path(koan_root), "run")
         log("koan", f"Shutdown. {count} runs executed.")
+        _reset_terminal()
 
 
 # ---------------------------------------------------------------------------
@@ -1015,7 +1033,8 @@ def _run_iteration(
     # the Claude agent.
     if mission_title:
         from app.debug import debug_log as _debug_log
-        _debug_log(f"[run] checking skill dispatch for: {mission_title}")
+        preview = f"{mission_title[:100]}..." if len(mission_title) > 100 else mission_title
+        _debug_log(f"[run] checking skill dispatch for: {preview}")
         from app.skill_dispatch import dispatch_skill_mission, is_skill_mission
         skill_cmd = dispatch_skill_mission(
             mission_text=mission_title,
@@ -1144,7 +1163,8 @@ def _run_iteration(
             project_name=project_name,
         )
 
-        _debug_log(f"[run] cli: cmd={' '.join(cmd[:6])}... cwd={project_path}")
+        cmd_display = [c[:100] + '...' if len(c) > 100 else c for c in cmd[:6]]
+        _debug_log(f"[run] cli: cmd={' '.join(cmd_display)}... cwd={project_path}")
         claude_exit = run_claude_task(cmd, stdout_file, stderr_file, cwd=project_path)
         _debug_log(f"[run] cli: exit_code={claude_exit}")
 
@@ -1161,6 +1181,7 @@ def _run_iteration(
                     print(f.read())
             except Exception as e2:
                 log("error", f"Failed to read CLI output: {e}, {e2}")
+        _reset_terminal()
 
         # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
         # Done BEFORE post-mission pipeline so quota exhaustion can't skip it.
@@ -1400,6 +1421,7 @@ def _run_skill_mission(
     try:
         result = subprocess.run(
             skill_cmd,
+            stdin=subprocess.DEVNULL,
             cwd=skill_cwd,
             capture_output=True,
             text=True,
@@ -1430,6 +1452,8 @@ def _run_skill_mission(
         log("error", f"Skill runner failed: {e}")
         debug_log(f"[run] skill exec: EXCEPTION {e}")
         exit_code = 1
+    finally:
+        _reset_terminal()
 
     # Write output to temp files for post-mission processing
     fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")
@@ -1513,6 +1537,8 @@ def main():
             backoff = _calculate_backoff(crash_count, MAX_BACKOFF_MAIN)
             print(f"[koan] Restarting in {backoff}s...", file=sys.stderr)
             time.sleep(backoff)
+
+    _reset_terminal()
 
 
 if __name__ == "__main__":
