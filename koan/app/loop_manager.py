@@ -359,8 +359,8 @@ def _post_error_for_notification(notif: dict, error: str) -> None:
             comment_id = str(comment.get("id", ""))
             if comment_id:
                 post_error_reply(owner, repo, issue_num, comment_id, error)
-    except Exception:
-        pass  # Silently fail error posting
+    except Exception as e:
+        print(f"[loop_manager] Error posting reply to GitHub: {e}", file=sys.stderr)
 
 
 # --- Interruptible sleep ---
@@ -378,7 +378,8 @@ def check_pending_missions(instance_dir: str) -> bool:
         return False
     try:
         return count_pending(missions_path.read_text()) > 0
-    except Exception:
+    except Exception as e:
+        print(f"[loop_manager] Error reading missions.md: {e}", file=sys.stderr)
         return False
 
 

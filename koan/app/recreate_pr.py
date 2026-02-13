@@ -14,6 +14,7 @@ Pipeline:
 """
 
 import re
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -368,8 +369,8 @@ def _push_recreated(
                 f"---\n_Automated by Kōan_",
             )
             actions.append("Cross-linked original PR")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[recreate_pr] Cross-link comment failed: {e}", file=sys.stderr)
 
         return {
             "success": True,

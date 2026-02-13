@@ -13,6 +13,7 @@ Functions here call it via import to ensure mocks propagate correctly.
 """
 
 import os
+import sys
 from typing import List, Optional
 
 
@@ -373,8 +374,8 @@ def get_auto_merge_config(config: dict, project_name: str) -> dict:
         projects_config = load_projects_config(koan_root) if koan_root else None
         if projects_config and project_name in projects_config.get("projects", {}):
             return get_project_auto_merge(projects_config, project_name)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[config] Auto-merge config load error for {project_name}: {e}", file=sys.stderr)
 
     # Fall back to config.yaml global settings
     global_cfg = config.get("git_auto_merge", {})
