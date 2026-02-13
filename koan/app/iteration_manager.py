@@ -414,7 +414,8 @@ def plan_iteration(
         try:
             from app.utils import get_contemplative_chance
             contemplative_chance = get_contemplative_chance()
-        except Exception:
+        except Exception as e:
+            print(f"[iteration] Contemplative chance load error: {e}", file=sys.stderr)
             contemplative_chance = 10
 
         if _should_contemplate(autonomous_mode, focus_state is not None,
@@ -429,7 +430,8 @@ def plan_iteration(
 
                 try:
                     focus_remaining = focus_state.remaining_display()
-                except Exception:
+                except Exception as e:
+                    print(f"[iteration] Focus state display error: {e}", file=sys.stderr)
                     focus_remaining = "unknown"
 
                 return {

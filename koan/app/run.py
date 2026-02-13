@@ -75,7 +75,7 @@ def _reset_terminal():
         sys.stdout.write(_ANSI_RESET)
         sys.stdout.flush()
     except Exception:
-        pass
+        pass  # Terminal may be gone during shutdown
 
 
 def _init_colors():

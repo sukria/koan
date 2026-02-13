@@ -17,6 +17,7 @@ CLI:
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -304,7 +305,8 @@ def _search_existing_issue(owner, repo, idea):
         # Return the first match
         hit = results[0]
         return str(hit.get("number", "")), hit.get("title", "")
-    except Exception:
+    except Exception as e:
+        print(f"[plan_runner] Issue search failed: {e}", file=sys.stderr)
         return None
 
 
@@ -337,8 +339,8 @@ def _get_repo_info(project_path):
         repo = data.get("name", "")
         if owner and repo:
             return owner, repo
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[plan_runner] Repo info fetch failed: {e}", file=sys.stderr)
     return None, None
 
 

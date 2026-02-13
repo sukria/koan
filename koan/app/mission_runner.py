@@ -165,7 +165,8 @@ def update_usage(stdout_file: str, usage_state: str, usage_md: str) -> bool:
 
         cmd_update(Path(stdout_file), Path(usage_state), Path(usage_md))
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[mission_runner] Usage update failed: {e}", file=sys.stderr)
         return False
 
 
@@ -208,8 +209,8 @@ def trigger_reflection(
         if reflection:
             write_to_journal(inst, reflection)
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[mission_runner] Reflection failed: {e}", file=sys.stderr)
     return False
 
 
@@ -241,7 +242,8 @@ def check_auto_merge(
 
         auto_merge_branch(instance_dir, project_name, project_path, branch)
         return branch
-    except Exception:
+    except Exception as e:
+        print(f"[mission_runner] Auto-merge check failed: {e}", file=sys.stderr)
         return None
 
 
@@ -363,7 +365,8 @@ def commit_instance(instance_dir: str) -> bool:
         run_git(instance_dir, "commit", "-m", f"koan: {now}")
         run_git(instance_dir, "push", "origin", "main")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[mission_runner] Instance commit failed: {e}", file=sys.stderr)
         return False
 
 
