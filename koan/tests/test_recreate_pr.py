@@ -269,12 +269,70 @@ class TestRunRecreate:
              patch("app.recreate_pr._get_current_branch", return_value="main"), \
              patch("app.recreate_pr._fetch_upstream_target", return_value="origin"), \
              patch("app.recreate_pr._run_git"), \
-             patch("app.recreate_pr._reimpl_feature"), \
+             patch("app.recreate_pr._reimpl_feature", return_value=True), \
              patch("app.recreate_pr._has_commits_on_branch", return_value=False), \
              patch("app.recreate_pr._safe_checkout"):
             ok, msg = run_recreate("o", "r", "1", "/p", notify_fn=notify)
             assert ok is False
             assert "no changes" in msg.lower()
+
+    def test_no_changes_includes_actions_log(self):
+        """When reimpl fails, the error message should include actions_log."""
+        notify = MagicMock()
+        ctx = self._mock_context()
+        with patch("app.recreate_pr.fetch_pr_context", return_value=ctx), \
+             patch("app.recreate_pr._get_current_branch", return_value="main"), \
+             patch("app.recreate_pr._fetch_upstream_target", return_value="origin"), \
+             patch("app.recreate_pr._run_git"), \
+             patch("app.recreate_pr._reimpl_feature", return_value=False), \
+             patch("app.recreate_pr._has_commits_on_branch", return_value=False), \
+             patch("app.recreate_pr._safe_checkout"):
+            ok, msg = run_recreate("o", "r", "1", "/p", notify_fn=notify)
+            assert ok is False
+            assert "reimplementation step failed" in msg.lower()
+            assert "Read PR #1" in msg
+
+    def test_merged_pr_rejected(self):
+        """Merged PRs should be rejected early with a clear message."""
+        notify = MagicMock()
+        ctx = self._mock_context()
+        ctx["state"] = "MERGED"
+        with patch("app.recreate_pr.fetch_pr_context", return_value=ctx):
+            ok, msg = run_recreate("o", "r", "42", "/p", notify_fn=notify)
+            assert ok is False
+            assert "already merged" in msg.lower()
+            assert "#42" in msg
+
+    def test_closed_pr_rejected(self):
+        """Closed PRs should be rejected early with a clear message."""
+        notify = MagicMock()
+        ctx = self._mock_context()
+        ctx["state"] = "CLOSED"
+        with patch("app.recreate_pr.fetch_pr_context", return_value=ctx):
+            ok, msg = run_recreate("o", "r", "42", "/p", notify_fn=notify)
+            assert ok is False
+            assert "closed" in msg.lower()
+            assert "#42" in msg
+
+    def test_open_pr_not_rejected(self):
+        """Open PRs should proceed past the state guard."""
+        notify = MagicMock()
+        ctx = self._mock_context()
+        ctx["state"] = "OPEN"
+        with patch("app.recreate_pr.fetch_pr_context", return_value=ctx), \
+             patch("app.recreate_pr._get_current_branch", return_value="main"), \
+             patch("app.recreate_pr._fetch_upstream_target", return_value="origin"), \
+             patch("app.recreate_pr._run_git"), \
+             patch("app.recreate_pr._reimpl_feature", return_value=True), \
+             patch("app.recreate_pr._has_commits_on_branch", return_value=True), \
+             patch("app.recreate_pr._run_tests", return_value=None), \
+             patch("app.recreate_pr._push_recreated", return_value={
+                 "success": True, "actions": [], "error": "",
+             }), \
+             patch("app.recreate_pr.run_gh"), \
+             patch("app.recreate_pr._safe_checkout"):
+            ok, msg = run_recreate("o", "r", "1", "/p", notify_fn=notify)
+            assert ok is True
 
     def test_successful_pipeline(self):
         notify = MagicMock()

@@ -522,6 +522,17 @@ def main(argv=None):
     )
 
     if not success and _is_conflict_failure(summary):
+        # Check PR state before falling back — recreate only works on open PRs
+        try:
+            ctx = fetch_pr_context(owner, repo, pr_number)
+            pr_state = ctx.get("state", "").upper()
+        except Exception:
+            pr_state = ""
+
+        if pr_state in ("MERGED", "CLOSED"):
+            print(f"{summary}\nCannot fall back to /recreate: PR #{pr_number} is {pr_state.lower()}.")
+            return 1
+
         print(f"{summary}\nFalling back to /recreate...")
         from app.recreate_pr import run_recreate
 
