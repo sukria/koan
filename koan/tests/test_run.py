@@ -1541,3 +1541,206 @@ class TestNotifyMissionEnd:
         assert mock_notify.call_count == 1
         _notify_mission_end("/tmp/inst", "proj", 1, 5, 1, "task")
         assert mock_notify.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Test: Koan branch helpers
+# ---------------------------------------------------------------------------
+
+class TestGetKoanBranch:
+    def test_returns_branch_name(self, tmp_path):
+        """_get_koan_branch returns the current branch of the repo."""
+        from app.run import _get_koan_branch
+        # Init a git repo
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=str(tmp_path), capture_output=True)
+        assert _get_koan_branch(str(tmp_path)) == "main"
+
+    def test_returns_empty_on_non_repo(self, tmp_path):
+        """_get_koan_branch returns '' for non-git directories."""
+        from app.run import _get_koan_branch
+        assert _get_koan_branch(str(tmp_path)) == ""
+
+    def test_returns_empty_on_invalid_path(self):
+        """_get_koan_branch returns '' for non-existent paths."""
+        from app.run import _get_koan_branch
+        assert _get_koan_branch("/nonexistent/path") == ""
+
+
+class TestRestoreKoanBranch:
+    def test_restores_when_branch_drifted(self, tmp_path, capsys):
+        """_restore_koan_branch checks out the expected branch when current differs."""
+        from app.run import _restore_koan_branch, _init_colors
+        _init_colors()
+        # Init repo with two branches
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "checkout", "-b", "other"], cwd=str(tmp_path), capture_output=True)
+
+        # Should restore to main
+        _restore_koan_branch(str(tmp_path), "main")
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(tmp_path), capture_output=True, text=True,
+        )
+        assert result.stdout.strip() == "main"
+
+    def test_noop_when_branch_matches(self, tmp_path):
+        """_restore_koan_branch does nothing when branch already matches."""
+        from app.run import _restore_koan_branch
+        # Init repo
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=str(tmp_path), capture_output=True)
+
+        # Should be a no-op — mock _get_koan_branch to avoid real git calls
+        with patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run.subprocess.run") as mock_run:
+            _restore_koan_branch(str(tmp_path), "main")
+            # No git checkout call since branch already matches
+            mock_run.assert_not_called()
+
+    def test_noop_when_expected_empty(self):
+        """_restore_koan_branch does nothing when expected_branch is empty."""
+        from app.run import _restore_koan_branch
+        with patch("app.run._get_koan_branch") as mock_get:
+            _restore_koan_branch("/some/path", "")
+            mock_get.assert_not_called()
+
+    def test_handles_checkout_failure(self, tmp_path, capsys):
+        """_restore_koan_branch logs but doesn't crash on checkout failure."""
+        from app.run import _restore_koan_branch, _init_colors
+        _init_colors()
+        with patch("app.run._get_koan_branch", return_value="wrong-branch"):
+            with patch("app.run.subprocess.run", side_effect=Exception("git error")):
+                # Should not raise
+                _restore_koan_branch(str(tmp_path), "main")
+        out = capsys.readouterr().out
+        assert "Failed to restore koan branch" in out
+
+
+class TestRunSkillMissionEnv:
+    """Tests that _run_skill_mission sets PYTHONPATH and restores branches."""
+
+    def test_passes_pythonpath_in_env(self, tmp_path):
+        """_run_skill_mission passes explicit PYTHONPATH to subprocess."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "koan").mkdir()
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "ok"
+        mock_result.stderr = ""
+
+        with patch("app.run.subprocess.run", return_value=mock_result) as mock_run, \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "-m", "app.plan_runner", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        # Verify subprocess.run was called with env containing PYTHONPATH
+        call_kwargs = mock_run.call_args[1]
+        assert "env" in call_kwargs
+        assert call_kwargs["env"]["PYTHONPATH"] == str(tmp_path / "koan")
+
+    def test_restores_branch_after_skill_execution(self, tmp_path):
+        """_run_skill_mission calls _restore_koan_branch after execution."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "koan").mkdir()
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+
+        with patch("app.run.subprocess.run", return_value=mock_result), \
+             patch("app.run._get_koan_branch", return_value="main") as mock_get, \
+             patch("app.run._restore_koan_branch") as mock_restore, \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        mock_get.assert_called_once_with(koan_root)
+        mock_restore.assert_called_once_with(koan_root, "main")
+
+    def test_restores_branch_even_on_timeout(self, tmp_path):
+        """Branch is restored even when subprocess times out."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "koan").mkdir()
+
+        with patch("app.run.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 600)), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch") as mock_restore, \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        mock_restore.assert_called_once_with(koan_root, "main")
+
+    def test_restores_branch_even_on_exception(self, tmp_path):
+        """Branch is restored even when subprocess raises an exception."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "koan").mkdir()
+
+        with patch("app.run.subprocess.run", side_effect=OSError("boom")), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch") as mock_restore, \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        mock_restore.assert_called_once_with(koan_root, "main")

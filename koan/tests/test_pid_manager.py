@@ -684,7 +684,7 @@ class TestStartRunner:
         assert call_args[1]["cwd"] == str(tmp_path / "koan")
         # Env should include KOAN_ROOT and PYTHONPATH
         assert call_args[1]["env"]["KOAN_ROOT"] == str(tmp_path)
-        assert call_args[1]["env"]["PYTHONPATH"] == "."
+        assert call_args[1]["env"]["PYTHONPATH"] == str(tmp_path / "koan")
 
     def test_returns_success_when_pid_appears(self, tmp_path):
         """After launch, verify PID appears within timeout."""
