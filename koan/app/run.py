@@ -1410,6 +1410,52 @@ def _finalize_mission(instance: str, mission_title: str, project_name: str, exit
         log("error", f"Mission history recording error: {e}")
 
 
+def _get_koan_branch(koan_root: str) -> str:
+    """Get the current branch of the koan repository.
+
+    Returns the branch name, or "" on error.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=koan_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _restore_koan_branch(koan_root: str, expected_branch: str):
+    """Restore the koan repo to the expected branch if it drifted.
+
+    Skills like /rebase and /recreate do git checkouts on their
+    project_path.  When project_path is the koan repo itself, a
+    crash in the skill can leave the working tree on the wrong
+    branch, breaking all subsequent module lookups.
+    """
+    if not expected_branch:
+        return
+    current = _get_koan_branch(koan_root)
+    if current and current != expected_branch:
+        from app.debug import debug_log
+        debug_log(
+            f"[run] koan branch drifted: {current} -> restoring {expected_branch}"
+        )
+        log("git", f"Restoring koan branch: {current} -> {expected_branch}")
+        try:
+            subprocess.run(
+                ["git", "checkout", expected_branch],
+                cwd=koan_root,
+                capture_output=True,
+                timeout=10,
+            )
+        except Exception as e:
+            log("error", f"Failed to restore koan branch: {e}")
+
+
 def _run_skill_mission(
     skill_cmd: list,
     koan_root: str,
@@ -1427,16 +1473,29 @@ def _run_skill_mission(
     from app.debug import debug_log
 
     mission_start = int(time.time())
-    skill_cwd = os.path.join(koan_root, "koan")
+    koan_pkg_dir = os.path.join(koan_root, "koan")
+
+    # Explicitly set PYTHONPATH so the subprocess can always resolve
+    # app.* modules even if the working tree changes (e.g. skill does
+    # a git checkout on the koan repo itself).
+    skill_env = {**os.environ, "PYTHONPATH": koan_pkg_dir}
+
+    # Record the koan repo's HEAD before execution.  Skills like
+    # /rebase and /recreate do git checkouts on project_path which
+    # may be the koan repo itself — if they crash without restoring
+    # the branch, subsequent runs break.
+    koan_branch_before = _get_koan_branch(koan_root)
+
     debug_log(f"[run] skill exec: cmd={' '.join(skill_cmd)}")
-    debug_log(f"[run] skill exec: cwd={skill_cwd}")
+    debug_log(f"[run] skill exec: cwd={koan_pkg_dir}")
     skill_stdout = ""
     skill_stderr = ""
     try:
         result = subprocess.run(
             skill_cmd,
             stdin=subprocess.DEVNULL,
-            cwd=skill_cwd,
+            cwd=koan_pkg_dir,
+            env=skill_env,
             capture_output=True,
             text=True,
             timeout=600,
@@ -1468,6 +1527,8 @@ def _run_skill_mission(
         exit_code = 1
     finally:
         _reset_terminal()
+        # Restore koan repo branch if it was changed by the skill.
+        _restore_koan_branch(koan_root, koan_branch_before)
 
     # Write output to temp files for post-mission processing
     fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")

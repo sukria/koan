@@ -247,7 +247,7 @@ def _launch_python_process(
     env = {
         **os.environ,
         "KOAN_ROOT": str(koan_root),
-        "PYTHONPATH": ".",
+        "PYTHONPATH": str(koan_dir),
         "KOAN_FORCE_COLOR": "1",
     }
 
