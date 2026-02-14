@@ -354,6 +354,105 @@ def get_status_processes(koan_root: Path) -> tuple:
     return tuple(n for n in PROCESS_NAMES if n != "ollama")
 
 
+def _read_runner_state(koan_root: Path) -> dict:
+    """Read the runner's current state from signal files.
+
+    Gathers information from .koan-status, .koan-pause, .koan-pause-reason,
+    and .koan-project to build a complete picture of the runner state.
+
+    Returns a dict with keys: status, paused, pause_reason, project.
+    All values are strings (empty string if unavailable).
+    """
+    state = {"status": "", "paused": False, "pause_reason": "", "project": ""}
+
+    status_file = koan_root / ".koan-status"
+    if status_file.exists():
+        try:
+            state["status"] = status_file.read_text().strip()
+        except OSError:
+            pass
+
+    pause_file = koan_root / ".koan-pause"
+    if pause_file.exists():
+        state["paused"] = True
+        reason_file = koan_root / ".koan-pause-reason"
+        if reason_file.exists():
+            try:
+                state["pause_reason"] = reason_file.read_text().strip().split("\n")[0]
+            except OSError:
+                pass
+
+    project_file = koan_root / ".koan-project"
+    if project_file.exists():
+        try:
+            state["project"] = project_file.read_text().strip()
+        except OSError:
+            pass
+
+    return state
+
+
+def format_status_all(koan_root: Path) -> list:
+    """Build a rich status display for 'make status'.
+
+    Shows process PIDs, runner state (mode, mission, project),
+    and pause information. Only shows runner context when the
+    runner process is actually alive.
+
+    Returns a list of lines to print.
+    """
+    lines = []
+    process_names = get_status_processes(koan_root)
+    run_pid = check_pidfile(koan_root, "run")
+    awake_pid = check_pidfile(koan_root, "awake")
+
+    # Read state files (only meaningful when runner is alive)
+    runner_state = _read_runner_state(koan_root) if run_pid else {}
+
+    # --- Runner ---
+    if run_pid:
+        status_text = runner_state.get("status", "")
+        if runner_state.get("paused"):
+            reason = runner_state.get("pause_reason", "")
+            if reason == "quota":
+                lines.append(f"  run: paused — quota exhausted (PID {run_pid})")
+            elif reason == "max_runs":
+                lines.append(f"  run: paused — max runs reached (PID {run_pid})")
+            elif reason == "errors":
+                lines.append(f"  run: paused — too many errors (PID {run_pid})")
+            elif reason:
+                lines.append(f"  run: paused — {reason} (PID {run_pid})")
+            else:
+                lines.append(f"  run: paused (PID {run_pid})")
+        elif status_text:
+            lines.append(f"  run: {status_text} (PID {run_pid})")
+        else:
+            lines.append(f"  run: running (PID {run_pid})")
+
+        # Show current project when runner is active and not idle
+        project = runner_state.get("project", "")
+        if project and not runner_state.get("paused"):
+            lines.append(f"       project: {project}")
+    else:
+        lines.append("  run: not running")
+
+    # --- Bridge ---
+    if awake_pid:
+        lines.append(f"  awake: running (PID {awake_pid})")
+    else:
+        lines.append("  awake: not running")
+
+    # --- Ollama (conditional) ---
+    if "ollama" in process_names:
+        ollama_pid = check_pidfile(koan_root, "ollama")
+        if ollama_pid:
+            lines.append(f"  ollama: running (PID {ollama_pid})")
+        else:
+            lines.append("  ollama: not running")
+
+    return lines
+
+
 def _detect_provider(koan_root: Path) -> str:
     """Detect the configured CLI provider.
 
@@ -578,12 +677,8 @@ if __name__ == "__main__":
 
     if action == "status-all":
         root = Path(sys.argv[2])
-        for name in get_status_processes(root):
-            pid = check_pidfile(root, name)
-            if pid:
-                print(f"  {name}: running (PID {pid})")
-            else:
-                print(f"  {name}: not running")
+        for line in format_status_all(root):
+            print(line)
         sys.exit(0)
 
     if len(sys.argv) < 4:

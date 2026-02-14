@@ -13,6 +13,7 @@ import pytest
 from app.pid_manager import (
     _pidfile_path,
     _read_pid,
+    _read_runner_state,
     _is_process_alive,
     _detect_provider,
     _needs_ollama,
@@ -30,6 +31,7 @@ from app.pid_manager import (
     start_all,
     start_stack,
     get_status_processes,
+    format_status_all,
     _print_stack_results,
     PROCESS_NAMES,
 )
@@ -578,6 +580,206 @@ class TestStopProcesses:
 
 
 # ---------------------------------------------------------------------------
+# _read_runner_state
+# ---------------------------------------------------------------------------
+
+
+class TestReadRunnerState:
+    """Tests for _read_runner_state signal file reading."""
+
+    def test_empty_state_when_no_files(self, tmp_path):
+        state = _read_runner_state(tmp_path)
+        assert state["status"] == ""
+        assert state["paused"] is False
+        assert state["pause_reason"] == ""
+        assert state["project"] == ""
+
+    def test_reads_status_file(self, tmp_path):
+        (tmp_path / ".koan-status").write_text("Run 3/20 — executing mission on koan")
+        state = _read_runner_state(tmp_path)
+        assert state["status"] == "Run 3/20 — executing mission on koan"
+
+    def test_reads_project_file(self, tmp_path):
+        (tmp_path / ".koan-project").write_text("myproject")
+        state = _read_runner_state(tmp_path)
+        assert state["project"] == "myproject"
+
+    def test_reads_pause_state(self, tmp_path):
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        state = _read_runner_state(tmp_path)
+        assert state["paused"] is True
+
+    def test_reads_pause_reason(self, tmp_path):
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("quota\n1234567890")
+        state = _read_runner_state(tmp_path)
+        assert state["pause_reason"] == "quota"
+
+    def test_pause_reason_without_pause_file(self, tmp_path):
+        """Pause reason file without .koan-pause should not set paused."""
+        (tmp_path / ".koan-pause-reason").write_text("quota")
+        state = _read_runner_state(tmp_path)
+        assert state["paused"] is False
+        assert state["pause_reason"] == ""
+
+    def test_strips_whitespace(self, tmp_path):
+        (tmp_path / ".koan-status").write_text("  Idle  \n")
+        (tmp_path / ".koan-project").write_text("  koan  \n")
+        state = _read_runner_state(tmp_path)
+        assert state["status"] == "Idle"
+        assert state["project"] == "koan"
+
+    def test_empty_status_file(self, tmp_path):
+        (tmp_path / ".koan-status").write_text("")
+        state = _read_runner_state(tmp_path)
+        assert state["status"] == ""
+
+
+# ---------------------------------------------------------------------------
+# format_status_all
+# ---------------------------------------------------------------------------
+
+
+class TestFormatStatusAll:
+    """Tests for format_status_all rich status display."""
+
+    def test_all_not_running(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "run: not running" in output
+        assert "awake: not running" in output
+
+    def test_runner_running_with_status(self, tmp_path):
+        """When runner is alive and has status, display it."""
+        (tmp_path / ".koan-status").write_text("Run 5/20 — executing mission on koan")
+        (tmp_path / ".koan-project").write_text("koan")
+        (tmp_path / ".koan-pid-run").write_text(str(os.getpid()))
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "Run 5/20" in output
+        assert "executing mission" in output
+        assert f"PID {os.getpid()}" in output
+        assert "project: koan" in output
+
+    def test_runner_running_no_status(self, tmp_path):
+        """When runner is alive but no status file, show generic running."""
+        (tmp_path / ".koan-pid-run").write_text(str(os.getpid()))
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert f"run: running (PID {os.getpid()})" in output
+
+    def test_runner_paused_quota(self, tmp_path):
+        """When paused for quota, show pause reason."""
+        (tmp_path / ".koan-pid-run").write_text(str(os.getpid()))
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("quota\n1234567890")
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "paused" in output
+        assert "quota exhausted" in output
+
+    def test_runner_paused_max_runs(self, tmp_path):
+        (tmp_path / ".koan-pid-run").write_text(str(os.getpid()))
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("max_runs\n1234567890")
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "paused" in output
+        assert "max runs reached" in output
+
+    def test_runner_paused_errors(self, tmp_path):
+        (tmp_path / ".koan-pid-run").write_text(str(os.getpid()))
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-pause-reason").write_text("errors")
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "paused" in output
+        assert "too many errors" in output
+
+    def test_runner_paused_generic(self, tmp_path):
+        (tmp_path / ".koan-pid-run").write_text(str(os.getpid()))
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "paused" in output
+
+    def test_no_project_when_paused(self, tmp_path):
+        """When paused, don't show project (it's stale context)."""
+        (tmp_path / ".koan-pid-run").write_text(str(os.getpid()))
+        (tmp_path / ".koan-pause").write_text("PAUSE")
+        (tmp_path / ".koan-project").write_text("koan")
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "project:" not in output
+
+    def test_no_state_files_when_not_running(self, tmp_path):
+        """When runner is NOT running, don't show stale status files."""
+        (tmp_path / ".koan-status").write_text("Run 3/20 — executing mission on koan")
+        (tmp_path / ".koan-project").write_text("koan")
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "run: not running" in output
+        assert "Run 3/20" not in output
+        assert "project:" not in output
+
+    def test_bridge_running(self, tmp_path):
+        (tmp_path / ".koan-pid-awake").write_text(str(os.getpid()))
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert f"awake: running (PID {os.getpid()})" in output
+
+    def test_ollama_shown_for_local_provider(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="local"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "ollama: not running" in output
+
+    def test_ollama_hidden_for_claude_provider(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "ollama" not in output
+
+    def test_idle_status_shows_project(self, tmp_path):
+        """Idle state should still show project context."""
+        (tmp_path / ".koan-pid-run").write_text(str(os.getpid()))
+        (tmp_path / ".koan-status").write_text("Idle — sleeping 300s (14:35)")
+        (tmp_path / ".koan-project").write_text("myapp")
+
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        output = "\n".join(lines)
+        assert "Idle" in output
+        assert "project: myapp" in output
+
+    def test_returns_list_of_strings(self, tmp_path):
+        with patch("app.pid_manager._detect_provider", return_value="claude"):
+            lines = format_status_all(tmp_path)
+        assert isinstance(lines, list)
+        for line in lines:
+            assert isinstance(line, str)
+
+
+# ---------------------------------------------------------------------------
 # CLI: stop-all and status-all
 # ---------------------------------------------------------------------------
 
@@ -621,7 +823,7 @@ class TestCLIStopAll:
 
         result = self._run_cli("status-all", str(tmp_path))
         assert result.returncode == 0
-        assert f"run: running (PID {os.getpid()})" in result.stdout
+        assert f"PID {os.getpid()}" in result.stdout
         assert "awake: not running" in result.stdout
 
     def test_start_runner_cli_already_running(self, tmp_path):
@@ -1140,8 +1342,7 @@ class TestCLIOllama:
         """status-all should NOT show ollama when provider is claude (default)."""
         result = self._run_cli("status-all", str(tmp_path))
         assert result.returncode == 0
-        assert "run: not running" in result.stdout
-        assert "awake: not running" in result.stdout
+        assert "not running" in result.stdout
         assert "ollama" not in result.stdout
 
     def test_status_all_shows_ollama_for_local_provider(self, tmp_path):
