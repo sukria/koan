@@ -167,3 +167,39 @@ class TestShutdownLifecycle:
         # Both processes check independently
         assert is_shutdown_requested(str(tmp_path), start_time) is True
         assert is_shutdown_requested(str(tmp_path), start_time) is True
+
+    def test_redelivered_shutdown_cleared_after_first_poll(self, tmp_path):
+        """Simulate: bridge restarts → Telegram re-delivers /shutdown → cleared.
+
+        The re-delivered /shutdown message creates a fresh .koan-shutdown
+        file (timestamp > startup_time). After the first poll, awake.py
+        clears it, so the shutdown check finds nothing.
+        """
+        startup_time = time.time()
+
+        # Re-delivered /shutdown creates a fresh file (as the handler would)
+        request_shutdown(str(tmp_path))
+
+        # At this point, is_shutdown_requested would return True
+        assert is_shutdown_requested(str(tmp_path), startup_time) is True
+
+        # But awake.py clears it after the first poll
+        request_shutdown(str(tmp_path))  # re-create (handler runs again)
+        clear_shutdown(str(tmp_path))     # awake.py first-poll cleanup
+
+        # Now the check returns False — process survives
+        assert is_shutdown_requested(str(tmp_path), startup_time) is False
+
+    def test_legitimate_shutdown_after_first_poll(self, tmp_path):
+        """A real /shutdown sent AFTER first poll should still work."""
+        startup_time = time.time()
+
+        # First poll: re-delivered message cleared
+        clear_shutdown(str(tmp_path))
+
+        # Later: user sends a new /shutdown
+        time.sleep(0.01)  # ensure distinct timestamp
+        request_shutdown(str(tmp_path))
+
+        # This one should be honored
+        assert is_shutdown_requested(str(tmp_path), startup_time) is True

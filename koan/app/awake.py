@@ -520,8 +520,8 @@ def main():
     provider_name = "telegram"  # about to become dynamic with provider abstraction
     print_bridge_banner(f"messaging bridge — {provider_name.lower()}")
 
-    # Record startup time — used to ignore stale .koan-restart files in
-    # the main loop (only react to files created after we started).
+    # Record startup time — used to ignore stale signal files in the
+    # main loop (only react to files created after we started).
     startup_time = time.time()
 
     # Compact old conversation history to avoid context bleed across sessions
@@ -572,15 +572,15 @@ def main():
                     log("chat", f"Received: {text[:60]}")
                     handle_message(text)
 
-            # After the first poll cycle, clear any stale .koan-restart
-            # file left from a previous incarnation.  During the first
-            # poll the file acts as a dedup guard: if Telegram re-delivers
-            # the /restart message that triggered our re-exec,
-            # the skill handler sees the file and skips.  Once that batch
-            # is processed we remove the guard so future /restart commands
-            # are honored.
+            # After the first poll cycle, clear any stale signal files
+            # left from a previous incarnation.  During the first poll
+            # these files act as dedup guards: if Telegram re-delivers
+            # the /restart or /shutdown message that triggered our exit,
+            # the skill handler re-creates the file — but we clear it
+            # right after so the check below finds nothing.
             if first_poll:
                 clear_restart(KOAN_ROOT)
+                clear_shutdown(str(KOAN_ROOT))
                 first_poll = False
 
             flush_outbox()
