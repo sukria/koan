@@ -466,11 +466,24 @@ class TestHandleCommand:
         mock_send.assert_called_once()
         assert "silent" in mock_send.call_args[0][0].lower()
 
+    @patch("app.command_handlers.send_telegram")
+    def test_unknown_command_rejected_without_llm(self, mock_send):
+        """Unknown /commands are rejected immediately — no LLM call."""
+        handle_command("/unknown")
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "Unknown command" in msg
+        assert "/unknown" in msg
+        assert "/help" in msg
+
     @patch("app.command_handlers._run_in_worker_cb")
     @patch("app.command_handlers._handle_chat_cb")
-    def test_unknown_command_falls_to_chat(self, mock_chat, mock_worker):
-        handle_command("/unknown")
-        mock_worker.assert_called_once_with(mock_chat, "/unknown")
+    @patch("app.command_handlers.send_telegram")
+    def test_unknown_command_does_not_call_llm(self, mock_send, mock_chat, mock_worker):
+        """Unknown /commands must NOT fall through to Claude chat."""
+        handle_command("/nonexistent_thing")
+        mock_chat.assert_not_called()
+        mock_worker.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1966,10 +1979,9 @@ class TestScopedDispatch:
         assert "Hello from greet" in mock_send.call_args[0][0]
         _reset_registry()
 
-    @patch("app.command_handlers._run_in_worker_cb")
-    @patch("app.command_handlers._handle_chat_cb")
-    def test_unknown_scoped_command_falls_to_chat(self, mock_chat, mock_worker, tmp_path):
-        """Unknown scoped command falls through to chat via worker."""
+    @patch("app.command_handlers.send_telegram")
+    def test_unknown_scoped_command_rejected_without_llm(self, mock_send, tmp_path):
+        """Unknown scoped command is rejected immediately — no LLM call."""
         instance = tmp_path / "instance"
         instance.mkdir()
         with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
@@ -1977,7 +1989,25 @@ class TestScopedDispatch:
              patch("app.bridge_state.INSTANCE_DIR", instance):
             _reset_registry()
             handle_command("/unknown.thing")
-        mock_worker.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "Unknown command" in msg
+        assert "/help" in msg
+        _reset_registry()
+
+    @patch("app.command_handlers._run_in_worker_cb")
+    @patch("app.command_handlers._handle_chat_cb")
+    @patch("app.command_handlers.send_telegram")
+    def test_unknown_scoped_command_does_not_call_llm(self, mock_send, mock_chat, mock_worker, tmp_path):
+        """Unknown scoped /commands must NOT fall through to Claude chat."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", instance), \
+             patch("app.bridge_state.INSTANCE_DIR", instance):
+            _reset_registry()
+            handle_command("/unknown.thing")
+        mock_chat.assert_not_called()
+        mock_worker.assert_not_called()
         _reset_registry()
 
 

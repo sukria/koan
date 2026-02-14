@@ -116,12 +116,8 @@ def handle_command(text: str):
             _dispatch_skill(skill, subcommand, skill_args)
             return
 
-    # Unknown command — pass to Claude as chat (in worker thread to avoid
-    # blocking the polling loop)
-    if _run_in_worker_cb and _handle_chat_cb:
-        _run_in_worker_cb(_handle_chat_cb, text)
-    elif _handle_chat_cb:
-        _handle_chat_cb(text)
+    # Unknown command — reject immediately instead of wasting LLM credits
+    send_telegram(f"❌ Unknown command: /{command_name}\nUse /help to see available commands.")
 
 
 def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
