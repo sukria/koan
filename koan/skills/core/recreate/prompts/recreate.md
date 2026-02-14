@@ -45,6 +45,9 @@ since this was written — adapt the implementation to the current state.
 You are working on a **fresh branch** created from the current `{BASE}`.
 The codebase may have changed significantly since the original PR was written.
 
+**IMPORTANT: Do NOT create new branches or switch branches with git checkout/switch.
+Stay on the current branch. Your changes will be committed and pushed automatically.**
+
 1. **Understand the intent.** Read the PR description, diff, and comments to
    understand what the feature is supposed to do and why.
 

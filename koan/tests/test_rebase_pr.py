@@ -824,6 +824,75 @@ class TestRunRebaseClaude:
             call_kwargs = mock_apply.call_args
             assert call_kwargs[1].get("skill_dir") == REBASE_SKILL_DIR
 
+    @patch("app.rebase_pr._safe_checkout")
+    @patch("app.rebase_pr.run_gh")
+    @patch("app.rebase_pr._apply_review_feedback")
+    @patch("app.rebase_pr.fetch_pr_context")
+    def test_claude_branch_switch_restored_after_feedback(
+        self, mock_ctx, mock_apply, mock_gh, mock_safe
+    ):
+        """If Claude switches branches during feedback, we restore the PR branch."""
+        mock_ctx.return_value = {
+            "title": "T", "body": "", "branch": "feat",
+            "base": "main", "state": "", "author": "", "url": "",
+            "diff": "", "review_comments": "fix this",
+            "reviews": "", "issue_comments": "",
+        }
+        notify = MagicMock()
+
+        # _get_current_branch returns different values:
+        # 1st call: "main" (original branch before checkout)
+        # 2nd call: "koan/some-branch" (Claude switched during feedback)
+        branch_calls = iter(["main", "koan/some-branch"])
+        with patch("app.rebase_pr._get_current_branch", side_effect=branch_calls), \
+             patch("app.rebase_pr._checkout_pr_branch"), \
+             patch("app.rebase_pr._rebase_onto_target", return_value="origin"), \
+             patch("app.rebase_pr._push_with_fallback", return_value={
+                 "success": True, "actions": ["Force-pushed"], "error": ""
+             }):
+            success, summary = run_rebase("o", "r", "1", "/p", notify_fn=notify,
+                                          skill_dir=REBASE_SKILL_DIR)
+            assert success is True
+            # _safe_checkout should be called to restore the PR branch
+            # (once for restoration + once at end for original branch)
+            checkout_calls = [c[0][0] for c in mock_safe.call_args_list]
+            assert "feat" in checkout_calls  # restored to PR branch
+
+    @patch("app.rebase_pr._safe_checkout")
+    @patch("app.rebase_pr.run_gh")
+    @patch("app.rebase_pr._apply_review_feedback")
+    @patch("app.rebase_pr.fetch_pr_context")
+    def test_claude_stays_on_branch_no_restore(
+        self, mock_ctx, mock_apply, mock_gh, mock_safe
+    ):
+        """If Claude stays on the correct branch, no extra checkout happens."""
+        mock_ctx.return_value = {
+            "title": "T", "body": "", "branch": "feat",
+            "base": "main", "state": "", "author": "", "url": "",
+            "diff": "", "review_comments": "fix this",
+            "reviews": "", "issue_comments": "",
+        }
+        notify = MagicMock()
+
+        # _get_current_branch returns "feat" after feedback (stayed on branch)
+        branch_calls = iter(["main", "feat"])
+        with patch("app.rebase_pr._get_current_branch", side_effect=branch_calls), \
+             patch("app.rebase_pr._checkout_pr_branch"), \
+             patch("app.rebase_pr._rebase_onto_target", return_value="origin"), \
+             patch("app.rebase_pr._push_with_fallback", return_value={
+                 "success": True, "actions": ["Force-pushed"], "error": ""
+             }):
+            success, summary = run_rebase("o", "r", "1", "/p", notify_fn=notify,
+                                          skill_dir=REBASE_SKILL_DIR)
+            assert success is True
+            # _safe_checkout should only be called at the end (original branch)
+            # NOT for branch restoration since Claude stayed on correct branch
+            restore_calls = [
+                c for c in mock_safe.call_args_list
+                if c[0][0] == "feat"
+            ]
+            assert len(restore_calls) == 0  # no restoration needed
+
 
 # ---------------------------------------------------------------------------
 # main() CLI entry point

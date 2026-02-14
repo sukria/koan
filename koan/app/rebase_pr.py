@@ -201,6 +201,16 @@ def run_rebase(
             skill_dir=skill_dir,
         )
 
+        # Claude may switch branches during feedback — ensure we're still
+        # on the expected branch before pushing.
+        current = _get_current_branch(project_path)
+        if current != branch:
+            actions_log.append(
+                f"Note: Claude switched to `{current}`, "
+                f"restoring `{branch}`"
+            )
+            _safe_checkout(branch, project_path)
+
     # ── Step 5: Push the result ───────────────────────────────────────
     notify_fn(f"Pushing `{branch}`...")
     push_result = _push_with_fallback(

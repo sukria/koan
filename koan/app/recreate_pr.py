@@ -129,6 +129,16 @@ def run_recreate(
         skill_dir=skill_dir,
     )
 
+    # Claude may have created its own branch instead of staying on work_branch.
+    # Detect the actual branch and use it for commit verification and push.
+    current_branch = _get_current_branch(project_path)
+    if current_branch != work_branch:
+        actions_log.append(
+            f"Claude switched to branch `{current_branch}` "
+            f"(expected `{work_branch}`)"
+        )
+        work_branch = current_branch
+
     # Verify something was actually implemented
     has_changes = _has_commits_on_branch(work_branch, base, upstream_remote, project_path)
     if not has_changes:
@@ -262,15 +272,22 @@ def _reimpl_feature(
 def _has_commits_on_branch(
     branch: str, base: str, remote: str, project_path: str
 ) -> bool:
-    """Check if the branch has commits beyond the upstream target."""
-    try:
-        log = _run_git(
-            ["git", "log", f"{remote}/{base}..{branch}", "--oneline"],
-            cwd=project_path,
-        )
-        return bool(log.strip())
-    except Exception:
-        return False
+    """Check if the branch has commits beyond the upstream target.
+
+    Falls back to checking HEAD if the named branch ref fails (e.g. when
+    the branch name is ambiguous due to dots/slashes).
+    """
+    for ref in (branch, "HEAD"):
+        try:
+            log = _run_git(
+                ["git", "log", f"{remote}/{base}..{ref}", "--oneline"],
+                cwd=project_path,
+            )
+            if log.strip():
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _run_tests(project_path: str) -> Optional[str]:

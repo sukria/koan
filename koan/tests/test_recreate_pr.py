@@ -82,9 +82,25 @@ class TestHasCommitsOnBranch:
         with patch("app.recreate_pr._run_git", return_value=""):
             assert _has_commits_on_branch("koan/feat", "main", "origin", "/proj") is False
 
-    def test_git_error_returns_false(self):
+    def test_git_error_falls_back_to_head(self):
+        """When the branch ref fails, falls back to HEAD."""
+        with patch("app.recreate_pr._run_git") as mock_git:
+            mock_git.side_effect = [
+                RuntimeError("ambiguous ref"),  # branch ref fails
+                "abc123 commit via HEAD",        # HEAD ref succeeds
+            ]
+            assert _has_commits_on_branch("koan.atoomic/feat", "main", "origin", "/proj") is True
+            assert mock_git.call_count == 2
+
+    def test_both_refs_fail_returns_false(self):
         with patch("app.recreate_pr._run_git", side_effect=RuntimeError("oops")):
             assert _has_commits_on_branch("koan/feat", "main", "origin", "/proj") is False
+
+    def test_branch_empty_but_head_has_commits(self):
+        """Branch ref returns empty but HEAD has commits (e.g. Claude switched branches)."""
+        with patch("app.recreate_pr._run_git") as mock_git:
+            mock_git.side_effect = ["", "abc123 commit on HEAD"]
+            assert _has_commits_on_branch("koan/feat", "main", "origin", "/proj") is True
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +462,65 @@ class TestRunRecreate:
              patch("app.recreate_pr._safe_checkout") as mock_checkout:
             run_recreate("o", "r", "1", "/p", notify_fn=notify)
             mock_checkout.assert_called_with("develop", "/p")
+
+    def test_claude_switches_branch_detected(self):
+        """When Claude creates a different branch, run_recreate should detect it."""
+        notify = MagicMock()
+        ctx = self._mock_context()  # branch = "koan/scanner"
+
+        # _get_current_branch returns different values:
+        # 1st call: before work (returns "main" - original)
+        # 2nd call: after _reimpl_feature (returns "koan/scanner-v2" - Claude switched)
+        get_branch_calls = iter(["main", "koan/scanner-v2"])
+
+        with patch("app.recreate_pr.fetch_pr_context", return_value=ctx), \
+             patch("app.recreate_pr._get_current_branch", side_effect=get_branch_calls), \
+             patch("app.recreate_pr._fetch_upstream_target", return_value="origin"), \
+             patch("app.recreate_pr._run_git"), \
+             patch("app.recreate_pr._reimpl_feature", return_value=True), \
+             patch("app.recreate_pr._has_commits_on_branch", return_value=True) as mock_has, \
+             patch("app.recreate_pr._run_tests", return_value=None), \
+             patch("app.recreate_pr._push_recreated", return_value={
+                 "success": True, "actions": [], "error": "",
+             }) as mock_push, \
+             patch("app.recreate_pr.run_gh"), \
+             patch("app.recreate_pr._safe_checkout"):
+            ok, msg = run_recreate("o", "r", "1", "/p", notify_fn=notify)
+            assert ok is True
+            # The branch switch should be logged in the summary
+            assert "switched" in msg.lower()
+            assert "koan/scanner-v2" in msg
+            # _has_commits_on_branch should be called with the NEW branch name
+            mock_has.assert_called_once_with(
+                "koan/scanner-v2", "main", "origin", "/p"
+            )
+            # Push should use the new branch name
+            mock_push.assert_called_once()
+            assert mock_push.call_args[0][0] == "koan/scanner-v2"
+
+    def test_claude_stays_on_branch(self):
+        """When Claude stays on the expected branch, no switch is logged."""
+        notify = MagicMock()
+        ctx = self._mock_context()  # branch = "koan/scanner"
+
+        # Both calls return expected branches
+        get_branch_calls = iter(["main", "koan/scanner"])
+
+        with patch("app.recreate_pr.fetch_pr_context", return_value=ctx), \
+             patch("app.recreate_pr._get_current_branch", side_effect=get_branch_calls), \
+             patch("app.recreate_pr._fetch_upstream_target", return_value="origin"), \
+             patch("app.recreate_pr._run_git"), \
+             patch("app.recreate_pr._reimpl_feature", return_value=True), \
+             patch("app.recreate_pr._has_commits_on_branch", return_value=True), \
+             patch("app.recreate_pr._run_tests", return_value=None), \
+             patch("app.recreate_pr._push_recreated", return_value={
+                 "success": True, "actions": [], "error": "",
+             }), \
+             patch("app.recreate_pr.run_gh"), \
+             patch("app.recreate_pr._safe_checkout"):
+            ok, msg = run_recreate("o", "r", "1", "/p", notify_fn=notify)
+            assert ok is True
+            assert "switched" not in msg.lower()
 
 
 # ---------------------------------------------------------------------------

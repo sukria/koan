@@ -36,6 +36,9 @@ You are rebasing a pull request and applying changes requested by reviewers.
 
 ## Your Task
 
+**IMPORTANT: Do NOT create new branches or switch branches with git checkout/switch.
+Stay on the current branch. Your changes will be committed and pushed automatically.**
+
 1. **Read all review comments carefully.** Identify actionable change requests vs. discussion or questions.
 2. **Implement the requested changes.** Edit the code to address each actionable review comment.
    - Skip comments that are questions, acknowledgments, or discussion (not change requests).
