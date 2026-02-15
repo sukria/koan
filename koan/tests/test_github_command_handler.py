@@ -10,7 +10,9 @@ from app.github_command_handler import (
     _error_replies,
     build_mission_from_command,
     extract_issue_number_from_notification,
+    format_help_message,
     get_github_enabled_commands,
+    get_github_enabled_commands_with_descriptions,
     post_error_reply,
     process_single_notification,
     resolve_project_from_notification,
@@ -125,6 +127,99 @@ class TestGetGithubEnabledCommands:
     def test_sorted(self, registry):
         commands = get_github_enabled_commands(registry)
         assert commands == sorted(commands)
+
+
+class TestGetGithubEnabledCommandsWithDescriptions:
+    def test_returns_name_and_description(self, registry):
+        result = get_github_enabled_commands_with_descriptions(registry)
+        names = [name for name, _ in result]
+        assert "rebase" in names
+        assert "implement" in names
+
+    def test_uses_command_description(self):
+        skill = Skill(
+            name="review", scope="core", github_enabled=True,
+            description="Skill description",
+            commands=[SkillCommand(name="review", description="Review a PR")],
+        )
+        reg = SkillRegistry()
+        reg._register(skill)
+        result = get_github_enabled_commands_with_descriptions(reg)
+        assert result == [("review", "Review a PR")]
+
+    def test_falls_back_to_skill_description(self):
+        skill = Skill(
+            name="review", scope="core", github_enabled=True,
+            description="Skill-level description",
+            commands=[SkillCommand(name="review", description="")],
+        )
+        reg = SkillRegistry()
+        reg._register(skill)
+        result = get_github_enabled_commands_with_descriptions(reg)
+        assert result == [("review", "Skill-level description")]
+
+    def test_excludes_disabled(self):
+        skill = Skill(
+            name="status", scope="core", github_enabled=False,
+            commands=[SkillCommand(name="status", description="Status check")],
+        )
+        reg = SkillRegistry()
+        reg._register(skill)
+        assert get_github_enabled_commands_with_descriptions(reg) == []
+
+    def test_sorted(self, registry):
+        result = get_github_enabled_commands_with_descriptions(registry)
+        names = [name for name, _ in result]
+        assert names == sorted(names)
+
+    def test_deduplicates_command_names(self):
+        """Two skills with same command name — first one wins."""
+        skill1 = Skill(
+            name="review", scope="core", github_enabled=True,
+            commands=[SkillCommand(name="review", description="First")],
+        )
+        skill2 = Skill(
+            name="review2", scope="custom", github_enabled=True,
+            commands=[SkillCommand(name="review", description="Second")],
+        )
+        reg = SkillRegistry()
+        reg._register(skill1)
+        reg._register(skill2)
+        result = get_github_enabled_commands_with_descriptions(reg)
+        assert len(result) == 1
+        assert result[0] == ("review", "First")
+
+
+class TestFormatHelpMessage:
+    def test_contains_invalid_command(self, registry):
+        msg = format_help_message("badcmd", registry, "koanbot")
+        assert "`badcmd`" in msg
+
+    def test_lists_available_commands(self, registry):
+        msg = format_help_message("badcmd", registry, "koanbot")
+        assert "`@koanbot rebase`" in msg
+        assert "`@koanbot implement`" in msg
+
+    def test_includes_usage_line(self, registry):
+        msg = format_help_message("badcmd", registry, "koanbot")
+        assert "Usage:" in msg
+        assert "`@koanbot <command>`" in msg
+
+    def test_includes_descriptions(self):
+        skill = Skill(
+            name="rebase", scope="core", github_enabled=True,
+            commands=[SkillCommand(name="rebase", description="Rebase a PR")],
+        )
+        reg = SkillRegistry()
+        reg._register(skill)
+        msg = format_help_message("badcmd", reg, "koanbot")
+        assert "Rebase a PR" in msg
+
+    def test_empty_registry(self):
+        reg = SkillRegistry()
+        msg = format_help_message("badcmd", reg, "koanbot")
+        assert "`badcmd`" in msg
+        assert "Usage:" in msg
 
 
 class TestBuildMissionFromCommand:
@@ -295,3 +390,52 @@ class TestProcessSingleNotification:
         )
         assert success is False
         assert "Unknown repository" in error
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_invalid_command_returns_help(
+        self, mock_resolve, mock_comment, mock_stale, mock_self,
+        mock_processed, mock_read, registry, sample_notification,
+    ):
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99999, "body": "@testbot badcmd",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot"}}
+
+        success, error = process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+        assert success is False
+        assert "`badcmd`" in error
+        assert "`@testbot rebase`" in error
+        assert "`@testbot implement`" in error
+        assert "Usage:" in error
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_invalid_command_marks_notification_read(
+        self, mock_resolve, mock_comment, mock_stale, mock_self,
+        mock_processed, mock_read, registry, sample_notification,
+    ):
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99999, "body": "@testbot badcmd",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot"}}
+
+        process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+        # Notification should be marked as read for invalid commands
+        mock_read.assert_called_with("12345")

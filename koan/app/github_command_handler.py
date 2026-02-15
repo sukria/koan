@@ -66,6 +66,48 @@ def get_github_enabled_commands(registry: SkillRegistry) -> List[str]:
     return sorted(commands)
 
 
+def get_github_enabled_commands_with_descriptions(
+    registry: SkillRegistry,
+) -> List[Tuple[str, str]]:
+    """Get github-enabled commands with their descriptions.
+
+    Returns sorted list of (command_name, description) tuples.
+    Only includes primary command names (not aliases).
+    """
+    commands: dict = {}
+    for skill in registry.list_all():
+        if skill.github_enabled:
+            for cmd in skill.commands:
+                if cmd.name not in commands:
+                    commands[cmd.name] = cmd.description or skill.description
+    return sorted(commands.items())
+
+
+def format_help_message(
+    invalid_command: str,
+    registry: SkillRegistry,
+    bot_username: str,
+) -> str:
+    """Build a help message listing available GitHub commands.
+
+    Args:
+        invalid_command: The command that was not recognized.
+        registry: Skills registry.
+        bot_username: The bot's GitHub username (for usage examples).
+
+    Returns:
+        A formatted markdown help message for GitHub comments.
+    """
+    commands = get_github_enabled_commands_with_descriptions(registry)
+
+    lines = [f"Unknown command `{invalid_command}`. Here are the commands I support:\n"]
+    for name, description in commands:
+        lines.append(f"- `@{bot_username} {name}` — {description}")
+
+    lines.append(f"\nUsage: `@{bot_username} <command>` in any PR or issue comment.")
+    return "\n".join(lines)
+
+
 def _extract_url_from_context(context: str) -> Optional[Tuple[str, str]]:
     """Extract URL from context text if present.
     
@@ -292,8 +334,9 @@ def process_single_notification(
     
     # If skill is None but we have a command_name, it's an invalid command
     if skill is None:
-        available = ", ".join(get_github_enabled_commands(registry))
-        return False, f"Unknown command '{command_name}'. Available: {available}"
+        mark_notification_read(str(notification.get("id", "")))
+        help_msg = format_help_message(command_name, registry, bot_username)
+        return False, help_msg
 
     # Check permissions
     allowed_users = get_github_authorized_users(config, project_name, projects_config)
