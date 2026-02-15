@@ -163,6 +163,8 @@ class TestBuildPrompt:
                 ISSUE_TITLE="Title",
                 PLAN="Plan",
                 CONTEXT="Context",
+                BRANCH_PREFIX="koan/",
+                ISSUE_NUMBER="",
             )
             assert result == "prompt"
 
@@ -177,6 +179,8 @@ class TestBuildPrompt:
                 ISSUE_TITLE="Title",
                 PLAN="Plan",
                 CONTEXT="Context",
+                BRANCH_PREFIX="koan/",
+                ISSUE_NUMBER="",
             )
             assert result == "prompt"
 

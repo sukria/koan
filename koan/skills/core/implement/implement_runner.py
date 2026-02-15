@@ -100,6 +100,7 @@ def run_implement(
             plan=plan,
             context=context or "Implement the full plan.",
             skill_dir=skill_dir,
+            issue_number=str(issue_number),
         )
     except Exception as e:
         return False, f"Implementation failed: {str(e)[:300]}"
@@ -205,35 +206,36 @@ def _build_prompt(
     plan: str,
     context: str,
     skill_dir: Optional[Path] = None,
+    branch_prefix: str = "koan/",
+    issue_number: str = "",
 ) -> str:
     """Build the implementation prompt from the issue and plan.
-    
+
     Args:
         issue_url: GitHub issue URL.
         issue_title: Issue title.
         plan: Extracted plan text.
         context: Additional user context.
         skill_dir: Path to skill directory for prompt loading.
-        
+        branch_prefix: Git branch prefix for the project.
+        issue_number: Issue number for branch naming.
+
     Returns:
         Formatted prompt string.
     """
-    if skill_dir is not None:
-        return load_skill_prompt(
-            skill_dir, "implement",
-            ISSUE_URL=issue_url,
-            ISSUE_TITLE=issue_title,
-            PLAN=plan,
-            CONTEXT=context,
-        )
-
-    return load_prompt(
-        "implement",
+    template_vars = dict(
         ISSUE_URL=issue_url,
         ISSUE_TITLE=issue_title,
         PLAN=plan,
         CONTEXT=context,
+        BRANCH_PREFIX=branch_prefix,
+        ISSUE_NUMBER=issue_number,
     )
+
+    if skill_dir is not None:
+        return load_skill_prompt(skill_dir, "implement", **template_vars)
+
+    return load_prompt("implement", **template_vars)
 
 
 def _generate_pr_summary(
@@ -298,9 +300,10 @@ def _execute_implementation(
     plan: str,
     context: str,
     skill_dir: Optional[Path] = None,
+    issue_number: str = "",
 ) -> str:
     """Execute the implementation via Claude CLI.
-    
+
     Args:
         project_path: Path to the project repository.
         issue_url: GitHub issue URL.
@@ -308,12 +311,20 @@ def _execute_implementation(
         plan: Extracted plan text.
         context: Additional user context.
         skill_dir: Path to skill directory for prompt loading.
-        
+        issue_number: Issue number for branch naming.
+
     Returns:
         Claude CLI output.
     """
-    prompt = _build_prompt(issue_url, issue_title, plan, context, skill_dir)
-    
+    from app.config import get_branch_prefix
+    branch_prefix = get_branch_prefix()
+
+    prompt = _build_prompt(
+        issue_url, issue_title, plan, context, skill_dir,
+        branch_prefix=branch_prefix,
+        issue_number=issue_number,
+    )
+
     from app.cli_provider import CLAUDE_TOOLS, run_command
     return run_command(
         prompt, project_path,
