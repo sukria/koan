@@ -112,6 +112,7 @@ Communication happens through shared markdown files in `instance/` — atomic wr
 ### Communication
 
 - **Telegram & Slack** — Pluggable messaging with flood protection
+- **Email digests** — Optional SMTP email notifications for session summaries (rate-limited, deduplicated)
 - **Personality-aware formatting** — Every outbox message passes through Claude with soul + memory context
 - **Verbose mode** — Real-time progress updates streamed to your phone
 - **Spontaneous messages** — Koan occasionally initiates conversation when something feels worth saying

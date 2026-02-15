@@ -142,10 +142,10 @@ class TestScanOutboxContent:
     def test_blocks_env_dump(self):
         """Multiple KEY=VALUE lines suggest .env file dump."""
         content = (
-            "HOME=/Users/nicolas\n"
-            "PATH=/usr/local/bin:/usr/bin\n"
-            "SHELL=/bin/zsh\n"
-            "USER=nicolas\n"
+            "KOAN_HOME=/Users/nicolas\n"
+            "KOAN_PATH=/usr/local/bin:/usr/bin\n"
+            "KOAN_SHELL=/bin/zsh\n"
+            "KOAN_USER=nicolas\n"
         )
         result = scan_outbox_content(content)
         assert result.blocked
@@ -161,13 +161,13 @@ class TestScanOutboxContent:
 
     def test_blocks_large_base64(self):
         result = scan_outbox_content(
-            "Data: " + "A" * 120 + "=="
+            "Data: " + "A" * 210 + "=="
         )
         assert result.blocked
         assert "base64" in result.reason.lower()
 
     def test_blocks_large_hex(self):
-        result = scan_outbox_content("Hash: " + "a1b2c3d4" * 10)
+        result = scan_outbox_content("Hash: " + "a1b2c3d4" * 20)
         assert result.blocked
         assert "hex" in result.reason.lower()
 

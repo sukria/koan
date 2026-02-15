@@ -9,6 +9,7 @@ Environment variables:
     KOAN_SLACK_CHANNEL_ID   — Channel ID to operate in (C...)
 """
 
+import itertools
 import os
 import queue
 import re
@@ -45,7 +46,7 @@ class SlackProvider(MessagingProvider):
 
         # Thread-safe message buffer for poll_updates()
         self._message_queue: queue.Queue = queue.Queue()
-        self._update_counter: int = 0
+        self._update_counter = itertools.count(1)
         self._send_lock = threading.Lock()
         self._last_send_time: float = 0.0
         self._connect_lock = threading.Lock()
@@ -232,15 +233,14 @@ class SlackProvider(MessagingProvider):
 
         # Strip @bot mentions from text
         if self._bot_user_id:
-            text = re.sub(rf"<@{self._bot_user_id}>\s*", "", text).strip()
+            text = re.sub(rf"<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()
 
         return text
 
     def _queue_update(self, text: str, event: dict, payload: dict):
         """Create and queue an Update from processed event data."""
-        self._update_counter += 1
         update = Update(
-            update_id=self._update_counter,
+            update_id=next(self._update_counter),
             message=Message(
                 text=text,
                 role="user",

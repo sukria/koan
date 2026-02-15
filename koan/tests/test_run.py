@@ -719,8 +719,8 @@ class TestMain:
 class TestMainLoop:
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
-    @patch("app.run.acquire_pid")
-    @patch("app.run.release_pid")
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
     def test_stop_file_exits_loop(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
         """Stop file created DURING loop causes clean exit."""
         from app.run import main_loop
@@ -747,8 +747,8 @@ class TestMainLoop:
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
-    @patch("app.run.acquire_pid")
-    @patch("app.run.release_pid")
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
     def test_stale_stop_file_cleared_on_startup(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
         """Stale .koan-stop from a previous make stop is cleared on startup.
 
@@ -787,8 +787,8 @@ class TestMainLoop:
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
-    @patch("app.run.acquire_pid")
-    @patch("app.run.release_pid")
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
     def test_stale_stop_file_absent_no_error(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
         """No crash when .koan-stop doesn't exist at startup (normal case)."""
         from app.run import main_loop
@@ -814,8 +814,8 @@ class TestMainLoop:
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
-    @patch("app.run.acquire_pid")
-    @patch("app.run.release_pid")
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
     def test_restart_file_exits_42(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
         from app.run import main_loop
 
@@ -1153,8 +1153,8 @@ class TestMainLoopResilience:
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
-    @patch("app.run.acquire_pid")
-    @patch("app.run.release_pid")
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
     @patch("app.run._run_iteration")
     @patch("app.run._handle_iteration_error")
     def test_recovers_from_iteration_error(
@@ -1190,8 +1190,8 @@ class TestMainLoopResilience:
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
-    @patch("app.run.acquire_pid")
-    @patch("app.run.release_pid")
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
     @patch("app.run._run_iteration")
     @patch("app.run._handle_iteration_error")
     def test_consecutive_error_counter_resets_on_success(
@@ -1237,8 +1237,8 @@ class TestMainLoopResilience:
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
-    @patch("app.run.acquire_pid")
-    @patch("app.run.release_pid")
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
     @patch("app.run._run_iteration")
     def test_keyboard_interrupt_propagates(
         self, mock_iteration, mock_release,
@@ -1262,8 +1262,8 @@ class TestMainLoopResilience:
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
-    @patch("app.run.acquire_pid")
-    @patch("app.run.release_pid")
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
     @patch("app.run._run_iteration")
     def test_system_exit_42_propagates(
         self, mock_iteration, mock_release,

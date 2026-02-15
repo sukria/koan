@@ -965,6 +965,11 @@ projects:
 
 class TestFilterExplorationProjectsPrLimit:
 
+    def setup_method(self):
+        """Clear the PR count cache between tests."""
+        from app.iteration_manager import _pr_count_cache
+        _pr_count_cache.clear()
+
     @patch("app.github.get_gh_username", return_value="koan-bot")
     @patch("app.github.count_open_prs", return_value=3)
     def test_under_limit_included(self, mock_count, mock_user, koan_root):

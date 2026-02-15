@@ -25,9 +25,10 @@ import argparse
 import json
 import re
 import sys
+import time
 from collections import namedtuple
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from app.loop_manager import resolve_focus_area
 
@@ -261,6 +262,28 @@ def _check_focus(koan_root: str):
         return None
 
 
+# TTL cache for count_open_prs results (avoids repeated gh CLI calls per iteration)
+_pr_count_cache: Dict[str, tuple] = {}  # key -> (count, timestamp)
+_PR_COUNT_TTL = 300  # 5 minutes
+
+
+def _cached_count_open_prs(github_url: str, author: str) -> int:
+    """count_open_prs with a 5-minute TTL cache."""
+    from app.github import count_open_prs
+
+    key = f"{github_url}:{author}"
+    now = time.monotonic()
+    cached = _pr_count_cache.get(key)
+    if cached and (now - cached[1]) < _PR_COUNT_TTL:
+        return cached[0]
+
+    result = count_open_prs(github_url, author)
+    # Cache errors (-1) too — avoids hammering gh on repeated failures.
+    # Fail-open: -1 means project stays included until cache expires.
+    _pr_count_cache[key] = (result, now)
+    return result
+
+
 FilterResult = namedtuple("FilterResult", ["projects", "pr_limited"])
 
 
@@ -297,7 +320,7 @@ def _filter_exploration_projects(
     ]
 
     # Gate 2: max_open_prs limit
-    from app.github import get_gh_username, count_open_prs
+    from app.github import get_gh_username
     author = get_gh_username()
 
     filtered = []
@@ -323,7 +346,7 @@ def _filter_exploration_projects(
             filtered.append((name, path))
             continue
 
-        open_count = count_open_prs(github_url, author)
+        open_count = _cached_count_open_prs(github_url, author)
         if open_count < 0:
             # Error — fail-open, include project
             filtered.append((name, path))

@@ -40,23 +40,18 @@ def extract_session_summary(journal_path: Path, max_chars: int = 800) -> str:
     if not content.strip():
         return "No journal entries today — session was brief."
 
-    # Extract last ~800 chars for context (will be formatted by Claude)
-    # This gives Claude the session context without dumping the whole journal
-    if len(content) > max_chars:
-        # Get last section or last N chars
-        sections = content.split("\n## ")
-        if len(sections) > 1:
-            # Take last 2-3 sections
-            recent_sections = sections[-3:]
-            summary = "\n## ".join(recent_sections)
-            if len(summary) > max_chars:
-                summary = "..." + summary[-max_chars:]
-        else:
-            summary = "..." + content[-max_chars:]
-    else:
-        summary = content
+    if len(content) <= max_chars:
+        return content
 
-    return summary
+    # Try to extract last 2-3 markdown sections for coherent context
+    sections = content.split("\n## ")
+    if len(sections) > 1:
+        summary = "\n## ".join(sections[-3:])
+        if len(summary) <= max_chars:
+            return summary
+
+    # Fall back to raw tail
+    return "..." + content[-max_chars:]
 
 
 def append_to_outbox(instance_dir: Path, message: str):
@@ -101,6 +96,14 @@ def create_retrospective(instance_dir: Path, project_name: str):
 
     append_to_outbox(instance_dir, retrospective)
     print(f"[send_retrospective] Retrospective sent to outbox ({len(retrospective)} chars)")
+
+    # Also email the digest if email is configured
+    try:
+        from app.email_notify import send_session_digest
+        if send_session_digest(project_name, retrospective):
+            print("[send_retrospective] Session digest emailed to owner")
+    except Exception as e:
+        print(f"[send_retrospective] Email digest skipped: {e}", file=sys.stderr)
 
 
 def main():
