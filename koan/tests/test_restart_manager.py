@@ -207,4 +207,9 @@ class TestRestartWorkflow:
 
         # But a fresh request should work
         request_restart(tmp_path)
+        # Ensure the fresh file's mtime is strictly after startup_time.
+        # On fast CI, write + time.time() can land in the same tick,
+        # so explicitly forward-date the file by 1 second.
+        future_mtime = startup_time + 1
+        os.utime(restart_file, (future_mtime, future_mtime))
         assert check_restart(tmp_path, since=startup_time) is True
