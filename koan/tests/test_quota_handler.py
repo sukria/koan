@@ -128,14 +128,15 @@ class TestComputeResumeInfo:
 
     def test_with_none_timestamp_uses_fallback(self):
         from app.quota_handler import compute_resume_info
+        from app.pause_manager import QUOTA_RETRY_SECONDS
 
         import time
 
-        before = int(time.time()) + 5 * 3600 - 10
+        before = int(time.time()) + QUOTA_RETRY_SECONDS - 10
         effective_ts, msg = compute_resume_info(None, "unknown")
-        after = int(time.time()) + 5 * 3600 + 10
+        after = int(time.time()) + QUOTA_RETRY_SECONDS + 10
         assert before <= effective_ts <= after
-        assert "5h" in msg
+        assert "1h" in msg
         assert "reset time unknown" in msg
 
 
@@ -368,7 +369,7 @@ class TestHandleQuotaExhaustion:
         )
         assert result is not None
         _, resume_msg = result
-        assert "5h" in resume_msg
+        assert "1h" in resume_msg
 
     def test_pause_reason_is_quota(self, tmp_path):
         from app.quota_handler import handle_quota_exhaustion

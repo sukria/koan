@@ -5,7 +5,7 @@ Performs a lightweight CLI probe before each mission to verify that
 API quota is available. This catches external quota consumption (manual
 Claude usage, other tools) that internal token estimation cannot detect.
 
-The probe adds ~2-3 seconds and ~100 tokens per mission start.
+Uses ``claude usage`` which consumes zero tokens (no API call).
 """
 
 from typing import Optional, Tuple

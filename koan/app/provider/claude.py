@@ -55,18 +55,12 @@ class ClaudeProvider(CLIProvider):
         return flags
 
     def check_quota_available(self, project_path: str, timeout: int = 15) -> Tuple[bool, str]:
-        """Probe Claude API quota with a minimal 1-turn CLI call.
+        """Check Claude API quota via ``claude usage`` (no tokens consumed).
 
-        Runs ``claude -p "reply OK" --max-turns 1`` and checks whether
-        the output contains quota exhaustion signals.
+        Runs ``claude usage`` and checks the output for quota exhaustion
+        signals. Unlike a prompt-based probe, this costs zero tokens.
         """
-        cmd = [
-            self.binary(),
-            "-p", "reply OK",
-            "--max-turns", "1",
-            "--output-format", "json",
-            "--no-input",
-        ]
+        cmd = [self.binary(), "usage"]
         try:
             result = subprocess.run(
                 cmd,
@@ -83,6 +77,6 @@ class ClaudeProvider(CLIProvider):
         except subprocess.TimeoutExpired:
             # Timeout — proceed optimistically
             return True, ""
-        except Exception as e:
+        except Exception:
             # Non-quota error — proceed optimistically
             return True, ""
