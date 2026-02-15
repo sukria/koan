@@ -1,0 +1,37 @@
+# Kōan Docker Compose — Mounted Binaries Approach
+#
+# The container mounts CLI binaries and auth from the host.
+# Run ./setup-docker.sh first — it generates docker-compose.override.yml
+# with the correct volume mounts for your system.
+#
+# Usage:
+#   ./setup-docker.sh               # Auto-detect host setup
+#   docker compose up --build        # Full stack (agent + bridge)
+#   docker compose run koan test     # Run test suite
+#   docker compose run koan shell    # Interactive shell
+
+services:
+  koan:
+    build:
+      context: .
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    container_name: koan
+    env_file:
+      - .env
+    environment:
+      - KOAN_ROOT=/app
+      - PYTHONPATH=/app/koan
+    volumes:
+      # Instance state — persisted across restarts
+      - ./instance:/app/instance
+      # Workspace — host project repos (read-write)
+      - ./workspace:/app/workspace
+      # Logs
+      - ./logs:/app/logs
+    restart: unless-stopped
+    # No ports exposed by default — Telegram/Slack only
+    # Uncomment to expose dashboard:
+    # ports:
+    #   - "5001:5001"

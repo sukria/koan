@@ -6,6 +6,7 @@ export
 .PHONY: awake run errand-run errand-awake dashboard
 .PHONY: ollama logs
 .PHONY: install-systemctl-service uninstall-systemctl-service
+.PHONY: docker-setup docker-up docker-down docker-logs docker-test
 
 PYTHON_BIN ?= python3
 
@@ -122,3 +123,21 @@ uninstall-systemctl-service:
 	@if [ -z "$(IS_LINUX)" ]; then echo "Error: systemd is only available on Linux." >&2; exit 1; fi
 	@if [ -z "$(HAS_SYSTEMD)" ]; then echo "Error: systemctl not found." >&2; exit 1; fi
 	sudo bash koan/systemd/uninstall-service.sh
+
+# --- Docker targets ---
+
+docker-setup:
+	@./setup-docker.sh
+
+docker-up: docker-setup
+	docker compose up --build -d
+	@echo "→ Kōan running in Docker. Use 'make docker-logs' to watch output."
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f
+
+docker-test:
+	docker compose run --rm koan test
