@@ -9,6 +9,7 @@ Core module for the notification-driven commands feature. Handles:
 """
 
 import json
+import logging
 import os
 import re
 import time
@@ -16,6 +17,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 from app.github import api, run_gh
+
+log = logging.getLogger(__name__)
 
 # In-memory set of processed comment IDs (resets on restart)
 _processed_comments: Set[str] = set()
@@ -50,19 +53,26 @@ def fetch_unread_notifications(known_repos: Optional[Set[str]] = None) -> List[d
     if not isinstance(notifications, list):
         return []
 
+    log.debug("GitHub API: %d total unread notifications", len(notifications))
+
     results = []
     for notif in notifications:
-        if notif.get("reason") != "mention":
+        reason = notif.get("reason", "?")
+        repo_name = notif.get("repository", {}).get("full_name", "?")
+
+        if reason != "mention":
+            log.debug("GitHub: skipping notification from %s — reason=%s (not mention)", repo_name, reason)
             continue
 
         # Filter by known repos if provided
         if known_repos:
-            repo_full_name = notif.get("repository", {}).get("full_name", "")
-            if repo_full_name not in known_repos:
+            if repo_name not in known_repos:
+                log.debug("GitHub: skipping mention from %s — not in known repos", repo_name)
                 continue
 
         results.append(notif)
 
+    log.debug("GitHub: %d mention notification(s) after filtering", len(results))
     return results
 
 

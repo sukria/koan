@@ -153,30 +153,34 @@ def resolve_project_from_notification(notification: dict) -> Optional[Tuple[str,
 
 def _should_skip_notification(notification: dict, bot_username: str, max_age_hours: int) -> bool:
     """Check if notification should be skipped (stale or self-mention).
-    
+
     Args:
         notification: Notification dict
         bot_username: Bot's GitHub username
         max_age_hours: Maximum age threshold
-        
+
     Returns:
         True if should skip
     """
+    thread_id = notification.get("id", "?")
     # Check staleness
     if is_notification_stale(notification, max_age_hours):
+        log.debug("GitHub: skipping notification %s — stale", thread_id)
         mark_notification_read(str(notification.get("id", "")))
         return True
-    
+
     # Get comment
     comment = get_comment_from_notification(notification)
     if not comment:
+        log.debug("GitHub: skipping notification %s — no comment found", thread_id)
         return True
-    
+
     # Skip self-mentions
     if is_self_mention(comment, bot_username):
+        log.debug("GitHub: skipping notification %s — self-mention", thread_id)
         mark_notification_read(str(notification.get("id", "")))
         return True
-    
+
     return False
 
 
@@ -206,26 +210,30 @@ def _validate_and_parse_command(
         command_name is None if already processed/no valid mention.
     """
     comment_id = str(comment.get("id", ""))
-    
+
     # Check if already processed
     if check_already_processed(comment_id, bot_username, owner, repo):
+        log.debug("GitHub: comment %s already processed", comment_id)
         mark_notification_read(str(notification.get("id", "")))
         return None, None, ""
-    
+
     # Parse command from comment
     nickname = get_github_nickname(config)
     command_result = parse_mention_command(comment.get("body", ""), nickname)
     if not command_result:
+        log.debug("GitHub: no valid @mention command in comment %s", comment_id)
         mark_notification_read(str(notification.get("id", "")))
         return None, None, ""
-    
+
     command_name, context = command_result
-    
+    log.debug("GitHub: parsed command=%s context=%s from comment %s", command_name, context, comment_id)
+
     # Validate command
     skill = validate_command(command_name, registry)
     if not skill:
+        log.debug("GitHub: command '%s' is not github-enabled", command_name)
         return None, command_name, context  # Invalid command, but we have the name for error message
-    
+
     return skill, command_name, context
 
 
@@ -266,9 +274,12 @@ def process_single_notification(
     # Resolve project
     project_info = resolve_project_from_notification(notification)
     if not project_info:
+        repo_name = notification.get("repository", {}).get("full_name", "?")
+        log.debug("GitHub: repo %s not found in projects.yaml", repo_name)
         return False, "Unknown repository — not configured in projects.yaml"
 
     project_name, owner, repo = project_info
+    log.debug("GitHub: resolved project=%s from %s/%s", project_name, owner, repo)
 
     # Validate and parse command
     skill, command_name, context = _validate_and_parse_command(
@@ -287,6 +298,7 @@ def process_single_notification(
     # Check permissions
     allowed_users = get_github_authorized_users(config, project_name, projects_config)
     if not check_user_permission(owner, repo, comment_author, allowed_users):
+        log.debug("GitHub: permission denied for user %s on %s/%s", comment_author, owner, repo)
         return False, "Permission denied. Only users with write access can trigger bot commands."
 
     # Build and insert mission BEFORE reacting (so crash doesn't lose command)

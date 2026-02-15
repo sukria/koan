@@ -303,8 +303,13 @@ def process_github_notifications(
         
         notifications = fetch_unread_notifications(known_repos)
 
+        log.debug(
+            "GitHub: fetched %d mention notification(s)", len(notifications)
+        )
+
         missions_created = 0
         for notif in notifications:
+            _log_notification(notif)
             success, error = process_single_notification(
                 notif, registry, config, projects_config,
                 github_config["bot_username"], github_config["max_age"],
@@ -312,6 +317,7 @@ def process_github_notifications(
 
             if success:
                 missions_created += 1
+                _notify_mission_from_mention(notif)
             elif error:
                 # Post error reply
                 _post_error_for_notification(notif, error)
@@ -334,6 +340,33 @@ def process_github_notifications(
     except Exception as e:
         log.warning("GitHub notification check failed: %s", e)
         return 0
+
+
+def _log_notification(notif: dict) -> None:
+    """Log a received notification at DEBUG level."""
+    repo_name = notif.get("repository", {}).get("full_name", "?")
+    subject_title = notif.get("subject", {}).get("title", "?")
+    subject_type = notif.get("subject", {}).get("type", "?")
+    updated_at = notif.get("updated_at", "?")
+    log.debug(
+        "GitHub notification: repo=%s type=%s title=%s updated=%s",
+        repo_name, subject_type, subject_title, updated_at,
+    )
+
+
+def _notify_mission_from_mention(notif: dict) -> None:
+    """Send a message to the communication layer when a GitHub @mention creates a mission."""
+    try:
+        from app.notify import send_telegram
+        repo_name = notif.get("repository", {}).get("full_name", "?")
+        subject_title = notif.get("subject", {}).get("title", "?")
+        subject_type = notif.get("subject", {}).get("type", "?").lower()
+        send_telegram(
+            f"📬 GitHub @mention → mission queued\n"
+            f"{repo_name} ({subject_type}): {subject_title}"
+        )
+    except Exception as e:
+        log.debug("Failed to send notification message: %s", e)
 
 
 def _post_error_for_notification(notif: dict, error: str) -> None:
