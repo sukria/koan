@@ -7,6 +7,7 @@ which sets ``GH_TOKEN`` — this module has no auth logic.
 
 import json
 import subprocess
+from typing import Optional
 
 # Cached GitHub username (from gh api user fallback).
 # None = not yet queried, "" = query failed.
@@ -182,6 +183,37 @@ def get_gh_username() -> str:
         _cached_gh_username = ""
 
     return _cached_gh_username
+
+
+def detect_parent_repo(project_path: str) -> Optional[str]:
+    """Detect if the local repo is a fork and return the parent owner/repo.
+
+    Calls ``gh repo view --json parent`` to check if the current repository
+    is a fork.  Returns the parent in ``owner/repo`` format, or ``None``
+    if the repo is not a fork, has no parent, or on any error.
+
+    Args:
+        project_path: Path to the local git repository.
+
+    Returns:
+        Parent repository slug (``owner/repo``) or ``None``.
+    """
+    try:
+        output = run_gh(
+            "repo", "view", "--json", "parent",
+            "--jq", '.parent.owner.login + "/" + .parent.name',
+            cwd=project_path, timeout=15,
+        )
+        # gh returns empty or "null/null" when parent is null
+        if not output or output == "/" or "null" in output:
+            return None
+        # Validate owner/repo format
+        parts = output.strip().split("/")
+        if len(parts) == 2 and all(parts):
+            return output.strip()
+        return None
+    except (RuntimeError, Exception):
+        return None
 
 
 def count_open_prs(repo: str, author: str, cwd: str = None) -> int:

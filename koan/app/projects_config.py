@@ -277,6 +277,25 @@ def get_project_github_authorized_users(config: dict, project_name: str) -> list
     return users if isinstance(users, list) else []
 
 
+def get_project_submit_to_repository(config: dict, project_name: str) -> dict:
+    """Get submit_to_repository config for a project from projects.yaml.
+
+    Controls where PRs are submitted for this project, especially for forks.
+    Returns a dict with keys: repo (owner/repo), remote (git remote name).
+    Returns empty dict if not configured.
+    """
+    project_cfg = get_project_config(config, project_name)
+    value = project_cfg.get("submit_to_repository", {})
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    if value.get("repo"):
+        result["repo"] = str(value["repo"])
+    if value.get("remote"):
+        result["remote"] = str(value["remote"])
+    return result
+
+
 def save_projects_config(koan_root: str, config: dict) -> None:
     """Write config back to projects.yaml atomically."""
     from app.utils import atomic_write

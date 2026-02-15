@@ -120,3 +120,12 @@ projects:
   #   path: "/Users/yourname/workspace/restricted-repo"
   #   github:
   #     authorized_users: ["alice", "bob"]  # Override global list for this project
+
+  # Example: a fork where PRs should be submitted to the parent repo
+  # Fork-aware routing: auto-detected via `gh repo view --json parent`,
+  # but you can override with this explicit config.
+  # my-fork:
+  #   path: "/Users/yourname/workspace/my-fork"
+  #   submit_to_repository:
+  #     repo: "upstream-owner/upstream-repo"  # Target repo for PR creation
+  #     remote: "upstream"                    # Git remote name (optional)
