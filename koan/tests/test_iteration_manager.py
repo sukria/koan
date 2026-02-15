@@ -14,6 +14,7 @@ os.environ.setdefault("KOAN_ROOT", "/tmp/test-koan")
 from app.iteration_manager import (
     _check_focus,
     _check_schedule,
+    _filter_exploration_projects,
     _get_known_project_names,
     _get_project_by_index,
     _get_usage_decision,
@@ -870,6 +871,244 @@ class TestDeepHoursModeCap:
         )
 
         assert result["schedule_mode"] == "normal"
+
+
+# === Tests: _filter_exploration_projects ===
+
+
+class TestFilterExplorationProjects:
+
+    def test_returns_all_when_no_config(self, koan_root):
+        """No projects.yaml → all projects returned (exploration enabled by default)."""
+        result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        assert result == PROJECTS_LIST
+
+    def test_filters_disabled_projects(self, koan_root):
+        """Projects with exploration: false are excluded."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+  backend:
+    path: /path/to/backend
+    exploration: false
+  webapp:
+    path: /path/to/webapp
+""")
+        result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        names = [name for name, _ in result]
+        assert "koan" in names
+        assert "webapp" in names
+        assert "backend" not in names
+
+    def test_returns_empty_when_all_disabled(self, koan_root):
+        """All projects disabled → empty list."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    exploration: false
+  backend:
+    path: /path/to/backend
+    exploration: false
+  webapp:
+    path: /path/to/webapp
+    exploration: false
+""")
+        result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        assert result == []
+
+    def test_returns_all_when_all_enabled(self, koan_root):
+        """All projects enabled → full list returned."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    exploration: true
+  backend:
+    path: /path/to/backend
+  webapp:
+    path: /path/to/webapp
+""")
+        result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        assert len(result) == 3
+
+    def test_graceful_fallback_on_invalid_yaml(self, koan_root):
+        """Invalid YAML → returns all projects (graceful fallback)."""
+        (koan_root / "projects.yaml").write_text("not: valid: [yaml")
+        result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        assert result == PROJECTS_LIST
+
+    def test_defaults_section_applies(self, koan_root):
+        """Defaults section exploration: false applies to all unless overridden."""
+        (koan_root / "projects.yaml").write_text("""
+defaults:
+  exploration: false
+projects:
+  koan:
+    path: /path/to/koan
+    exploration: true
+  backend:
+    path: /path/to/backend
+  webapp:
+    path: /path/to/webapp
+""")
+        result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        names = [name for name, _ in result]
+        assert names == ["koan"]
+
+
+# === Tests: plan_iteration with exploration flag ===
+
+
+class TestPlanIterationExploration:
+
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._filter_exploration_projects")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("random.randint", return_value=99)
+    def test_exploration_disabled_skips_project(
+        self, mock_rand, mock_focus, mock_filter, mock_refresh, mock_pick,
+        instance_dir, koan_root, usage_state,
+    ):
+        """When one project is exploration-disabled, another is selected."""
+        # Return only webapp (koan and backend filtered out)
+        mock_filter.return_value = [("webapp", "/path/to/webapp")]
+
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "autonomous"
+        assert result["project_name"] == "webapp"
+
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._filter_exploration_projects")
+    def test_all_disabled_returns_exploration_wait(
+        self, mock_filter, mock_refresh, mock_pick,
+        instance_dir, koan_root, usage_state,
+    ):
+        """All projects exploration-disabled → exploration_wait action."""
+        mock_filter.return_value = []
+
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "exploration_wait"
+        assert "exploration disabled" in result["decision_reason"]
+
+    @patch("app.pick_mission.pick_mission", return_value="backend:Fix bug")
+    @patch("app.usage_estimator.cmd_refresh")
+    def test_mission_still_runs_on_disabled_project(
+        self, mock_refresh, mock_pick,
+        instance_dir, koan_root, usage_state,
+    ):
+        """Explicit missions execute even on exploration-disabled projects."""
+        # Write config with backend exploration disabled
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+  backend:
+    path: /path/to/backend
+    exploration: false
+  webapp:
+    path: /path/to/webapp
+""")
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "mission"
+        assert result["project_name"] == "backend"
+        assert result["mission_title"] == "Fix bug"
+
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._filter_exploration_projects")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("random.randint", return_value=3)  # Would trigger contemplation
+    def test_contemplation_uses_filtered_project(
+        self, mock_rand, mock_focus, mock_filter, mock_refresh, mock_pick,
+        instance_dir, koan_root, usage_state,
+    ):
+        """Contemplative sessions use exploration-filtered project list."""
+        mock_filter.return_value = [("webapp", "/path/to/webapp")]
+
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "contemplative"
+        assert result["project_name"] == "webapp"
+
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._filter_exploration_projects")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("random.randint", return_value=99)
+    def test_mixed_projects_selects_enabled(
+        self, mock_rand, mock_focus, mock_filter, mock_refresh, mock_pick,
+        instance_dir, koan_root, usage_state,
+    ):
+        """With mixed enabled/disabled, only enabled projects are selected."""
+        mock_filter.return_value = [("koan", "/path/to/koan"), ("webapp", "/path/to/webapp")]
+
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "autonomous"
+        assert result["project_name"] in ("koan", "webapp")
+        assert result["project_name"] != "backend"
 
 
 # === Tests: CLI interface ===
