@@ -31,7 +31,9 @@ from app.skills import SkillRegistry
 
 log = logging.getLogger(__name__)
 
-# Track error replies to avoid duplicate error messages per comment
+# Track error replies to avoid duplicate error messages per comment.
+# Bounded: evict oldest entries when limit is reached.
+_MAX_TRACKED_ENTRIES = 10000
 _error_replies: Set[str] = set()
 
 
@@ -193,8 +195,8 @@ def resolve_project_from_notification(notification: dict) -> Optional[Tuple[str,
     return project_name, owner, repo
 
 
-def _should_skip_notification(notification: dict, bot_username: str, max_age_hours: int) -> bool:
-    """Check if notification should be skipped (stale or self-mention).
+def _fetch_and_filter_comment(notification: dict, bot_username: str, max_age_hours: int) -> Optional[dict]:
+    """Fetch the triggering comment and check if notification should be skipped.
 
     Args:
         notification: Notification dict
@@ -202,28 +204,28 @@ def _should_skip_notification(notification: dict, bot_username: str, max_age_hou
         max_age_hours: Maximum age threshold
 
     Returns:
-        True if should skip
+        The comment dict if notification should be processed, or None to skip.
     """
     thread_id = notification.get("id", "?")
     # Check staleness
     if is_notification_stale(notification, max_age_hours):
         log.debug("GitHub: skipping notification %s — stale", thread_id)
         mark_notification_read(str(notification.get("id", "")))
-        return True
+        return None
 
     # Get comment
     comment = get_comment_from_notification(notification)
     if not comment:
         log.debug("GitHub: skipping notification %s — no comment found", thread_id)
-        return True
+        return None
 
     # Skip self-mentions
     if is_self_mention(comment, bot_username):
         log.debug("GitHub: skipping notification %s — self-mention", thread_id)
         mark_notification_read(str(notification.get("id", "")))
-        return True
+        return None
 
-    return False
+    return comment
 
 
 def _validate_and_parse_command(
@@ -302,12 +304,8 @@ def process_single_notification(
     Returns:
         Tuple of (success, error_message). error_message is None on success.
     """
-    # Early exit checks
-    if _should_skip_notification(notification, bot_username, max_age_hours):
-        return False, None
-
-    # Get the triggering comment (already fetched in _should_skip_notification, but kept for clarity)
-    comment = get_comment_from_notification(notification)
+    # Early exit checks + fetch comment (single API call)
+    comment = _fetch_and_filter_comment(notification, bot_username, max_age_hours)
     if not comment:
         return False, None
 
@@ -403,6 +401,8 @@ def post_error_reply(
             method="POST",
             extra_args=["-f", f"body={body}"],
         )
+        if len(_error_replies) >= _MAX_TRACKED_ENTRIES:
+            _error_replies.clear()
         _error_replies.add(error_key)
 
         # Also add reaction to mark as processed

@@ -31,7 +31,7 @@ from typing import Optional
 
 from app.iteration_manager import plan_iteration
 from app.loop_manager import check_pending_missions, interruptible_sleep
-from app.pid_manager import acquire_pid, release_pid
+from app.pid_manager import acquire_pidfile, release_pidfile
 from app.shutdown_manager import is_shutdown_requested, clear_shutdown
 from app.utils import atomic_write
 
@@ -290,7 +290,7 @@ def run_claude_task(
             stdout=out_f,
             stderr=err_f,
             cwd=cwd,
-            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN),
+            start_new_session=True,
         )
         _sig.claude_proc = proc
 
@@ -757,8 +757,8 @@ def main_loop():
     # Record startup time
     start_time = time.time()
 
-    # Acquire PID
-    acquire_pid(Path(koan_root), "run", os.getpid())
+    # Acquire PID (flock-based exclusive lock)
+    pidfile_lock = acquire_pidfile(Path(koan_root), "run")
 
     # Clear stale signal files from a previous session.
     # If `make stop` or `/stop` ran while run.py was NOT running, the signal
@@ -852,7 +852,7 @@ def main_loop():
     finally:
         # Cleanup
         Path(koan_root, ".koan-status").unlink(missing_ok=True)
-        release_pid(Path(koan_root), "run")
+        release_pidfile(pidfile_lock, Path(koan_root), "run")
         log("koan", f"Shutdown. {count} runs executed.")
         _reset_terminal()
 
@@ -1572,7 +1572,7 @@ def _run_skill_mission(
             capture_output=True,
             text=True,
             timeout=600,
-            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN),
+            start_new_session=True,
         )
         exit_code = result.returncode
         skill_stdout = result.stdout or ""

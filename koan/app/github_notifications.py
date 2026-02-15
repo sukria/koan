@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -20,7 +21,9 @@ from app.github import api, run_gh
 
 log = logging.getLogger(__name__)
 
-# In-memory set of processed comment IDs (resets on restart)
+# In-memory set of processed comment IDs (resets on restart).
+# Bounded: evict all entries when limit is reached.
+_MAX_PROCESSED_COMMENTS = 10000
 _processed_comments: Set[str] = set()
 
 # Regex for extracting @mention commands, skipping code blocks
@@ -39,7 +42,7 @@ def fetch_unread_notifications(known_repos: Optional[Set[str]] = None) -> List[d
     """
     try:
         raw = api("notifications", extra_args=["--paginate"])
-    except (RuntimeError, Exception):
+    except (RuntimeError, subprocess.TimeoutExpired, OSError):
         return []
 
     if not raw:
@@ -141,8 +144,11 @@ def get_comment_from_notification(notification: dict) -> Optional[dict]:
     if not comment_url:
         return None
 
-    # Convert full URL to API endpoint
-    endpoint = comment_url.replace("https://api.github.com/", "")
+    # Convert full URL to API endpoint (strict prefix check to prevent SSRF)
+    api_prefix = "https://api.github.com/"
+    if not comment_url.startswith(api_prefix):
+        return None
+    endpoint = comment_url[len(api_prefix):]
     if not endpoint:
         return None
 
@@ -196,6 +202,8 @@ def check_already_processed(comment_id: str, bot_username: str,
             for reaction in reactions:
                 if (reaction.get("user", {}).get("login") == bot_username
                         and reaction.get("content") == "+1"):
+                    if len(_processed_comments) >= _MAX_PROCESSED_COMMENTS:
+                        _processed_comments.clear()
                     _processed_comments.add(comment_id)
                     return True
     except (RuntimeError, json.JSONDecodeError):
@@ -222,6 +230,8 @@ def add_reaction(owner: str, repo: str, comment_id: str, emoji: str = "+1") -> b
             method="POST",
             extra_args=["-f", f"content={emoji}"],
         )
+        if len(_processed_comments) >= _MAX_PROCESSED_COMMENTS:
+            _processed_comments.clear()
         _processed_comments.add(comment_id)
         return True
     except RuntimeError:

@@ -265,6 +265,9 @@ def _launch_python_process(
     except Exception as e:
         log_fh.close()
         return False, f"Failed to launch: {e}"
+    else:
+        # Child inherited the FD — close parent's copy to avoid leak
+        log_fh.close()
 
     # Wait briefly for process to acquire its PID file
     deadline = time.monotonic() + verify_timeout
@@ -321,6 +324,9 @@ def start_ollama(koan_root: Path, verify_timeout: float = OLLAMA_VERIFY_TIMEOUT)
     except Exception as e:
         log_fh.close()
         return False, f"Failed to launch ollama: {e}"
+    else:
+        # Child inherited the FD — close parent's copy to avoid leak
+        log_fh.close()
 
     # Write PID file — ollama serve is an external binary (no flock)
     acquire_pid(koan_root, "ollama", proc.pid)
@@ -690,6 +696,10 @@ if __name__ == "__main__":
         sys.exit(2)
 
     proc_name = sys.argv[2]
+    if proc_name not in PROCESS_NAMES:
+        print(f"Invalid process name: {proc_name}. Must be one of: {', '.join(PROCESS_NAMES)}",
+              file=sys.stderr)
+        sys.exit(2)
     root = Path(sys.argv[3])
 
     if action == "acquire-pid":

@@ -135,7 +135,38 @@ Edit the files in `instance/memory/projects/myapp/` to describe your project's a
 $EDITOR instance/soul.md    # Write your agent's personality
 ```
 
-### 7. Install dependencies
+### 7. Email notifications (optional)
+
+Koan can email you session digests when budget is exhausted. This uses standard SMTP — no extra dependencies.
+
+**Step 1:** Enable email in `instance/config.yaml`:
+
+```yaml
+email:
+  enabled: true          # Turn on email notifications
+  max_per_day: 5         # Rate limit (rolling 24h window)
+```
+
+**Step 2:** Add SMTP credentials to `.env`:
+
+```bash
+# SMTP server (e.g., Gmail with an app password)
+KOAN_SMTP_HOST=smtp.gmail.com
+KOAN_SMTP_PORT=587
+KOAN_SMTP_USER=koan-bot@gmail.com
+KOAN_SMTP_PASSWORD=your-app-password-here
+
+# Your email address (single recipient)
+EMAIL_KOAN_OWNER=you@example.com
+```
+
+> **Gmail users:** You need an [App Password](https://support.google.com/accounts/answer/185833), not your regular password. Enable 2FA first, then generate an app password under Security → App Passwords.
+
+**Step 3:** Test with the `/email test` command in Telegram.
+
+Use `/email` (or `/email status`) to check configuration and sending stats at any time.
+
+### 8. Install dependencies
 
 ```bash
 make setup
@@ -143,7 +174,7 @@ make setup
 
 This creates a `.venv/` and installs Python dependencies.
 
-### 8. Run
+### 9. Run
 
 ```bash
 # Terminal 1: Telegram bridge
@@ -399,6 +430,11 @@ Alternatively: **System Settings → Energy → Prevent automatic sleeping when 
 | `KOAN_BRIDGE_INTERVAL` | 3 | Telegram poll interval (seconds) |
 | `KOAN_CHAT_TIMEOUT` | 180 | Claude CLI timeout for chat responses (seconds) |
 | `KOAN_GIT_SYNC_INTERVAL` | 5 | Runs between git sync checks |
+| `KOAN_SMTP_HOST` | — | SMTP server hostname (e.g., `smtp.gmail.com`) |
+| `KOAN_SMTP_PORT` | 587 | SMTP server port |
+| `KOAN_SMTP_USER` | — | SMTP login username |
+| `KOAN_SMTP_PASSWORD` | — | SMTP login password |
+| `EMAIL_KOAN_OWNER` | — | Recipient email for notifications |
 
 > **Note:** `max_runs_per_day` and `interval_seconds` are now configured in `config.yaml`, not `.env`.
 > The env vars `KOAN_MAX_RUNS` and `KOAN_INTERVAL` are deprecated and ignored.

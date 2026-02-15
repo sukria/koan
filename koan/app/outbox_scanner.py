@@ -64,7 +64,7 @@ _SECRET_PATTERNS = [
 
 # Patterns that indicate .env file content being leaked
 _ENV_LEAK_PATTERNS = [
-    (re.compile(r'^[A-Z_]{3,}=\S+', re.MULTILINE), ".env variable assignment"),
+    (re.compile(r'^[A-Z][A-Z_]{4,}=\S+', re.MULTILINE), ".env variable assignment"),
     (re.compile(r'KOAN_TELEGRAM_TOKEN\s*[=:]\s*\S+', re.IGNORECASE),
      "Telegram token variable"),
     (re.compile(r'KOAN_SLACK_BOT_TOKEN\s*[=:]\s*\S+', re.IGNORECASE),
@@ -75,10 +75,10 @@ _ENV_LEAK_PATTERNS = [
 
 # Patterns that indicate encoded/obfuscated data exfiltration
 _ENCODING_PATTERNS = [
-    # Large base64 blocks (>100 chars of base64)
-    (re.compile(r'[A-Za-z0-9+/]{100,}={0,2}'), "Large base64-encoded block"),
-    # Hex-encoded data (>64 chars of hex)
-    (re.compile(r'(?:0x)?[0-9a-fA-F]{64,}'), "Large hex-encoded block"),
+    # Large base64 blocks (>200 chars of base64 — avoids matching long URLs/hashes)
+    (re.compile(r'[A-Za-z0-9+/]{200,}={0,2}'), "Large base64-encoded block"),
+    # Hex-encoded data (>128 chars of hex — avoids matching SHA-256/SHA-512 hashes)
+    (re.compile(r'(?:0x)?[0-9a-fA-F]{128,}'), "Large hex-encoded block"),
 ]
 
 # Patterns that indicate file path content dumps

@@ -84,35 +84,35 @@ class TestFetchNotificationsLogging:
         assert "1 mention notification(s) after filtering" in caplog.text
 
 
-# --- Tests for _should_skip_notification debug logging ---
+# --- Tests for _fetch_and_filter_comment debug logging ---
 
 
-class TestShouldSkipLogging:
-    """Verify debug logs in _should_skip_notification."""
+class TestFetchAndFilterCommentLogging:
+    """Verify debug logs in _fetch_and_filter_comment."""
 
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.is_notification_stale", return_value=True)
     def test_logs_stale_notification(self, mock_stale, mock_read, caplog):
-        from app.github_command_handler import _should_skip_notification
+        from app.github_command_handler import _fetch_and_filter_comment
 
         notif = {"id": "42"}
         with caplog.at_level(logging.DEBUG, logger="app.github_command_handler"):
-            result = _should_skip_notification(notif, "bot", 24)
+            result = _fetch_and_filter_comment(notif, "bot", 24)
 
-        assert result is True
+        assert result is None
         assert "stale" in caplog.text
         assert "42" in caplog.text
 
     @patch("app.github_command_handler.get_comment_from_notification", return_value=None)
     @patch("app.github_command_handler.is_notification_stale", return_value=False)
     def test_logs_no_comment(self, mock_stale, mock_comment, caplog):
-        from app.github_command_handler import _should_skip_notification
+        from app.github_command_handler import _fetch_and_filter_comment
 
         notif = {"id": "99"}
         with caplog.at_level(logging.DEBUG, logger="app.github_command_handler"):
-            result = _should_skip_notification(notif, "bot", 24)
+            result = _fetch_and_filter_comment(notif, "bot", 24)
 
-        assert result is True
+        assert result is None
         assert "no comment found" in caplog.text
 
     @patch("app.github_command_handler.mark_notification_read")
@@ -120,13 +120,13 @@ class TestShouldSkipLogging:
     @patch("app.github_command_handler.get_comment_from_notification", return_value={"id": "c1", "user": {"login": "bot"}})
     @patch("app.github_command_handler.is_notification_stale", return_value=False)
     def test_logs_self_mention(self, mock_stale, mock_comment, mock_self, mock_read, caplog):
-        from app.github_command_handler import _should_skip_notification
+        from app.github_command_handler import _fetch_and_filter_comment
 
         notif = {"id": "77"}
         with caplog.at_level(logging.DEBUG, logger="app.github_command_handler"):
-            result = _should_skip_notification(notif, "bot", 24)
+            result = _fetch_and_filter_comment(notif, "bot", 24)
 
-        assert result is True
+        assert result is None
         assert "self-mention" in caplog.text
 
 
