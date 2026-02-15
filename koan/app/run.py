@@ -971,6 +971,15 @@ def _run_iteration(
             log("koan", "New mission detected during work hours sleep — waking up")
         return
 
+    if action == "exploration_wait":
+        log("koan", "All projects have exploration disabled — waiting for missions")
+        set_status(koan_root, f"Exploration disabled — waiting for missions ({time.strftime('%H:%M')})")
+        with protected_phase("Exploration disabled — waiting for missions"):
+            wake = interruptible_sleep(interval, koan_root, instance)
+        if wake == "mission":
+            log("koan", "New mission detected during exploration wait — waking up")
+        return
+
     if action == "wait_pause":
         log("quota", "Decision: WAIT mode (budget exhausted)")
         print(f"  Reason: {plan['decision_reason']}")
