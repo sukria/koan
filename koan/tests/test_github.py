@@ -5,7 +5,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.github import run_gh, pr_create, issue_create, api
+from app.github import run_gh, pr_create, issue_create, api, get_gh_username, count_open_prs
+import app.github as github_module
 
 
 # ---------------------------------------------------------------------------
@@ -209,3 +210,99 @@ class TestApi:
         mock_run.return_value = MagicMock(returncode=1, stderr="forbidden")
         with pytest.raises(RuntimeError, match="gh failed"):
             api("repos/o/r/issues/1/comments", input_data="body")
+
+
+# ---------------------------------------------------------------------------
+# get_gh_username
+# ---------------------------------------------------------------------------
+
+class TestGetGhUsername:
+
+    def setup_method(self):
+        """Reset cached username between tests."""
+        github_module._cached_gh_username = None
+
+    @patch("app.github_auth.get_github_user", return_value="koan-bot")
+    def test_returns_github_user_env(self, mock_get_user):
+        assert get_gh_username() == "koan-bot"
+
+    @patch("app.github_auth.get_github_user", return_value="")
+    @patch("app.github.run_gh", return_value="fallback-user")
+    def test_falls_back_to_gh_api(self, mock_gh, mock_get_user):
+        assert get_gh_username() == "fallback-user"
+        mock_gh.assert_called_once_with("api", "user", "--jq", ".login", timeout=15)
+
+    @patch("app.github_auth.get_github_user", return_value="")
+    @patch("app.github.run_gh", side_effect=RuntimeError("not logged in"))
+    def test_returns_empty_on_failure(self, mock_gh, mock_get_user):
+        assert get_gh_username() == ""
+
+    @patch("app.github_auth.get_github_user", return_value="")
+    @patch("app.github.run_gh", return_value="cached-user")
+    def test_caches_gh_api_result(self, mock_gh, mock_get_user):
+        assert get_gh_username() == "cached-user"
+        assert get_gh_username() == "cached-user"
+        # Only one call to run_gh despite two invocations
+        mock_gh.assert_called_once()
+
+    @patch("app.github_auth.get_github_user", return_value="")
+    @patch("app.github.run_gh", side_effect=RuntimeError("fail"))
+    def test_caches_failure_as_empty(self, mock_gh, mock_get_user):
+        assert get_gh_username() == ""
+        assert get_gh_username() == ""
+        # Only one call — failure is cached too
+        mock_gh.assert_called_once()
+
+    @patch("app.github_auth.get_github_user", return_value="env-user")
+    def test_env_var_takes_priority_over_cache(self, mock_get_user):
+        # Pre-populate cache
+        github_module._cached_gh_username = "cached-user"
+        assert get_gh_username() == "env-user"
+
+
+# ---------------------------------------------------------------------------
+# count_open_prs
+# ---------------------------------------------------------------------------
+
+class TestCountOpenPrs:
+
+    @patch("app.github.run_gh", return_value="5")
+    def test_returns_count(self, mock_gh):
+        assert count_open_prs("owner/repo", "koan-bot") == 5
+        mock_gh.assert_called_once_with(
+            "pr", "list",
+            "--repo", "owner/repo",
+            "--state", "open",
+            "--author", "koan-bot",
+            "--json", "number",
+            "--jq", "length",
+            cwd=None, timeout=15,
+        )
+
+    @patch("app.github.run_gh", return_value="0")
+    def test_returns_zero_when_no_prs(self, mock_gh):
+        assert count_open_prs("owner/repo", "koan-bot") == 0
+
+    @patch("app.github.run_gh", side_effect=RuntimeError("auth error"))
+    def test_returns_negative_one_on_error(self, mock_gh):
+        assert count_open_prs("owner/repo", "koan-bot") == -1
+
+    @patch("app.github.run_gh", side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=15))
+    def test_returns_negative_one_on_timeout(self, mock_gh):
+        assert count_open_prs("owner/repo", "koan-bot") == -1
+
+    def test_returns_negative_one_for_empty_author(self):
+        assert count_open_prs("owner/repo", "") == -1
+
+    @patch("app.github.run_gh", return_value="not-a-number")
+    def test_returns_negative_one_on_non_numeric_output(self, mock_gh):
+        assert count_open_prs("owner/repo", "koan-bot") == -1
+
+    @patch("app.github.run_gh", return_value="3")
+    def test_passes_cwd(self, mock_gh):
+        count_open_prs("owner/repo", "koan-bot", cwd="/my/project")
+        assert mock_gh.call_args.kwargs["cwd"] == "/my/project"
+
+    @patch("app.github.run_gh", return_value="")
+    def test_empty_output_returns_negative_one(self, mock_gh):
+        assert count_open_prs("owner/repo", "koan-bot") == -1

@@ -25,6 +25,7 @@ import argparse
 import json
 import re
 import sys
+from collections import namedtuple
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -260,28 +261,82 @@ def _check_focus(koan_root: str):
         return None
 
 
+FilterResult = namedtuple("FilterResult", ["projects", "pr_limited"])
+
+
 def _filter_exploration_projects(
     projects: List[Tuple[str, str]], koan_root: str,
-) -> List[Tuple[str, str]]:
-    """Filter projects to only those with exploration enabled.
+) -> FilterResult:
+    """Filter projects to only those eligible for exploration.
 
-    Loads projects.yaml and checks the exploration flag for each project.
-    Projects without config default to exploration=True.
+    Checks two gates in order:
+    1. ``exploration`` flag — projects with ``exploration: false`` are excluded.
+    2. ``max_open_prs`` limit — projects at or over their PR limit are excluded.
+
+    Returns a FilterResult with:
+    - ``projects``: list of (name, path) tuples eligible for exploration
+    - ``pr_limited``: list of project names excluded due to PR limit
     """
-    from app.projects_config import load_projects_config, get_project_exploration
+    from app.projects_config import (
+        load_projects_config, get_project_exploration,
+        get_project_max_open_prs,
+    )
 
     try:
         config = load_projects_config(koan_root)
     except Exception:
-        return projects  # Graceful fallback — assume all enabled
+        return FilterResult(projects=projects, pr_limited=[])
 
     if config is None:
-        return projects  # No config file — all enabled by default
+        return FilterResult(projects=projects, pr_limited=[])
 
-    return [
+    # Gate 1: exploration flag
+    exploration_enabled = [
         (name, path) for name, path in projects
         if get_project_exploration(config, name)
     ]
+
+    # Gate 2: max_open_prs limit
+    from app.github import get_gh_username, count_open_prs
+    author = get_gh_username()
+
+    filtered = []
+    pr_limited = []
+
+    for name, path in exploration_enabled:
+        limit = get_project_max_open_prs(config, name)
+        if limit == 0:
+            filtered.append((name, path))
+            continue
+
+        if not author:
+            # Can't determine author — fail-open, include project
+            filtered.append((name, path))
+            continue
+
+        # Resolve github_url from project config
+        project_cfg = config.get("projects", {}).get(name, {}) or {}
+        github_url = project_cfg.get("github_url", "")
+        if not github_url:
+            _log_iteration("debug",
+                f"Project '{name}' has max_open_prs={limit} but no github_url — skipping PR check")
+            filtered.append((name, path))
+            continue
+
+        open_count = count_open_prs(github_url, author)
+        if open_count < 0:
+            # Error — fail-open, include project
+            filtered.append((name, path))
+            continue
+
+        if open_count >= limit:
+            _log_iteration("koan",
+                f"Project '{name}' at PR limit ({open_count}/{limit}) — excluding from exploration")
+            pr_limited.append(name)
+        else:
+            filtered.append((name, path))
+
+    return FilterResult(projects=filtered, pr_limited=pr_limited)
 
 
 def _check_schedule():
@@ -325,7 +380,7 @@ def plan_iteration(
     Returns:
         dict with iteration plan:
         {
-            "action": "mission" | "autonomous" | "contemplative" | "focus_wait" | "schedule_wait" | "wait_pause" | "error",
+            "action": "mission" | "autonomous" | "contemplative" | "focus_wait" | "schedule_wait" | "exploration_wait" | "pr_limit_wait" | "wait_pause" | "error",
             "project_name": str,
             "project_path": str,
             "mission_title": str (empty for autonomous/contemplative),
@@ -424,19 +479,32 @@ def plan_iteration(
         mission_title = ""
 
         # Filter to exploration-enabled projects only
-        exploration_projects = _filter_exploration_projects(projects, koan_root)
+        filter_result = _filter_exploration_projects(projects, koan_root)
+        exploration_projects = filter_result.projects
         if not exploration_projects:
-            _log_iteration("koan", "All projects have exploration disabled — waiting for missions")
+            # Determine whether this is exploration-disabled or PR-limited
+            if filter_result.pr_limited:
+                _log_iteration("koan", "All exploration projects at PR limit — waiting for reviews")
+                wait_action = "pr_limit_wait"
+                wait_reason = (
+                    f"PR limit reached for: {', '.join(filter_result.pr_limited)} "
+                    f"— waiting for reviews"
+                )
+            else:
+                _log_iteration("koan", "All projects have exploration disabled — waiting for missions")
+                wait_action = "exploration_wait"
+                wait_reason = "All projects have exploration disabled — waiting for missions"
+
             focus_area = resolve_focus_area(autonomous_mode, has_mission=False)
             return {
-                "action": "exploration_wait",
+                "action": wait_action,
                 "project_name": projects[0][0] if projects else "default",
                 "project_path": projects[0][1] if projects else "",
                 "mission_title": "",
                 "autonomous_mode": autonomous_mode,
                 "focus_area": focus_area,
                 "available_pct": available_pct,
-                "decision_reason": "All projects have exploration disabled — waiting for missions",
+                "decision_reason": wait_reason,
                 "display_lines": display_lines,
                 "recurring_injected": recurring_injected,
                 "focus_remaining": None,
