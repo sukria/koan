@@ -670,9 +670,25 @@ def handle_pause(
     except Exception as e:
         log("error", f"Focus mode check failed in pause: {e}")
 
-    if roll < 50 and not in_focus:
+    # Find first exploration-enabled project for contemplation
+    exploration_project = None
+    try:
+        from app.projects_config import load_projects_config, get_project_exploration
+        config = load_projects_config(koan_root)
+        if config is not None:
+            for name, path in projects:
+                if get_project_exploration(config, name):
+                    exploration_project = (name, path)
+                    break
+        else:
+            exploration_project = projects[0] if projects else None
+    except Exception as e:
+        log("error", f"Exploration config check failed in pause: {e}")
+        exploration_project = projects[0] if projects else None
+
+    if roll < 50 and not in_focus and exploration_project is not None:
         log("pause", "A thought stirs...")
-        project_name, project_path = projects[0]
+        project_name, project_path = exploration_project
         atomic_write(Path(koan_root, ".koan-project"), project_name)
 
         log("pause", "Running contemplative session...")
@@ -969,6 +985,15 @@ def _run_iteration(
             wake = interruptible_sleep(interval, koan_root, instance)
         if wake == "mission":
             log("koan", "New mission detected during work hours sleep — waking up")
+        return
+
+    if action == "exploration_wait":
+        log("koan", "All projects have exploration disabled — waiting for missions")
+        set_status(koan_root, f"Exploration disabled — waiting for missions ({time.strftime('%H:%M')})")
+        with protected_phase("Exploration disabled — waiting for missions"):
+            wake = interruptible_sleep(interval, koan_root, instance)
+        if wake == "mission":
+            log("koan", "New mission detected during exploration wait — waking up")
         return
 
     if action == "wait_pause":

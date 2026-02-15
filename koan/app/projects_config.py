@@ -8,6 +8,7 @@ Provides:
 - get_project_cli_provider(config, name) -> str: Get CLI provider for a project
 - get_project_models(config, name) -> dict: Get model overrides for a project
 - get_project_tools(config, name) -> dict: Get tool restrictions for a project
+- get_project_exploration(config, name) -> bool: Get exploration flag for a project
 - get_project_github_authorized_users(config, name) -> list: Get GitHub authorized users
 
 File location: projects.yaml at KOAN_ROOT (next to .env).
@@ -219,6 +220,25 @@ def get_project_tools(config: dict, project_name: str) -> dict:
     if not isinstance(tools, dict):
         return {}
     return tools
+
+
+def get_project_exploration(config: dict, project_name: str) -> bool:
+    """Get exploration flag for a project from projects.yaml.
+
+    Controls whether autonomous exploration (contemplative sessions and
+    free-form autonomous work) is enabled for a project. When False, the
+    agent only works on the project when explicit missions are queued.
+
+    Returns True by default (exploration enabled).
+    """
+    project_cfg = get_project_config(config, project_name)
+    value = project_cfg.get("exploration", True)
+
+    # Handle string values like "false", "no", "0"
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "no", "0", "")
+
+    return bool(value)
 
 
 def get_project_github_authorized_users(config: dict, project_name: str) -> list:

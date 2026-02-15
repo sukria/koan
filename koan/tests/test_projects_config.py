@@ -10,6 +10,7 @@ from app.projects_config import (
     get_project_config,
     get_project_auto_merge,
     get_project_cli_provider,
+    get_project_exploration,
     get_project_models,
     get_project_tools,
     validate_project_paths,
@@ -424,6 +425,83 @@ class TestGetProjectAutoMerge:
         }
         result = get_project_auto_merge(config, "unknown")
         assert result["enabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# get_project_exploration
+# ---------------------------------------------------------------------------
+
+
+class TestGetProjectExploration:
+    """Tests for get_project_exploration() — per-project exploration flag."""
+
+    def test_defaults_to_true_when_key_missing(self):
+        config = {"projects": {"app": {"path": "/app"}}}
+        assert get_project_exploration(config, "app") is True
+
+    def test_explicit_false_returns_false(self):
+        config = {"projects": {"app": {"path": "/app", "exploration": False}}}
+        assert get_project_exploration(config, "app") is False
+
+    def test_explicit_true_returns_true(self):
+        config = {"projects": {"app": {"path": "/app", "exploration": True}}}
+        assert get_project_exploration(config, "app") is True
+
+    def test_defaults_section_override(self):
+        config = {
+            "defaults": {"exploration": False},
+            "projects": {"app": {"path": "/app"}},
+        }
+        assert get_project_exploration(config, "app") is False
+
+    def test_project_overrides_defaults(self):
+        config = {
+            "defaults": {"exploration": False},
+            "projects": {"app": {"path": "/app", "exploration": True}},
+        }
+        assert get_project_exploration(config, "app") is True
+
+    def test_string_false_coerced(self):
+        config = {"projects": {"app": {"path": "/app", "exploration": "false"}}}
+        assert get_project_exploration(config, "app") is False
+
+    def test_string_no_coerced(self):
+        config = {"projects": {"app": {"path": "/app", "exploration": "no"}}}
+        assert get_project_exploration(config, "app") is False
+
+    def test_string_zero_coerced(self):
+        config = {"projects": {"app": {"path": "/app", "exploration": "0"}}}
+        assert get_project_exploration(config, "app") is False
+
+    def test_string_true_coerced(self):
+        config = {"projects": {"app": {"path": "/app", "exploration": "true"}}}
+        assert get_project_exploration(config, "app") is True
+
+    def test_int_zero_returns_false(self):
+        config = {"projects": {"app": {"path": "/app", "exploration": 0}}}
+        assert get_project_exploration(config, "app") is False
+
+    def test_int_one_returns_true(self):
+        config = {"projects": {"app": {"path": "/app", "exploration": 1}}}
+        assert get_project_exploration(config, "app") is True
+
+    def test_unknown_project_returns_default_true(self):
+        config = {"projects": {"app": {"path": "/app"}}}
+        assert get_project_exploration(config, "unknown") is True
+
+    def test_unknown_project_inherits_defaults_false(self):
+        config = {
+            "defaults": {"exploration": False},
+            "projects": {"app": {"path": "/app"}},
+        }
+        assert get_project_exploration(config, "unknown") is False
+
+    def test_none_project_config_returns_default(self):
+        config = {
+            "defaults": {"exploration": True},
+            "projects": {"app": None},
+        }
+        assert get_project_exploration(config, "app") is True
 
 
 # ---------------------------------------------------------------------------

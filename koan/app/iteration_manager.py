@@ -260,6 +260,30 @@ def _check_focus(koan_root: str):
         return None
 
 
+def _filter_exploration_projects(
+    projects: List[Tuple[str, str]], koan_root: str,
+) -> List[Tuple[str, str]]:
+    """Filter projects to only those with exploration enabled.
+
+    Loads projects.yaml and checks the exploration flag for each project.
+    Projects without config default to exploration=True.
+    """
+    from app.projects_config import load_projects_config, get_project_exploration
+
+    try:
+        config = load_projects_config(koan_root)
+    except Exception:
+        return projects  # Graceful fallback — assume all enabled
+
+    if config is None:
+        return projects  # No config file — all enabled by default
+
+    return [
+        (name, path) for name, path in projects
+        if get_project_exploration(config, name)
+    ]
+
+
 def _check_schedule():
     """Check schedule state (time-of-day windows from config).
 
@@ -398,7 +422,30 @@ def plan_iteration(
     else:
         # No mission — autonomous mode
         mission_title = ""
-        project_name, project_path = _get_project_by_index(projects, recommended_idx)
+
+        # Filter to exploration-enabled projects only
+        exploration_projects = _filter_exploration_projects(projects, koan_root)
+        if not exploration_projects:
+            _log_iteration("koan", "All projects have exploration disabled — waiting for missions")
+            focus_area = resolve_focus_area(autonomous_mode, has_mission=False)
+            return {
+                "action": "exploration_wait",
+                "project_name": projects[0][0] if projects else "default",
+                "project_path": projects[0][1] if projects else "",
+                "mission_title": "",
+                "autonomous_mode": autonomous_mode,
+                "focus_area": focus_area,
+                "available_pct": available_pct,
+                "decision_reason": "All projects have exploration disabled — waiting for missions",
+                "display_lines": display_lines,
+                "recurring_injected": recurring_injected,
+                "focus_remaining": None,
+                "schedule_mode": schedule_state.mode if schedule_state else "normal",
+                "error": None,
+            }
+
+        filtered_idx = recommended_idx % len(exploration_projects)
+        project_name, project_path = _get_project_by_index(exploration_projects, filtered_idx)
 
     # Step 6: Determine action for autonomous mode
     action = "mission" if mission_title else "autonomous"
