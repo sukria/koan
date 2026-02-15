@@ -208,8 +208,12 @@ def _execute_implementation(
     """
     prompt = _build_prompt(issue_url, issue_title, plan, context, skill_dir)
     
-    from app.cli_provider import run_command
-    return run_command(prompt, project_path, max_turns=50, timeout=900)
+    from app.cli_provider import CLAUDE_TOOLS, run_command
+    return run_command(
+        prompt, project_path,
+        allowed_tools=sorted(CLAUDE_TOOLS),
+        max_turns=50, timeout=900,
+    )
 
 
 # ---------------------------------------------------------------------------

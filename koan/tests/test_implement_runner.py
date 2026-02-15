@@ -189,10 +189,24 @@ class TestExecuteImplementation:
                 "/project", "url", "t", "p", "c",
                 skill_dir=Path("/skill"),
             )
-            mock_run.assert_called_once_with(
-                "prompt", "/project", max_turns=50, timeout=900,
-            )
+            mock_run.assert_called_once()
+            call_kwargs = mock_run.call_args
+            assert call_kwargs[0][0] == "prompt"
+            assert call_kwargs[0][1] == "/project"
+            assert call_kwargs[1]["max_turns"] == 50
+            assert call_kwargs[1]["timeout"] == 900
             assert result == "ok"
+
+    def test_passes_allowed_tools(self):
+        """run_command must receive allowed_tools covering full CLAUDE_TOOLS set."""
+        with patch("skills.core.implement.implement_runner._build_prompt", return_value="p"), \
+             patch("app.cli_provider.run_command", return_value="ok") as mock_run:
+            _execute_implementation("/project", "url", "t", "p", "c")
+            call_args = mock_run.call_args
+            tools = call_args[1].get("allowed_tools") or call_args[0][2]
+            # Implementation needs the full toolset
+            for tool in ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]:
+                assert tool in tools, f"{tool} missing from allowed_tools"
 
 
 # ---------------------------------------------------------------------------
