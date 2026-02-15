@@ -1,9 +1,7 @@
 """Tests for restart_manager.py — file-based restart signaling."""
 
 import os
-import sys
 import time
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest

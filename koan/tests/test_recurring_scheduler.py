@@ -1,9 +1,6 @@
 """Tests for recurring_scheduler.py — CLI entry point for recurring missions."""
 
-import json
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from io import StringIO
 
 import pytest
