@@ -12,6 +12,7 @@ import pytest
 os.environ.setdefault("KOAN_ROOT", "/tmp/test-koan")
 
 from app.iteration_manager import (
+    FilterResult,
     _check_focus,
     _check_schedule,
     _filter_exploration_projects,
@@ -881,7 +882,8 @@ class TestFilterExplorationProjects:
     def test_returns_all_when_no_config(self, koan_root):
         """No projects.yaml → all projects returned (exploration enabled by default)."""
         result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
-        assert result == PROJECTS_LIST
+        assert result.projects == PROJECTS_LIST
+        assert result.pr_limited == []
 
     def test_filters_disabled_projects(self, koan_root):
         """Projects with exploration: false are excluded."""
@@ -896,7 +898,7 @@ projects:
     path: /path/to/webapp
 """)
         result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
-        names = [name for name, _ in result]
+        names = [name for name, _ in result.projects]
         assert "koan" in names
         assert "webapp" in names
         assert "backend" not in names
@@ -916,7 +918,7 @@ projects:
     exploration: false
 """)
         result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
-        assert result == []
+        assert result.projects == []
 
     def test_returns_all_when_all_enabled(self, koan_root):
         """All projects enabled → full list returned."""
@@ -931,13 +933,13 @@ projects:
     path: /path/to/webapp
 """)
         result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
-        assert len(result) == 3
+        assert len(result.projects) == 3
 
     def test_graceful_fallback_on_invalid_yaml(self, koan_root):
         """Invalid YAML → returns all projects (graceful fallback)."""
         (koan_root / "projects.yaml").write_text("not: valid: [yaml")
         result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
-        assert result == PROJECTS_LIST
+        assert result.projects == PROJECTS_LIST
 
     def test_defaults_section_applies(self, koan_root):
         """Defaults section exploration: false applies to all unless overridden."""
@@ -954,8 +956,219 @@ projects:
     path: /path/to/webapp
 """)
         result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
-        names = [name for name, _ in result]
+        names = [name for name, _ in result.projects]
         assert names == ["koan"]
+
+
+# === Tests: _filter_exploration_projects with PR limits ===
+
+
+class TestFilterExplorationProjectsPrLimit:
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs", return_value=3)
+    def test_under_limit_included(self, mock_count, mock_user, koan_root):
+        """Project under PR limit is included."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 10
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert len(result.projects) == 1
+        assert result.pr_limited == []
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs", return_value=10)
+    def test_at_limit_excluded(self, mock_count, mock_user, koan_root):
+        """Project at PR limit is excluded."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 10
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert result.projects == []
+        assert result.pr_limited == ["koan"]
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs", return_value=15)
+    def test_over_limit_excluded(self, mock_count, mock_user, koan_root):
+        """Project over PR limit is excluded."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 10
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert result.projects == []
+        assert result.pr_limited == ["koan"]
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs", return_value=-1)
+    def test_gh_error_fails_open(self, mock_count, mock_user, koan_root):
+        """gh failure returns -1 → project included (fail-open)."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 5
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert len(result.projects) == 1
+        assert result.pr_limited == []
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    def test_no_github_url_included(self, mock_user, koan_root):
+        """Project with max_open_prs but no github_url is included."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    max_open_prs: 5
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert len(result.projects) == 1
+        assert result.pr_limited == []
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs")
+    def test_zero_limit_means_unlimited(self, mock_count, mock_user, koan_root):
+        """max_open_prs: 0 means unlimited — no gh call made."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 0
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert len(result.projects) == 1
+        mock_count.assert_not_called()
+
+    @patch("app.github.get_gh_username", return_value="")
+    @patch("app.github.count_open_prs")
+    def test_no_author_skips_pr_checks(self, mock_count, mock_user, koan_root):
+        """Empty author → all PR limit checks skipped, projects included."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 5
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert len(result.projects) == 1
+        mock_count.assert_not_called()
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs")
+    def test_mixed_projects(self, mock_count, mock_user, koan_root):
+        """Mix of limited and unlimited projects."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 5
+  backend:
+    path: /path/to/backend
+    github_url: owner/backend
+    max_open_prs: 3
+  webapp:
+    path: /path/to/webapp
+""")
+        # koan: 4 open (under 5), backend: 3 open (at 3)
+        mock_count.side_effect = lambda repo, author, **kw: (
+            4 if "koan" in repo else 3
+        )
+        result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        names = [name for name, _ in result.projects]
+        assert "koan" in names
+        assert "webapp" in names  # No limit set
+        assert "backend" not in names
+        assert result.pr_limited == ["backend"]
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs", return_value=10)
+    def test_pr_limited_field_populated(self, mock_count, mock_user, koan_root):
+        """pr_limited contains names of all PR-limited projects."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 5
+  backend:
+    path: /path/to/backend
+    github_url: owner/backend
+    max_open_prs: 3
+  webapp:
+    path: /path/to/webapp
+    github_url: owner/webapp
+    max_open_prs: 2
+""")
+        result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        assert result.projects == []
+        assert sorted(result.pr_limited) == ["backend", "koan", "webapp"]
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs", return_value=5)
+    def test_exploration_false_checked_before_pr_limit(self, mock_count, mock_user, koan_root):
+        """exploration: false is checked before PR limit — no gh call for disabled."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    exploration: false
+    github_url: owner/koan
+    max_open_prs: 10
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert result.projects == []
+        assert result.pr_limited == []
+        mock_count.assert_not_called()
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs", return_value=1)
+    def test_defaults_section_max_open_prs(self, mock_count, mock_user, koan_root):
+        """Defaults section max_open_prs applies to all projects."""
+        (koan_root / "projects.yaml").write_text("""
+defaults:
+  max_open_prs: 1
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert result.projects == []
+        assert result.pr_limited == ["koan"]
 
 
 # === Tests: plan_iteration with exploration flag ===
@@ -974,7 +1187,9 @@ class TestPlanIterationExploration:
     ):
         """When one project is exploration-disabled, another is selected."""
         # Return only webapp (koan and backend filtered out)
-        mock_filter.return_value = [("webapp", "/path/to/webapp")]
+        mock_filter.return_value = FilterResult(
+            projects=[("webapp", "/path/to/webapp")], pr_limited=[],
+        )
 
         usage_md = instance_dir / "usage.md"
         usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
@@ -1000,7 +1215,7 @@ class TestPlanIterationExploration:
         instance_dir, koan_root, usage_state,
     ):
         """All projects exploration-disabled → exploration_wait action."""
-        mock_filter.return_value = []
+        mock_filter.return_value = FilterResult(projects=[], pr_limited=[])
 
         usage_md = instance_dir / "usage.md"
         usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
@@ -1063,7 +1278,9 @@ projects:
         instance_dir, koan_root, usage_state,
     ):
         """Contemplative sessions use exploration-filtered project list."""
-        mock_filter.return_value = [("webapp", "/path/to/webapp")]
+        mock_filter.return_value = FilterResult(
+            projects=[("webapp", "/path/to/webapp")], pr_limited=[],
+        )
 
         usage_md = instance_dir / "usage.md"
         usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
@@ -1091,7 +1308,10 @@ projects:
         instance_dir, koan_root, usage_state,
     ):
         """With mixed enabled/disabled, only enabled projects are selected."""
-        mock_filter.return_value = [("koan", "/path/to/koan"), ("webapp", "/path/to/webapp")]
+        mock_filter.return_value = FilterResult(
+            projects=[("koan", "/path/to/koan"), ("webapp", "/path/to/webapp")],
+            pr_limited=[],
+        )
 
         usage_md = instance_dir / "usage.md"
         usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
