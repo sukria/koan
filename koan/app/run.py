@@ -996,6 +996,15 @@ def _run_iteration(
             log("koan", "New mission detected during exploration wait — waking up")
         return
 
+    if action == "pr_limit_wait":
+        log("koan", "PR limit reached for all projects — waiting for reviews")
+        set_status(koan_root, f"PR limit reached — waiting for reviews ({time.strftime('%H:%M')})")
+        with protected_phase("PR limit reached — waiting for reviews"):
+            wake = interruptible_sleep(interval, koan_root, instance)
+        if wake == "mission":
+            log("koan", "New mission detected during PR limit wait — waking up")
+        return
+
     if action == "wait_pause":
         log("quota", "Decision: WAIT mode (budget exhausted)")
         print(f"  Reason: {plan['decision_reason']}")

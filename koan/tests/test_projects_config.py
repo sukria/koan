@@ -11,6 +11,7 @@ from app.projects_config import (
     get_project_auto_merge,
     get_project_cli_provider,
     get_project_exploration,
+    get_project_max_open_prs,
     get_project_models,
     get_project_tools,
     validate_project_paths,
@@ -502,6 +503,83 @@ class TestGetProjectExploration:
             "projects": {"app": None},
         }
         assert get_project_exploration(config, "app") is True
+
+
+# ---------------------------------------------------------------------------
+# get_project_max_open_prs
+# ---------------------------------------------------------------------------
+
+
+class TestGetProjectMaxOpenPrs:
+    """Tests for get_project_max_open_prs() — per-project PR limit."""
+
+    def test_defaults_to_zero_when_key_missing(self):
+        config = {"projects": {"app": {"path": "/app"}}}
+        assert get_project_max_open_prs(config, "app") == 0
+
+    def test_explicit_zero_returns_zero(self):
+        config = {"projects": {"app": {"path": "/app", "max_open_prs": 0}}}
+        assert get_project_max_open_prs(config, "app") == 0
+
+    def test_positive_int_returns_value(self):
+        config = {"projects": {"app": {"path": "/app", "max_open_prs": 10}}}
+        assert get_project_max_open_prs(config, "app") == 10
+
+    def test_string_int_coerced(self):
+        config = {"projects": {"app": {"path": "/app", "max_open_prs": "5"}}}
+        assert get_project_max_open_prs(config, "app") == 5
+
+    def test_negative_returns_zero(self):
+        config = {"projects": {"app": {"path": "/app", "max_open_prs": -1}}}
+        assert get_project_max_open_prs(config, "app") == 0
+
+    def test_none_returns_zero(self):
+        config = {"projects": {"app": {"path": "/app", "max_open_prs": None}}}
+        assert get_project_max_open_prs(config, "app") == 0
+
+    def test_invalid_string_returns_zero(self):
+        config = {"projects": {"app": {"path": "/app", "max_open_prs": "abc"}}}
+        assert get_project_max_open_prs(config, "app") == 0
+
+    def test_float_coerced_to_int(self):
+        config = {"projects": {"app": {"path": "/app", "max_open_prs": 3.7}}}
+        assert get_project_max_open_prs(config, "app") == 3
+
+    def test_empty_string_returns_zero(self):
+        config = {"projects": {"app": {"path": "/app", "max_open_prs": ""}}}
+        assert get_project_max_open_prs(config, "app") == 0
+
+    def test_defaults_section_applies(self):
+        config = {
+            "defaults": {"max_open_prs": 10},
+            "projects": {"app": {"path": "/app"}},
+        }
+        assert get_project_max_open_prs(config, "app") == 10
+
+    def test_project_overrides_defaults(self):
+        config = {
+            "defaults": {"max_open_prs": 10},
+            "projects": {"app": {"path": "/app", "max_open_prs": 3}},
+        }
+        assert get_project_max_open_prs(config, "app") == 3
+
+    def test_unknown_project_returns_default_zero(self):
+        config = {"projects": {"app": {"path": "/app"}}}
+        assert get_project_max_open_prs(config, "unknown") == 0
+
+    def test_unknown_project_inherits_defaults(self):
+        config = {
+            "defaults": {"max_open_prs": 5},
+            "projects": {"app": {"path": "/app"}},
+        }
+        assert get_project_max_open_prs(config, "unknown") == 5
+
+    def test_none_project_config_returns_default(self):
+        config = {
+            "defaults": {"max_open_prs": 8},
+            "projects": {"app": None},
+        }
+        assert get_project_max_open_prs(config, "app") == 8
 
 
 # ---------------------------------------------------------------------------
