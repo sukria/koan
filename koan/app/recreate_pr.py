@@ -20,6 +20,7 @@ from typing import List, Optional, Tuple
 
 from app.claude_step import _run_git, run_claude_step
 from app.github import pr_create, run_gh
+from app.prompts import load_prompt, load_skill_prompt
 from app.rebase_pr import (
     _get_current_branch,
     _is_permission_error,
@@ -219,7 +220,6 @@ def _fetch_upstream_target(base: str, project_path: str) -> Optional[str]:
 def _build_recreate_prompt(context: dict, skill_dir: Optional[Path] = None) -> str:
     """Build a prompt for Claude to reimplement the feature from scratch."""
     if skill_dir is not None:
-        from app.prompts import load_skill_prompt
         return load_skill_prompt(
             skill_dir, "recreate",
             TITLE=context["title"],
@@ -231,7 +231,6 @@ def _build_recreate_prompt(context: dict, skill_dir: Optional[Path] = None) -> s
             REVIEWS=context.get("reviews", ""),
             ISSUE_COMMENTS=context.get("issue_comments", ""),
         )
-    from app.prompts import load_prompt
     return load_prompt(
         "recreate",
         TITLE=context["title"],

@@ -216,7 +216,7 @@ class TestRunExploration:
     @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
     @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
     @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
-    @patch("app.prompts.load_skill_prompt", return_value="Explore myapp")
+    @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_success_returns_true(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
         tmp_path
@@ -233,7 +233,7 @@ class TestRunExploration:
     @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
     @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
     @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
-    @patch("app.prompts.load_skill_prompt", return_value="Explore myapp")
+    @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_notifies_start_and_result(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
         tmp_path
@@ -253,7 +253,7 @@ class TestRunExploration:
     @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
     @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
     @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
-    @patch("app.prompts.load_skill_prompt", return_value="Explore myapp")
+    @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_failure_returns_false(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
         tmp_path
@@ -270,7 +270,7 @@ class TestRunExploration:
     @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
     @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
     @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
-    @patch("app.prompts.load_skill_prompt", return_value="Explore myapp")
+    @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_empty_result_returns_false(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
         tmp_path
@@ -287,7 +287,7 @@ class TestRunExploration:
     @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
     @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
     @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
-    @patch("app.prompts.load_skill_prompt", return_value="Explore myapp")
+    @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_loads_prompt_from_skill_dir(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
         tmp_path
@@ -306,7 +306,7 @@ class TestRunExploration:
     @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
     @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
     @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
-    @patch("app.prompts.load_skill_prompt", return_value="Explore myapp")
+    @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_prompt_substitutions(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
         tmp_path
@@ -327,7 +327,7 @@ class TestRunExploration:
     @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
     @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
     @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
-    @patch("app.prompts.load_skill_prompt", return_value="Explore myapp")
+    @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_truncates_telegram_output(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
         tmp_path

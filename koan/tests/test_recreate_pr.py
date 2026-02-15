@@ -117,7 +117,7 @@ class TestBuildRecreatePrompt:
     def test_without_skill_dir_uses_system_prompts(self, pr_context):
         """Without skill_dir, falls back to system-prompts/recreate.md which
         may not exist. That's fine -- the test just verifies the code path."""
-        with patch("app.prompts.load_prompt", return_value="fallback prompt") as mock:
+        with patch("app.recreate_pr.load_prompt", return_value="fallback prompt") as mock:
             prompt = _build_recreate_prompt(pr_context, skill_dir=None)
             mock.assert_called_once()
             assert prompt == "fallback prompt"

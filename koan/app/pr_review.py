@@ -26,6 +26,7 @@ from app.claude_step import (
 )
 from app.github import run_gh
 from app.github_url_parser import parse_pr_url
+from app.prompts import load_prompt, load_skill_prompt
 from app.rebase_pr import fetch_pr_context
 
 # Matches skill names like `atoomic.refactor` or my.review (with or without backticks)
@@ -41,9 +42,7 @@ def _load_prompt(name: str, skill_dir: Path = None, **kwargs) -> str:
         **kwargs: Placeholder substitutions.
     """
     if skill_dir is not None:
-        from app.prompts import load_skill_prompt
         return load_skill_prompt(skill_dir, name, **kwargs)
-    from app.prompts import load_prompt
     return load_prompt(name, **kwargs)
 
 

@@ -220,7 +220,7 @@ class TestRunRefresh:
             patch("app.claudemd_refresh.build_git_context", return_value=git_ctx),
             patch("app.claude_step.run_claude", return_value=claude_result),
             patch("app.cli_provider.build_full_command", return_value=cmd),
-            patch("app.prompts.load_skill_prompt", return_value=prompt),
+            patch("app.claudemd_refresh.load_skill_prompt", return_value=prompt),
             patch("app.utils.get_model_config", return_value=models),
         ]
 
@@ -263,7 +263,7 @@ class TestRunRefresh:
 
         patches = self._patches(git_ctx="No CLAUDE.md exists")
         with patches[0], patches[1], patches[2], patches[3], \
-             patch("app.prompts.load_skill_prompt", return_value="prompt") as mock_prompt, \
+             patch("app.claudemd_refresh.load_skill_prompt", return_value="prompt") as mock_prompt, \
              patches[4]:
             result = run_refresh(str(project), "test")
             assert result == 0
@@ -278,7 +278,7 @@ class TestRunRefresh:
         with patch("app.claudemd_refresh.build_git_context", return_value="abc Commits"), \
              patch("app.claude_step.run_claude", return_value={"success": True, "output": "Updated", "error": ""}), \
              patch("app.cli_provider.build_full_command", return_value=["claude"]), \
-             patch("app.prompts.load_skill_prompt", return_value="prompt") as mock_prompt, \
+             patch("app.claudemd_refresh.load_skill_prompt", return_value="prompt") as mock_prompt, \
              patch("app.utils.get_model_config", return_value={"mission": "", "fallback": ""}):
             result = run_refresh(str(project), "test")
             assert result == 0
@@ -293,7 +293,7 @@ class TestRunRefresh:
         with patch("app.claudemd_refresh.build_git_context", return_value="abc Commit"), \
              patch("app.claude_step.run_claude", return_value={"success": True, "output": "OK", "error": ""}), \
              patch("app.cli_provider.build_full_command", return_value=["claude"]) as mock_cmd, \
-             patch("app.prompts.load_skill_prompt", return_value="prompt"), \
+             patch("app.claudemd_refresh.load_skill_prompt", return_value="prompt"), \
              patch("app.utils.get_model_config", return_value={"mission": "", "fallback": ""}):
             run_refresh(str(project), "test")
             tools = mock_cmd.call_args[1]["allowed_tools"]
@@ -310,7 +310,7 @@ class TestRunRefresh:
         with patch("app.claudemd_refresh.build_git_context", return_value="abc Commit"), \
              patch("app.claude_step.run_claude", return_value={"success": True, "output": "OK", "error": ""}), \
              patch("app.cli_provider.build_full_command", return_value=["claude"]), \
-             patch("app.prompts.load_skill_prompt", return_value="prompt") as mock_prompt, \
+             patch("app.claudemd_refresh.load_skill_prompt", return_value="prompt") as mock_prompt, \
              patch("app.utils.get_model_config", return_value={"mission": "", "fallback": ""}):
             run_refresh(str(project), "myproject")
             assert mock_prompt.call_args[1]["PROJECT_NAME"] == "myproject"
@@ -323,7 +323,7 @@ class TestRunRefresh:
         with patch("app.claudemd_refresh.build_git_context", return_value="abc Commit"), \
              patch("app.claude_step.run_claude", return_value={"success": True, "output": "OK", "error": ""}), \
              patch("app.cli_provider.build_full_command", return_value=["claude"]) as mock_cmd, \
-             patch("app.prompts.load_skill_prompt", return_value="prompt"), \
+             patch("app.claudemd_refresh.load_skill_prompt", return_value="prompt"), \
              patch("app.utils.get_model_config", return_value={"mission": "", "fallback": ""}):
             run_refresh(str(project), "test")
             assert mock_cmd.call_args[1]["max_turns"] == 10

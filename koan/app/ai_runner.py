@@ -13,6 +13,8 @@ CLI:
 from pathlib import Path
 from typing import Optional, Tuple
 
+from app.prompts import load_skill_prompt
+
 
 def run_exploration(
     project_path: str,
@@ -45,8 +47,6 @@ def run_exploration(
         skill_dir = (
             Path(__file__).resolve().parent.parent / "skills" / "core" / "ai"
         )
-
-    from app.prompts import load_skill_prompt
 
     prompt = load_skill_prompt(
         skill_dir,

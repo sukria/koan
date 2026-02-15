@@ -17,6 +17,7 @@ from typing import List, Optional, Tuple
 
 from app.github import fetch_issue_with_comments
 from app.github_url_parser import parse_issue_url
+from app.prompts import load_prompt, load_skill_prompt
 
 
 # Regex pattern matching plan structure markers
@@ -166,7 +167,6 @@ def _build_prompt(
         Formatted prompt string.
     """
     if skill_dir is not None:
-        from app.prompts import load_skill_prompt
         return load_skill_prompt(
             skill_dir, "implement",
             ISSUE_URL=issue_url,
@@ -175,7 +175,6 @@ def _build_prompt(
             CONTEXT=context,
         )
 
-    from app.prompts import load_prompt
     return load_prompt(
         "implement",
         ISSUE_URL=issue_url,

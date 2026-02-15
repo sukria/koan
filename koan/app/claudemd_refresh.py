@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 from app.git_sync import run_git
+from app.prompts import load_skill_prompt
 
 
 def _git_last_modified(project_path: str, filepath: str) -> str:
@@ -102,7 +103,6 @@ def run_refresh(project_path: str, project_name: str) -> int:
     """
     from app.claude_step import run_claude
     from app.cli_provider import build_full_command
-    from app.prompts import load_skill_prompt
     from app.config import get_model_config
 
     project_path = str(Path(project_path).resolve())

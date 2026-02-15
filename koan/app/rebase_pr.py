@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 
 from app.claude_step import _rebase_onto_target, _run_git, _truncate
 from app.github import pr_create, run_gh
+from app.prompts import load_prompt, load_skill_prompt
 
 
 def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
@@ -258,7 +259,6 @@ def run_rebase(
 def _build_rebase_prompt(context: dict, skill_dir: Optional[Path] = None) -> str:
     """Build a prompt for Claude to analyze and apply review feedback."""
     if skill_dir is not None:
-        from app.prompts import load_skill_prompt
         return load_skill_prompt(
             skill_dir, "rebase",
             TITLE=context["title"],
@@ -270,7 +270,6 @@ def _build_rebase_prompt(context: dict, skill_dir: Optional[Path] = None) -> str
             REVIEWS=context.get("reviews", ""),
             ISSUE_COMMENTS=context.get("issue_comments", ""),
         )
-    from app.prompts import load_prompt
     return load_prompt(
         "rebase",
         TITLE=context["title"],

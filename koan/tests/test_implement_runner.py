@@ -152,7 +152,7 @@ class TestFetchIssueWithComments:
 class TestBuildPrompt:
     def test_uses_skill_prompt_when_skill_dir_given(self):
         skill_dir = Path("/fake/skill/dir")
-        with patch("app.prompts.load_skill_prompt", return_value="prompt") as mock_load:
+        with patch("skills.core.implement.implement_runner.load_skill_prompt", return_value="prompt") as mock_load:
             result = _build_prompt(
                 "http://url", "Title", "Plan", "Context",
                 skill_dir=skill_dir,
@@ -167,7 +167,7 @@ class TestBuildPrompt:
             assert result == "prompt"
 
     def test_uses_global_prompt_when_no_skill_dir(self):
-        with patch("app.prompts.load_prompt", return_value="prompt") as mock_load:
+        with patch("skills.core.implement.implement_runner.load_prompt", return_value="prompt") as mock_load:
             result = _build_prompt(
                 "http://url", "Title", "Plan", "Context",
             )
