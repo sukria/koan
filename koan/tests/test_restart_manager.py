@@ -4,8 +4,6 @@ import os
 import time
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 from app.restart_manager import (
     RESTART_FILE,
     RESTART_EXIT_CODE,
