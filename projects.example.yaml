@@ -51,6 +51,11 @@ defaults:
   #   mission: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
   #   chat: ["Read", "Glob", "Grep"]
 
+  # Exploration — whether the agent autonomously explores this project.
+  # When false, the agent only works on explicit missions for the project.
+  # Default: true
+  # exploration: true
+
 projects:
   # Example: your main project (minimal config — inherits all defaults)
   myapp:
@@ -86,9 +91,10 @@ projects:
   #   tools:
   #     mission: ["Read", "Glob", "Grep", "Edit", "Write"]  # No Bash
 
-  # Example: a read-only repo (audit/review only)
+  # Example: a read-only repo (audit/review only, no autonomous exploration)
   # vendor-lib:
   #   path: "/Users/yourname/workspace/vendor-lib"
+  #   exploration: false                   # Only work on explicit missions
   #   tools:
   #     mission: ["Read", "Glob", "Grep"]  # Read-only — no modifications
 
