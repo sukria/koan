@@ -9,6 +9,7 @@ Provides:
 - get_project_models(config, name) -> dict: Get model overrides for a project
 - get_project_tools(config, name) -> dict: Get tool restrictions for a project
 - get_project_exploration(config, name) -> bool: Get exploration flag for a project
+- get_project_max_open_prs(config, name) -> int: Get max open PRs limit for a project
 - get_project_github_authorized_users(config, name) -> list: Get GitHub authorized users
 
 File location: projects.yaml at KOAN_ROOT (next to .env).
@@ -239,6 +240,28 @@ def get_project_exploration(config: dict, project_name: str) -> bool:
         return value.strip().lower() not in ("false", "no", "0", "")
 
     return bool(value)
+
+
+def get_project_max_open_prs(config: dict, project_name: str) -> int:
+    """Get max open PRs limit for a project from projects.yaml.
+
+    Controls the maximum number of open PRs allowed before autonomous
+    exploration is paused for this project. When the limit is reached,
+    the agent only works on explicit missions for the project.
+
+    Returns 0 by default (unlimited).
+    """
+    project_cfg = get_project_config(config, project_name)
+    value = project_cfg.get("max_open_prs", 0)
+
+    # Coerce to int; invalid values map to 0 (unlimited)
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return 0
+
+    # Negative or zero → unlimited
+    return result if result > 0 else 0
 
 
 def get_project_github_authorized_users(config: dict, project_name: str) -> list:
