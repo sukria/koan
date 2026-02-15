@@ -12,8 +12,8 @@ CLI:
 """
 
 import logging
+import os
 import re
-import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -387,7 +387,6 @@ def _resolve_submit_target(
 
     Returns dict with 'repo' (owner/repo) and 'is_fork' (bool).
     """
-    import os
     from app.projects_config import load_projects_config, get_project_submit_to_repository
 
     koan_root = os.environ.get("KOAN_ROOT", "")
