@@ -8,6 +8,10 @@ which sets ``GH_TOKEN`` — this module has no auth logic.
 import json
 import subprocess
 
+# Cached GitHub username (from gh api user fallback).
+# None = not yet queried, "" = query failed.
+_cached_gh_username = None
+
 
 def run_gh(*args, cwd=None, timeout=30, stdin_data=None):
     """Run a ``gh`` CLI command and return stripped stdout.
@@ -150,3 +154,61 @@ def fetch_issue_with_comments(owner, repo, issue_number):
         comments = []
 
     return title, body, comments
+
+
+def get_gh_username() -> str:
+    """Return the GitHub username to use for PR author filtering.
+
+    Resolution order:
+    1. ``GITHUB_USER`` env var (via ``github_auth.get_github_user()``)
+    2. ``gh api user --jq .login`` (cached after first call)
+
+    Returns empty string if neither source yields a username.
+    """
+    global _cached_gh_username
+
+    from app.github_auth import get_github_user
+    env_user = get_github_user()
+    if env_user:
+        return env_user
+
+    # Fallback: ask gh who is authenticated
+    if _cached_gh_username is not None:
+        return _cached_gh_username
+
+    try:
+        _cached_gh_username = run_gh("api", "user", "--jq", ".login", timeout=15)
+    except Exception:
+        _cached_gh_username = ""
+
+    return _cached_gh_username
+
+
+def count_open_prs(repo: str, author: str, cwd: str = None) -> int:
+    """Count open pull requests by a specific author in a repository.
+
+    Args:
+        repo: Repository in ``owner/repo`` format.
+        author: GitHub username to filter by. If empty, returns ``-1``.
+        cwd: Optional working directory.
+
+    Returns:
+        Number of open PRs, or ``-1`` on error (gh unavailable, auth
+        failure, network error).
+    """
+    if not author:
+        return -1
+
+    try:
+        output = run_gh(
+            "pr", "list",
+            "--repo", repo,
+            "--state", "open",
+            "--author", author,
+            "--json", "number",
+            "--jq", "length",
+            cwd=cwd, timeout=15,
+        )
+        return int(output)
+    except (RuntimeError, subprocess.TimeoutExpired, ValueError, TypeError):
+        return -1

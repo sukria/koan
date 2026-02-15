@@ -56,6 +56,13 @@ defaults:
   # Default: true
   # exploration: true
 
+  # Max open PRs — limit how many open PRs the agent can have per repo
+  # before autonomous exploration is paused. Explicit missions are never
+  # affected. Uses GITHUB_USER or `gh` login to identify the agent's PRs.
+  # Set to 0 or omit for unlimited.
+  # Default: 0 (unlimited)
+  max_open_prs: 10
+
 projects:
   # Example: your main project (minimal config — inherits all defaults)
   myapp:
@@ -97,6 +104,11 @@ projects:
   #   exploration: false                   # Only work on explicit missions
   #   tools:
   #     mission: ["Read", "Glob", "Grep"]  # Read-only — no modifications
+
+  # Example: a project with a lower PR limit (overrides default of 10)
+  # oss-lib:
+  #   path: "/Users/yourname/workspace/oss-lib"
+  #   max_open_prs: 3                        # Keep max 3 open PRs for this repo
 
   # Example: a project using GitHub Copilot instead of Claude
   # copilot-project:
