@@ -212,7 +212,7 @@ def detect_parent_repo(project_path: str) -> Optional[str]:
         if len(parts) == 2 and all(parts):
             return output.strip()
         return None
-    except (RuntimeError, Exception):
+    except Exception:
         return None
 
 
