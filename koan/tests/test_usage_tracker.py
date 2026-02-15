@@ -191,27 +191,27 @@ class TestModeDecisions:
         assert mode == "implement"
 
     def test_decide_review_mode_low_budget(self, tmp_path):
-        """Review mode when low budget (5-15%)."""
+        """Review mode when low budget (15-30% remaining with default thresholds)."""
         usage = tmp_path / "usage.md"
         usage.write_text("""
-Session (5hr) : 78% (reset in 1h)
-Weekly (7 day) : 80% (Resets in 1d)
+Session (5hr) : 65% (reset in 1h)
+Weekly (7 day) : 70% (Resets in 1d)
 """)
         tracker = UsageTracker(usage)
         mode = tracker.decide_mode()
 
-        # Session: 12% remaining, Weekly: 10% remaining → min = 10%
+        # Session: 25% remaining, Weekly: 20% remaining → min = 20%
+        # With defaults (warn=70, stop=85): 15 < 20 < 30 → review
         assert mode == "review"
 
     def test_decide_wait_mode_exhausted(self, usage_file_high):
-        """Wait mode when budget exhausted (< 5%)."""
+        """Wait mode when budget exhausted (< 15% remaining with default thresholds)."""
         tracker = UsageTracker(usage_file_high)
         mode = tracker.decide_mode()
 
         # Session: 5% remaining, Weekly: 8% remaining → min = 5%
-        # Threshold is < 5, so at exactly 5% we still get "review"
-        # Let's check with slightly higher usage
-        assert mode in ("wait", "review")  # Edge case at 5%
+        # With defaults (stop=85): 5 < 15 → wait
+        assert mode == "wait"
 
 
 class TestProjectSelection:

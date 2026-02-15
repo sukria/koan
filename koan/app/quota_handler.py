@@ -96,9 +96,10 @@ def compute_resume_info(
         until = time_until_reset(reset_timestamp)
         return reset_timestamp, f"Auto-resume at reset time (~{until})"
 
-    # Fallback: current time + 5h
-    fallback_ts = int(datetime.now().timestamp()) + 5 * 3600
-    return fallback_ts, "Auto-resume in ~5h (reset time unknown)"
+    # Fallback: current time + 1h retry
+    from app.pause_manager import QUOTA_RETRY_SECONDS
+    fallback_ts = int(datetime.now().timestamp()) + QUOTA_RETRY_SECONDS
+    return fallback_ts, "Auto-resume in ~1h (reset time unknown)"
 
 
 def write_quota_journal(

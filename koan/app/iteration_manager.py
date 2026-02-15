@@ -57,9 +57,11 @@ def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
         dict with keys: mode, available_pct, reason, project_idx
     """
     try:
-        from app.usage_tracker import UsageTracker, _get_budget_mode
+        from app.usage_tracker import UsageTracker, _get_budget_mode, _get_budget_thresholds
         budget_mode = _get_budget_mode()
-        tracker = UsageTracker(usage_md, count, budget_mode=budget_mode)
+        warn_pct, stop_pct = _get_budget_thresholds()
+        tracker = UsageTracker(usage_md, count, budget_mode=budget_mode,
+                               warn_pct=warn_pct, stop_pct=stop_pct)
         mode = tracker.decide_mode()
         project_idx = tracker.select_project(projects_str, mode, count + 1)
         session_rem, weekly_rem = tracker.remaining_budget()

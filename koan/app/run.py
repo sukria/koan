@@ -994,7 +994,8 @@ def _run_iteration(
         except Exception as e:
             log("error", f"Reset time estimation failed: {e}")
         if reset_ts is None:
-            reset_ts = int(time.time()) + 5 * 3600  # fallback: now + 5h
+            from app.pause_manager import QUOTA_RETRY_SECONDS
+            reset_ts = int(time.time()) + QUOTA_RETRY_SECONDS
         from app.pause_manager import create_pause
         create_pause(koan_root, "quota", reset_ts, reset_display)
 
@@ -1032,7 +1033,8 @@ def _run_iteration(
                 except Exception as e:
                     log("error", f"Pre-flight reset time extraction failed: {e}")
                 if pf_reset_ts is None:
-                    pf_reset_ts = int(time.time()) + 3600  # 1h retry fallback
+                    from app.pause_manager import QUOTA_RETRY_SECONDS
+                    pf_reset_ts = int(time.time()) + QUOTA_RETRY_SECONDS
                 from app.pause_manager import create_pause
                 create_pause(koan_root, "quota", pf_reset_ts, pf_reset_display)
                 label = plan["mission_title"] if plan["mission_title"] else "autonomous run"

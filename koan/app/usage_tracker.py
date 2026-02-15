@@ -31,7 +31,8 @@ class UsageTracker:
     """Track Claude usage and decide autonomous mode based on remaining budget."""
 
     def __init__(self, usage_file: Path, runs_completed: int = 0,
-                 budget_mode: str = "full"):
+                 budget_mode: str = "full",
+                 warn_pct: int = 70, stop_pct: int = 85):
         """Initialize tracker by parsing usage.md file.
 
         Args:
@@ -44,6 +45,10 @@ class UsageTracker:
                     the real Claude API quota.
                 "disabled": no internal budget gating — only real API quota
                     exhaustion errors (from quota_handler.py) will pause.
+            warn_pct: Usage percentage at which to enter conservative mode
+                (default 70 → review when <30% remaining).
+            stop_pct: Usage percentage at which to pause entirely
+                (default 85 → wait when <15% remaining).
 
         Raises:
             ValueError: If usage file cannot be parsed
@@ -55,6 +60,8 @@ class UsageTracker:
         self.runs_this_session = runs_completed
         self.safety_margin = 10.0  # Keep 10% buffer
         self.budget_mode = budget_mode
+        self.warn_pct = warn_pct
+        self.stop_pct = stop_pct
 
         if usage_file.exists():
             self._parse_usage_file(usage_file)
@@ -156,11 +163,17 @@ class UsageTracker:
     def decide_mode(self) -> str:
         """Decide autonomous mode based on remaining budget.
 
-        Budget thresholds:
-        - < 5%: wait (too close to limit)
-        - < 15%: review (low-cost only)
+        Budget thresholds (derived from config):
+        - < (100 - stop_pct)%: wait (too close to limit)
+        - < (100 - warn_pct)%: review (low-cost only)
         - < 40%: implement (medium-cost)
         - >= 40%: deep (high-cost allowed)
+
+        With defaults (warn_pct=70, stop_pct=85):
+        - < 15%: wait
+        - < 30%: review
+        - < 40%: implement
+        - >= 40%: deep
 
         Returns:
             One of: "wait", "review", "implement", "deep"
@@ -168,9 +181,12 @@ class UsageTracker:
         session_rem, weekly_rem = self.remaining_budget()
         available = min(session_rem, weekly_rem)
 
-        if available < 5:
+        stop_remaining = 100 - self.stop_pct  # default: 15
+        warn_remaining = 100 - self.warn_pct  # default: 30
+
+        if available < stop_remaining:
             return "wait"
-        elif available < 15:
+        elif available < warn_remaining:
             return "review"
         elif available < 40:
             return "implement"
@@ -247,6 +263,26 @@ class UsageTracker:
         return f"{mode}:{available:.0f}:{reason}:{project_idx}"
 
 
+def _get_budget_thresholds() -> tuple:
+    """Read budget thresholds from config.yaml → budget.warn_at_percent / stop_at_percent.
+
+    Returns:
+        (warn_at_percent, stop_at_percent) with defaults (70, 85).
+    """
+    try:
+        from app.utils import load_config
+        config = load_config()
+        budget = config.get("budget", {})
+        warn = int(budget.get("warn_at_percent", 70))
+        stop = int(budget.get("stop_at_percent", 85))
+        # Sanity bounds
+        warn = max(0, min(100, warn))
+        stop = max(0, min(100, stop))
+        return warn, stop
+    except Exception:
+        return 70, 85
+
+
 def _get_budget_mode() -> str:
     """Read budget_mode from config.yaml → usage.budget_mode.
 
@@ -274,9 +310,11 @@ def main():
     projects = sys.argv[3] if len(sys.argv) > 3 else ""
 
     budget_mode = _get_budget_mode()
+    warn_pct, stop_pct = _get_budget_thresholds()
 
     try:
-        tracker = UsageTracker(usage_file, run_count, budget_mode=budget_mode)
+        tracker = UsageTracker(usage_file, run_count, budget_mode=budget_mode,
+                               warn_pct=warn_pct, stop_pct=stop_pct)
         mode = tracker.decide_mode()
         project_idx = tracker.select_project(projects, mode, run_count + 1)  # +1 because next run
         output = tracker.format_output(mode, project_idx)

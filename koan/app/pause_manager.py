@@ -25,6 +25,10 @@ from typing import Optional
 # Default cooldown for non-quota pauses (max_runs, manual)
 DEFAULT_COOLDOWN_SECONDS = 5 * 60 * 60  # 5 hours
 
+# Retry interval for quota pauses when reset time is unknown.
+# Shorter than DEFAULT_COOLDOWN_SECONDS to discover quota resets faster.
+QUOTA_RETRY_SECONDS = 3600  # 1 hour
+
 
 @dataclass
 class PauseState:
