@@ -11,13 +11,16 @@ CLI:
     python3 -m skills.core.implement.implement_runner --project-path <path> --issue-url <url> --context "Phase 1 to 3"
 """
 
+import logging
 import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.github import fetch_issue_with_comments
+from app.github import detect_parent_repo, fetch_issue_with_comments, run_gh, pr_create
 from app.github_url_parser import parse_issue_url
 from app.prompts import load_prompt, load_skill_prompt
+
+logger = logging.getLogger(__name__)
 
 
 # Regex pattern matching plan structure markers
@@ -182,6 +185,61 @@ def _build_prompt(
         PLAN=plan,
         CONTEXT=context,
     )
+
+
+def _generate_pr_summary(
+    project_path: str,
+    issue_title: str,
+    issue_url: str,
+    commit_subjects: List[str],
+    skill_dir: Optional[Path] = None,
+) -> str:
+    """Generate a PR summary using the lightweight model.
+
+    Falls back to a bullet list of commit subjects if the model call
+    fails or times out.
+
+    Args:
+        project_path: Path to the project repository.
+        issue_title: Issue title for context.
+        issue_url: Issue URL for cross-reference.
+        commit_subjects: List of commit subject lines.
+        skill_dir: Path to skill directory for prompt loading.
+
+    Returns:
+        PR summary text.
+    """
+    commits_text = "\n".join(f"- {s}" for s in commit_subjects) or "(no commits)"
+    fallback = f"Implements {issue_url}\n\n{commits_text}"
+
+    try:
+        if skill_dir is not None:
+            prompt = load_skill_prompt(
+                skill_dir, "pr_summary",
+                ISSUE_URL=issue_url,
+                ISSUE_TITLE=issue_title,
+                COMMIT_SUBJECTS=commits_text,
+            )
+        else:
+            prompt = load_prompt(
+                "pr_summary",
+                ISSUE_URL=issue_url,
+                ISSUE_TITLE=issue_title,
+                COMMIT_SUBJECTS=commits_text,
+            )
+
+        from app.cli_provider import run_command
+        output = run_command(
+            prompt, project_path,
+            allowed_tools=[],
+            model_key="lightweight",
+            max_turns=1,
+            timeout=300,
+        )
+        return output.strip() if output and output.strip() else fallback
+    except Exception as e:
+        logger.debug("PR summary generation failed: %s", e)
+        return fallback
 
 
 def _execute_implementation(
