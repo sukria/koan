@@ -26,6 +26,8 @@ services:
     volumes:
       # Instance state — persisted across restarts
       - ./instance:/app/instance
+      # Isolated mission queue for Docker (overlays instance/ mount)
+      - ./instance/missions.docker.md:/app/instance/missions.md
       # Workspace — host project repos (read-write)
       - ./workspace:/app/workspace
       # Project configuration (RW — daemon updates this)

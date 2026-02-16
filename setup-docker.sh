@@ -189,7 +189,15 @@ detect_dir "~/.gitconfig" "/home/koan/.gitconfig" "ro" "Git config" || true
 section "Workspace"
 resolve_workspace
 
-# 3b. Ensure projects.docker.yaml exists
+# 3b. Ensure missions.docker.md exists (isolated mission queue for container)
+if [ ! -f "instance/missions.docker.md" ]; then
+    touch "instance/missions.docker.md"
+    success "Created instance/missions.docker.md (empty mission queue for container)"
+else
+    success "Found instance/missions.docker.md"
+fi
+
+# 3c. Ensure projects.docker.yaml exists (container-specific project config)
 if [ ! -f "projects.docker.yaml" ]; then
     if [ -f "projects.example.yaml" ]; then
         success "Created projects.docker.yaml from example template"
