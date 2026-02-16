@@ -10,7 +10,7 @@ EnvironmentFile=__KOAN_ROOT__/.env
 Environment=KOAN_ROOT=__KOAN_ROOT__
 Environment=PYTHONPATH=__KOAN_ROOT__/koan
 Environment=PATH=__PATH__
-ExecStart=/usr/bin/script -qefc "__PYTHON__ app/awake.py" /dev/null
+ExecStart=__PYTHON__ app/awake.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=append:__KOAN_ROOT__/logs/awake.log

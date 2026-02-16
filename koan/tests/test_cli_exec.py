@@ -95,6 +95,14 @@ class TestPreparePromptFile:
         finally:
             _cleanup_prompt_file(path)
 
+    @patch("app.provider.get_provider_name", return_value="copilot")
+    def test_copilot_provider_skips_stdin_passing(self, _mock):
+        """Copilot provider should skip @stdin mechanism entirely."""
+        cmd = ["copilot", "-p", "my prompt", "--allow-all-tools"]
+        new_cmd, path = prepare_prompt_file(cmd)
+        assert new_cmd is cmd
+        assert path is None
+
 
 # ---------------------------------------------------------------------------
 # _cleanup_prompt_file

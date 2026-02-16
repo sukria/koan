@@ -4,6 +4,10 @@ Prevents prompts from leaking into ``ps`` process listings by writing
 them to a temporary file (``0o600``) and redirecting that file as the
 subprocess stdin.  The ``-p`` argument visible in ``ps`` becomes the
 short placeholder ``@stdin`` instead of the full prompt text.
+
+Providers that consume stdin for the prompt (making it unavailable for
+the agent's own tool calls) skip this mechanism and pass the prompt
+directly as a ``-p`` argument.
 """
 
 import os
@@ -14,13 +18,32 @@ from typing import Callable, List, Optional, Tuple
 STDIN_PLACEHOLDER = "@stdin"
 
 
+def _uses_stdin_passing() -> bool:
+    """Check if the current provider supports stdin-based prompt passing.
+
+    Copilot CLI consumes stdin when reading the ``@stdin`` prompt,
+    leaving nothing for its internal agent's tool calls (e.g.
+    ``cat /dev/stdin``).  For these providers we pass the prompt
+    directly as a ``-p`` argument instead.
+    """
+    try:
+        from app.provider import get_provider_name
+        return get_provider_name() not in ("copilot",)
+    except Exception:
+        return True
+
+
 def prepare_prompt_file(cmd: List[str]) -> Tuple[List[str], Optional[str]]:
     """Extract the ``-p`` prompt from *cmd* and write it to a secure temp file.
 
     Returns ``(modified_cmd, temp_file_path)``.  If no ``-p`` argument is
-    found or it already equals :data:`STDIN_PLACEHOLDER`, returns
+    found, it already equals :data:`STDIN_PLACEHOLDER`, or the current
+    provider does not support stdin-based prompt passing, returns
     ``(cmd, None)`` unchanged.
     """
+    if not _uses_stdin_passing():
+        return cmd, None
+
     try:
         idx = cmd.index("-p")
     except ValueError:
