@@ -44,7 +44,7 @@ def set_callbacks(
 # Core commands that remain hardcoded (safety-critical or bootstrap)
 CORE_COMMANDS = frozenset({
     "help", "stop", "sleep", "resume", "skill",
-    "pause", "work", "awake", "start",  # aliases for sleep/resume
+    "pause", "work", "awake", "start", "run",  # aliases for sleep/resume
 })
 
 
@@ -68,7 +68,7 @@ def handle_command(text: str):
             send_telegram("⏸️ Paused. No missions will run. /resume to unpause.")
         return
 
-    if cmd in ("/resume", "/work", "/awake"):
+    if cmd in ("/resume", "/work", "/awake", "/run"):
         handle_resume()
         return
 
@@ -350,7 +350,7 @@ def _handle_help():
         "Kōan -- Commands\n",
         "CORE",
         "⏸️ /pause -- pause (alias: /sleep)",
-        "▶️ /resume -- resume after pause (alias: /work, /awake)",
+        "▶️ /resume -- resume after pause (alias: /run, /work, /awake)",
         "🚀 /start -- start agent loop (or resume if paused)",
         "⏹️ /stop -- stop Kōan after current mission",
         "/help -- this help (use /help <command> for details)",

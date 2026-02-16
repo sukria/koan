@@ -429,6 +429,11 @@ class TestHandleCommand:
         handle_command("/awake")
         mock_resume.assert_called_once()
 
+    @patch("app.command_handlers.handle_resume")
+    def test_run_delegates_to_resume(self, mock_resume):
+        handle_command("/run")
+        mock_resume.assert_called_once()
+
     @patch("app.command_handlers._dispatch_skill")
     def test_restart_routes_to_skill(self, mock_dispatch):
         handle_command("/restart")
