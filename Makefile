@@ -118,6 +118,7 @@ install-systemctl-service: setup
 	sudo CALLER_PATH="$$PATH" bash koan/systemd/install-service.sh "$(PWD)" "$(PWD)/$(PYTHON)"
 
 uninstall-systemctl-service:
+	@-$(MAKE) stop
 	@if [ -z "$(IS_LINUX)" ]; then echo "Error: systemd is only available on Linux." >&2; exit 1; fi
 	@if [ -z "$(HAS_SYSTEMD)" ]; then echo "Error: systemctl not found." >&2; exit 1; fi
 	sudo bash koan/systemd/uninstall-service.sh
