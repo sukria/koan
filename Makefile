@@ -50,7 +50,7 @@ ifeq ($(USE_SYSTEMD),1)
 start: setup
 	@if [ -z "$(SERVICE_INSTALLED)" ]; then \
 		echo "→ systemd detected — installing Kōan service (one-time setup)..."; \
-		sudo bash koan/systemd/install-service.sh "$(PWD)" "$(PWD)/$(PYTHON)"; \
+		sudo CALLER_PATH="$$PATH" bash koan/systemd/install-service.sh "$(PWD)" "$(PWD)/$(PYTHON)"; \
 	fi
 	@sudo systemctl start koan
 
@@ -115,7 +115,7 @@ sync-instance:
 install-systemctl-service: setup
 	@if [ -z "$(IS_LINUX)" ]; then echo "Error: systemd is only available on Linux." >&2; exit 1; fi
 	@if [ -z "$(HAS_SYSTEMD)" ]; then echo "Error: systemctl not found. systemd is required." >&2; exit 1; fi
-	sudo bash koan/systemd/install-service.sh "$(PWD)" "$(PWD)/$(PYTHON)"
+	sudo CALLER_PATH="$$PATH" bash koan/systemd/install-service.sh "$(PWD)" "$(PWD)/$(PYTHON)"
 
 uninstall-systemctl-service:
 	@if [ -z "$(IS_LINUX)" ]; then echo "Error: systemd is only available on Linux." >&2; exit 1; fi
