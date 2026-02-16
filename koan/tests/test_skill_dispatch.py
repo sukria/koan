@@ -265,10 +265,10 @@ class TestBuildSkillCommand:
         assert "--context" not in cmd
 
     def test_python_path(self):
-        """Commands should use the venv python."""
+        """Commands should use sys.executable (works in venv and Docker)."""
+        import sys
         cmd = self._build("plan", "test idea")
-        python_path = os.path.join(self.KOAN_ROOT, ".venv", "bin", "python3")
-        assert cmd[0] == python_path
+        assert cmd[0] == sys.executable
 
 
 # ---------------------------------------------------------------------------

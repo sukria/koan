@@ -1,8 +1,11 @@
-# Kōan Docker Compose — Mounted Binaries Approach
+# Kōan Docker Compose
 #
-# The container mounts CLI binaries and auth from the host.
+# Claude CLI is installed in the image. Auth is via ANTHROPIC_API_KEY in .env.
 # Run ./setup-docker.sh first — it generates docker-compose.override.yml
-# with the correct volume mounts for your system.
+# with workspace mounts and GitHub CLI auth for your system.
+#
+# REQUIRED: Set ANTHROPIC_API_KEY in .env
+# Get one at: https://console.anthropic.com/settings/keys
 #
 # Usage:
 #   ./setup-docker.sh               # Auto-detect host setup
@@ -30,8 +33,6 @@ services:
       - ./instance/missions.docker.md:/app/instance/missions.md
       # Workspace — host project repos (read-write)
       - ./workspace:/app/workspace
-      # Project configuration (RW — daemon updates this)
-      - ./projects.docker.yaml:/app/projects.yaml
       # Logs
       - ./logs:/app/logs
     restart: unless-stopped

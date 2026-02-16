@@ -29,10 +29,10 @@ class TestDockerfile:
         """Thin image — CLIs are mounted, not installed."""
         assert "FROM python:3.12-slim" in self.dockerfile
 
-    def test_no_claude_cli_install(self):
-        """Mounted binaries approach: no npm install of Claude CLI."""
-        assert "@anthropic-ai/claude-code" not in self.dockerfile
-        assert "npm install" not in self.dockerfile
+    def test_installs_claude_cli_via_npm(self):
+        """Claude CLI is installed in the image (can't mount across architectures)."""
+        assert "@anthropic-ai/claude-code" in self.dockerfile
+        assert "npm install -g @anthropic-ai/claude-code" in self.dockerfile
 
     def test_no_node_install(self):
         """Node.js is mounted from host if needed, not installed in image."""
@@ -53,7 +53,7 @@ class TestDockerfile:
     def test_creates_nonroot_user(self):
         """Security: must not run as root."""
         assert "useradd" in self.dockerfile
-        assert "USER koan" in self.dockerfile
+        assert "USER ${HOST_UID}" in self.dockerfile
 
     def test_sets_koan_root(self):
         assert "KOAN_ROOT=/app" in self.dockerfile
@@ -74,9 +74,9 @@ class TestDockerfile:
         code_line = self.dockerfile.index("COPY koan/ ")
         assert req_line < code_line
 
-    def test_host_bin_in_path(self):
-        """PATH should include /host-bin for mounted CLI binaries."""
-        assert "/host-bin" in self.dockerfile
+    def test_no_host_bin_in_path(self):
+        """PATH should not include /host-bin — CLIs are installed in image."""
+        assert "/host-bin" not in self.dockerfile
 
     def test_workspace_directory_created(self):
         assert "/app/workspace" in self.dockerfile
@@ -95,10 +95,10 @@ class TestDockerfile:
         """Image size: pip should use --no-cache-dir."""
         assert "--no-cache-dir" in self.dockerfile
 
-    def test_creates_host_bin_and_host_node_dirs(self):
-        """Directories for mounted binaries must exist."""
-        assert "/host-bin" in self.dockerfile
-        assert "/host-node" in self.dockerfile
+    def test_no_host_bin_dirs(self):
+        """No /host-bin or /host-node — CLIs are installed in image."""
+        assert "/host-bin" not in self.dockerfile
+        assert "/host-node" not in self.dockerfile
 
 
 class TestEntrypoint:
@@ -158,9 +158,9 @@ class TestEntrypoint:
     def test_supports_ollama_provider(self):
         assert "ollama" in self.entrypoint
 
-    def test_checks_claude_auth_dir(self):
-        """Should check for ~/.claude directory."""
-        assert ".claude" in self.entrypoint
+    def test_validates_anthropic_api_key(self):
+        """Should validate ANTHROPIC_API_KEY at startup."""
+        assert "ANTHROPIC_API_KEY" in self.entrypoint
 
     def test_checks_copilot_auth_dir(self):
         """Should check for ~/.copilot directory."""
@@ -255,25 +255,25 @@ class TestSetupScript:
     def test_generates_override_file(self):
         assert "docker-compose.override.yml" in self.setup
 
-    def test_detects_gh_binary(self):
-        assert '"gh"' in self.setup
+    def test_no_claude_binary_detection(self):
+        """Claude is installed in the image — no host binary detection."""
+        assert 'detect_binary "claude"' not in self.setup
 
-    def test_detects_claude_binary(self):
-        assert '"claude"' in self.setup
-
-    def test_detects_copilot_binary(self):
-        """Should detect GitHub Copilot CLI."""
+    def test_detects_copilot_auth_dir(self):
+        """Should detect Copilot auth directory."""
         assert "copilot" in self.setup
 
-    def test_detects_ollama_binary(self):
-        assert '"ollama"' in self.setup
+    def test_no_ollama_binary_detection(self):
+        """Ollama detection not needed in current setup."""
+        assert 'detect_binary "ollama"' not in self.setup
 
-    def test_detects_node_runtime(self):
-        """Node.js is needed for Claude CLI wrapper."""
-        assert "detect_node_runtime" in self.setup
+    def test_explains_claude_in_image(self):
+        """Should explain Claude CLI is installed via npm."""
+        assert "npm" in self.setup
 
-    def test_detects_claude_auth_dir(self):
-        assert ".claude" in self.setup
+    def test_no_claude_auth_mount(self):
+        """~/.claude not mounted — auth via ANTHROPIC_API_KEY."""
+        assert 'detect_dir "~/.claude"' not in self.setup
 
     def test_detects_copilot_auth_dir(self):
         assert ".copilot" in self.setup
@@ -295,13 +295,12 @@ class TestSetupScript:
         """CLI binaries should be mounted read-only."""
         assert ":ro" in self.setup
 
-    def test_mounts_claude_auth_read_write(self):
-        """Claude auth dir needs write access for session state."""
-        # Find the line that mounts .claude — it should be :rw
+    def test_mounts_gh_auth_read_only(self):
+        """GitHub CLI auth dir should be mounted read-only."""
         lines = self.setup.splitlines()
         for line in lines:
-            if ".claude" in line and "container_dir" not in line and "detect_dir" in line:
-                assert "rw" in line, "~/.claude should be mounted read-write"
+            if ".config/gh" in line and "detect_dir" in line:
+                assert "ro" in line, "~/.config/gh should be mounted read-only"
                 break
 
 
@@ -452,21 +451,19 @@ class TestGitIgnoreDockerEntries:
 class TestDesignPrinciples:
     """Validate key architectural decisions of the mounted-binaries approach."""
 
-    def test_no_npm_in_dockerfile(self):
-        """Dockerfile should NOT install npm packages."""
+    def test_claude_cli_installed_via_npm(self):
+        """Dockerfile installs Claude CLI via npm (cross-architecture)."""
         dockerfile = (REPO_ROOT / "Dockerfile").read_text()
-        assert "npm install" not in dockerfile
-        assert "npm i " not in dockerfile
+        assert "npm install -g @anthropic-ai/claude-code" in dockerfile
 
     def test_no_setup_token_in_entrypoint(self):
         """Auth comes from mounted dirs, not setup-token."""
         entrypoint = (REPO_ROOT / "docker-entrypoint.sh").read_text()
         assert "setup-token" not in entrypoint
 
-    def test_no_api_key_in_entrypoint(self):
-        """No ANTHROPIC_API_KEY credential helper — auth is mounted."""
+    def test_no_credential_helper_in_entrypoint(self):
+        """Should not set up credential helpers with embedded tokens."""
         entrypoint = (REPO_ROOT / "docker-entrypoint.sh").read_text()
-        # Should not set up credential helpers with embedded tokens
         assert "credential.helper" not in entrypoint
 
     def test_entrypoint_references_python_processes(self):

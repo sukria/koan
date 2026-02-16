@@ -1,9 +1,8 @@
 # Kōan Docker Image
 #
-# Runtime tools (git, gh, node) are installed in the image.
-# Only the Claude CLI binary and auth state (~/.claude/) are mounted
-# from the host at runtime, since they live under /Users/ which Docker
-# Desktop shares by default.
+# Runtime tools (git, gh, node, Claude CLI) are all installed in the image.
+# Auth is via ANTHROPIC_API_KEY in .env (required).
+# GitHub CLI auth (~/.config/gh) is mounted from the host.
 #
 # Build:  docker build -t koan .
 # Run:    docker compose up --build
@@ -31,8 +30,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Claude CLI via npm (can't mount host binary across architectures)
+RUN npm install -g @anthropic-ai/claude-code
+
 # Configurable UID/GID — match the host user to avoid permission issues
-# on bind-mounted volumes (workspace, ~/.claude, etc.)
+# on bind-mounted volumes (workspace, ~/.config/gh, etc.)
 ARG HOST_UID=1000
 ARG HOST_GID=1000
 
@@ -68,9 +70,8 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 # Workspace + runtime directories
-# /host-bin is where the mounted Claude CLI binary lives
-RUN mkdir -p /app/workspace /app/instance /app/logs /host-bin \
-    && chown -R ${HOST_UID}:${HOST_GID} /app /host-bin
+RUN mkdir -p /app/workspace /app/instance /app/logs \
+    && chown -R ${HOST_UID}:${HOST_GID} /app
 
 # Switch to non-root user
 USER ${HOST_UID}
@@ -87,8 +88,6 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 
 ENV KOAN_ROOT=/app
 ENV PYTHONPATH=/app/koan
-# /host-bin is where mounted CLI binaries (claude, gh, copilot) are linked
-ENV PATH="/host-bin:${PATH}"
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["start"]

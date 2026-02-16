@@ -22,6 +22,7 @@ Scoped skills:
 
 import os
 import re
+import sys
 from typing import List, Optional, Tuple
 
 from app.github_url_parser import ISSUE_URL_PATTERN, PR_URL_PATTERN
@@ -186,7 +187,7 @@ def build_skill_command(
         return None
     debug_log(f"[skill_dispatch] build_skill_command: '{command}' -> {runner_module}")
 
-    python = os.path.join(koan_root, ".venv", "bin", "python3")
+    python = sys.executable
     base_cmd = [python, "-m", runner_module]
 
     # Dispatch to command-specific builder
