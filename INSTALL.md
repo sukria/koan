@@ -12,6 +12,10 @@ make install
 
 This launches a web-based wizard that guides you through Telegram setup, project configuration, and validation. If you prefer manual setup, continue below.
 
+## Docker
+
+To run Koan in a Docker container (for server deployment or local isolation), see the [Docker Setup Guide](docs/docker.md).
+
 ## Prerequisites
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
