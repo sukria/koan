@@ -25,9 +25,20 @@ if [ ! -x "$PYTHON" ]; then
     PYTHON="python3"
 fi
 
-log() {
-    echo "[koan-docker] $(date +%H:%M:%S) $*"
-}
+# --- ANSI Colors (disabled when stdout is not a TTY) ---
+if [ -n "${KOAN_FORCE_COLOR:-}" ] || [ -t 1 ]; then
+    BOLD='\033[1m' DIM='\033[2m'
+    RED='\033[31m' GREEN='\033[32m' YELLOW='\033[33m' CYAN='\033[36m'
+    RESET='\033[0m'
+else
+    BOLD='' DIM='' RED='' GREEN='' YELLOW='' CYAN='' RESET=''
+fi
+
+log()     { printf "${DIM}[koan-docker] $(date +%H:%M:%S)${RESET} %s\n" "$*"; }
+warn()    { printf "${YELLOW}[koan-docker] $(date +%H:%M:%S) ⚠ %s${RESET}\n" "$*" >&2; }
+error()   { printf "${RED}[koan-docker] $(date +%H:%M:%S) ✗ %s${RESET}\n" "$*" >&2; }
+success() { printf "${GREEN}[koan-docker] $(date +%H:%M:%S) ✓ %s${RESET}\n" "$*"; }
+section() { printf "\n${BOLD}${CYAN}--- %s ---${RESET}\n" "$*"; }
 
 # -------------------------------------------------------------------------
 # 1. Verify Mounted Binaries
@@ -37,9 +48,9 @@ verify_binaries() {
     local provider="${KOAN_CLI_PROVIDER:-claude}"
 
     # gh and git are installed in the image — just log versions
-    log "Found: gh $(gh --version 2>/dev/null | head -1 || echo '(unknown version)')"
-    log "Found: git $(git --version 2>/dev/null || echo '(unknown version)')"
-    log "Found: node $(node --version 2>/dev/null || echo '(unknown version)')"
+    success "gh $(gh --version 2>/dev/null | head -1 || echo '(unknown version)')"
+    success "git $(git --version 2>/dev/null || echo '(unknown version)')"
+    success "node $(node --version 2>/dev/null || echo '(unknown version)')"
 
     # Provider-specific CLI (mounted from host)
     case "$provider" in
@@ -47,36 +58,36 @@ verify_binaries() {
             if ! command -v claude &>/dev/null; then
                 missing+=("claude (Claude Code CLI) — mount via docker-compose.override.yml")
             else
-                log "Found: claude $(claude --version 2>/dev/null | head -1 || echo '(unknown version)')"
+                success "claude $(claude --version 2>/dev/null | head -1 || echo '(unknown version)')"
             fi
             ;;
         copilot)
             if ! command -v github-copilot-cli &>/dev/null && ! command -v copilot &>/dev/null; then
                 missing+=("github-copilot-cli or copilot (GitHub Copilot CLI)")
             else
-                log "Found: copilot CLI"
+                success "copilot CLI"
             fi
             ;;
         local|ollama)
             if ! command -v ollama &>/dev/null; then
                 missing+=("ollama")
             else
-                log "Found: ollama $(ollama --version 2>/dev/null | head -1 || echo '(unknown version)')"
+                success "ollama $(ollama --version 2>/dev/null | head -1 || echo '(unknown version)')"
             fi
             ;;
     esac
 
     if [ ${#missing[@]} -gt 0 ]; then
-        log "ERROR: Missing binaries:"
+        error "Missing binaries:"
         for bin in "${missing[@]}"; do
-            log "  - $bin"
+            printf "  ${RED}✗${RESET} %s\n" "$bin"
         done
-        log ""
+        printf "\n"
         log "Run ./setup-docker.sh on the host to generate volume mounts."
         return 1
     fi
 
-    log "All required binaries available (provider: $provider)"
+    success "All required binaries available (provider: $provider)"
     return 0
 }
 
@@ -105,7 +116,7 @@ verify_auth() {
     fi
 
     for w in "${warnings[@]}"; do
-        log "WARNING: $w"
+        warn "$w"
     done
 
     return 0
@@ -145,7 +156,7 @@ setup_workspace() {
         if [ "$count" -gt 0 ]; then
             log "No projects.yaml — $count workspace project(s) will be auto-discovered"
         else
-            log "WARNING: No projects.yaml and no workspace projects"
+            warn "No projects.yaml and no workspace projects"
             log "  Run setup-docker.sh or mount projects in workspace/"
         fi
     fi
@@ -202,7 +213,7 @@ cleanup() {
     # Clean up signal files
     rm -f "$KOAN_ROOT/.koan-stop"
 
-    log "Shutdown complete"
+    success "Shutdown complete"
     exit 0
 }
 
@@ -210,7 +221,7 @@ monitor_processes() {
     while true; do
         if [ -n "${AGENT_PID:-}" ] && ! kill -0 "$AGENT_PID" 2>/dev/null; then
             wait "$AGENT_PID" 2>/dev/null || true
-            log "Agent loop exited — restarting in 5s"
+            warn "Agent loop exited — restarting in 5s"
             sleep 5
             # Only restart if we're not shutting down
             if [ "$STOPPING" = false ]; then
@@ -220,7 +231,7 @@ monitor_processes() {
 
         if [ -n "${BRIDGE_PID:-}" ] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
             wait "$BRIDGE_PID" 2>/dev/null || true
-            log "Bridge exited — restarting in 2s"
+            warn "Bridge exited — restarting in 2s"
             sleep 2
             if [ "$STOPPING" = false ]; then
                 start_bridge
@@ -241,7 +252,7 @@ COMMAND="${1:-start}"
 
 case "$COMMAND" in
     start)
-        log "Kōan Docker — initializing"
+        printf "${BOLD}${CYAN}Kōan Docker — initializing${RESET}\n"
         verify_binaries || exit 1
         verify_auth
         setup_instance

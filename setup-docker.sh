@@ -21,17 +21,20 @@ fi
 
 OVERRIDE_FILE="docker-compose.override.yml"
 
-log() {
-    echo "[setup-docker] $*"
-}
+# --- ANSI Colors (disabled when stdout is not a TTY) ---
+if [ -n "${KOAN_FORCE_COLOR:-}" ] || [ -t 1 ]; then
+    BOLD='\033[1m' DIM='\033[2m'
+    RED='\033[31m' GREEN='\033[32m' YELLOW='\033[33m' CYAN='\033[36m'
+    RESET='\033[0m'
+else
+    BOLD='' DIM='' RED='' GREEN='' YELLOW='' CYAN='' RESET=''
+fi
 
-warn() {
-    echo "[setup-docker] WARNING: $*" >&2
-}
-
-error() {
-    echo "[setup-docker] ERROR: $*" >&2
-}
+log()     { printf "${DIM}[setup-docker]${RESET} %s\n" "$*"; }
+warn()    { printf "${YELLOW}[setup-docker] ⚠ %s${RESET}\n" "$*" >&2; }
+error()   { printf "${RED}[setup-docker] ✗ %s${RESET}\n" "$*" >&2; }
+success() { printf "${GREEN}[setup-docker] ✓ %s${RESET}\n" "$*"; }
+section() { printf "\n${BOLD}${CYAN}--- %s ---${RESET}\n" "$*"; }
 
 # -------------------------------------------------------------------------
 # Detect binaries and their real paths (resolve symlinks)
@@ -53,7 +56,7 @@ detect_binary() {
     local real_path
     real_path=$(realpath "$path" 2>/dev/null || readlink -f "$path" 2>/dev/null || echo "$path")
 
-    log "Found $name: $real_path"
+    success "Found $name: $real_path"
     VOLUME_MOUNTS+=("      - ${real_path}:${target}:ro")
     FOUND_BINS+=("$name")
     return 0
@@ -70,7 +73,7 @@ detect_dir() {
     local expanded="${host_dir/#\~/$HOME}"
 
     if [ -d "$expanded" ]; then
-        log "Found $label: $expanded"
+        success "Found $label: $expanded"
         VOLUME_MOUNTS+=("      - ${expanded}:${container_dir}:${mode}")
         return 0
     fi
@@ -117,7 +120,7 @@ resolve_workspace() {
     done
 
     if [ $count -gt 0 ]; then
-        log "Resolved $count workspace symlink(s)"
+        success "Resolved $count workspace symlink(s)"
     fi
 }
 
@@ -150,13 +153,12 @@ $mount"
     done
 
     if [ "$DRY_RUN" = true ]; then
-        echo ""
-        echo "=== Would write to $OVERRIDE_FILE ==="
+        printf "\n${BOLD}${CYAN}=== Would write to %s ===${RESET}\n" "$OVERRIDE_FILE"
         echo "$content"
-        echo "=== End ==="
+        printf "${BOLD}${CYAN}=== End ===${RESET}\n"
     else
         echo "$content" > "$OVERRIDE_FILE"
-        log "Written: $OVERRIDE_FILE"
+        success "Written: $OVERRIDE_FILE"
     fi
 }
 
@@ -165,16 +167,13 @@ $mount"
 # =========================================================================
 
 log "Detecting host environment..."
-echo ""
 
 # 1. CLI binaries (only Claude CLI needs host mount — git, gh, node are in the image)
-log "--- CLI Binaries ---"
+section "CLI Binaries"
 detect_binary "claude" || warn "claude not found — agent loop will not work"
 
-echo ""
-
 # 2. Auth directories
-log "--- Auth Directories ---"
+section "Auth Directories"
 detect_dir "~/.claude" "/home/koan/.claude" "rw" "Claude auth" || \
     log "~/.claude not found (ok if using ANTHROPIC_API_KEY)"
 
@@ -186,32 +185,32 @@ detect_dir "~/.config/gh" "/home/koan/.config/gh" "ro" "GitHub CLI auth" || \
 
 detect_dir "~/.gitconfig" "/home/koan/.gitconfig" "ro" "Git config" || true
 
-echo ""
-
 # 3. Workspace symlink resolution + projects.yaml
-log "--- Workspace ---"
+section "Workspace"
 resolve_workspace
 
 # 3b. Ensure projects.docker.yaml exists
 if [ ! -f "projects.docker.yaml" ]; then
     if [ -f "projects.example.yaml" ]; then
-        log "Creating projects.docker.yaml from example template"
-        cp projects.example.yaml projects.docker.yaml
+        success "Created projects.docker.yaml from example template"
+        sed '/^projects:/,$d' projects.example.yaml > projects.docker.yaml
     fi
 else
-    log "Found projects.docker.yaml"
+    success "Found projects.docker.yaml"
 fi
 VOLUME_MOUNTS+=("      - ./projects.docker.yaml:/app/projects.yaml")
 
-echo ""
-
 # 4. Generate files
-log "--- Generating ---"
+section "Generating"
 detect_uid_gid
 generate_override
 
-echo ""
-log "Done! Next steps:"
-log "  1. Review $OVERRIDE_FILE"
-log "  2. Ensure .env has your messaging credentials (KOAN_TELEGRAM_TOKEN, etc.)"
-log "  3. docker compose up --build"
+if [ "$DRY_RUN" = false ]; then
+    printf "\n${BOLD}${CYAN}╭──────────────────────────────────────────────────────────╮${RESET}\n"
+    printf "${BOLD}${CYAN}│${RESET} ${GREEN}✓ Setup complete!${RESET}                                        ${BOLD}${CYAN}│${RESET}\n"
+    printf "${BOLD}${CYAN}├──────────────────────────────────────────────────────────┤${RESET}\n"
+    printf "${BOLD}${CYAN}│${RESET}  1. Review %-43s ${BOLD}${CYAN}│${RESET}\n" "$OVERRIDE_FILE"
+    printf "${BOLD}${CYAN}│${RESET}  2. Ensure .env has messaging credentials                ${BOLD}${CYAN}│${RESET}\n"
+    printf "${BOLD}${CYAN}│${RESET}  3. docker compose up --build                            ${BOLD}${CYAN}│${RESET}\n"
+    printf "${BOLD}${CYAN}╰──────────────────────────────────────────────────────────╯${RESET}\n"
+fi
