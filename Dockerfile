@@ -1,18 +1,17 @@
-# Kōan Docker Image — Mounted Binaries Approach
+# Kōan Docker Image
 #
-# The container is a runtime sandbox. CLI binaries (claude, gh, copilot)
-# and their auth state (~/.claude/, ~/.copilot/) live on the host and
-# are mounted as volumes at runtime.
-#
-# This keeps the image thin (~150MB) and avoids auth conflicts.
+# Runtime tools (git, gh, node) are installed in the image.
+# Only the Claude CLI binary and auth state (~/.claude/) are mounted
+# from the host at runtime, since they live under /Users/ which Docker
+# Desktop shares by default.
 #
 # Build:  docker build -t koan .
 # Run:    docker compose up --build
-# Setup:  ./setup-docker.sh  (auto-detects host binaries, generates mounts)
+# Setup:  ./setup-docker.sh  (auto-detects host paths, generates mounts)
 
 FROM python:3.12-slim
 
-# System dependencies — git, common tools, Node.js runtime for Claude CLI
+# System dependencies + Node.js (for Claude CLI) + gh (GitHub CLI)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     jq \
@@ -21,6 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     openssh-client \
     make \
+    nodejs \
+    npm \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurable UID/GID — match the host user to avoid permission issues
@@ -59,11 +67,10 @@ COPY projects.example.yaml /app/
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
-# Workspace directory — host repos are mounted here
-# Directories for mounted binaries and their dependencies
-# (populated by bind mounts from the host at runtime)
-RUN mkdir -p /app/workspace /app/instance /app/logs /host-bin /host-node \
-    && chown -R ${HOST_UID}:${HOST_GID} /app /host-bin /host-node
+# Workspace + runtime directories
+# /host-bin is where the mounted Claude CLI binary lives
+RUN mkdir -p /app/workspace /app/instance /app/logs /host-bin \
+    && chown -R ${HOST_UID}:${HOST_GID} /app /host-bin
 
 # Switch to non-root user
 USER ${HOST_UID}

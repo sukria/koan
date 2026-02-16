@@ -77,37 +77,7 @@ detect_dir() {
     return 1
 }
 
-# -------------------------------------------------------------------------
-# Detect Node.js runtime (needed for Claude CLI)
-# -------------------------------------------------------------------------
-detect_node_runtime() {
-    local node_path
-    node_path=$(command -v node 2>/dev/null || true)
-    if [ -z "$node_path" ]; then
-        warn "Node.js not found — Claude CLI may not work"
-        return 1
-    fi
-
-    local real_node
-    real_node=$(realpath "$node_path" 2>/dev/null || echo "$node_path")
-    log "Found node: $real_node"
-    VOLUME_MOUNTS+=("      - ${real_node}:/host-bin/node:ro")
-
-    # Find npm global packages (where @anthropic-ai/claude-code lives)
-    local npm_prefix
-    npm_prefix=$(npm prefix -g 2>/dev/null || true)
-    if [ -n "$npm_prefix" ] && [ -d "$npm_prefix/lib/node_modules" ]; then
-        log "Found npm global modules: $npm_prefix/lib/node_modules"
-        VOLUME_MOUNTS+=("      - ${npm_prefix}/lib/node_modules:/host-node/lib/node_modules:ro")
-
-        # Also mount the npm bin directory for the claude wrapper script
-        if [ -d "$npm_prefix/bin" ]; then
-            VOLUME_MOUNTS+=("      - ${npm_prefix}/bin:/host-node/bin:ro")
-        fi
-    fi
-
-    return 0
-}
+# Node.js and gh are installed in the Docker image — no host mounts needed.
 
 # -------------------------------------------------------------------------
 # Detect host UID/GID
@@ -197,23 +167,9 @@ $mount"
 log "Detecting host environment..."
 echo ""
 
-# 1. CLI binaries
+# 1. CLI binaries (only Claude CLI needs host mount — git, gh, node are in the image)
 log "--- CLI Binaries ---"
-detect_binary "gh" || warn "gh not found — GitHub operations will fail"
-
-# Claude CLI (the main script is usually a node wrapper)
-if detect_binary "claude"; then
-    detect_node_runtime || true
-fi
-
-# GitHub Copilot CLI
-detect_binary "github-copilot-cli" || detect_binary "copilot" || true
-
-# Ollama
-detect_binary "ollama" || true
-
-# Git (usually available in the image, but mount host version for consistency)
-detect_binary "git" || true
+detect_binary "claude" || warn "claude not found — agent loop will not work"
 
 echo ""
 

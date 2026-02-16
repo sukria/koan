@@ -36,18 +36,16 @@ verify_binaries() {
     local missing=()
     local provider="${KOAN_CLI_PROVIDER:-claude}"
 
-    # gh CLI is always needed
-    if ! command -v gh &>/dev/null; then
-        missing+=("gh (GitHub CLI)")
-    else
-        log "Found: gh $(gh --version 2>/dev/null | head -1 || echo '(unknown version)')"
-    fi
+    # gh and git are installed in the image — just log versions
+    log "Found: gh $(gh --version 2>/dev/null | head -1 || echo '(unknown version)')"
+    log "Found: git $(git --version 2>/dev/null || echo '(unknown version)')"
+    log "Found: node $(node --version 2>/dev/null || echo '(unknown version)')"
 
-    # Provider-specific CLI
+    # Provider-specific CLI (mounted from host)
     case "$provider" in
         claude)
             if ! command -v claude &>/dev/null; then
-                missing+=("claude (Claude Code CLI)")
+                missing+=("claude (Claude Code CLI) — mount via docker-compose.override.yml")
             else
                 log "Found: claude $(claude --version 2>/dev/null | head -1 || echo '(unknown version)')"
             fi
@@ -69,13 +67,12 @@ verify_binaries() {
     esac
 
     if [ ${#missing[@]} -gt 0 ]; then
-        log "ERROR: Missing mounted binaries:"
+        log "ERROR: Missing binaries:"
         for bin in "${missing[@]}"; do
             log "  - $bin"
         done
         log ""
-        log "Run ./setup-docker.sh on the host to detect and mount binaries."
-        log "Or add volume mounts manually in docker-compose.override.yml."
+        log "Run ./setup-docker.sh on the host to generate volume mounts."
         return 1
     fi
 
