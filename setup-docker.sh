@@ -188,9 +188,15 @@ detect_dir "~/.gitconfig" "/home/koan/.gitconfig" "ro" "Git config" || true
 
 echo ""
 
-# 3. Workspace symlink resolution
+# 3. Workspace symlink resolution + projects.yaml
 log "--- Workspace ---"
 resolve_workspace
+
+# 3b. Mount projects.yaml if present
+if [ -f "projects.yaml" ]; then
+    log "Found projects.yaml"
+    VOLUME_MOUNTS+=("      - ./projects.yaml:/app/projects.yaml")
+fi
 
 echo ""
 
