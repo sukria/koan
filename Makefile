@@ -55,7 +55,7 @@ start: setup
 	@sudo systemctl start koan
 
 stop:
-	@sudo systemctl stop koan
+	@sudo systemctl stop koan koan-awake
 
 status:
 	@sudo systemctl status koan koan-awake --no-pager || true

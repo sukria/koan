@@ -1,6 +1,7 @@
 [Unit]
 Description=Kōan Communication Bridge
 After=network.target
+PartOf=koan.service
 
 [Service]
 Type=simple
