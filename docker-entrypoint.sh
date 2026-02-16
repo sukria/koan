@@ -140,13 +140,13 @@ setup_workspace() {
     count=$(find "$workspace" -maxdepth 1 -mindepth 1 -type d -o -type l 2>/dev/null | wc -l | tr -d ' ')
     log "Workspace: $count project(s) mounted"
 
-    # Verify projects.yaml exists — auto-discover or copy example as last resort
+    # Check for projects.yaml (mounted from host's projects.docker.yaml)
     if [ ! -f "$KOAN_ROOT/projects.yaml" ]; then
         if [ "$count" -gt 0 ]; then
             log "No projects.yaml — $count workspace project(s) will be auto-discovered"
-        elif [ -f "$KOAN_ROOT/projects.example.yaml" ]; then
-            log "No projects.yaml and no workspace projects — copying example"
-            cp "$KOAN_ROOT/projects.example.yaml" "$KOAN_ROOT/projects.yaml"
+        else
+            log "WARNING: No projects.yaml and no workspace projects"
+            log "  Run setup-docker.sh or mount projects in workspace/"
         fi
     fi
 }

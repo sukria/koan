@@ -28,8 +28,8 @@ services:
       - ./instance:/app/instance
       # Workspace — host project repos (read-write)
       - ./workspace:/app/workspace
-      # Project configuration (read-write)
-      - ./projects.yaml:/app/projects.yaml
+      # Project configuration (RW — daemon updates this)
+      - ./projects.docker.yaml:/app/projects.yaml
       # Logs
       - ./logs:/app/logs
     restart: unless-stopped

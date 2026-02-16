@@ -192,11 +192,16 @@ echo ""
 log "--- Workspace ---"
 resolve_workspace
 
-# 3b. Mount projects.yaml if present
-if [ -f "projects.yaml" ]; then
-    log "Found projects.yaml"
-    VOLUME_MOUNTS+=("      - ./projects.yaml:/app/projects.yaml")
+# 3b. Ensure projects.docker.yaml exists
+if [ ! -f "projects.docker.yaml" ]; then
+    if [ -f "projects.example.yaml" ]; then
+        log "Creating projects.docker.yaml from example template"
+        cp projects.example.yaml projects.docker.yaml
+    fi
+else
+    log "Found projects.docker.yaml"
 fi
+VOLUME_MOUNTS+=("      - ./projects.docker.yaml:/app/projects.yaml")
 
 echo ""
 

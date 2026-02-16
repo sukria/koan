@@ -28,6 +28,7 @@ venv/
 .idea/
 .last-review-sha
 projects.yaml
+projects.docker.yaml
 
 # wp-copilot-skills: Ignore symlinked agents (pointing to shared installation)
 .github/agents/wp.*
