@@ -28,17 +28,6 @@ fi
 KOAN_ROOT="$(cd "$KOAN_ROOT" && pwd)"
 PYTHON="$(cd "$(dirname "$PYTHON")" && pwd)/$(basename "$PYTHON")"
 
-# Build a sanitized PATH: keep system-wide dirs, strip $HOME paths for security
-HOMEDIR="$(eval echo ~"$(logname 2>/dev/null || echo root)")"
-SAFE_PATH=""
-IFS=':' read -ra _path_entries <<< "$PATH"
-for _entry in "${_path_entries[@]}"; do
-    case "$_entry" in
-        "$HOMEDIR"|"$HOMEDIR"/*) ;;  # skip home directory paths
-        *) SAFE_PATH="${SAFE_PATH:+$SAFE_PATH:}$_entry" ;;
-    esac
-done
-
 if [ ! -f "$KOAN_ROOT/koan/app/run.py" ]; then
     echo "Error: $KOAN_ROOT does not look like a Kōan installation." >&2
     exit 1
@@ -49,19 +38,13 @@ if [ ! -x "$PYTHON" ]; then
     exit 1
 fi
 
-# --- Generate service files ---
+# --- Generate service files via Python (testable PATH sanitization) ---
 
 mkdir -p "$KOAN_ROOT/logs"
 
-for template in "$SCRIPT_DIR"/koan*.service.template; do
-    service_name="$(basename "$template" .template)"
-    echo "→ Generating $service_name"
-    sed \
-        -e "s|__KOAN_ROOT__|${KOAN_ROOT}|g" \
-        -e "s|__PYTHON__|${PYTHON}|g" \
-        -e "s|__PATH__|${SAFE_PATH}|g" \
-        "$template" > "/etc/systemd/system/$service_name"
-done
+CALLER_PATH="${CALLER_PATH:-$PATH}"
+OUTPUT_DIR="/etc/systemd/system"
+PYTHONPATH="$KOAN_ROOT/koan" "$PYTHON" -m app.systemd_service "$KOAN_ROOT" "$PYTHON" "$CALLER_PATH" "$OUTPUT_DIR"
 
 # --- Enable and reload ---
 
