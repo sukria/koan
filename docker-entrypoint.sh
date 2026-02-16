@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # =========================================================================
-# Kōan Docker Entrypoint — Mounted Binaries Approach
+# Kōan Docker Entrypoint
 # =========================================================================
-# The container expects CLI binaries (claude, gh, copilot) and their auth
-# state to be mounted from the host. No installation happens here.
+# Claude CLI is installed in the image via npm.
+# Auth is via ANTHROPIC_API_KEY (required for start/agent commands).
+# GitHub CLI auth (~/.config/gh) is mounted from the host.
 #
 # Commands:
 #   start    — Run both agent loop and Telegram bridge (default)
@@ -52,11 +53,11 @@ verify_binaries() {
     success "git $(git --version 2>/dev/null || echo '(unknown version)')"
     success "node $(node --version 2>/dev/null || echo '(unknown version)')"
 
-    # Provider-specific CLI (mounted from host)
+    # Provider-specific CLI
     case "$provider" in
         claude)
             if ! command -v claude &>/dev/null; then
-                missing+=("claude (Claude Code CLI) — mount via docker-compose.override.yml")
+                missing+=("claude (Claude Code CLI) — npm install may have failed")
             else
                 success "claude $(claude --version 2>/dev/null | head -1 || echo '(unknown version)')"
             fi
@@ -98,12 +99,8 @@ verify_auth() {
     local provider="${KOAN_CLI_PROVIDER:-claude}"
     local warnings=()
 
-    # Check Claude auth
-    if [ "$provider" = "claude" ]; then
-        if [ ! -d "${HOME}/.claude" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-            warnings+=("No ~/.claude/ mounted and no ANTHROPIC_API_KEY set")
-        fi
-    fi
+    # Claude auth is handled by ANTHROPIC_API_KEY validation at startup
+    # (no ~/.claude mount needed — macOS Keychain doesn't work in containers)
 
     # Check gh auth
     if [ ! -d "${HOME}/.config/gh" ]; then
@@ -253,6 +250,11 @@ COMMAND="${1:-start}"
 case "$COMMAND" in
     start)
         printf "${BOLD}${CYAN}Kōan Docker — initializing${RESET}\n"
+        if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            error "ANTHROPIC_API_KEY is required"
+            log "  Set it in your .env file. Get one at: https://console.anthropic.com/settings/keys"
+            exit 1
+        fi
         verify_binaries || exit 1
         verify_auth
         setup_instance
@@ -273,6 +275,11 @@ case "$COMMAND" in
 
     agent)
         log "Kōan Docker — agent only"
+        if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            error "ANTHROPIC_API_KEY is required"
+            log "  Set it in your .env file. Get one at: https://console.anthropic.com/settings/keys"
+            exit 1
+        fi
         verify_binaries || exit 1
         verify_auth
         setup_instance
