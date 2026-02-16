@@ -186,6 +186,8 @@ make run
 
 ## Dedicated GitHub Identity (Recommended)
 
+> **Linux users:** See [Running as a systemd service](#running-as-a-systemd-service-linux) below for automatic startup, restart-on-failure, and proper service management.
+
 For full autonomy, Kōan should have its own GitHub account. This gives it a distinct identity for PRs, commits, and @mention commands — clearly separated from your personal account.
 
 ### 1. Create a GitHub account for the bot
@@ -313,6 +315,77 @@ At startup, Kōan calls `gh auth token --user <GITHUB_USER>` to retrieve the bot
 During the sleep cycle between missions, Kōan polls the bot's GitHub notifications. When someone posts `@yourname-koan rebase` on a PR, the bot detects the mention, verifies the user's permissions, and queues a mission.
 
 See [docs/github-commands.md](docs/github-commands.md) for the full list of supported @mention commands and the security model.
+
+## Running as a systemd Service (Linux)
+
+On Linux systems with systemd, Kōan can run as a native system service with automatic restart on failure, journal integration, and boot-time startup.
+
+> **Note:** macOS users should use `make start` directly (or `caffeinate` — see [Preventing macOS sleep](#preventing-macos-sleep) below). systemd is Linux-only.
+
+### Quick setup
+
+```bash
+make install-systemctl-service   # One-time: install + enable services
+make start                       # Start via systemctl
+```
+
+Or simply run `make start` — on Linux with systemd, it auto-installs the service on first run.
+
+### What it does
+
+The install creates two systemd services:
+
+| Service | Process | Description |
+|---------|---------|-------------|
+| `koan.service` | `run.py` | Agent loop (missions, execution, reflection) |
+| `koan-awake.service` | `awake.py` | Messaging bridge (Telegram/Slack) |
+
+The services are linked: stopping one stops both (`BindsTo=` relationship).
+
+### How `make start/stop/status` work with systemd
+
+On Linux with systemd available, the Makefile **automatically delegates** to `systemctl`:
+
+| Command | Without systemd | With systemd |
+|---------|----------------|--------------|
+| `make start` | Python PID manager | `systemctl start koan` |
+| `make stop` | Python PID manager | `systemctl stop koan` |
+| `make status` | Python PID manager | `systemctl status koan koan-awake` |
+
+The detection is automatic — no configuration needed. On macOS or Linux without systemd, the original PID-manager behavior is preserved.
+
+### Viewing logs
+
+Logs are written to both the systemd journal and the `logs/` directory:
+
+```bash
+# systemd journal (quick checks)
+sudo journalctl -u koan -f
+sudo journalctl -u koan-awake -f
+
+# File-based logs (same as non-systemd)
+make logs
+```
+
+### Managing the service
+
+```bash
+# Standard systemctl commands work
+sudo systemctl restart koan        # Restart both services
+sudo systemctl enable koan         # Start on boot (done by install)
+sudo systemctl disable koan        # Don't start on boot
+
+# Uninstall completely (reverts to PID-manager mode)
+make uninstall-systemctl-service
+```
+
+### Uninstalling
+
+```bash
+make uninstall-systemctl-service
+```
+
+This stops the services, disables them, removes the unit files, and reloads systemd. After uninstalling, `make start` will use the Python PID manager again.
 
 ## Troubleshooting
 

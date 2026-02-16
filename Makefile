@@ -5,11 +5,18 @@ export
 .PHONY: clean say migrate test sync-instance
 .PHONY: awake run errand-run errand-awake dashboard
 .PHONY: ollama logs
+.PHONY: install-systemctl-service uninstall-systemctl-service
 
 PYTHON_BIN ?= python3
 
 VENV   ?= .venv
 PYTHON ?= $(VENV)/bin/$(PYTHON_BIN)
+
+# --- systemd detection (Linux only, never on macOS) ---
+IS_LINUX := $(shell [ "$$(uname -s)" = "Linux" ] && echo 1)
+HAS_SYSTEMD := $(if $(IS_LINUX),$(shell command -v systemctl >/dev/null 2>&1 && echo 1))
+USE_SYSTEMD := $(if $(HAS_SYSTEMD),1)
+SERVICE_INSTALLED = $(shell [ -f /etc/systemd/system/koan.service ] && echo 1)
 
 setup: $(VENV)/.installed
 
@@ -38,6 +45,23 @@ migrate: setup
 dashboard: setup
 	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/dashboard.py
 
+ifeq ($(USE_SYSTEMD),1)
+
+start: setup
+	@if [ -z "$(SERVICE_INSTALLED)" ]; then \
+		echo "→ systemd detected — installing Kōan service (one-time setup)..."; \
+		sudo bash koan/systemd/install-service.sh "$(PWD)" "$(PWD)/$(PYTHON)"; \
+	fi
+	@sudo systemctl start koan
+
+stop:
+	@sudo systemctl stop koan
+
+status:
+	@sudo systemctl status koan koan-awake --no-pager || true
+
+else
+
 start: setup
 	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager start-all $(PWD)
 
@@ -46,6 +70,8 @@ stop: setup
 
 status: setup
 	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager status-all $(PWD)
+
+endif
 
 errand-run: setup
 	caffeinate -i $(MAKE) run
@@ -85,3 +111,13 @@ sync-instance:
 		fi; \
 	done
 	@echo "✓ instance/ synced with instance.example/"
+
+install-systemctl-service: setup
+	@if [ -z "$(IS_LINUX)" ]; then echo "Error: systemd is only available on Linux." >&2; exit 1; fi
+	@if [ -z "$(HAS_SYSTEMD)" ]; then echo "Error: systemctl not found. systemd is required." >&2; exit 1; fi
+	sudo bash koan/systemd/install-service.sh "$(PWD)" "$(PWD)/$(PYTHON)"
+
+uninstall-systemctl-service:
+	@if [ -z "$(IS_LINUX)" ]; then echo "Error: systemd is only available on Linux." >&2; exit 1; fi
+	@if [ -z "$(HAS_SYSTEMD)" ]; then echo "Error: systemctl not found." >&2; exit 1; fi
+	sudo bash koan/systemd/uninstall-service.sh

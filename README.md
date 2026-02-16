@@ -246,6 +246,8 @@ instance/                 # Your private data (gitignored)
 | `make dashboard` | Web UI (port 5001) |
 | `make test` | Run test suite |
 | `make say m="..."` | Send a test message |
+| `make install-systemctl-service` | Install systemd service (Linux only) |
+| `make uninstall-systemctl-service` | Remove systemd service |
 | `make clean` | Remove virtualenv |
 
 ## Philosophy

@@ -1,0 +1,19 @@
+[Unit]
+Description=Kōan Agent Loop
+After=network.target koan-awake.service
+BindsTo=koan-awake.service
+
+[Service]
+Type=simple
+WorkingDirectory=__KOAN_ROOT__/koan
+EnvironmentFile=__KOAN_ROOT__/.env
+Environment=KOAN_ROOT=__KOAN_ROOT__
+Environment=PYTHONPATH=__KOAN_ROOT__/koan
+ExecStart=__PYTHON__ app/run.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:__KOAN_ROOT__/logs/run.log
+StandardError=append:__KOAN_ROOT__/logs/run.log
+
+[Install]
+WantedBy=multi-user.target
