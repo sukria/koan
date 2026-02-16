@@ -98,7 +98,7 @@ class TestRenderServiceTemplate:
             [Service]
             WorkingDirectory=__KOAN_ROOT__/koan
             Environment=PATH=__PATH__
-            ExecStart=__PYTHON__ app/run.py
+            ExecStart=/usr/bin/script -qefc "__PYTHON__ app/run.py" /dev/null
         """))
 
         result = render_service_template(
@@ -108,7 +108,7 @@ class TestRenderServiceTemplate:
 
         assert "WorkingDirectory=/opt/koan/koan" in result
         assert "Environment=PATH=/usr/local/bin:/usr/bin:/bin" in result
-        assert "ExecStart=/opt/koan/.venv/bin/python3 app/run.py" in result
+        assert 'ExecStart=/usr/bin/script -qefc "/opt/koan/.venv/bin/python3 app/run.py" /dev/null' in result
         assert "__KOAN_ROOT__" not in result
         assert "__PYTHON__" not in result
         assert "__PATH__" not in result
