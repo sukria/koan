@@ -1,0 +1,18 @@
+[Unit]
+Description=Kōan Communication Bridge
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__KOAN_ROOT__/koan
+EnvironmentFile=__KOAN_ROOT__/.env
+Environment=KOAN_ROOT=__KOAN_ROOT__
+Environment=PYTHONPATH=__KOAN_ROOT__/koan
+ExecStart=__PYTHON__ app/awake.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:__KOAN_ROOT__/logs/awake.log
+StandardError=append:__KOAN_ROOT__/logs/awake.log
+
+[Install]
+WantedBy=multi-user.target
