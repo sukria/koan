@@ -124,16 +124,20 @@ def log(category: str, message: str):
     print(f"{prefix}[{category}]{reset} {message}", flush=True)
 
 
-def bold_cyan(text: str) -> str:
+def _styled(text: str, *styles: str) -> str:
+    """Apply ANSI styles to text. E.g. _styled("hi", "bold", "cyan")."""
     if not _COLORS:
         _init_colors()
-    return f"{_COLORS.get('bold', '')}{_COLORS.get('cyan', '')}{text}{_COLORS.get('reset', '')}"
+    prefix = "".join(_COLORS.get(s, "") for s in styles)
+    return f"{prefix}{text}{_COLORS.get('reset', '')}"
+
+
+def bold_cyan(text: str) -> str:
+    return _styled(text, "bold", "cyan")
 
 
 def bold_green(text: str) -> str:
-    if not _COLORS:
-        _init_colors()
-    return f"{_COLORS.get('bold', '')}{_COLORS.get('green', '')}{text}{_COLORS.get('reset', '')}"
+    return _styled(text, "bold", "green")
 
 
 # ---------------------------------------------------------------------------
@@ -968,41 +972,33 @@ def _run_iteration(
                 log("koan", "New mission detected during sleep — waking up early")
         return
 
-    if action == "focus_wait":
-        remaining = plan.get("focus_remaining", "unknown")
-        log("koan", f"Focus mode active ({remaining} remaining) — no missions pending, sleeping")
-        set_status(koan_root, f"Focus mode — waiting for missions ({remaining} remaining)")
-        with protected_phase("Focus mode — waiting for missions"):
+    # Idle wait actions — all follow the same sleep-and-check pattern
+    _IDLE_WAIT_CONFIG = {
+        "focus_wait": lambda p: (
+            f"Focus mode active ({p.get('focus_remaining', 'unknown')} remaining) — no missions pending, sleeping",
+            f"Focus mode — waiting for missions ({p.get('focus_remaining', 'unknown')} remaining)",
+        ),
+        "schedule_wait": lambda _: (
+            "Work hours active — waiting for missions (exploration suppressed)",
+            f"Work hours — waiting for missions ({time.strftime('%H:%M')})",
+        ),
+        "exploration_wait": lambda _: (
+            "All projects have exploration disabled — waiting for missions",
+            f"Exploration disabled — waiting for missions ({time.strftime('%H:%M')})",
+        ),
+        "pr_limit_wait": lambda _: (
+            "PR limit reached for all projects — waiting for reviews",
+            f"PR limit reached — waiting for reviews ({time.strftime('%H:%M')})",
+        ),
+    }
+    if action in _IDLE_WAIT_CONFIG:
+        log_msg, status_msg = _IDLE_WAIT_CONFIG[action](plan)
+        log("koan", log_msg)
+        set_status(koan_root, status_msg)
+        with protected_phase(status_msg):
             wake = interruptible_sleep(interval, koan_root, instance)
         if wake == "mission":
-            log("koan", "New mission detected during focus sleep — waking up")
-        return
-
-    if action == "schedule_wait":
-        log("koan", "Work hours active — waiting for missions (exploration suppressed)")
-        set_status(koan_root, f"Work hours — waiting for missions ({time.strftime('%H:%M')})")
-        with protected_phase("Work hours — waiting for missions"):
-            wake = interruptible_sleep(interval, koan_root, instance)
-        if wake == "mission":
-            log("koan", "New mission detected during work hours sleep — waking up")
-        return
-
-    if action == "exploration_wait":
-        log("koan", "All projects have exploration disabled — waiting for missions")
-        set_status(koan_root, f"Exploration disabled — waiting for missions ({time.strftime('%H:%M')})")
-        with protected_phase("Exploration disabled — waiting for missions"):
-            wake = interruptible_sleep(interval, koan_root, instance)
-        if wake == "mission":
-            log("koan", "New mission detected during exploration wait — waking up")
-        return
-
-    if action == "pr_limit_wait":
-        log("koan", "PR limit reached for all projects — waiting for reviews")
-        set_status(koan_root, f"PR limit reached — waiting for reviews ({time.strftime('%H:%M')})")
-        with protected_phase("PR limit reached — waiting for reviews"):
-            wake = interruptible_sleep(interval, koan_root, instance)
-        if wake == "mission":
-            log("koan", "New mission detected during PR limit wait — waking up")
+            log("koan", f"New mission detected during {action} — waking up")
         return
 
     if action == "wait_pause":
@@ -1016,20 +1012,7 @@ def _run_iteration(
         except Exception as e:
             log("error", f"Retrospective sending failed: {e}")
         # Compute a proper future reset timestamp to avoid instant auto-resume
-        reset_ts = None
-        reset_display = ""
-        try:
-            from app.usage_estimator import cmd_reset_time, _estimate_reset_time, _load_state
-            usage_state_path = Path(instance, "usage_state.json")
-            reset_ts = cmd_reset_time(usage_state_path)
-            # Build display info for the pause reason file
-            state = _load_state(usage_state_path)
-            reset_display = f"session reset in ~{_estimate_reset_time(state.get('session_start', ''), 5)}"
-        except Exception as e:
-            log("error", f"Reset time estimation failed: {e}")
-        if reset_ts is None:
-            from app.pause_manager import QUOTA_RETRY_SECONDS
-            reset_ts = int(time.time()) + QUOTA_RETRY_SECONDS
+        reset_ts, reset_display = _compute_quota_reset_ts(instance)
         from app.pause_manager import create_pause
         create_pause(koan_root, "quota", reset_ts, reset_display)
 
@@ -1056,19 +1039,7 @@ def _run_iteration(
             )
             if not pf_ok:
                 log("quota", "Pre-flight probe detected quota exhaustion")
-                # Try to extract reset time from probe output
-                pf_reset_ts = None
-                pf_reset_display = ""
-                try:
-                    from app.quota_handler import extract_reset_info, parse_reset_time, compute_resume_info
-                    reset_info = extract_reset_info(pf_error or "")
-                    pf_reset_ts, pf_reset_display = parse_reset_time(reset_info)
-                    pf_reset_ts, _ = compute_resume_info(pf_reset_ts, pf_reset_display)
-                except Exception as e:
-                    log("error", f"Pre-flight reset time extraction failed: {e}")
-                if pf_reset_ts is None:
-                    from app.pause_manager import QUOTA_RETRY_SECONDS
-                    pf_reset_ts = int(time.time()) + QUOTA_RETRY_SECONDS
+                pf_reset_ts, pf_reset_display = _compute_preflight_reset_ts(pf_error)
                 from app.pause_manager import create_pause
                 create_pause(koan_root, "quota", pf_reset_ts, pf_reset_display)
                 label = plan["mission_title"] if plan["mission_title"] else "autonomous run"
@@ -1418,6 +1389,49 @@ def _handle_iteration_error(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _compute_quota_reset_ts(instance: str):
+    """Compute quota reset timestamp and display string.
+
+    Returns (reset_ts: int, reset_display: str). Falls back to
+    QUOTA_RETRY_SECONDS from now if estimation fails.
+    """
+    reset_ts = None
+    reset_display = ""
+    try:
+        from app.usage_estimator import cmd_reset_time, _estimate_reset_time, _load_state
+        usage_state_path = Path(instance, "usage_state.json")
+        reset_ts = cmd_reset_time(usage_state_path)
+        state = _load_state(usage_state_path)
+        reset_display = f"session reset in ~{_estimate_reset_time(state.get('session_start', ''), 5)}"
+    except Exception as e:
+        log("error", f"Reset time estimation failed: {e}")
+    if reset_ts is None:
+        from app.pause_manager import QUOTA_RETRY_SECONDS
+        reset_ts = int(time.time()) + QUOTA_RETRY_SECONDS
+    return reset_ts, reset_display
+
+
+def _compute_preflight_reset_ts(error_output: str):
+    """Compute quota reset timestamp from preflight probe error output.
+
+    Returns (reset_ts: int, reset_display: str). Falls back to
+    QUOTA_RETRY_SECONDS from now if extraction fails.
+    """
+    reset_ts = None
+    reset_display = ""
+    try:
+        from app.quota_handler import extract_reset_info, parse_reset_time, compute_resume_info
+        reset_info = extract_reset_info(error_output or "")
+        reset_ts, reset_display = parse_reset_time(reset_info)
+        reset_ts, _ = compute_resume_info(reset_ts, reset_display)
+    except Exception as e:
+        log("error", f"Pre-flight reset time extraction failed: {e}")
+    if reset_ts is None:
+        from app.pause_manager import QUOTA_RETRY_SECONDS
+        reset_ts = int(time.time()) + QUOTA_RETRY_SECONDS
+    return reset_ts, reset_display
 
 
 def _reset_usage_session(instance: str):

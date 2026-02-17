@@ -852,6 +852,231 @@ class TestBoldHelpers:
         assert "test" in result
 
 
+class TestStyled:
+    """Tests for the _styled() helper that bold_cyan/bold_green delegate to."""
+
+    def test_styled_returns_text(self):
+        from app.run import _styled, _init_colors
+        _init_colors()
+        result = _styled("hello", "bold", "cyan")
+        assert "hello" in result
+
+    def test_styled_single_style(self):
+        from app.run import _styled, _init_colors
+        _init_colors()
+        result = _styled("x", "red")
+        assert "x" in result
+
+    def test_styled_no_styles(self):
+        from app.run import _styled, _init_colors
+        _init_colors()
+        result = _styled("plain")
+        assert "plain" in result
+
+    def test_bold_cyan_uses_styled(self):
+        """bold_cyan() should produce the same result as _styled("x", "bold", "cyan")."""
+        from app.run import bold_cyan, _styled, _init_colors
+        _init_colors()
+        assert bold_cyan("test") == _styled("test", "bold", "cyan")
+
+    def test_bold_green_uses_styled(self):
+        """bold_green() should produce the same result as _styled("x", "bold", "green")."""
+        from app.run import bold_green, _styled, _init_colors
+        _init_colors()
+        assert bold_green("test") == _styled("test", "bold", "green")
+
+    def test_styled_with_colors_disabled(self, monkeypatch):
+        """When KOAN_FORCE_COLOR is unset and stdout is not TTY, styles are empty strings."""
+        import app.run as run_mod
+        monkeypatch.delenv("KOAN_FORCE_COLOR", raising=False)
+        run_mod._COLORS = {}
+        # Non-TTY stdout: styles should be empty
+        run_mod._init_colors()
+        if not sys.stdout.isatty():
+            result = run_mod._styled("text", "bold", "red")
+            assert result == "text"
+
+
+class TestIdleWaitConfig:
+    """Tests for the consolidated _IDLE_WAIT_CONFIG dispatch in _run_iteration."""
+
+    def _make_plan(self, action, **overrides):
+        """Build a minimal iteration plan dict."""
+        plan = {
+            "action": action,
+            "project_name": "koan",
+            "project_path": "/tmp/koan",
+            "autonomous_mode": "implement",
+            "available_pct": 50,
+            "display_lines": [],
+            "mission_title": "",
+            "focus_area": "",
+            "decision_reason": "",
+            "recurring_injected": [],
+        }
+        plan.update(overrides)
+        return plan
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_focus_wait_action(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        """focus_wait action should use consolidated idle wait handler."""
+        from app.run import _run_iteration
+        mock_plan.return_value = self._make_plan("focus_wait", focus_remaining="3h45m")
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance, exist_ok=True)
+        (tmp_path / ".koan-project").write_text("koan")
+
+        _run_iteration(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("koan", "/tmp/koan")],
+            count=0, max_runs=10, interval=60, git_sync_interval=5,
+        )
+
+        # Verify sleep was called with the interval
+        mock_sleep.assert_called_once_with(60, str(tmp_path), instance)
+        # Verify status was set with focus info
+        status_calls = [c for c in mock_status.call_args_list if "Focus mode" in str(c)]
+        assert len(status_calls) >= 1
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_schedule_wait_action(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        """schedule_wait action should use consolidated idle wait handler."""
+        from app.run import _run_iteration
+        mock_plan.return_value = self._make_plan("schedule_wait")
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance, exist_ok=True)
+        (tmp_path / ".koan-project").write_text("koan")
+
+        _run_iteration(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("koan", "/tmp/koan")],
+            count=0, max_runs=10, interval=60, git_sync_interval=5,
+        )
+
+        mock_sleep.assert_called_once()
+        status_calls = [c for c in mock_status.call_args_list if "Work hours" in str(c)]
+        assert len(status_calls) >= 1
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_exploration_wait_action(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        """exploration_wait action should use consolidated idle wait handler."""
+        from app.run import _run_iteration
+        mock_plan.return_value = self._make_plan("exploration_wait")
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance, exist_ok=True)
+        (tmp_path / ".koan-project").write_text("koan")
+
+        _run_iteration(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("koan", "/tmp/koan")],
+            count=0, max_runs=10, interval=60, git_sync_interval=5,
+        )
+
+        mock_sleep.assert_called_once()
+        status_calls = [c for c in mock_status.call_args_list if "Exploration disabled" in str(c)]
+        assert len(status_calls) >= 1
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_pr_limit_wait_action(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        """pr_limit_wait action should use consolidated idle wait handler."""
+        from app.run import _run_iteration
+        mock_plan.return_value = self._make_plan("pr_limit_wait")
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance, exist_ok=True)
+        (tmp_path / ".koan-project").write_text("koan")
+
+        _run_iteration(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("koan", "/tmp/koan")],
+            count=0, max_runs=10, interval=60, git_sync_interval=5,
+        )
+
+        mock_sleep.assert_called_once()
+        status_calls = [c for c in mock_status.call_args_list if "PR limit" in str(c)]
+        assert len(status_calls) >= 1
+
+    @patch("app.run.interruptible_sleep", return_value="mission")
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_idle_wait_wakes_on_mission(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        """When interruptible_sleep returns 'mission', idle wait should log wakeup."""
+        from app.run import _run_iteration
+        mock_plan.return_value = self._make_plan("focus_wait", focus_remaining="2h")
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance, exist_ok=True)
+        (tmp_path / ".koan-project").write_text("koan")
+
+        _run_iteration(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("koan", "/tmp/koan")],
+            count=0, max_runs=10, interval=60, git_sync_interval=5,
+        )
+
+        # Should log about waking up
+        wake_logs = [c for c in mock_log.call_args_list if "waking up" in str(c)]
+        assert len(wake_logs) >= 1
+
+
+class TestComputeQuotaResetTs:
+    """Tests for _compute_quota_reset_ts and _compute_preflight_reset_ts."""
+
+    @patch("app.run.log")
+    def test_compute_quota_reset_ts_fallback(self, mock_log, tmp_path):
+        """When usage_estimator fails, falls back to QUOTA_RETRY_SECONDS."""
+        from app.run import _compute_quota_reset_ts
+        instance = str(tmp_path)
+        reset_ts, reset_display = _compute_quota_reset_ts(instance)
+        # Should return a future timestamp
+        assert reset_ts > time.time() - 10
+        assert isinstance(reset_ts, int)
+
+    @patch("app.run.log")
+    def test_compute_preflight_reset_ts_fallback(self, mock_log):
+        """When quota_handler extraction fails, falls back to QUOTA_RETRY_SECONDS."""
+        from app.run import _compute_preflight_reset_ts
+        reset_ts, reset_display = _compute_preflight_reset_ts("")
+        assert reset_ts > time.time() - 10
+        assert isinstance(reset_ts, int)
+
+    @patch("app.run.log")
+    def test_compute_preflight_reset_ts_with_error_output(self, mock_log):
+        """With error output, should attempt extraction (and fall back gracefully)."""
+        from app.run import _compute_preflight_reset_ts
+        reset_ts, reset_display = _compute_preflight_reset_ts("Rate limit exceeded, try again at 10:00 AM")
+        assert reset_ts > time.time() - 10
+
+    @patch("app.usage_estimator.cmd_reset_time", return_value=9999999999)
+    @patch("app.usage_estimator._load_state", return_value={"session_start": "2026-02-16T10:00:00Z"})
+    @patch("app.usage_estimator._estimate_reset_time", return_value="4h30m")
+    @patch("app.run.log")
+    def test_compute_quota_reset_ts_with_valid_state(
+        self, mock_log, mock_estimate, mock_state, mock_reset
+    ):
+        """When usage_estimator works, uses its output."""
+        from app.run import _compute_quota_reset_ts
+        reset_ts, reset_display = _compute_quota_reset_ts("/tmp/test-instance")
+        assert reset_ts == 9999999999
+        assert "4h30m" in reset_display
+
+
 # ---------------------------------------------------------------------------
 # Test: quota spam loop regression tests (session 220 fixes)
 # ---------------------------------------------------------------------------
