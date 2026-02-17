@@ -1,6 +1,7 @@
 [Unit]
 Description=Kōan Agent Loop
 After=network.target koan-awake.service
+Requires=koan-awake.service
 BindsTo=koan-awake.service
 
 [Service]

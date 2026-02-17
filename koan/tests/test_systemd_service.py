@@ -1,9 +1,13 @@
 """Tests for systemd service PATH building and template rendering."""
 
 import os
+import sys
 import textwrap
+from unittest.mock import patch
 
-from app.systemd_service import build_safe_path, render_all_templates, render_service_template
+import pytest
+
+from app.systemd_service import build_safe_path, main, render_all_templates, render_service_template
 
 
 class TestBuildSafePath:
@@ -135,3 +139,127 @@ class TestRenderServiceTemplate:
             str(tmp_path), "/opt/koan", "/usr/bin/python3", "/usr/bin"
         )
         assert result == {}
+
+
+class TestMain:
+    """Tests for the CLI entrypoint main()."""
+
+    def test_wrong_argc_exits_with_error(self):
+        with patch.object(sys, "argv", ["prog"]):
+            with pytest.raises(SystemExit, match="1"):
+                main()
+
+    def test_too_many_args_exits_with_error(self):
+        with patch.object(sys, "argv", ["prog", "a", "b", "c", "d", "e"]):
+            with pytest.raises(SystemExit, match="1"):
+                main()
+
+    def test_renders_templates_to_output_dir(self, tmp_path):
+        # Create a fake app/ dir with a sibling systemd/ dir to match main()'s
+        # template_dir = os.path.join(os.path.dirname(__file__), "..", "systemd")
+        fake_app = tmp_path / "koan" / "app"
+        fake_app.mkdir(parents=True)
+        tmpl_dir = tmp_path / "koan" / "systemd"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "koan.service.template").write_text(
+            "WorkingDirectory=__KOAN_ROOT__\nExecStart=__PYTHON__\nPATH=__PATH__\n"
+        )
+        out_dir = tmp_path / "output"
+
+        with patch.object(
+            sys, "argv",
+            ["prog", "/opt/koan", "/usr/bin/python3", "/usr/bin:/bin", str(out_dir)]
+        ), patch("app.systemd_service.os.path.dirname", return_value=str(fake_app)):
+            main()
+
+        assert (out_dir / "koan.service").exists()
+        content = (out_dir / "koan.service").read_text()
+        assert "/opt/koan" in content
+        assert "__KOAN_ROOT__" not in content
+
+    def test_uses_sudo_user_for_home_filtering(self, tmp_path):
+        fake_app = tmp_path / "koan" / "app"
+        fake_app.mkdir(parents=True)
+        tmpl_dir = tmp_path / "koan" / "systemd"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "koan.service.template").write_text("PATH=__PATH__\n")
+        out_dir = tmp_path / "output"
+
+        caller_path = "/home/alice/.local/bin:/usr/bin:/bin"
+
+        with patch.object(
+            sys, "argv",
+            ["prog", "/opt/koan", "/usr/bin/python3", caller_path, str(out_dir)]
+        ), patch.dict(os.environ, {"SUDO_USER": "alice"}, clear=False), \
+             patch("app.systemd_service.os.path.dirname", return_value=str(fake_app)), \
+             patch("app.systemd_service.os.path.expanduser", return_value="/home/alice"):
+            main()
+
+        content = (out_dir / "koan.service").read_text()
+        assert "/home/alice/.local/bin" not in content
+        assert "/usr/bin" in content
+
+
+class TestServiceTemplateContent:
+    """Validate actual service template files have correct systemd directives."""
+
+    @pytest.fixture
+    def template_dir(self):
+        """Path to the real systemd template directory."""
+        return os.path.join(os.path.dirname(__file__), "..", "systemd")
+
+    def test_koan_service_requires_awake(self, template_dir):
+        """koan.service must Require koan-awake so 'systemctl start koan' starts both."""
+        path = os.path.join(template_dir, "koan.service.template")
+        content = open(path).read()
+        assert "Requires=koan-awake.service" in content
+
+    def test_koan_service_binds_to_awake(self, template_dir):
+        """koan.service must BindTo koan-awake so it stops when awake stops."""
+        path = os.path.join(template_dir, "koan.service.template")
+        content = open(path).read()
+        assert "BindsTo=koan-awake.service" in content
+
+    def test_koan_service_starts_after_awake(self, template_dir):
+        """koan.service must start After koan-awake for correct ordering."""
+        path = os.path.join(template_dir, "koan.service.template")
+        content = open(path).read()
+        assert "koan-awake.service" in content
+        # After directive should reference koan-awake
+        for line in content.splitlines():
+            if line.startswith("After="):
+                assert "koan-awake.service" in line
+                break
+        else:
+            pytest.fail("No After= directive found")
+
+    def test_awake_service_part_of_koan(self, template_dir):
+        """koan-awake.service must be PartOf koan.service for bidirectional lifecycle."""
+        path = os.path.join(template_dir, "koan-awake.service.template")
+        content = open(path).read()
+        assert "PartOf=koan.service" in content
+
+    def test_both_templates_have_required_placeholders(self, template_dir):
+        """Both templates must contain all three placeholders."""
+        for name in ["koan.service.template", "koan-awake.service.template"]:
+            path = os.path.join(template_dir, name)
+            content = open(path).read()
+            assert "__KOAN_ROOT__" in content, f"{name} missing __KOAN_ROOT__"
+            assert "__PYTHON__" in content, f"{name} missing __PYTHON__"
+            assert "__PATH__" in content, f"{name} missing __PATH__"
+
+    def test_both_templates_use_env_file(self, template_dir):
+        """Both templates must load .env for secrets."""
+        for name in ["koan.service.template", "koan-awake.service.template"]:
+            path = os.path.join(template_dir, name)
+            content = open(path).read()
+            assert "EnvironmentFile=__KOAN_ROOT__/.env" in content, \
+                f"{name} missing EnvironmentFile"
+
+    def test_both_templates_restart_on_failure(self, template_dir):
+        """Both services should restart on failure."""
+        for name in ["koan.service.template", "koan-awake.service.template"]:
+            path = os.path.join(template_dir, name)
+            content = open(path).read()
+            assert "Restart=on-failure" in content, \
+                f"{name} missing Restart=on-failure"
