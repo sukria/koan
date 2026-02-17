@@ -2,6 +2,7 @@
 
 import os
 import time
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from app.restart_manager import (
@@ -34,12 +35,12 @@ class TestConstants:
 
 class TestRequestRestart:
     def test_creates_file(self, tmp_path):
-        request_restart(tmp_path)
+        request_restart(str(tmp_path))
         restart_file = tmp_path / RESTART_FILE
         assert restart_file.exists()
 
     def test_file_contains_timestamp(self, tmp_path):
-        request_restart(tmp_path)
+        request_restart(str(tmp_path))
         content = (tmp_path / RESTART_FILE).read_text()
         assert "restart requested at" in content
         assert ":" in content  # Time format HH:MM:SS
@@ -47,10 +48,19 @@ class TestRequestRestart:
     def test_overwrites_existing_file(self, tmp_path):
         restart_file = tmp_path / RESTART_FILE
         restart_file.write_text("old content")
-        request_restart(tmp_path)
+        request_restart(str(tmp_path))
         content = restart_file.read_text()
         assert "old content" not in content
         assert "restart requested at" in content
+
+    def test_uses_atomic_write(self, tmp_path):
+        """request_restart should use atomic_write for thread safety."""
+        with patch("app.utils.atomic_write") as mock_aw:
+            request_restart(str(tmp_path))
+            mock_aw.assert_called_once()
+            # First arg should be a Path
+            call_path = mock_aw.call_args[0][0]
+            assert str(call_path).endswith(RESTART_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -60,11 +70,11 @@ class TestRequestRestart:
 
 class TestCheckRestart:
     def test_returns_false_when_no_file(self, tmp_path):
-        assert check_restart(tmp_path) is False
+        assert check_restart(str(tmp_path)) is False
 
     def test_returns_true_when_file_exists(self, tmp_path):
         (tmp_path / RESTART_FILE).write_text("restart")
-        assert check_restart(tmp_path) is True
+        assert check_restart(str(tmp_path)) is True
 
     def test_respects_since_parameter_newer(self, tmp_path):
         """File modified after 'since' should return True."""
@@ -72,7 +82,7 @@ class TestCheckRestart:
         restart_file.write_text("restart")
         # File was just created, so mtime is recent
         old_time = time.time() - 60  # 1 minute ago
-        assert check_restart(tmp_path, since=old_time) is True
+        assert check_restart(str(tmp_path), since=old_time) is True
 
     def test_respects_since_parameter_older(self, tmp_path):
         """File modified before 'since' should return False (stale signal)."""
@@ -83,7 +93,7 @@ class TestCheckRestart:
         os.utime(restart_file, (old_mtime, old_mtime))
         # Check with 'since' = 2 seconds ago (more recent than file)
         since_time = time.time() - 2
-        assert check_restart(tmp_path, since=since_time) is False
+        assert check_restart(str(tmp_path), since=since_time) is False
 
     def test_since_zero_ignores_mtime(self, tmp_path):
         """When since=0, mtime is not checked."""
@@ -92,7 +102,7 @@ class TestCheckRestart:
         # Even with old mtime, since=0 should return True
         old_mtime = time.time() - 3600  # 1 hour ago
         os.utime(restart_file, (old_mtime, old_mtime))
-        assert check_restart(tmp_path, since=0) is True
+        assert check_restart(str(tmp_path), since=0) is True
 
     def test_since_exact_boundary(self, tmp_path):
         """File with mtime == since should return False (not strictly after)."""
@@ -100,7 +110,14 @@ class TestCheckRestart:
         restart_file.write_text("restart")
         mtime = restart_file.stat().st_mtime
         # since == mtime means file was NOT modified AFTER since
-        assert check_restart(tmp_path, since=mtime) is False
+        assert check_restart(str(tmp_path), since=mtime) is False
+
+    def test_handles_oserror_on_stat(self, tmp_path):
+        """check_restart returns False if stat() raises OSError."""
+        restart_file = tmp_path / RESTART_FILE
+        restart_file.write_text("restart")
+        with patch("app.restart_manager.os.path.getmtime", side_effect=OSError):
+            assert check_restart(str(tmp_path), since=1.0) is False
 
 
 # ---------------------------------------------------------------------------
@@ -112,21 +129,21 @@ class TestClearRestart:
     def test_removes_existing_file(self, tmp_path):
         restart_file = tmp_path / RESTART_FILE
         restart_file.write_text("restart")
-        clear_restart(tmp_path)
+        clear_restart(str(tmp_path))
         assert not restart_file.exists()
 
     def test_no_error_when_file_missing(self, tmp_path):
         # Should not raise even if file doesn't exist
-        clear_restart(tmp_path)
+        clear_restart(str(tmp_path))
         assert not (tmp_path / RESTART_FILE).exists()
 
     def test_idempotent(self, tmp_path):
         """Multiple clears should be safe."""
         restart_file = tmp_path / RESTART_FILE
         restart_file.write_text("restart")
-        clear_restart(tmp_path)
-        clear_restart(tmp_path)
-        clear_restart(tmp_path)
+        clear_restart(str(tmp_path))
+        clear_restart(str(tmp_path))
+        clear_restart(str(tmp_path))
         assert not restart_file.exists()
 
 
@@ -174,21 +191,23 @@ class TestReexecBridge:
 class TestRestartWorkflow:
     def test_full_restart_cycle(self, tmp_path):
         """Test the complete request → check → clear cycle."""
+        root = str(tmp_path)
         # Initially no restart pending
-        assert check_restart(tmp_path) is False
+        assert check_restart(root) is False
 
         # Request restart
-        request_restart(tmp_path)
-        assert check_restart(tmp_path) is True
+        request_restart(root)
+        assert check_restart(root) is True
 
         # Clear it
-        clear_restart(tmp_path)
-        assert check_restart(tmp_path) is False
+        clear_restart(root)
+        assert check_restart(root) is False
 
     def test_stale_signal_ignored(self, tmp_path):
         """Stale restart signals from previous incarnation should be ignored."""
+        root = str(tmp_path)
         # Create a restart signal
-        request_restart(tmp_path)
+        request_restart(root)
         restart_file = tmp_path / RESTART_FILE
 
         # Backdate the file to simulate stale signal
@@ -199,13 +218,21 @@ class TestRestartWorkflow:
         startup_time = time.time()
 
         # Stale signal should be ignored
-        assert check_restart(tmp_path, since=startup_time) is False
+        assert check_restart(root, since=startup_time) is False
 
         # But a fresh request should work
-        request_restart(tmp_path)
+        request_restart(root)
         # Ensure the fresh file's mtime is strictly after startup_time.
         # On fast CI, write + time.time() can land in the same tick,
         # so explicitly forward-date the file by 1 second.
         future_mtime = startup_time + 1
         os.utime(restart_file, (future_mtime, future_mtime))
-        assert check_restart(tmp_path, since=startup_time) is True
+        assert check_restart(root, since=startup_time) is True
+
+    def test_accepts_str_not_path(self, tmp_path):
+        """All functions should accept str, not Path objects."""
+        root = str(tmp_path)
+        request_restart(root)
+        assert check_restart(root) is True
+        clear_restart(root)
+        assert check_restart(root) is False

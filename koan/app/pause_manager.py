@@ -123,19 +123,20 @@ def create_pause(
                    Defaults to current time.
         display: Human-readable display info
     """
+    from app.utils import atomic_write
+
     if timestamp is None:
         timestamp = int(time.time())
 
-    pause_file = os.path.join(koan_root, ".koan-pause")
-    reason_file = os.path.join(koan_root, ".koan-pause-reason")
+    pause_file = Path(koan_root) / ".koan-pause"
+    reason_file = Path(koan_root) / ".koan-pause-reason"
 
     # Write reason file first (so it's ready before the signal file)
     content = f"{reason}\n{timestamp}\n{display}\n"
-    with open(reason_file, "w") as f:
-        f.write(content)
+    atomic_write(reason_file, content)
 
     # Touch the pause file (signal)
-    Path(pause_file).touch()
+    pause_file.touch()
 
 
 def remove_pause(koan_root: str) -> None:

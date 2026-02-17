@@ -23,7 +23,7 @@ def handle(ctx: SkillContext) -> str:
 
     # New code pulled -- clear pause and restart
     remove_pause(str(ctx.koan_root))
-    request_restart(ctx.koan_root)
+    request_restart(str(ctx.koan_root))
 
     msg = f"🔄 {result.summary()}\nRestarting both processes..."
     if result.stashed:

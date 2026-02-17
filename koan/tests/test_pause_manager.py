@@ -604,3 +604,21 @@ class TestBudgetLoopRegression:
         msg = check_and_resume(str(tmp_path))
         assert msg is not None
         assert "quota reset time reached" in msg
+
+
+class TestCreatePauseAtomicWrite:
+    """Test that create_pause uses atomic_write for thread safety."""
+
+    def test_uses_atomic_write_for_reason_file(self, tmp_path):
+        from unittest.mock import patch
+
+        from app.pause_manager import create_pause
+
+        with patch("app.utils.atomic_write") as mock_aw:
+            create_pause(str(tmp_path), "quota", 1707000000, "resets 10am")
+            mock_aw.assert_called_once()
+            call_path = str(mock_aw.call_args[0][0])
+            assert call_path.endswith(".koan-pause-reason")
+            content = mock_aw.call_args[0][1]
+            assert "quota" in content
+            assert "1707000000" in content

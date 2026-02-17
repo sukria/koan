@@ -596,7 +596,7 @@ def main():
             # the skill handler re-creates the file — but we clear it
             # right after so the check below finds nothing.
             if first_poll:
-                clear_restart(KOAN_ROOT)
+                clear_restart(str(KOAN_ROOT))
                 clear_shutdown(str(KOAN_ROOT))
                 first_poll = False
 
@@ -606,7 +606,7 @@ def main():
             # Check for restart signal (set by /restart command).
             # Only react to files created AFTER we started — stale files
             # were already cleared above after the first poll.
-            if check_restart(KOAN_ROOT, since=startup_time):
+            if check_restart(str(KOAN_ROOT), since=startup_time):
                 log("init", "Restart signal detected. Re-executing...")
                 release_pidfile(pidfile_lock, KOAN_ROOT, "awake")
                 reexec_bridge()

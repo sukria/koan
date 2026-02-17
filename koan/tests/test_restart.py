@@ -25,18 +25,18 @@ from app.restart_manager import (
 
 class TestRequestRestart:
     def test_creates_restart_file(self, tmp_path):
-        request_restart(tmp_path)
+        request_restart(str(tmp_path))
         assert (tmp_path / RESTART_FILE).exists()
 
     def test_restart_file_contains_timestamp(self, tmp_path):
-        request_restart(tmp_path)
+        request_restart(str(tmp_path))
         content = (tmp_path / RESTART_FILE).read_text()
         assert "restart requested at" in content
 
     def test_overwrites_existing_file(self, tmp_path):
         restart_file = tmp_path / RESTART_FILE
         restart_file.write_text("old content")
-        request_restart(tmp_path)
+        request_restart(str(tmp_path))
         content = restart_file.read_text()
         assert "restart requested at" in content
         assert "old content" not in content
@@ -45,10 +45,10 @@ class TestRequestRestart:
 class TestCheckRestart:
     def test_returns_true_when_file_exists(self, tmp_path):
         (tmp_path / RESTART_FILE).write_text("restart")
-        assert check_restart(tmp_path) is True
+        assert check_restart(str(tmp_path)) is True
 
     def test_returns_false_when_no_file(self, tmp_path):
-        assert check_restart(tmp_path) is False
+        assert check_restart(str(tmp_path)) is False
 
     def test_since_ignores_old_file(self, tmp_path):
         """File touched before `since` is treated as stale."""
@@ -56,13 +56,13 @@ class TestCheckRestart:
         # Set mtime in the past
         past = time.time() - 10
         os.utime(tmp_path / RESTART_FILE, (past, past))
-        assert check_restart(tmp_path, since=time.time()) is False
+        assert check_restart(str(tmp_path), since=time.time()) is False
 
     def test_since_detects_fresh_file(self, tmp_path):
         """File touched after `since` is detected."""
         since = time.time() - 10
         (tmp_path / RESTART_FILE).write_text("restart")
-        assert check_restart(tmp_path, since=since) is True
+        assert check_restart(str(tmp_path), since=since) is True
 
     def test_since_zero_means_no_filter(self, tmp_path):
         """Default since=0 behaves like the old check (any file triggers)."""
@@ -70,18 +70,18 @@ class TestCheckRestart:
         # Set mtime far in the past
         past = time.time() - 1000
         os.utime(tmp_path / RESTART_FILE, (past, past))
-        assert check_restart(tmp_path, since=0) is True
+        assert check_restart(str(tmp_path), since=0) is True
 
 
 class TestClearRestart:
     def test_removes_restart_file(self, tmp_path):
         (tmp_path / RESTART_FILE).write_text("restart")
-        clear_restart(tmp_path)
+        clear_restart(str(tmp_path))
         assert not (tmp_path / RESTART_FILE).exists()
 
     def test_no_error_when_file_missing(self, tmp_path):
         # Should not raise
-        clear_restart(tmp_path)
+        clear_restart(str(tmp_path))
 
 
 class TestReexecBridge:
@@ -140,7 +140,7 @@ class TestRestartAsUpdateAlias:
             result = handle(ctx)
 
         mock_pull.assert_called_once_with(tmp_path)
-        mock_request.assert_called_once_with(tmp_path)
+        mock_request.assert_called_once_with(str(tmp_path))
         assert "Restarting" in result
 
     def test_restart_alias_no_changes(self, tmp_path):
@@ -230,13 +230,13 @@ class TestRestartLoopPrevention:
         os.utime(restart_file, (past, past))
 
         startup_time = time.time()
-        assert check_restart(tmp_path, since=startup_time) is False
+        assert check_restart(str(tmp_path), since=startup_time) is False
 
     def test_fresh_file_triggers_restart(self, tmp_path):
         """A new .koan-restart file (after startup) triggers restart."""
         startup_time = time.time() - 10
-        request_restart(tmp_path)
-        assert check_restart(tmp_path, since=startup_time) is True
+        request_restart(str(tmp_path))
+        assert check_restart(str(tmp_path), since=startup_time) is True
 
 
 class TestHelpListsRestartAsAlias:
@@ -299,7 +299,7 @@ class TestMainLoopRestartDetection:
         source = inspect.getsource(main)
         while_idx = source.index("while True:")
         # check_restart should appear after the while loop starts
-        check_idx = source.index("check_restart(KOAN_ROOT", while_idx)
+        check_idx = source.index("check_restart(str(KOAN_ROOT)", while_idx)
         assert check_idx > while_idx
 
     def test_main_clears_stale_file_after_first_poll(self):
@@ -309,7 +309,7 @@ class TestMainLoopRestartDetection:
         source = inspect.getsource(main)
         while_idx = source.index("while True:")
         # clear_restart should appear inside the loop (after first poll)
-        clear_idx = source.index("clear_restart(KOAN_ROOT)", while_idx)
+        clear_idx = source.index("clear_restart(str(KOAN_ROOT))", while_idx)
         assert clear_idx > while_idx
         # And it should be guarded by first_poll
         assert "first_poll" in source

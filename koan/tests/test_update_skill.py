@@ -45,7 +45,7 @@ class TestUpdateCommand:
 
         mock_pull.assert_called_once_with(tmp_path)
         mock_remove.assert_called_once()
-        mock_request.assert_called_once_with(tmp_path)
+        mock_request.assert_called_once_with(str(tmp_path))
         assert "3 new commits" in result
         assert "Restarting" in result
 
@@ -135,7 +135,7 @@ class TestRestartAlias:
         result = handle(ctx)
 
         mock_pull.assert_called_once_with(tmp_path)
-        mock_request.assert_called_once_with(tmp_path)
+        mock_request.assert_called_once_with(str(tmp_path))
         assert "Restarting" in result
 
     @patch(_P_REQUEST)
@@ -171,7 +171,7 @@ class TestRestartAlias:
         result = handle(ctx)
 
         mock_pull.assert_called_once_with(tmp_path)
-        mock_request.assert_called_once_with(tmp_path)
+        mock_request.assert_called_once_with(str(tmp_path))
 
 
 class TestSkillRegistration:
