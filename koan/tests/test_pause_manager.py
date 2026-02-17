@@ -306,11 +306,15 @@ class TestCheckAndResume:
 
         assert check_and_resume(str(tmp_path)) is None
 
-    def test_returns_none_when_no_reason_file(self, tmp_path):
+    def test_cleans_up_orphan_pause_without_reason_file(self, tmp_path):
         from app.pause_manager import check_and_resume
 
         (tmp_path / ".koan-pause").touch()
-        assert check_and_resume(str(tmp_path)) is None
+        msg = check_and_resume(str(tmp_path))
+        assert msg is not None
+        assert "orphan" in msg
+        # Both files should be cleaned up
+        assert not (tmp_path / ".koan-pause").exists()
 
     def test_auto_resumes_quota_past_reset(self, tmp_path, monkeypatch):
         from app.pause_manager import check_and_resume
@@ -546,6 +550,81 @@ class TestCLI:
     def test_no_args(self):
         result = self._run_cli()
         assert result.returncode == 1
+
+
+class TestOrphanPauseCleanup:
+    """Tests for orphan .koan-pause cleanup (missing reason file).
+
+    The bug: if .koan-pause exists but .koan-pause-reason is missing,
+    get_pause_state() returns None, and check_and_resume() returned None
+    without cleaning up. This caused the agent to stay permanently paused
+    with no auto-resume path.
+    """
+
+    def test_orphan_pause_file_cleaned_up(self, tmp_path):
+        """Orphan .koan-pause with no reason file should be cleaned up."""
+        from app.pause_manager import check_and_resume
+
+        (tmp_path / ".koan-pause").touch()
+        # No .koan-pause-reason
+
+        msg = check_and_resume(str(tmp_path))
+        assert msg is not None
+        assert "orphan" in msg
+        assert not (tmp_path / ".koan-pause").exists()
+
+    def test_orphan_pause_with_empty_reason_file(self, tmp_path):
+        """Orphan .koan-pause with empty reason file should be cleaned up."""
+        from app.pause_manager import check_and_resume
+
+        (tmp_path / ".koan-pause").touch()
+        (tmp_path / ".koan-pause-reason").write_text("")
+
+        msg = check_and_resume(str(tmp_path))
+        assert msg is not None
+        assert "orphan" in msg
+        assert not (tmp_path / ".koan-pause").exists()
+
+    def test_orphan_cleanup_is_idempotent(self, tmp_path):
+        """Calling check_and_resume twice after orphan cleanup returns None."""
+        from app.pause_manager import check_and_resume
+
+        (tmp_path / ".koan-pause").touch()
+
+        msg1 = check_and_resume(str(tmp_path))
+        assert msg1 is not None
+
+        # Second call: no longer paused
+        msg2 = check_and_resume(str(tmp_path))
+        assert msg2 is None
+
+    def test_normal_pause_not_treated_as_orphan(self, tmp_path, monkeypatch):
+        """A valid pause (with reason file) should NOT be treated as orphan."""
+        from app.pause_manager import check_and_resume, create_pause
+
+        create_pause(str(tmp_path), "quota", 9999999999, "future")
+        monkeypatch.setattr("app.pause_manager.time.time", lambda: 1000)
+
+        msg = check_and_resume(str(tmp_path))
+        assert msg is None  # Still paused, not orphan
+        assert (tmp_path / ".koan-pause").exists()
+
+    def test_orphan_pause_lifecycle(self, tmp_path):
+        """Full lifecycle: create pause, delete reason, check_and_resume cleans up."""
+        from app.pause_manager import check_and_resume, create_pause, is_paused
+
+        create_pause(str(tmp_path), "quota", 9999999999, "future")
+        assert is_paused(str(tmp_path)) is True
+
+        # Simulate crash: reason file deleted but pause file remains
+        (tmp_path / ".koan-pause-reason").unlink()
+        assert is_paused(str(tmp_path)) is True  # Still "paused"
+
+        # check_and_resume should detect and clean up
+        msg = check_and_resume(str(tmp_path))
+        assert msg is not None
+        assert "orphan" in msg
+        assert is_paused(str(tmp_path)) is False
 
 
 class TestBudgetLoopRegression:

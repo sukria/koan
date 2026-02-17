@@ -158,9 +158,16 @@ def check_and_resume(koan_root: str) -> Optional[str]:
 
     Side effects:
         Removes pause files if auto-resuming.
+        Cleans up orphan .koan-pause files (missing reason file).
     """
     state = get_pause_state(koan_root)
     if state is None:
+        # Orphan .koan-pause with no reason file — clean up and resume.
+        # This prevents permanent pause when the reason file is missing
+        # (e.g., crash between file operations, manual deletion).
+        if is_paused(koan_root):
+            remove_pause(koan_root)
+            return "orphan pause file cleaned up (missing reason)"
         return None
 
     if not should_auto_resume(state):
