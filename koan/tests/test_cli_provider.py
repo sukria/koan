@@ -19,6 +19,7 @@ from app.cli_provider import (
     build_output_flags,
     build_max_turns_flags,
     build_full_command,
+    run_command,
     CLAUDE_TOOLS,
     TOOL_NAME_MAP,
 )
@@ -755,3 +756,267 @@ class TestLocalProviderResolution:
         assert "app.local_llm_runner" in cmd
         assert "--allowed-tools" in cmd
         assert "--output-format" in cmd
+
+
+# ---------------------------------------------------------------------------
+# ClaudeProvider.check_quota_available
+# ---------------------------------------------------------------------------
+
+class TestClaudeQuotaCheck:
+    """Tests for ClaudeProvider.check_quota_available()."""
+
+    def setup_method(self):
+        self.provider = ClaudeProvider()
+
+    @patch("app.provider.claude.subprocess.run")
+    @patch("app.quota_handler.detect_quota_exhaustion", return_value=False)
+    def test_quota_available(self, mock_detect, mock_run):
+        """Returns (True, '') when quota is available."""
+        mock_run.return_value = MagicMock(stderr="", stdout="Usage: 50%")
+        available, detail = self.provider.check_quota_available("/fake/path")
+        assert available is True
+        assert detail == ""
+        mock_run.assert_called_once()
+        mock_detect.assert_called_once()
+
+    @patch("app.provider.claude.subprocess.run")
+    @patch("app.quota_handler.detect_quota_exhaustion", return_value=True)
+    def test_quota_exhausted(self, mock_detect, mock_run):
+        """Returns (False, output) when quota is exhausted."""
+        mock_run.return_value = MagicMock(
+            stderr="Rate limit exceeded",
+            stdout="Quota exhausted"
+        )
+        available, detail = self.provider.check_quota_available("/fake/path")
+        assert available is False
+        assert "Quota exhausted" in detail
+
+    @patch("app.provider.claude.subprocess.run")
+    def test_timeout_returns_available(self, mock_run):
+        """Timeout is treated optimistically — proceed as if quota available."""
+        import subprocess
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["claude", "usage"], timeout=15)
+        available, detail = self.provider.check_quota_available("/fake/path")
+        assert available is True
+        assert detail == ""
+
+    @patch("app.provider.claude.subprocess.run")
+    def test_other_exception_returns_available(self, mock_run):
+        """Non-quota exceptions treated optimistically."""
+        mock_run.side_effect = OSError("binary not found")
+        available, detail = self.provider.check_quota_available("/fake/path")
+        assert available is True
+        assert detail == ""
+
+    @patch("app.provider.claude.subprocess.run")
+    @patch("app.quota_handler.detect_quota_exhaustion", return_value=False)
+    def test_custom_timeout(self, mock_detect, mock_run):
+        """Custom timeout is passed to subprocess.run."""
+        mock_run.return_value = MagicMock(stderr="", stdout="ok")
+        self.provider.check_quota_available("/fake/path", timeout=30)
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["timeout"] == 30
+
+    @patch("app.provider.claude.subprocess.run")
+    @patch("app.quota_handler.detect_quota_exhaustion", return_value=False)
+    def test_uses_project_path_as_cwd(self, mock_detect, mock_run):
+        """subprocess.run cwd is set to project_path."""
+        mock_run.return_value = MagicMock(stderr="", stdout="ok")
+        self.provider.check_quota_available("/my/project")
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["cwd"] == "/my/project"
+
+    @patch("app.provider.claude.subprocess.run")
+    @patch("app.quota_handler.detect_quota_exhaustion", return_value=False)
+    def test_combines_stderr_and_stdout(self, mock_detect, mock_run):
+        """Both stderr and stdout are combined for quota detection."""
+        mock_run.return_value = MagicMock(stderr="warning", stdout="usage data")
+        self.provider.check_quota_available("/fake/path")
+        combined = mock_detect.call_args[0][0]
+        assert "warning" in combined
+        assert "usage data" in combined
+
+
+# ---------------------------------------------------------------------------
+# Base CLIProvider defaults
+# ---------------------------------------------------------------------------
+
+class TestCLIProviderBase:
+    """Tests for CLIProvider base class behavior."""
+
+    def test_check_quota_available_default(self):
+        """Base implementation always returns available (no quota concept)."""
+        from app.provider.base import CLIProvider
+        provider = CLIProvider()
+        available, detail = provider.check_quota_available("/any/path")
+        assert available is True
+        assert detail == ""
+
+    def test_shell_command_default(self):
+        """shell_command() defaults to binary()."""
+        from app.provider.base import CLIProvider
+
+        class TestProvider(CLIProvider):
+            def binary(self):
+                return "test-bin"
+
+        assert TestProvider().shell_command() == "test-bin"
+
+    def test_is_available_returns_false_for_missing_binary(self):
+        """is_available() returns False when binary not found."""
+        from app.provider.base import CLIProvider
+
+        class TestProvider(CLIProvider):
+            def binary(self):
+                return "nonexistent-binary-xyz"
+
+        assert TestProvider().is_available() is False
+
+    def test_build_command_raises_not_implemented(self):
+        """Abstract methods raise NotImplementedError."""
+        from app.provider.base import CLIProvider
+        provider = CLIProvider()
+        with pytest.raises(NotImplementedError):
+            provider.build_prompt_args("hello")
+        with pytest.raises(NotImplementedError):
+            provider.build_tool_args()
+        with pytest.raises(NotImplementedError):
+            provider.build_model_args()
+        with pytest.raises(NotImplementedError):
+            provider.build_output_args()
+        with pytest.raises(NotImplementedError):
+            provider.build_max_turns_args()
+        with pytest.raises(NotImplementedError):
+            provider.build_mcp_args()
+
+    def test_build_extra_flags_delegates(self):
+        """build_extra_flags calls build_model_args + build_tool_args."""
+        from app.provider.base import CLIProvider
+
+        class TestProvider(CLIProvider):
+            def build_model_args(self, model="", fallback=""):
+                return ["--model", model] if model else []
+
+            def build_tool_args(self, allowed_tools=None, disallowed_tools=None):
+                return ["--no-bash"] if disallowed_tools else []
+
+        result = TestProvider().build_extra_flags(model="opus", disallowed_tools=["Bash"])
+        assert result == ["--model", "opus", "--no-bash"]
+
+
+# ---------------------------------------------------------------------------
+# run_command
+# ---------------------------------------------------------------------------
+
+class TestRunCommand:
+    """Tests for the run_command() high-level helper."""
+
+    def setup_method(self):
+        reset_provider()
+
+    def teardown_method(self):
+        reset_provider()
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.cli_exec.run_cli")
+    @patch("app.config.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"})
+    def test_success_returns_stripped_stdout(self, mock_models, mock_run):
+        """Successful command returns stripped stdout."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="  result text  \n")
+        result = run_command(
+            prompt="analyze this",
+            project_path="/fake/project",
+            allowed_tools=["Read", "Grep"],
+        )
+        assert result == "result text"
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.cli_exec.run_cli")
+    @patch("app.config.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"})
+    def test_failure_raises_runtime_error(self, mock_models, mock_run):
+        """Non-zero exit raises RuntimeError with stderr snippet."""
+        mock_run.return_value = MagicMock(returncode=1, stderr="some error message")
+        with pytest.raises(RuntimeError, match="CLI invocation failed"):
+            run_command(
+                prompt="analyze this",
+                project_path="/fake/project",
+                allowed_tools=["Read"],
+            )
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.cli_exec.run_cli")
+    @patch("app.config.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"})
+    def test_passes_model_from_config(self, mock_models, mock_run):
+        """Uses model from config based on model_key."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        run_command(
+            prompt="test",
+            project_path="/fake",
+            allowed_tools=["Read"],
+            model_key="chat",
+        )
+        cmd = mock_run.call_args[0][0]
+        assert "--model" in cmd
+        idx = cmd.index("--model")
+        assert cmd[idx + 1] == "sonnet"
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.cli_exec.run_cli")
+    @patch("app.config.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"})
+    def test_passes_max_turns(self, mock_models, mock_run):
+        """max_turns parameter is forwarded to build_full_command."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        run_command(
+            prompt="test",
+            project_path="/fake",
+            allowed_tools=["Read"],
+            max_turns=5,
+        )
+        cmd = mock_run.call_args[0][0]
+        assert "--max-turns" in cmd
+        idx = cmd.index("--max-turns")
+        assert cmd[idx + 1] == "5"
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.cli_exec.run_cli")
+    @patch("app.config.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"})
+    def test_passes_cwd_to_run_cli(self, mock_models, mock_run):
+        """project_path is passed as cwd to run_cli."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        run_command(
+            prompt="test",
+            project_path="/my/project",
+            allowed_tools=["Read"],
+        )
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["cwd"] == "/my/project"
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.cli_exec.run_cli")
+    @patch("app.config.get_model_config", return_value={"chat": "sonnet", "fallback": "haiku"})
+    def test_passes_timeout(self, mock_models, mock_run):
+        """Custom timeout is forwarded to run_cli."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        run_command(
+            prompt="test",
+            project_path="/fake",
+            allowed_tools=["Read"],
+            timeout=600,
+        )
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["timeout"] == 600
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.cli_exec.run_cli")
+    @patch("app.config.get_model_config", return_value={})
+    def test_missing_model_key_uses_empty(self, mock_models, mock_run):
+        """Missing model key results in empty model (no --model flag)."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        run_command(
+            prompt="test",
+            project_path="/fake",
+            allowed_tools=["Read"],
+            model_key="nonexistent",
+        )
+        cmd = mock_run.call_args[0][0]
+        assert "--model" not in cmd

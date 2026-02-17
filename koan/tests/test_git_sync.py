@@ -7,15 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.git_sync import (
-    run_git,
-    get_koan_branches,
-    get_recent_main_commits,
-    get_merged_branches,
-    get_unmerged_branches,
-    build_sync_report,
-    write_sync_to_journal,
-)
+from app.git_sync import run_git, GitSync
 
 
 class TestRunGit:
@@ -42,6 +34,11 @@ def default_prefix():
         yield
 
 
+def _sync(project_path="/fake", instance_dir="", project_name=""):
+    """Helper to create a GitSync instance for testing."""
+    return GitSync(instance_dir, project_name, project_path)
+
+
 class TestGetKoanBranches:
     def test_parses_local_and_remote(self):
         """Extracts koan/* branches from mixed branch listing."""
@@ -53,7 +50,7 @@ class TestGetKoanBranches:
             "  main\n"
         )
         with patch("app.git_sync.run_git", return_value=mock_output):
-            branches = get_koan_branches("/fake")
+            branches = _sync().get_koan_branches()
         assert "koan/fix-bug" in branches
         assert "koan/current" in branches
         assert "koan/other" in branches
@@ -62,14 +59,14 @@ class TestGetKoanBranches:
 
     def test_empty_output(self):
         with patch("app.git_sync.run_git", return_value=""):
-            assert get_koan_branches("/fake") == []
+            assert _sync().get_koan_branches() == []
 
 
 class TestGetMergedBranches:
     def test_parses_merged(self):
         mock_output = "  remotes/origin/koan/done-feature\n  remotes/origin/koan/old-fix\n"
         with patch("app.git_sync.run_git", return_value=mock_output):
-            merged = get_merged_branches("/fake")
+            merged = _sync().get_merged_branches()
         assert "koan/done-feature" in merged
         assert "koan/old-fix" in merged
 
@@ -88,7 +85,7 @@ class TestGetUnmergedBranches:
             return all_branches
 
         with patch("app.git_sync.run_git", side_effect=side_effect):
-            unmerged = get_unmerged_branches("/fake")
+            unmerged = _sync().get_unmerged_branches()
         assert "koan/wip" in unmerged
         assert "koan/pending-review" in unmerged
         assert "koan/merged-one" not in unmerged
@@ -98,13 +95,13 @@ class TestGetRecentMainCommits:
     def test_parses_commits(self):
         mock_output = "abc1234 fix: something\ndef5678 feat: other thing\n"
         with patch("app.git_sync.run_git", return_value=mock_output):
-            commits = get_recent_main_commits("/fake")
+            commits = _sync().get_recent_main_commits()
         assert len(commits) == 2
         assert "abc1234 fix: something" in commits[0]
 
     def test_empty(self):
         with patch("app.git_sync.run_git", return_value=""):
-            assert get_recent_main_commits("/fake") == []
+            assert _sync().get_recent_main_commits() == []
 
 
 class TestBuildSyncReport:
@@ -126,7 +123,7 @@ class TestBuildSyncReport:
                 return ""
 
             mock_git.side_effect = side_effect
-            report = build_sync_report("/fake")
+            report = _sync().build_sync_report()
 
         assert "koan/merged-one" in report
         assert "koan/pending-one" in report
@@ -135,7 +132,7 @@ class TestBuildSyncReport:
 
     def test_report_no_changes(self):
         with patch("app.git_sync.run_git", return_value=""):
-            report = build_sync_report("/fake")
+            report = _sync().build_sync_report()
         assert "No notable changes" in report
 
 
@@ -146,7 +143,8 @@ class TestWriteSyncToJournal:
         instance.mkdir()
         (instance / "journal").mkdir()
 
-        write_sync_to_journal(str(instance), "koan", "Test sync report")
+        sync = GitSync(str(instance), "koan", "/fake")
+        sync.write_sync_to_journal("Test sync report")
 
         today = date.today().strftime("%Y-%m-%d")
         journal_file = instance / "journal" / today / "koan.md"
@@ -165,7 +163,8 @@ class TestWriteSyncToJournal:
         journal_file = journal_dir / "koan.md"
         journal_file.write_text("## Previous Entry\n\nSome work.\n")
 
-        write_sync_to_journal(str(instance), "koan", "New sync")
+        sync = GitSync(str(instance), "koan", "/fake")
+        sync.write_sync_to_journal("New sync")
 
         content = journal_file.read_text()
         assert "Previous Entry" in content
@@ -173,7 +172,7 @@ class TestWriteSyncToJournal:
 
 
 class TestGitSyncCLI:
-    """Tests for git_sync.py __main__ block (lines 131-143)."""
+    """Tests for git_sync.py __main__ block."""
 
     def test_cli_usage_error(self):
         """Exit 1 with usage message when called with too few args."""

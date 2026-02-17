@@ -175,40 +175,6 @@ class GitSync:
 
 
 # ---------------------------------------------------------------------------
-# Module-level functions (backward compatibility)
-# ---------------------------------------------------------------------------
-
-def get_koan_branches(project_path: str) -> List[str]:
-    """List all koan/* branches (local and remote)."""
-    return GitSync("", "", project_path).get_koan_branches()
-
-
-def get_recent_main_commits(project_path: str, since_hours: int = 12) -> List[str]:
-    """Get recent commits on main (last N hours)."""
-    return GitSync("", "", project_path).get_recent_main_commits(since_hours)
-
-
-def get_merged_branches(project_path: str) -> List[str]:
-    """List koan/* branches merged into any target branch."""
-    return GitSync("", "", project_path).get_merged_branches()
-
-
-def get_unmerged_branches(project_path: str) -> List[str]:
-    """List koan/* branches NOT merged into any target branch."""
-    return GitSync("", "", project_path).get_unmerged_branches()
-
-
-def build_sync_report(project_path: str) -> str:
-    """Build a human-readable git sync report."""
-    return GitSync("", "", project_path).build_sync_report()
-
-
-def write_sync_to_journal(instance_dir: str, project_name: str, report: str):
-    """Append git sync report to today's journal."""
-    GitSync(instance_dir, project_name, "").write_sync_to_journal(report)
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
