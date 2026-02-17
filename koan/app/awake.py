@@ -382,6 +382,9 @@ def handle_chat(text: str):
             save_conversation_message(CONVERSATION_HISTORY_FILE, "assistant", error_msg)
     except Exception as e:
         log("error", f"Claude error: {e}")
+        error_msg = "⚠️ Something went wrong — try again?"
+        send_telegram(error_msg)
+        save_conversation_message(CONVERSATION_HISTORY_FILE, "assistant", error_msg)
 
 
 # ---------------------------------------------------------------------------

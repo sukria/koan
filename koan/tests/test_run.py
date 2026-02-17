@@ -53,11 +53,19 @@ class TestLog:
     def test_log_all_categories(self, capsys):
         from app.run import log, _init_colors
         _init_colors()
-        for cat in ["koan", "error", "init", "health", "git", "mission", "quota", "pause"]:
+        for cat in ["koan", "error", "init", "health", "git", "mission", "quota", "pause",
+                     "warning", "warn"]:
             log(cat, f"test {cat}")
         out = capsys.readouterr().out
-        for cat in ["koan", "error", "init", "health", "git", "mission", "quota", "pause"]:
+        for cat in ["koan", "error", "init", "health", "git", "mission", "quota", "pause",
+                     "warning", "warn"]:
             assert f"[{cat}]" in out
+
+    def test_warning_and_warn_have_color(self):
+        """warning and warn categories should be in _CATEGORY_COLORS (not fall through to white)."""
+        from app.run import _CATEGORY_COLORS
+        assert "warning" in _CATEGORY_COLORS
+        assert "warn" in _CATEGORY_COLORS
 
     def test_log_unknown_category(self, capsys):
         from app.run import log, _init_colors
@@ -1620,6 +1628,42 @@ class TestRunIterationErrorAction:
                 interval=10,
                 git_sync_interval=5,
             )
+
+
+# ---------------------------------------------------------------------------
+# Test: claude_exit initialization (prevents UnboundLocalError)
+# ---------------------------------------------------------------------------
+
+class TestClaudeExitInit:
+    """claude_exit must be initialized before the try block so that
+    build_mission_command failures don't cause UnboundLocalError at the
+    post-try reporting code (line ~1291)."""
+
+    def test_claude_exit_initialized_before_try(self):
+        """Verify claude_exit = 1 appears before the try block in source."""
+        import inspect
+        from app.run import _run_iteration
+        src = inspect.getsource(_run_iteration)
+        # Find positions
+        init_pos = src.find("claude_exit = 1")
+        try_pos = src.find("try:", src.find("# Build CLI command"))
+        assert init_pos != -1, "claude_exit = 1 initialization not found"
+        assert init_pos < try_pos, "claude_exit must be initialized before the try block"
+
+    def test_claude_exit_default_is_failure(self):
+        """The default value of claude_exit should indicate failure (non-zero)."""
+        import inspect
+        from app.run import _run_iteration
+        src = inspect.getsource(_run_iteration)
+        # Find the initialization line
+        for line in src.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('claude_exit = ') and 'run_claude_task' not in stripped:
+                val = stripped.split('=')[1].strip().split('#')[0].strip()
+                assert val != '0', "Default claude_exit should not be 0 (success)"
+                break
+        else:
+            pytest.fail("No claude_exit initialization found")
 
 
 # ---------------------------------------------------------------------------

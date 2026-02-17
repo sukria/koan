@@ -749,6 +749,31 @@ class TestHandleChat:
             handle_chat("hi")
         mock_run.assert_called_once()
 
+    @patch("app.awake.save_conversation_message")
+    @patch("app.awake.load_recent_history", return_value=[])
+    @patch("app.awake.format_conversation_history", return_value="")
+    @patch("app.awake.get_tools_description", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
+    @patch("app.awake.send_telegram")
+    @patch("app.cli_exec.run_cli")
+    def test_chat_unexpected_error_sends_feedback(self, mock_run, mock_send, mock_tools,
+                                                   mock_tools_desc, mock_fmt, mock_hist,
+                                                   mock_save, tmp_path):
+        """Unexpected exceptions in handle_chat should still send error feedback to the user."""
+        mock_run.side_effect = RuntimeError("unexpected import failure")
+        with patch("app.awake.INSTANCE_DIR", tmp_path), \
+             patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.PROJECT_PATH", ""), \
+             patch("app.awake.CONVERSATION_HISTORY_FILE", tmp_path / "history.jsonl"), \
+             patch("app.awake.SOUL", ""), \
+             patch("app.awake.SUMMARY", ""):
+            handle_chat("hello")
+        # Must send error feedback (not silent)
+        mock_send.assert_called_once()
+        assert "Something went wrong" in mock_send.call_args[0][0]
+        # Must save the error message to conversation history
+        assert mock_save.call_count >= 2  # user msg + error msg
+
 
 # ---------------------------------------------------------------------------
 # flush_outbox
