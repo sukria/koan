@@ -110,6 +110,8 @@ _CATEGORY_COLORS = {
     "mission": "green",
     "quota": "bold+yellow",
     "pause": "dim+blue",
+    "warning": "yellow",
+    "warn": "yellow",
 }
 
 
@@ -1215,6 +1217,7 @@ def _run_iteration(
     fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
     os.close(fd_out)
     os.close(fd_err)
+    claude_exit = 1  # default to failure; overwritten on successful execution
     try:
         # Build CLI command (provider-agnostic with per-project overrides)
         from app.mission_runner import build_mission_command
