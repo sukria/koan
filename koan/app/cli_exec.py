@@ -77,11 +77,40 @@ def _cleanup_prompt_file(path: Optional[str]) -> None:
             pass
 
 
+def _get_provider_env() -> dict:
+    """Get environment overrides from the current provider.
+
+    Returns an empty dict if no overrides are needed or if the provider
+    can't be resolved (safe fallback — preserves existing behavior).
+    """
+    try:
+        from app.provider import get_provider
+        return get_provider().get_env()
+    except Exception:
+        return {}
+
+
+def _inject_provider_env(kwargs: dict) -> None:
+    """Merge provider environment overrides into subprocess kwargs.
+
+    Only injects when the caller hasn't already set ``env=`` and the
+    provider has non-empty overrides. When no overrides exist, kwargs
+    is left untouched (preserving exact current behavior).
+    """
+    if "env" not in kwargs:
+        provider_env = _get_provider_env()
+        if provider_env:
+            kwargs["env"] = {**os.environ, **provider_env}
+
+
 def run_cli(cmd, **kwargs) -> subprocess.CompletedProcess:
     """Run a CLI command with the prompt passed via temp-file stdin.
 
     Drop-in replacement for ``subprocess.run(cmd, stdin=DEVNULL, ...)``.
+    Injects provider environment overrides (e.g., ANTHROPIC_BASE_URL)
+    when the caller hasn't set ``env=`` explicitly.
     """
+    _inject_provider_env(kwargs)
     cmd, prompt_path = prepare_prompt_file(cmd)
     if prompt_path:
         try:
@@ -103,7 +132,11 @@ def popen_cli(
 
     Returns ``(proc, cleanup)`` where *cleanup()* **must** be called after
     the process exits to close the file handle and delete the temp file.
+
+    Injects provider environment overrides (e.g., ANTHROPIC_BASE_URL)
+    when the caller hasn't set ``env=`` explicitly.
     """
+    _inject_provider_env(kwargs)
     cmd, prompt_path = prepare_prompt_file(cmd)
     if prompt_path:
         stdin_file = open(prompt_path)  # noqa: SIM115

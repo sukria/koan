@@ -234,3 +234,96 @@ class TestPopenCli:
         stdin_arg = call_args[1]["stdin"]
         assert hasattr(stdin_arg, "read")  # it's a file object
         cleanup()
+
+
+# ---------------------------------------------------------------------------
+# Provider env injection
+# ---------------------------------------------------------------------------
+
+class TestProviderEnvInjection:
+    """Tests for provider environment injection in run_cli/popen_cli."""
+
+    def setup_method(self):
+        from app.provider import reset_provider
+        reset_provider()
+
+    def teardown_method(self):
+        from app.provider import reset_provider
+        reset_provider()
+
+    @patch("app.cli_exec.subprocess.run")
+    @patch.dict("os.environ", {
+        "KOAN_CLI_PROVIDER": "ollama-claude",
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+    })
+    def test_run_cli_injects_env_for_ollama_claude(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+        run_cli(["claude", "-p", "test"], capture_output=True, text=True)
+
+        call_kwargs = mock_run.call_args[1]
+        assert "env" in call_kwargs
+        env = call_kwargs["env"]
+        assert env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+        assert env["ANTHROPIC_API_KEY"] == "ollama"
+        assert env["ANTHROPIC_MODEL"] == "llama3.3"
+
+    @patch("app.cli_exec.subprocess.run")
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    def test_run_cli_no_env_for_claude_provider(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+        run_cli(["claude", "-p", "test"], capture_output=True, text=True)
+
+        call_kwargs = mock_run.call_args[1]
+        assert "env" not in call_kwargs
+
+    @patch("app.cli_exec.subprocess.Popen")
+    @patch.dict("os.environ", {
+        "KOAN_CLI_PROVIDER": "ollama-claude",
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+    })
+    def test_popen_cli_injects_env_for_ollama_claude(self, mock_popen):
+        mock_popen.return_value = MagicMock()
+        proc, cleanup = popen_cli(["claude", "-p", "test"], stdout=subprocess.PIPE)
+
+        call_kwargs = mock_popen.call_args[1]
+        assert "env" in call_kwargs
+        env = call_kwargs["env"]
+        assert env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+        assert env["ANTHROPIC_MODEL"] == "llama3.3"
+        cleanup()
+
+    @patch("app.cli_exec.subprocess.run")
+    @patch.dict("os.environ", {
+        "KOAN_CLI_PROVIDER": "ollama-claude",
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+    })
+    def test_explicit_env_not_overridden(self, mock_run):
+        """When caller passes env= explicitly, provider env is not injected."""
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+        custom_env = {"PATH": "/usr/bin", "CUSTOM": "value"}
+        run_cli(["echo", "test"], env=custom_env, capture_output=True, text=True)
+
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs["env"] is custom_env
+        # Provider env vars should NOT be in the explicit env
+        assert "ANTHROPIC_BASE_URL" not in call_kwargs["env"]
+
+    @patch("app.cli_exec.subprocess.run")
+    @patch.dict("os.environ", {
+        "KOAN_CLI_PROVIDER": "ollama-claude",
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+    })
+    def test_injected_env_includes_parent_env(self, mock_run):
+        """Injected env merges provider overrides on top of os.environ."""
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+        run_cli(["echo", "test"], capture_output=True, text=True)
+
+        call_kwargs = mock_run.call_args[1]
+        env = call_kwargs["env"]
+        # Should contain both parent env vars and provider overrides
+        assert "PATH" in env  # from os.environ
+        assert env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"  # from provider

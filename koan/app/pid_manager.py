@@ -463,7 +463,7 @@ def _detect_provider(koan_root: Path) -> str:
     """Detect the configured CLI provider.
 
     Uses the provider package resolution (env var > config.yaml > default).
-    Returns provider name: "claude", "copilot", "local", or "ollama".
+    Returns provider name: "claude", "copilot", "local", "ollama", or "ollama-claude".
     """
     try:
         # Lazy import to avoid circular deps and keep pid_manager lightweight
@@ -475,7 +475,7 @@ def _detect_provider(koan_root: Path) -> str:
 
 def _needs_ollama(provider: str) -> bool:
     """Return True if the provider requires ollama serve."""
-    return provider in ("local", "ollama")
+    return provider in ("local", "ollama", "ollama-claude")
 
 
 def _show_startup_banner(koan_root: Path, provider: str) -> None:

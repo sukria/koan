@@ -2,11 +2,12 @@
 CLI provider abstraction — backward-compatible re-export facade.
 
 All implementation lives in the app.provider package:
-    app/provider/base.py    — CLIProvider base class + tool constants
-    app/provider/claude.py  — ClaudeProvider
-    app/provider/copilot.py — CopilotProvider
-    app/provider/local.py   — LocalLLMProvider
-    app/provider/__init__.py — Registry, resolution, convenience functions
+    app/provider/base.py         — CLIProvider base class + tool constants
+    app/provider/claude.py       — ClaudeProvider
+    app/provider/copilot.py      — CopilotProvider
+    app/provider/local.py        — LocalLLMProvider
+    app/provider/ollama_claude.py — OllamaClaudeProvider
+    app/provider/__init__.py     — Registry, resolution, convenience functions
 
 This module re-exports everything so existing imports from
 ``app.cli_provider`` continue to work unchanged.
@@ -21,6 +22,7 @@ from app.provider import (  # noqa: F401
     ClaudeProvider,
     CopilotProvider,
     LocalLLMProvider,
+    OllamaClaudeProvider,
     # Registry & resolution
     get_provider_name,
     get_provider,

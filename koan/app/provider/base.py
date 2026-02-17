@@ -1,7 +1,7 @@
 """Base class and constants for CLI provider abstraction."""
 
 import shutil
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +113,15 @@ class CLIProvider:
         cmd.extend(self.build_max_turns_args(max_turns))
         cmd.extend(self.build_mcp_args(mcp_configs))
         return cmd
+
+    def get_env(self) -> Dict[str, str]:
+        """Return extra environment variables to inject into subprocess calls.
+
+        Providers that need to override environment variables (e.g., setting
+        ANTHROPIC_BASE_URL for a proxy) should override this method.
+        Returns an empty dict by default (no env overrides).
+        """
+        return {}
 
     def check_quota_available(self, project_path: str, timeout: int = 15) -> Tuple[bool, str]:
         """Probe real API quota with a minimal CLI call.

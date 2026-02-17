@@ -73,7 +73,8 @@ tools:
     - Shell: Bash (run git, gh, make, and other commands)
 
 # CLI provider — which AI CLI to use as the backend
-# Options: "claude" (default), "copilot" (GitHub Copilot CLI), "local" (local LLM)
+# Options: "claude" (default), "copilot" (GitHub Copilot CLI), "local" (local LLM),
+#          "ollama-claude" (Claude CLI through Anthropic-compatible proxy)
 # Can also be set via KOAN_CLI_PROVIDER env var (overrides this)
 cli_provider: "claude"
 
@@ -88,6 +89,21 @@ cli_provider: "claude"
 #   base_url: "http://localhost:11434/v1"
 #   model: "glm4"
 #   api_key: ""   # Usually empty for local servers
+
+# Ollama-Claude configuration (used when cli_provider: "ollama-claude")
+# Routes the real Claude Code CLI through a local Anthropic-compatible proxy
+# (LiteLLM, ollama-cloud-proxy, etc.). Inherits all Claude CLI features
+# (MCP, extended thinking, tools) while using a local model backend.
+# Both base_url and model are required — provider fails early if missing.
+# IMPORTANT: base_url must NOT include /v1/messages — Claude CLI appends the path.
+# Can also be set via KOAN_OLLAMA_CLAUDE_* env vars (override config values)
+# ollama_claude:
+#   base_url: "http://localhost:11434"   # Proxy endpoint (required)
+#   api_key: "ollama"                     # Dummy key (default: "ollama")
+#   auth_token: ""                        # Optional Bearer token
+#   model: "llama3.3"                     # Default model (required)
+#   haiku_model: ""                       # Override for ANTHROPIC_DEFAULT_HAIKU_MODEL
+#   sonnet_model: ""                      # Override for ANTHROPIC_DEFAULT_SONNET_MODEL
 
 # Claude model configuration
 # Controls which models are used for different types of Claude calls
@@ -138,7 +154,7 @@ usage:
 # Per-project overrides are now configured in projects.yaml.
 # Supported per-project settings:
 #   - git_auto_merge: per-project merge rules
-#   - cli_provider: override AI provider ("claude", "copilot", "local")
+#   - cli_provider: override AI provider ("claude", "copilot", "local", "ollama-claude")
 #   - models: override model selection (mission, chat, lightweight, etc.)
 #   - tools: restrict available tools (mission, chat tool lists)
 #   - github: override authorized_users for GitHub @mention commands

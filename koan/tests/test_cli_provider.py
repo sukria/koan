@@ -9,6 +9,7 @@ from app.cli_provider import (
     ClaudeProvider,
     CopilotProvider,
     LocalLLMProvider,
+    OllamaClaudeProvider,
     get_provider,
     get_provider_name,
     get_cli_binary,
@@ -755,3 +756,349 @@ class TestLocalProviderResolution:
         assert "app.local_llm_runner" in cmd
         assert "--allowed-tools" in cmd
         assert "--output-format" in cmd
+
+
+# ---------------------------------------------------------------------------
+# OllamaClaudeProvider
+# ---------------------------------------------------------------------------
+
+# Default env for a valid ollama-claude configuration
+_OLLAMA_CLAUDE_ENV = {
+    "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+    "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+}
+
+
+class TestOllamaClaudeProvider:
+    """Tests for OllamaClaudeProvider flag generation and env injection.
+
+    get_env() reads env vars at call time (not init), so tests that
+    check get_env() output must keep the env vars active.
+    """
+
+    def setup_method(self):
+        reset_provider()
+
+    def teardown_method(self):
+        reset_provider()
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_name(self):
+        p = OllamaClaudeProvider()
+        assert p.name == "ollama-claude"
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_binary(self):
+        p = OllamaClaudeProvider()
+        assert p.binary() == "claude"
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_inherits_claude_prompt_args(self):
+        p = OllamaClaudeProvider()
+        assert p.build_prompt_args("hello world") == ["-p", "hello world"]
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_inherits_claude_tool_args_allowed(self):
+        p = OllamaClaudeProvider()
+        result = p.build_tool_args(allowed_tools=["Bash", "Read"])
+        assert result == ["--allowedTools", "Bash,Read"]
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_inherits_claude_tool_args_disallowed(self):
+        p = OllamaClaudeProvider()
+        result = p.build_tool_args(disallowed_tools=["Bash", "Edit"])
+        assert result == ["--disallowedTools", "Bash", "Edit"]
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_inherits_claude_model_args(self):
+        p = OllamaClaudeProvider()
+        result = p.build_model_args(model="opus", fallback="sonnet")
+        assert result == ["--model", "opus", "--fallback-model", "sonnet"]
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_inherits_claude_output_args(self):
+        p = OllamaClaudeProvider()
+        assert p.build_output_args("json") == ["--output-format", "json"]
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_inherits_claude_max_turns_args(self):
+        p = OllamaClaudeProvider()
+        assert p.build_max_turns_args(5) == ["--max-turns", "5"]
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_inherits_claude_mcp_args(self):
+        p = OllamaClaudeProvider()
+        result = p.build_mcp_args(["mcp.json"])
+        assert result == ["--mcp-config", "mcp.json"]
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_build_command_full(self):
+        p = OllamaClaudeProvider()
+        cmd = p.build_command(
+            prompt="do the thing",
+            allowed_tools=["Bash", "Read"],
+            model="opus",
+            fallback="sonnet",
+            output_format="json",
+            max_turns=5,
+            mcp_configs=["mcp.json"],
+        )
+        assert cmd[0] == "claude"
+        assert "-p" in cmd
+        assert "do the thing" in cmd
+        assert "--allowedTools" in cmd
+        assert "--model" in cmd
+        assert "opus" in cmd
+        assert "--fallback-model" in cmd
+        assert "--output-format" in cmd
+        assert "--max-turns" in cmd
+        assert "--mcp-config" in cmd
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_build_command_minimal(self):
+        p = OllamaClaudeProvider()
+        cmd = p.build_command(prompt="hello")
+        assert cmd == ["claude", "-p", "hello"]
+
+    # --- get_env() ---
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_get_env_returns_correct_dict(self):
+        p = OllamaClaudeProvider()
+        env = p.get_env()
+        assert env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+        assert env["ANTHROPIC_API_KEY"] == "ollama"
+        assert env["ANTHROPIC_MODEL"] == "llama3.3"
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_get_env_default_api_key(self):
+        """Default API key is 'ollama' when not explicitly set."""
+        p = OllamaClaudeProvider()
+        assert p.get_env()["ANTHROPIC_API_KEY"] == "ollama"
+
+    @patch.dict("os.environ", {**_OLLAMA_CLAUDE_ENV, "KOAN_OLLAMA_CLAUDE_API_KEY": "sk-custom"})
+    def test_get_env_custom_api_key(self):
+        p = OllamaClaudeProvider()
+        assert p.get_env()["ANTHROPIC_API_KEY"] == "sk-custom"
+
+    @patch.dict("os.environ", {**_OLLAMA_CLAUDE_ENV, "KOAN_OLLAMA_CLAUDE_AUTH_TOKEN": "bearer-token"})
+    def test_get_env_auth_token_when_set(self):
+        p = OllamaClaudeProvider()
+        env = p.get_env()
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "bearer-token"
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_get_env_no_auth_token_by_default(self):
+        p = OllamaClaudeProvider()
+        assert "ANTHROPIC_AUTH_TOKEN" not in p.get_env()
+
+    @patch.dict("os.environ", {**_OLLAMA_CLAUDE_ENV, "KOAN_OLLAMA_CLAUDE_HAIKU_MODEL": "phi3"})
+    def test_get_env_haiku_model_when_set(self):
+        p = OllamaClaudeProvider()
+        env = p.get_env()
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "phi3"
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_get_env_no_haiku_model_by_default(self):
+        p = OllamaClaudeProvider()
+        assert "ANTHROPIC_DEFAULT_HAIKU_MODEL" not in p.get_env()
+
+    @patch.dict("os.environ", {**_OLLAMA_CLAUDE_ENV, "KOAN_OLLAMA_CLAUDE_SONNET_MODEL": "mistral"})
+    def test_get_env_sonnet_model_when_set(self):
+        p = OllamaClaudeProvider()
+        env = p.get_env()
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "mistral"
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_get_env_no_sonnet_model_by_default(self):
+        p = OllamaClaudeProvider()
+        assert "ANTHROPIC_DEFAULT_SONNET_MODEL" not in p.get_env()
+
+    # --- env var overrides config ---
+
+    @patch("app.utils.load_config", return_value={
+        "ollama_claude": {
+            "base_url": "http://config:1234",
+            "model": "config-model",
+            "api_key": "config-key",
+        }
+    })
+    @patch.dict("os.environ", {
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://env:5678",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "env-model",
+        "KOAN_OLLAMA_CLAUDE_API_KEY": "env-key",
+    })
+    def test_env_var_overrides_config(self, _mock_config):
+        """Env vars take precedence over config.yaml values."""
+        p = OllamaClaudeProvider()
+        env = p.get_env()
+        assert env["ANTHROPIC_BASE_URL"] == "http://env:5678"
+        assert env["ANTHROPIC_MODEL"] == "env-model"
+        assert env["ANTHROPIC_API_KEY"] == "env-key"
+
+    @patch("app.utils.load_config", return_value={
+        "ollama_claude": {
+            "base_url": "http://config:1234",
+            "model": "config-model",
+        }
+    })
+    def test_config_values_when_no_env(self, _mock_config):
+        """Config values are used when env vars are not set."""
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("KOAN_OLLAMA_CLAUDE_BASE_URL", None)
+            os.environ.pop("KOAN_OLLAMA_CLAUDE_MODEL", None)
+            os.environ.pop("KOAN_OLLAMA_CLAUDE_API_KEY", None)
+            p = OllamaClaudeProvider()
+            env = p.get_env()
+            assert env["ANTHROPIC_BASE_URL"] == "http://config:1234"
+            assert env["ANTHROPIC_MODEL"] == "config-model"
+
+    # --- Early validation ---
+
+    def test_raises_on_missing_base_url(self):
+        with pytest.raises(ValueError, match="base_url"):
+            with patch.dict("os.environ", {"KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3"}, clear=False):
+                os.environ.pop("KOAN_OLLAMA_CLAUDE_BASE_URL", None)
+                with patch("app.utils.load_config", return_value={}):
+                    OllamaClaudeProvider()
+
+    def test_raises_on_missing_model(self):
+        with pytest.raises(ValueError, match="model"):
+            with patch.dict("os.environ", {"KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434"}, clear=False):
+                os.environ.pop("KOAN_OLLAMA_CLAUDE_MODEL", None)
+                with patch("app.utils.load_config", return_value={}):
+                    OllamaClaudeProvider()
+
+    # --- check_quota_available ---
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_check_quota_always_available(self):
+        p = OllamaClaudeProvider()
+        available, detail = p.check_quota_available("/tmp")
+        assert available is True
+        assert detail == ""
+
+    # --- is_available ---
+
+    @patch("shutil.which", return_value="/usr/bin/claude")
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_is_available_when_configured(self, _mock_which):
+        p = OllamaClaudeProvider()
+        assert p.is_available()
+
+    @patch("shutil.which", return_value=None)
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_not_available_without_binary(self, _mock_which):
+        p = OllamaClaudeProvider()
+        assert not p.is_available()
+
+    @patch("shutil.which", return_value="/usr/bin/claude")
+    @patch("app.utils.load_config", return_value={})
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_not_available_without_config(self, _mock_config, _mock_which):
+        """Not available if base_url or model are missing (after init)."""
+        p = OllamaClaudeProvider()
+        # Remove env vars to simulate missing config post-init
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("KOAN_OLLAMA_CLAUDE_BASE_URL", None)
+            os.environ.pop("KOAN_OLLAMA_CLAUDE_MODEL", None)
+            assert not p.is_available()
+
+    # --- Extra flags (inherited) ---
+
+    @patch.dict("os.environ", _OLLAMA_CLAUDE_ENV)
+    def test_extra_flags(self):
+        p = OllamaClaudeProvider()
+        result = p.build_extra_flags(
+            model="opus", fallback="sonnet", disallowed_tools=["Bash"]
+        )
+        assert "--model" in result
+        assert "--fallback-model" in result
+        assert "--disallowedTools" in result
+
+    # --- Base class get_env() default ---
+
+    def test_base_class_get_env_empty(self):
+        """CLIProvider.get_env() returns empty dict."""
+        from app.provider.base import CLIProvider
+        p = CLIProvider()
+        assert p.get_env() == {}
+
+    def test_claude_provider_get_env_empty(self):
+        """ClaudeProvider.get_env() returns empty dict (inherited default)."""
+        p = ClaudeProvider()
+        assert p.get_env() == {}
+
+    def test_local_provider_get_env_empty(self):
+        """LocalLLMProvider.get_env() returns empty dict (inherited default)."""
+        p = LocalLLMProvider()
+        assert p.get_env() == {}
+
+
+# ---------------------------------------------------------------------------
+# Provider resolution with ollama-claude
+# ---------------------------------------------------------------------------
+
+class TestOllamaClaudeProviderResolution:
+    """Tests for provider resolution with ollama-claude provider."""
+
+    def setup_method(self):
+        reset_provider()
+
+    def teardown_method(self):
+        reset_provider()
+
+    @patch.dict("os.environ", {
+        "KOAN_CLI_PROVIDER": "ollama-claude",
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+    })
+    def test_env_var_resolves(self):
+        assert get_provider_name() == "ollama-claude"
+
+    @patch.dict("os.environ", {
+        "KOAN_CLI_PROVIDER": "ollama-claude",
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+    })
+    def test_get_provider_returns_ollama_claude(self):
+        provider = get_provider()
+        assert isinstance(provider, OllamaClaudeProvider)
+
+    @patch.dict("os.environ", {
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+    }, clear=False)
+    @patch("app.utils.load_config", return_value={"cli_provider": "ollama-claude"})
+    def test_config_yaml_resolves(self, _mock_config):
+        os.environ.pop("KOAN_CLI_PROVIDER", None)
+        assert get_provider_name() == "ollama-claude"
+
+    @patch.dict("os.environ", {
+        "KOAN_CLI_PROVIDER": "ollama-claude",
+        "KOAN_OLLAMA_CLAUDE_BASE_URL": "http://localhost:11434",
+        "KOAN_OLLAMA_CLAUDE_MODEL": "llama3.3",
+    })
+    def test_build_full_command_ollama_claude(self):
+        cmd = build_full_command(
+            prompt="hello",
+            allowed_tools=["Bash", "Read"],
+            model="opus",
+            max_turns=3,
+            output_format="json",
+        )
+        assert cmd[0] == "claude"
+        assert "--allowedTools" in cmd
+        assert "--output-format" in cmd
+        assert "--max-turns" in cmd
+
+    # --- Package structure ---
+
+    def test_import_from_provider_module(self):
+        from app.provider.ollama_claude import OllamaClaudeProvider
+        assert OllamaClaudeProvider.name == "ollama-claude"
+
+    def test_facade_reexports_ollama_claude(self):
+        from app.cli_provider import OllamaClaudeProvider as Facade
+        from app.provider import OllamaClaudeProvider as Package
+        assert Facade is Package

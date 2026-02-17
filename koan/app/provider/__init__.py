@@ -33,6 +33,7 @@ from app.provider.base import (  # noqa: F401
 from app.provider.claude import ClaudeProvider  # noqa: F401
 from app.provider.copilot import CopilotProvider  # noqa: F401
 from app.provider.local import LocalLLMProvider  # noqa: F401
+from app.provider.ollama_claude import OllamaClaudeProvider  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +44,7 @@ _PROVIDERS = {
     "claude": ClaudeProvider,
     "copilot": CopilotProvider,
     "local": LocalLLMProvider,
+    "ollama-claude": OllamaClaudeProvider,
 }
 
 # Cached provider instance (reset with reset_provider() in tests)

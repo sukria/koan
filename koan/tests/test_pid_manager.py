@@ -1089,6 +1089,9 @@ class TestNeedsOllama:
     def test_copilot_does_not_need_ollama(self):
         assert _needs_ollama("copilot") is False
 
+    def test_ollama_claude_needs_ollama(self):
+        assert _needs_ollama("ollama-claude") is True
+
 
 # ---------------------------------------------------------------------------
 # get_status_processes
