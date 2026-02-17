@@ -769,6 +769,7 @@ def main_loop():
     # file persists and would cause an immediate exit on next startup.
     Path(koan_root, ".koan-stop").unlink(missing_ok=True)
     Path(koan_root, ".koan-shutdown").unlink(missing_ok=True)
+    Path(koan_root, ".koan-restart").unlink(missing_ok=True)
 
     # Install SIGINT handler
     signal.signal(signal.SIGINT, _on_sigint)
@@ -811,6 +812,10 @@ def main_loop():
                     mtime = restart_file.stat().st_mtime
                     if mtime > start_time:
                         log("koan", "Restart requested. Exiting for re-launch...")
+                        # Clear the restart signal before exiting to prevent
+                        # the restarted process from seeing a stale file and
+                        # entering a restart loop.
+                        restart_file.unlink(missing_ok=True)
                         sys.exit(42)
                 except Exception as e:
                     log("error", f"Restart signal check failed: {e}")

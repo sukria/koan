@@ -285,18 +285,21 @@ class TestStartOnPause:
         assert (koan_root / ".koan-pause").exists()
         assert (koan_root / ".koan-pause-reason").exists()
 
-    def test_no_auto_resume_without_reason_file(self, koan_root):
-        """Verify that check_and_resume returns None when no reason file exists.
-        
-        This is a unit test for the core assumption: pause_manager.check_and_resume
-        should NOT auto-resume when there's no reason file (manual pause).
+    def test_orphan_pause_cleaned_up_without_reason_file(self, koan_root):
+        """Verify that check_and_resume cleans up orphan .koan-pause files.
+
+        An orphan .koan-pause (no reason file) previously caused permanent
+        pause with no auto-resume path. Now check_and_resume detects this
+        as an orphan and removes the pause file.
         """
         from app.pause_manager import check_and_resume
-        
+
         (koan_root / ".koan-pause").touch()
-        # No reason file = manual pause or cleaned by start_on_pause
+        # No reason file = orphan state (crash, partial cleanup, etc.)
         result = check_and_resume(str(koan_root))
-        assert result is None, "Should not auto-resume without a reason file"
+        assert result is not None, "Should auto-resume from orphan pause"
+        assert "orphan" in result
+        assert not (koan_root / ".koan-pause").exists()
 
 
 
@@ -822,16 +825,87 @@ class TestMainLoop:
         os.environ["KOAN_ROOT"] = str(koan_root)
         os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
 
-        # Create restart file with mtime in the future (after start_time set inside main_loop)
-        restart_file = koan_root / ".koan-restart"
-        restart_file.write_text("restart")
-        future = time.time() + 3600
-        os.utime(str(restart_file), (future, future))
+        # Create restart file AFTER startup (via side_effect) so startup
+        # cleanup doesn't remove it before the loop's restart check runs.
+        def startup_creates_restart(*args, **kwargs):
+            restart_file = koan_root / ".koan-restart"
+            restart_file.write_text("restart")
+            future = time.time() + 3600
+            os.utime(str(restart_file), (future, future))
+            return (5, 10, "koan/")
+
+        mock_startup.side_effect = startup_creates_restart
 
         with pytest.raises(SystemExit) as exc:
             with patch("app.run._notify"):
                 main_loop()
         assert exc.value.code == 42
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
+    def test_restart_file_cleared_before_exit(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
+        """Regression: run.py must clear .koan-restart before sys.exit(42)
+        to prevent the restarted process from seeing a stale file and
+        entering a restart loop."""
+        from app.run import main_loop
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+
+        restart_file = koan_root / ".koan-restart"
+
+        def startup_creates_restart(*args, **kwargs):
+            restart_file.write_text("restart")
+            future = time.time() + 3600
+            os.utime(str(restart_file), (future, future))
+            return (5, 10, "koan/")
+
+        mock_startup.side_effect = startup_creates_restart
+
+        with pytest.raises(SystemExit) as exc:
+            with patch("app.run._notify"):
+                main_loop()
+        assert exc.value.code == 42
+        # The restart file must be deleted BEFORE exit
+        assert not restart_file.exists(), \
+            ".koan-restart was not cleared before exit — restart loop risk"
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
+    def test_stale_restart_file_cleared_on_startup(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
+        """Stale .koan-restart from a previous session is cleared on startup.
+
+        Regression: if run.py is killed while .koan-restart exists, the stale
+        file would be seen by the next startup and immediately trigger exit(42),
+        creating a restart loop.
+        """
+        from app.run import main_loop
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+        (koan_root / ".koan-project").write_text("test")
+
+        # Simulate stale .koan-restart from a previous session
+        (koan_root / ".koan-restart").write_text("stale restart")
+
+        # Startup creates a stop file so the loop exits cleanly
+        def startup_then_stop(*args, **kwargs):
+            (koan_root / ".koan-stop").touch()
+            return (5, 10, "koan/")
+
+        mock_startup.side_effect = startup_then_stop
+
+        with patch("app.run._notify"):
+            main_loop()
+
+        # Startup ran (stale restart didn't cause immediate exit)
+        mock_startup.assert_called_once()
+        # The restart file was cleared
+        assert not (koan_root / ".koan-restart").exists()
 
 
 # ---------------------------------------------------------------------------
