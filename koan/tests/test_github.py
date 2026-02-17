@@ -1,11 +1,16 @@
 """Tests for app.github — shared gh CLI wrapper."""
 
+import json
 import subprocess
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.github import run_gh, pr_create, issue_create, api, get_gh_username, count_open_prs
+from app.github import (
+    run_gh, pr_create, issue_create, api,
+    get_gh_username, count_open_prs,
+    fetch_issue_with_comments, detect_parent_repo,
+)
 import app.github as github_module
 
 
@@ -306,3 +311,224 @@ class TestCountOpenPrs:
     @patch("app.github.run_gh", return_value="")
     def test_empty_output_returns_negative_one(self, mock_gh):
         assert count_open_prs("owner/repo", "koan-bot") == -1
+
+
+# ---------------------------------------------------------------------------
+# run_gh — stdin_data
+# ---------------------------------------------------------------------------
+
+
+class TestRunGhStdinData:
+
+    @patch("app.github.subprocess.run")
+    def test_stdin_data_passes_input(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        run_gh("api", "endpoint", stdin_data="my input")
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs["input"] == "my input"
+        # stdin should NOT be set when using input
+        assert "stdin" not in call_kwargs
+
+    @patch("app.github.subprocess.run")
+    def test_no_stdin_data_uses_devnull(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        run_gh("pr", "view", "1")
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs["stdin"] == subprocess.DEVNULL
+        assert "input" not in call_kwargs
+
+
+# ---------------------------------------------------------------------------
+# fetch_issue_with_comments
+# ---------------------------------------------------------------------------
+
+
+class TestFetchIssueWithComments:
+
+    @patch("app.github.api")
+    def test_returns_title_body_comments(self, mock_api):
+        issue_json = json.dumps({"title": "Bug report", "body": "It's broken"})
+        comments_json = json.dumps([
+            {"author": "user1", "date": "2026-01-01", "body": "I agree"},
+            {"author": "user2", "date": "2026-01-02", "body": "Fixed"},
+        ])
+        mock_api.side_effect = [issue_json, comments_json]
+
+        title, body, comments = fetch_issue_with_comments("owner", "repo", 42)
+
+        assert title == "Bug report"
+        assert body == "It's broken"
+        assert len(comments) == 2
+        assert comments[0]["author"] == "user1"
+        assert comments[1]["body"] == "Fixed"
+
+    @patch("app.github.api")
+    def test_calls_correct_endpoints(self, mock_api):
+        mock_api.side_effect = [
+            json.dumps({"title": "T", "body": "B"}),
+            json.dumps([]),
+        ]
+        fetch_issue_with_comments("sukria", "koan", 99)
+
+        calls = mock_api.call_args_list
+        assert calls[0][0][0] == "repos/sukria/koan/issues/99"
+        assert calls[1][0][0] == "repos/sukria/koan/issues/99/comments"
+
+    @patch("app.github.api")
+    def test_handles_malformed_issue_json(self, mock_api):
+        mock_api.side_effect = ["not json", json.dumps([])]
+
+        title, body, comments = fetch_issue_with_comments("o", "r", 1)
+
+        # Falls back to raw text as body
+        assert title == ""
+        assert body == "not json"
+        assert comments == []
+
+    @patch("app.github.api")
+    def test_handles_malformed_comments_json(self, mock_api):
+        mock_api.side_effect = [
+            json.dumps({"title": "T", "body": "B"}),
+            "not json",
+        ]
+
+        title, body, comments = fetch_issue_with_comments("o", "r", 1)
+
+        assert title == "T"
+        assert body == "B"
+        assert comments == []
+
+    @patch("app.github.api")
+    def test_handles_comments_not_a_list(self, mock_api):
+        mock_api.side_effect = [
+            json.dumps({"title": "T", "body": "B"}),
+            json.dumps({"unexpected": "object"}),
+        ]
+
+        title, body, comments = fetch_issue_with_comments("o", "r", 1)
+        assert comments == []
+
+    @patch("app.github.api")
+    def test_empty_comments(self, mock_api):
+        mock_api.side_effect = [
+            json.dumps({"title": "T", "body": "B"}),
+            json.dumps([]),
+        ]
+
+        title, body, comments = fetch_issue_with_comments("o", "r", 1)
+        assert comments == []
+
+    @patch("app.github.api")
+    def test_missing_title_defaults_empty(self, mock_api):
+        mock_api.side_effect = [
+            json.dumps({"body": "only body"}),
+            json.dumps([]),
+        ]
+
+        title, body, comments = fetch_issue_with_comments("o", "r", 1)
+        assert title == ""
+        assert body == "only body"
+
+    @patch("app.github.api")
+    def test_missing_body_defaults_empty(self, mock_api):
+        mock_api.side_effect = [
+            json.dumps({"title": "only title"}),
+            json.dumps([]),
+        ]
+
+        title, body, comments = fetch_issue_with_comments("o", "r", 1)
+        assert title == "only title"
+        assert body == ""
+
+    @patch("app.github.api", side_effect=RuntimeError("gh failed"))
+    def test_propagates_api_error(self, mock_api):
+        with pytest.raises(RuntimeError, match="gh failed"):
+            fetch_issue_with_comments("o", "r", 1)
+
+
+# ---------------------------------------------------------------------------
+# detect_parent_repo
+# ---------------------------------------------------------------------------
+
+
+class TestDetectParentRepo:
+
+    @patch("app.github.run_gh", return_value="upstream-owner/upstream-repo")
+    def test_returns_parent_repo(self, mock_gh):
+        result = detect_parent_repo("/my/fork")
+        assert result == "upstream-owner/upstream-repo"
+        mock_gh.assert_called_once_with(
+            "repo", "view", "--json", "parent",
+            "--jq", '.parent.owner.login + "/" + .parent.name',
+            cwd="/my/fork", timeout=15,
+        )
+
+    @patch("app.github.run_gh", return_value="")
+    def test_returns_none_for_empty_output(self, mock_gh):
+        assert detect_parent_repo("/not/a/fork") is None
+
+    @patch("app.github.run_gh", return_value="/")
+    def test_returns_none_for_slash_only(self, mock_gh):
+        assert detect_parent_repo("/not/a/fork") is None
+
+    @patch("app.github.run_gh", return_value="null/null")
+    def test_returns_none_for_null_parent(self, mock_gh):
+        assert detect_parent_repo("/not/a/fork") is None
+
+    @patch("app.github.run_gh", return_value="just-one-part")
+    def test_returns_none_for_invalid_format(self, mock_gh):
+        assert detect_parent_repo("/some/path") is None
+
+    @patch("app.github.run_gh", return_value="/repo-only")
+    def test_returns_none_for_empty_owner(self, mock_gh):
+        assert detect_parent_repo("/some/path") is None
+
+    @patch("app.github.run_gh", return_value="owner-only/")
+    def test_returns_none_for_empty_repo(self, mock_gh):
+        assert detect_parent_repo("/some/path") is None
+
+    @patch("app.github.run_gh", side_effect=RuntimeError("not found"))
+    def test_returns_none_on_error(self, mock_gh):
+        assert detect_parent_repo("/nonexistent") is None
+
+    @patch("app.github.run_gh", side_effect=subprocess.TimeoutExpired(cmd="gh", timeout=15))
+    def test_returns_none_on_timeout(self, mock_gh):
+        assert detect_parent_repo("/slow/repo") is None
+
+    @patch("app.github.run_gh", return_value="  owner/repo  ")
+    def test_strips_whitespace(self, mock_gh):
+        assert detect_parent_repo("/my/fork") == "owner/repo"
+
+
+# ---------------------------------------------------------------------------
+# pr_create — repo and head parameters
+# ---------------------------------------------------------------------------
+
+
+class TestPrCreateExtended:
+
+    @patch("app.github.subprocess.run")
+    def test_passes_repo_flag(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="url")
+        pr_create("Title", "Body", repo="upstream/repo")
+        cmd = mock_run.call_args[0][0]
+        assert "--repo" in cmd
+        idx = cmd.index("--repo")
+        assert cmd[idx + 1] == "upstream/repo"
+
+    @patch("app.github.subprocess.run")
+    def test_passes_head_flag(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="url")
+        pr_create("Title", "Body", head="user:branch")
+        cmd = mock_run.call_args[0][0]
+        assert "--head" in cmd
+        idx = cmd.index("--head")
+        assert cmd[idx + 1] == "user:branch"
+
+    @patch("app.github.subprocess.run")
+    def test_no_repo_no_head_omits_flags(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="url")
+        pr_create("Title", "Body")
+        cmd = mock_run.call_args[0][0]
+        assert "--repo" not in cmd
+        assert "--head" not in cmd
