@@ -97,8 +97,13 @@ def _extract_mission_title(line: str) -> Optional[str]:
     return text if text else None
 
 
-def _parse_completed_missions() -> List[str]:
-    """Extract recently completed missions from missions.md."""
+def _parse_completed_missions(target_date: Optional[date] = None) -> List[str]:
+    """Extract completed missions from missions.md.
+
+    Args:
+        target_date: If provided, only return missions completed on this date.
+                     If None, return all completed missions (legacy behavior).
+    """
     if not MISSIONS_FILE.exists():
         return []
 
@@ -109,6 +114,13 @@ def _parse_completed_missions() -> List[str]:
     completed = []
     for item in sections["done"]:
         first_line = item.split("\n")[0]
+
+        if target_date is not None:
+            # Filter by ✅ completion date
+            match = re.search(r"✅\s*\((\d{4}-\d{2}-\d{2})", first_line)
+            if not match or match.group(1) != target_date.strftime("%Y-%m-%d"):
+                continue
+
         title = _extract_mission_title(first_line)
         if title:
             completed.append(title)
@@ -140,7 +152,7 @@ def generate_report(report_type: str = "morning") -> str:
         header = "Daily Summary"
 
     journal = _read_journal(target)
-    completed = _parse_completed_missions()
+    completed = _parse_completed_missions(target_date=target)
     pending = _count_pending_missions()
 
     lines = [f"-- {header} --", ""]

@@ -180,6 +180,57 @@ class TestParseCompletedMissions:
             result = _parse_completed_missions()
         assert result == []
 
+    def test_date_filter_matches(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## Done\n\n"
+            "- [project:koan] yesterdays task ✅ (2026-02-17 21:16)\n"
+            "- [project:koan] todays task ✅ (2026-02-18 10:30)\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file):
+            result = _parse_completed_missions(target_date=date(2026, 2, 18))
+        assert len(result) == 1
+        assert "todays task" in result[0]
+
+    def test_date_filter_no_match(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## Done\n\n"
+            "- [project:koan] old task ✅ (2026-02-15 10:00)\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file):
+            result = _parse_completed_missions(target_date=date(2026, 2, 18))
+        assert result == []
+
+    def test_no_date_filter_returns_all(self, tmp_path):
+        """Without target_date, all done missions are returned."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## Done\n\n"
+            "- [project:koan] task A ✅ (2026-02-15 10:00)\n"
+            "- [project:koan] task B ✅ (2026-02-18 10:00)\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file):
+            result = _parse_completed_missions()
+        assert len(result) == 2
+
+    def test_date_filter_skips_missions_without_timestamp(self, tmp_path):
+        """Missions without ✅ timestamp are skipped when date filter is active."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## Done\n\n"
+            "- [project:koan] has timestamp ✅ (2026-02-18 10:00)\n"
+            "- plain entry no timestamp\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file):
+            result = _parse_completed_missions(target_date=date(2026, 2, 18))
+        assert len(result) == 1
+        assert "has timestamp" in result[0]
+
 
 # ---------------------------------------------------------------------------
 # _count_pending_missions
@@ -211,6 +262,8 @@ class TestCountPendingMissions:
 
 class TestGenerateReport:
     def test_morning_report_real_format(self, tmp_path):
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        today = date.today().strftime("%Y-%m-%d")
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
@@ -219,7 +272,8 @@ class TestGenerateReport:
             "## In Progress\n\n"
             "- [project:koan] working on stuff ⏳(2026-02-18T08:00) ▶(2026-02-18T08:05)\n\n"
             "## Done\n\n"
-            "- [project:koan] done thing ✅ (2026-02-17 21:16)\n"
+            f"- [project:koan] done thing ✅ ({yesterday} 21:16)\n"
+            f"- [project:koan] older thing ✅ (2025-01-01 10:00)\n"
         )
         with patch("app.daily_report.MISSIONS_FILE", missions_file), \
              patch("app.daily_report.INSTANCE_DIR", tmp_path):
@@ -227,12 +281,15 @@ class TestGenerateReport:
 
         assert "Report for" in report
         assert "done thing" in report
+        # Older mission should be filtered out (wrong date)
+        assert "older thing" not in report
         assert "Pending: 1" in report
         assert "working on stuff" in report
         assert "In Progress:" in report
         assert "-- Kōan" in report
 
     def test_morning_report_legacy_format(self, tmp_path):
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
@@ -242,7 +299,7 @@ class TestGenerateReport:
             "### Big project (PRIO)\n"
             "- sub-item\n\n"
             "## Done\n\n"
-            "- **Done thing** (session 1)\n"
+            f"- **Done thing** ✅ ({yesterday} 15:00)\n"
         )
         with patch("app.daily_report.MISSIONS_FILE", missions_file), \
              patch("app.daily_report.INSTANCE_DIR", tmp_path):
