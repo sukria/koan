@@ -118,9 +118,8 @@ def write_quota_journal(
         reset_display: Human-readable reset info
         resume_message: Auto-resume message
     """
-    journal_dir = os.path.join(instance_dir, "journal", date.today().strftime("%Y-%m-%d"))
-    os.makedirs(journal_dir, exist_ok=True)
-    journal_file = os.path.join(journal_dir, f"{project_name}.md")
+    from pathlib import Path
+    from app.journal import append_to_journal
 
     now = datetime.now().strftime("%H:%M:%S")
     entry = f"""
@@ -131,8 +130,7 @@ Claude quota reached after {run_count} runs (project: {project_name}). {reset_di
 {resume_message} or use `/resume` to restart manually.
 """
 
-    with open(journal_file, "a") as f:
-        f.write(entry)
+    append_to_journal(Path(instance_dir), project_name, entry)
 
 
 def handle_quota_exhaustion(

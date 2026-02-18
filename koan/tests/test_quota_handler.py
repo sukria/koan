@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -195,6 +196,21 @@ class TestWriteQuotaJournal:
 
         journal_dir = os.path.join(instance, "journal", date.today().strftime("%Y-%m-%d"))
         assert os.path.isdir(journal_dir)
+
+    @patch("app.journal.append_to_journal")
+    def test_uses_append_to_journal_for_locking(self, mock_append, tmp_path):
+        """Verify write_quota_journal uses append_to_journal (which has file locking)."""
+        from app.quota_handler import write_quota_journal
+
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance)
+
+        write_quota_journal(instance, "koan", 5, "resets 10am", "Auto-resume in 2h")
+
+        mock_append.assert_called_once()
+        args = mock_append.call_args
+        assert args[0][1] == "koan"  # project_name
+        assert "Quota Exhausted" in args[0][2]  # content
 
 
 class TestHandleQuotaExhaustion:

@@ -212,6 +212,23 @@ class TestArchivePending:
         assert "Previous entry" in content
         assert "New content" in content
 
+    @patch("app.journal.append_to_journal")
+    def test_uses_append_to_journal_for_locking(self, mock_append, tmp_path):
+        """Verify archive_pending uses append_to_journal (which has file locking)."""
+        from app.mission_runner import archive_pending
+
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        pending = journal_dir / "pending.md"
+        pending.write_text("test content\n")
+
+        archive_pending(str(tmp_path), "myproject", 1)
+
+        mock_append.assert_called_once()
+        args = mock_append.call_args
+        assert args[0][1] == "myproject"  # project_name
+        assert "test content" in args[0][2]  # content
+
 
 class TestUpdateUsage:
     """Test update_usage function."""

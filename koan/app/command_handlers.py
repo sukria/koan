@@ -60,11 +60,11 @@ def handle_command(text: str):
         return
 
     if cmd in ("/pause", "/sleep"):
-        pause_file = KOAN_ROOT / ".koan-pause"
-        if pause_file.exists():
+        from app.pause_manager import is_paused, create_pause
+        if is_paused(str(KOAN_ROOT)):
             send_telegram("⏸️ Already paused. /resume to unpause.")
         else:
-            pause_file.write_text("PAUSE")
+            create_pause(str(KOAN_ROOT), reason="manual", display="paused via Telegram")
             send_telegram("⏸️ Paused. No missions will run. /resume to unpause.")
         return
 

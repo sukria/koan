@@ -2464,3 +2464,42 @@ class TestSkillCommandRouting:
         msg = mock_send.call_args[0][0]
         assert "install" in msg.lower()
         _reset_registry()
+
+
+# ---------------------------------------------------------------------------
+# Test: missions.md read protection in _build_chat_prompt
+# ---------------------------------------------------------------------------
+
+class TestBuildChatPromptMissionsReadProtection:
+    """Tests that _build_chat_prompt handles OSError on missions.md read."""
+
+    @patch("app.awake.save_conversation_message")
+    @patch("app.awake.load_recent_history", return_value=[])
+    @patch("app.awake.format_conversation_history", return_value="")
+    @patch("app.awake.get_tools_description", return_value="")
+    @patch("app.awake.get_chat_tools", return_value="")
+    @patch("app.awake.send_telegram", return_value=True)
+    @patch("app.awake.subprocess.run")
+    def test_missions_read_oserror_does_not_crash(
+        self, mock_run, mock_send, mock_tools, mock_tools_desc, mock_fmt,
+        mock_hist, mock_save, tmp_path
+    ):
+        """_build_chat_prompt should not crash if missions.md raises OSError."""
+        from app.awake import _build_chat_prompt
+
+        # Create a mock MISSIONS_FILE that exists() returns True but read_text() raises
+        mock_missions = MagicMock()
+        mock_missions.exists.return_value = True
+        mock_missions.read_text.side_effect = OSError("locked")
+
+        with patch("app.awake.INSTANCE_DIR", tmp_path), \
+             patch("app.awake.KOAN_ROOT", tmp_path), \
+             patch("app.awake.MISSIONS_FILE", mock_missions), \
+             patch("app.awake.SOUL", "test soul"), \
+             patch("app.awake.SUMMARY", ""):
+            # Should not raise
+            prompt = _build_chat_prompt("hello")
+
+        # Prompt should still be built (missions context will be empty)
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0

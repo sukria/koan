@@ -140,17 +140,13 @@ def archive_pending(instance_dir: str, project_name: str, run_num: int) -> bool:
     if not pending_path.exists():
         return False
 
-    journal_dir = Path(instance_dir) / "journal" / date.today().strftime("%Y-%m-%d")
-    journal_dir.mkdir(parents=True, exist_ok=True)
-    journal_file = journal_dir / f"{project_name}.md"
-
-    # Append pending content to daily journal
+    # Append pending content to daily journal (with file locking)
+    from app.journal import append_to_journal
     pending_content = pending_path.read_text()
     now = datetime.now().strftime("%H:%M")
     entry = f"\n## Run {run_num} — {now} (auto-archived from pending)\n\n{pending_content}"
 
-    with open(journal_file, "a") as f:
-        f.write(entry)
+    append_to_journal(Path(instance_dir), project_name, entry)
 
     pending_path.unlink()
     return True

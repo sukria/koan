@@ -179,7 +179,10 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
         missions_context = pending_context
     elif MISSIONS_FILE.exists():
         from app.missions import parse_sections
-        sections = parse_sections(MISSIONS_FILE.read_text())
+        try:
+            sections = parse_sections(MISSIONS_FILE.read_text())
+        except OSError:
+            sections = {}
         in_progress = sections.get("in_progress", [])
         pending = sections.get("pending", [])
         if in_progress or pending:
