@@ -2,16 +2,21 @@
 Kōan -- Shared helpers for the CI/CD pipeline.
 
 Git operations, Claude Code CLI invocation, and text utilities
-used by pr_review.py, rebase_pr.py, and other pipeline modules.
+used by pr_review.py, rebase_pr.py, recreate_pr.py, and other
+pipeline modules.
 """
 
 import re
 import subprocess
+import sys
+from pathlib import Path
 from typing import List, Optional
 
 from app.cli_provider import build_full_command, run_command
 from app.config import get_model_config
 from app.git_utils import run_git_strict
+from app.github import pr_create, run_gh
+from app.prompts import load_prompt, load_skill_prompt
 
 # Backward-compatible alias — callers should import from app.cli_provider
 run_claude_command = run_command
@@ -166,3 +171,201 @@ def run_claude_step(
     elif failure_label:
         actions_log.append(f"{failure_label}: {result['error'][:200]}")
     return False
+
+
+# ---------------------------------------------------------------------------
+# Shared PR pipeline helpers
+# ---------------------------------------------------------------------------
+
+def _get_current_branch(project_path: str) -> str:
+    """Get the current branch name."""
+    try:
+        return _run_git(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=project_path,
+        )
+    except Exception:
+        return "main"
+
+
+def _safe_checkout(branch: str, project_path: str) -> None:
+    """Checkout a branch without raising on failure."""
+    try:
+        _run_git(["git", "checkout", branch], cwd=project_path)
+    except Exception as e:
+        print(f"[claude_step] Safe checkout failed for {branch}: {e}", file=sys.stderr)
+
+
+def _is_permission_error(error_msg: str) -> bool:
+    """Check if an error message indicates a permission/access problem."""
+    indicators = [
+        "permission", "denied", "forbidden", "403",
+        "protected branch", "not allowed",
+        "unable to access", "authentication failed",
+    ]
+    lower = error_msg.lower()
+    return any(ind in lower for ind in indicators)
+
+
+def _build_pr_prompt(
+    prompt_name: str,
+    context: dict,
+    skill_dir: Optional[Path] = None,
+) -> str:
+    """Build a prompt for Claude to process PR feedback.
+
+    Shared by rebase and recreate pipelines — the only difference is the
+    prompt template name.
+
+    Args:
+        prompt_name: Prompt template name (e.g. "rebase", "recreate").
+        context: PR context dict from fetch_pr_context().
+        skill_dir: Optional skill directory for prompt resolution.
+    """
+    kwargs = dict(
+        TITLE=context["title"],
+        BODY=context.get("body", ""),
+        BRANCH=context["branch"],
+        BASE=context["base"],
+        DIFF=context.get("diff", ""),
+        REVIEW_COMMENTS=context.get("review_comments", ""),
+        REVIEWS=context.get("reviews", ""),
+        ISSUE_COMMENTS=context.get("issue_comments", ""),
+    )
+    if skill_dir is not None:
+        return load_skill_prompt(skill_dir, prompt_name, **kwargs)
+    return load_prompt(prompt_name, **kwargs)
+
+
+# -- Push with PR fallback (shared config) ----------------------------------
+
+_PR_TYPE_CONFIG = {
+    "rebase": {
+        "force_label": "Force-pushed `{branch}`",
+        "branch_suffix": "rebase-",
+        "title_prefix": "[Rebase]",
+        "pr_body": (
+            "Supersedes #{pr_number}.\n\n"
+            "This PR contains the rebased version of `{branch}` onto `{base}`.\n"
+            "Original PR: {url}\n\n"
+            "---\n_Automated by Kōan_"
+        ),
+        "crosslink": (
+            "This PR has been rebased and superseded by {ref}.\n\n"
+            "The new PR contains the same changes rebased onto `{base}`.\n\n"
+            "---\n_Automated by Kōan_"
+        ),
+    },
+    "recreate": {
+        "force_label": "Force-pushed `{branch}` (recreated from scratch)",
+        "branch_suffix": "recreate-",
+        "title_prefix": "[Recreate]",
+        "pr_body": (
+            "Supersedes #{pr_number}.\n\n"
+            "This PR contains a fresh reimplementation of the original feature, "
+            "built on top of current `{base}`.\n\n"
+            "The original branch had diverged too far for a clean rebase, so the "
+            "feature was recreated from scratch based on the original PR's intent.\n\n"
+            "Original PR: {url}\n\n"
+            "---\n_Automated by Kōan_"
+        ),
+        "crosslink": (
+            "This PR has been recreated from scratch and superseded by {ref}.\n\n"
+            "The original branch had diverged too far for a clean rebase. "
+            "The new PR contains a fresh reimplementation on current `{base}`.\n\n"
+            "---\n_Automated by Kōan_"
+        ),
+    },
+}
+
+
+def _push_with_pr_fallback(
+    branch: str,
+    base: str,
+    full_repo: str,
+    pr_number: str,
+    context: dict,
+    project_path: str,
+    *,
+    pr_type: str = "rebase",
+) -> dict:
+    """Push branch, falling back to new draft PR if permission denied.
+
+    Shared by rebase and recreate pipelines.
+
+    Args:
+        pr_type: "rebase" or "recreate" — controls labels, prefix, and body text.
+
+    Returns:
+        dict with keys: success, actions, error, new_pr_url (optional).
+    """
+    actions: List[str] = []
+    cfg = _PR_TYPE_CONFIG.get(pr_type, _PR_TYPE_CONFIG["rebase"])
+
+    # Option 1: Try force-pushing to the existing branch
+    try:
+        _run_git(
+            ["git", "push", "origin", branch, "--force-with-lease"],
+            cwd=project_path,
+        )
+        actions.append(cfg["force_label"].format(branch=branch))
+        return {"success": True, "actions": actions, "error": ""}
+    except Exception as push_error:
+        error_msg = str(push_error)
+
+    # Option 2: Permission denied — create a new draft PR
+    if not _is_permission_error(error_msg):
+        return {"success": False, "actions": actions, "error": error_msg}
+
+    from app.config import get_branch_prefix
+    prefix = get_branch_prefix()
+    new_branch = f"{prefix}{cfg['branch_suffix']}{branch.replace('/', '-')}"
+    try:
+        _run_git(["git", "checkout", "-b", new_branch], cwd=project_path)
+        _run_git(["git", "push", "-u", "origin", new_branch], cwd=project_path)
+        actions.append(
+            f"Created new branch `{new_branch}` (no push permission on `{branch}`)"
+        )
+
+        title = context.get("title", f"{cfg['title_prefix'].strip('[]')} of #{pr_number}")
+        pr_body = cfg["pr_body"].format(
+            pr_number=pr_number, branch=branch, base=base,
+            url=context.get("url", f"#{pr_number}"),
+        )
+        new_pr_url = pr_create(
+            title=f"{cfg['title_prefix']} {title}",
+            body=pr_body,
+            draft=True,
+            base=base,
+            repo=full_repo,
+            head=new_branch,
+        )
+        actions.append(f"Created draft PR: {new_pr_url.strip()}")
+
+        # Cross-link on original PR
+        new_pr_match = re.search(r'/pull/(\d+)', new_pr_url)
+        new_pr_ref = new_pr_match.group(0) if new_pr_match else new_pr_url.strip()
+
+        try:
+            run_gh(
+                "pr", "comment", pr_number,
+                "--repo", full_repo,
+                "--body", cfg["crosslink"].format(ref=new_pr_ref, base=base),
+            )
+            actions.append("Cross-linked original PR")
+        except Exception as e:
+            print(f"[{pr_type}_pr] Cross-link comment failed: {e}", file=sys.stderr)
+
+        return {
+            "success": True,
+            "actions": actions,
+            "error": "",
+            "new_pr_url": new_pr_url.strip(),
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "actions": actions,
+            "error": f"Failed to create fallback PR: {e}",
+        }

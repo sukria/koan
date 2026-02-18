@@ -153,7 +153,7 @@ class TestBuildPromptFunctions:
         """_build_recreate_prompt falls back to load_prompt without skill_dir."""
         from unittest.mock import patch
         from app.recreate_pr import _build_recreate_prompt
-        with patch("app.recreate_pr.load_prompt", return_value="fallback") as mock:
+        with patch("app.claude_step.load_prompt", return_value="fallback") as mock:
             result = _build_recreate_prompt(pr_context, skill_dir=None)
             mock.assert_called_once()
             assert result == "fallback"
@@ -169,7 +169,7 @@ class TestBuildPromptFunctions:
         """_build_rebase_prompt falls back to load_prompt without skill_dir."""
         from unittest.mock import patch
         from app.rebase_pr import _build_rebase_prompt
-        with patch("app.rebase_pr.load_prompt", return_value="fallback") as mock:
+        with patch("app.claude_step.load_prompt", return_value="fallback") as mock:
             result = _build_rebase_prompt(pr_context, skill_dir=None)
             mock.assert_called_once()
             assert result == "fallback"
