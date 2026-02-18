@@ -14,6 +14,22 @@ from pathlib import Path
 from typing import Dict, List
 
 
+def _parse_jsonl_lines(lines: list) -> List[Dict]:
+    """Parse JSONL lines into a list of message dicts.
+
+    Skips blank lines and lines with invalid JSON.
+    """
+    messages = []
+    for line in lines:
+        line = line.strip()
+        if line:
+            try:
+                messages.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return messages
+
+
 def save_conversation_message(history_file: Path, role: str, text: str):
     """Save a message to the conversation history file (JSONL format).
 
@@ -30,8 +46,10 @@ def save_conversation_message(history_file: Path, role: str, text: str):
     try:
         with open(history_file, "a", encoding="utf-8") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
-            f.write(json.dumps(message, ensure_ascii=False) + "\n")
-            fcntl.flock(f, fcntl.LOCK_UN)
+            try:
+                f.write(json.dumps(message, ensure_ascii=False) + "\n")
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
     except OSError as e:
         print(f"[conversation_history] Error saving message to history: {e}")
 
@@ -52,20 +70,12 @@ def load_recent_history(history_file: Path, max_messages: int = 10) -> List[Dict
     try:
         with open(history_file, "r", encoding="utf-8") as f:
             fcntl.flock(f, fcntl.LOCK_SH)
-            lines = f.readlines()
-            fcntl.flock(f, fcntl.LOCK_UN)
+            try:
+                lines = f.readlines()
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
-        # Parse JSONL (one JSON per line)
-        messages = []
-        for line in lines:
-            line = line.strip()
-            if line:
-                try:
-                    messages.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-
-        # Return last N messages
+        messages = _parse_jsonl_lines(lines)
         return messages[-max_messages:] if len(messages) > max_messages else messages
     except OSError as e:
         print(f"[conversation_history] Error loading history: {e}")
@@ -126,18 +136,14 @@ def compact_history(history_file: Path, topics_file: Path, min_messages: int = 2
     try:
         with open(history_file, "r", encoding="utf-8") as f:
             fcntl.flock(f, fcntl.LOCK_SH)
-            lines = f.readlines()
-            fcntl.flock(f, fcntl.LOCK_UN)
+            try:
+                lines = f.readlines()
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
     except OSError:
         return 0
 
-    for line in lines:
-        line = line.strip()
-        if line:
-            try:
-                messages.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    messages = _parse_jsonl_lines(lines)
 
     if len(messages) < min_messages:
         return 0
