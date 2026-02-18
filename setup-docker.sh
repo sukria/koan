@@ -9,7 +9,7 @@ set -euo pipefail
 # the correct volume mounts.
 #
 # Claude CLI is installed in the Docker image via npm — no host mount needed.
-# Auth is via ANTHROPIC_API_KEY in .env.
+# Auth: ANTHROPIC_API_KEY in .env (API billing) or interactive login (subscription).
 #
 # Usage:
 #   ./setup-docker.sh           # Auto-detect and generate
@@ -170,7 +170,18 @@ log "Detecting host environment..."
 
 # 1. Auth directories (Claude CLI is installed in the image — no host mount needed)
 section "Auth Directories"
-log "Claude CLI: installed in Docker image via npm (auth via ANTHROPIC_API_KEY)"
+log "Claude CLI: installed in Docker image via npm"
+log "  Auth option 1: ANTHROPIC_API_KEY in .env (API billing)"
+log "  Auth option 2: docker compose run --rm -it koan auth (subscription login)"
+
+# Create claude-auth/ for interactive login persistence
+if [ ! -d "claude-auth" ]; then
+    mkdir -p "claude-auth"
+    success "Created claude-auth/ (persistent auth state for Claude CLI)"
+else
+    success "Found claude-auth/"
+fi
+VOLUME_MOUNTS+=("      - ./claude-auth:/home/koan/.claude:rw")
 
 detect_dir "~/.copilot" "/home/koan/.copilot" "rw" "Copilot auth" || \
     log "~/.copilot not found (ok if not using Copilot)"
@@ -250,7 +261,9 @@ if [ "$DRY_RUN" = false ]; then
     printf "${BOLD}${CYAN}│${RESET} ${GREEN}✓ Setup complete!${RESET}                                        ${BOLD}${CYAN}│${RESET}\n"
     printf "${BOLD}${CYAN}├──────────────────────────────────────────────────────────┤${RESET}\n"
     printf "${BOLD}${CYAN}│${RESET}  1. Review %-43s ${BOLD}${CYAN}│${RESET}\n" "$OVERRIDE_FILE"
-    printf "${BOLD}${CYAN}│${RESET}  2. Ensure .env has ANTHROPIC_API_KEY                     ${BOLD}${CYAN}│${RESET}\n"
+    printf "${BOLD}${CYAN}│${RESET}  2. Auth (pick one):                                     ${BOLD}${CYAN}│${RESET}\n"
+    printf "${BOLD}${CYAN}│${RESET}     a. Set ANTHROPIC_API_KEY in .env (API billing)        ${BOLD}${CYAN}│${RESET}\n"
+    printf "${BOLD}${CYAN}│${RESET}     b. docker compose run --rm -it koan auth (sub login)  ${BOLD}${CYAN}│${RESET}\n"
     printf "${BOLD}${CYAN}│${RESET}  3. docker compose up --build                            ${BOLD}${CYAN}│${RESET}\n"
     printf "${BOLD}${CYAN}╰──────────────────────────────────────────────────────────╯${RESET}\n"
 fi

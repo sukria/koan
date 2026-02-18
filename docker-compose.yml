@@ -1,17 +1,18 @@
 # Kōan Docker Compose
 #
-# Claude CLI is installed in the image. Auth is via ANTHROPIC_API_KEY in .env.
+# Claude CLI is installed in the image. Auth options:
+#   1. ANTHROPIC_API_KEY in .env (API billing accounts)
+#   2. Interactive login: docker compose run --rm -it koan auth (subscriptions)
+#
 # Run ./setup-docker.sh first — it generates docker-compose.override.yml
 # with workspace mounts and GitHub CLI auth for your system.
 #
-# REQUIRED: Set ANTHROPIC_API_KEY in .env
-# Get one at: https://console.anthropic.com/settings/keys
-#
 # Usage:
-#   ./setup-docker.sh               # Auto-detect host setup
-#   docker compose up --build        # Full stack (agent + bridge)
-#   docker compose run koan test     # Run test suite
-#   docker compose run koan shell    # Interactive shell
+#   ./setup-docker.sh                        # Auto-detect host setup
+#   docker compose run --rm -it koan auth    # Interactive Claude login
+#   docker compose up --build                # Full stack (agent + bridge)
+#   docker compose run --rm koan test        # Run test suite
+#   docker compose run --rm koan shell       # Interactive shell
 
 services:
   koan:

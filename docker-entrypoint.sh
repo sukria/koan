@@ -5,13 +5,14 @@ set -euo pipefail
 # Kōan Docker Entrypoint
 # =========================================================================
 # Claude CLI is installed in the image via npm.
-# Auth is via ANTHROPIC_API_KEY (required for start/agent commands).
+# Auth: ANTHROPIC_API_KEY (API billing) or interactive login (subscription).
 # GitHub CLI auth (~/.config/gh) is mounted from the host.
 #
 # Commands:
 #   start    — Run both agent loop and Telegram bridge (default)
 #   agent    — Run agent loop only
 #   bridge   — Run Telegram bridge only
+#   auth     — Authenticate Claude CLI interactively (browser login)
 #   test     — Run the test suite
 #   shell    — Drop into bash shell
 # =========================================================================
@@ -95,12 +96,33 @@ verify_binaries() {
 # -------------------------------------------------------------------------
 # 2. Verify Auth State
 # -------------------------------------------------------------------------
+
+# Check Claude authentication (API key or interactive login).
+# Returns 0 if authenticated, 1 if not.
+check_claude_auth() {
+    # Option 1: API key (works with API billing accounts)
+    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+        success "Claude auth: API key"
+        return 0
+    fi
+
+    # Option 2: Interactive login (works with Claude subscriptions)
+    # The auth state lives in ~/.claude/ (mounted from host's claude-auth/)
+    if timeout 10 claude -p "ok" --max-turns 1 >/dev/null 2>&1; then
+        success "Claude auth: interactive login"
+        return 0
+    fi
+
+    # Neither method works
+    error "Claude CLI is not authenticated"
+    log "  Option 1: Set ANTHROPIC_API_KEY in .env (API billing)"
+    log "  Option 2: Run 'docker compose run --rm -it koan auth' (subscription login)"
+    return 1
+}
+
 verify_auth() {
     local provider="${KOAN_CLI_PROVIDER:-claude}"
     local warnings=()
-
-    # Claude auth is handled by ANTHROPIC_API_KEY validation at startup
-    # (no ~/.claude mount needed — macOS Keychain doesn't work in containers)
 
     # Check gh auth
     if [ ! -d "${HOME}/.config/gh" ]; then
@@ -250,12 +272,8 @@ COMMAND="${1:-start}"
 case "$COMMAND" in
     start)
         printf "${BOLD}${CYAN}Kōan Docker — initializing${RESET}\n"
-        if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-            error "ANTHROPIC_API_KEY is required"
-            log "  Set it in your .env file. Get one at: https://console.anthropic.com/settings/keys"
-            exit 1
-        fi
         verify_binaries || exit 1
+        check_claude_auth || exit 1
         verify_auth
         setup_instance
         setup_workspace
@@ -275,12 +293,8 @@ case "$COMMAND" in
 
     agent)
         log "Kōan Docker — agent only"
-        if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-            error "ANTHROPIC_API_KEY is required"
-            log "  Set it in your .env file. Get one at: https://console.anthropic.com/settings/keys"
-            exit 1
-        fi
         verify_binaries || exit 1
+        check_claude_auth || exit 1
         verify_auth
         setup_instance
         setup_workspace
@@ -304,12 +318,24 @@ case "$COMMAND" in
             exec $PYTHON -m pytest tests/ -v
         ;;
 
+    auth)
+        section "Claude CLI Authentication"
+        if check_claude_auth 2>/dev/null; then
+            success "Already authenticated — no action needed"
+            exit 0
+        fi
+        log "Starting interactive Claude CLI login..."
+        log "A browser URL will appear — open it to complete authentication."
+        log "Auth state will persist in the mounted claude-auth/ volume."
+        exec claude
+        ;;
+
     shell)
         exec /bin/bash
         ;;
 
     *)
-        echo "Usage: docker run koan [start|agent|bridge|test|shell]"
+        echo "Usage: docker run koan [start|agent|bridge|auth|test|shell]"
         exit 1
         ;;
 esac

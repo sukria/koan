@@ -81,6 +81,10 @@ class TestDockerfile:
     def test_workspace_directory_created(self):
         assert "/app/workspace" in self.dockerfile
 
+    def test_creates_claude_config_dir(self):
+        """~/.claude dir must exist for interactive auth state."""
+        assert "/home/koan/.claude" in self.dockerfile
+
     def test_entrypoint_is_set(self):
         assert "ENTRYPOINT" in self.dockerfile
 
@@ -158,9 +162,17 @@ class TestEntrypoint:
     def test_supports_ollama_provider(self):
         assert "ollama" in self.entrypoint
 
-    def test_validates_anthropic_api_key(self):
-        """Should validate ANTHROPIC_API_KEY at startup."""
+    def test_supports_api_key_auth(self):
+        """Should support ANTHROPIC_API_KEY as one auth method."""
         assert "ANTHROPIC_API_KEY" in self.entrypoint
+
+    def test_has_check_claude_auth_function(self):
+        """Should have a multi-method auth check function."""
+        assert "check_claude_auth" in self.entrypoint
+
+    def test_supports_auth_command(self):
+        """Should support 'auth' command for interactive login."""
+        assert "auth)" in self.entrypoint
 
     def test_checks_copilot_auth_dir(self):
         """Should check for ~/.copilot directory."""
@@ -271,9 +283,13 @@ class TestSetupScript:
         """Should explain Claude CLI is installed via npm."""
         assert "npm" in self.setup
 
-    def test_no_claude_auth_mount(self):
-        """~/.claude not mounted — auth via ANTHROPIC_API_KEY."""
-        assert 'detect_dir "~/.claude"' not in self.setup
+    def test_creates_claude_auth_directory(self):
+        """Should create claude-auth/ for persistent auth state."""
+        assert "claude-auth" in self.setup
+
+    def test_mounts_claude_auth_dir(self):
+        """claude-auth/ should be mounted as ~/.claude in the container."""
+        assert "./claude-auth:/home/koan/.claude" in self.setup
 
     def test_detects_copilot_auth_dir(self):
         assert ".copilot" in self.setup
@@ -344,6 +360,10 @@ class TestDockerIgnore:
 
     def test_excludes_logs(self):
         assert "logs/" in self.patterns
+
+    def test_excludes_claude_auth(self):
+        """claude-auth/ should not be in build context."""
+        assert "claude-auth/" in self.patterns
 
 
 class TestDockerCompose:
@@ -446,6 +466,10 @@ class TestGitIgnoreDockerEntries:
 
     def test_ignores_env_docker(self):
         assert ".env.docker" in self.gitignore
+
+    def test_ignores_claude_auth(self):
+        """claude-auth/ contains credentials — must be gitignored."""
+        assert "claude-auth/" in self.gitignore
 
 
 class TestDesignPrinciples:

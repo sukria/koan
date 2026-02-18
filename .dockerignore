@@ -33,6 +33,7 @@ __pycache__/
 # Docker (don't copy into build context)
 docker-compose.override.yml
 .env.docker
+claude-auth/
 
 # Workspace (mounted at runtime, not copied)
 workspace/

@@ -1,7 +1,7 @@
 # Kōan Docker Image
 #
 # Runtime tools (git, gh, node, Claude CLI) are all installed in the image.
-# Auth is via ANTHROPIC_API_KEY in .env (required).
+# Auth: ANTHROPIC_API_KEY in .env (API billing) or interactive login (subscription).
 # GitHub CLI auth (~/.config/gh) is mounted from the host.
 #
 # Build:  docker build -t koan .
@@ -70,8 +70,8 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 # Workspace + runtime directories
-RUN mkdir -p /app/workspace /app/instance /app/logs \
-    && chown -R ${HOST_UID}:${HOST_GID} /app
+RUN mkdir -p /app/workspace /app/instance /app/logs /home/koan/.claude \
+    && chown -R ${HOST_UID}:${HOST_GID} /app /home/koan/.claude
 
 # Switch to non-root user
 USER ${HOST_UID}

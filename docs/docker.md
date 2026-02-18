@@ -7,7 +7,9 @@
 ## Prerequisites
 
 - **Docker Engine 20+** and **Docker Compose v2+**
-- **ANTHROPIC_API_KEY** — get one at [console.anthropic.com](https://console.anthropic.com/settings/keys)
+- **Claude authentication** (one of):
+  - **ANTHROPIC_API_KEY** in `.env` — for API billing accounts ([console.anthropic.com](https://console.anthropic.com/settings/keys))
+  - **Interactive login** — for Claude subscription users (browser-based, one-time)
 - **GitHub CLI (`gh`)** authenticated on the host (for PR/issue operations)
 - A messaging platform configured (**Telegram** or **Slack** — see [INSTALL.md](../INSTALL.md#2-set-up-a-messaging-platform))
 
@@ -23,7 +25,8 @@ cp -r instance.example instance
 
 # 3. Set up credentials
 cp env.example .env
-# Edit .env — set ANTHROPIC_API_KEY and messaging credentials (Telegram or Slack)
+# Edit .env — set messaging credentials (Telegram or Slack)
+# For API billing: also set ANTHROPIC_API_KEY in .env
 
 # 4. Add projects to the workspace
 mkdir -p workspace
@@ -32,7 +35,12 @@ ln -s /path/to/your/project workspace/myproject
 # 5. Run the setup script (auto-detects host paths, generates mounts)
 ./setup-docker.sh
 
-# 6. Build and start
+# 6. Authenticate Claude CLI (pick one)
+# Option A: API key — just set ANTHROPIC_API_KEY in .env (done in step 3)
+# Option B: Interactive login (for Claude subscription users):
+docker compose run --rm -it koan auth
+
+# 7. Build and start
 docker compose up --build
 ```
 
@@ -116,8 +124,11 @@ If either process crashes, the entrypoint restarts it automatically.
 
 ### Authentication
 
-- **Claude CLI** authenticates via `ANTHROPIC_API_KEY` from `.env` (macOS
-  Keychain doesn't work inside containers).
+- **Claude CLI** supports two auth methods:
+  - **API key**: Set `ANTHROPIC_API_KEY` in `.env` (for API billing accounts).
+  - **Interactive login**: Run `docker compose run --rm -it koan auth` to open a
+    browser-based login flow (for Claude subscription users). Auth state persists
+    in `claude-auth/` on the host, so login is a one-time process.
 - **GitHub CLI** uses `~/.config/gh` mounted read-only from the host.
 - **Git** uses a default identity (`Koan <koan@noreply.github.com>`), overridable
   by mounting `~/.gitconfig`.
@@ -130,6 +141,7 @@ If either process crashes, the entrypoint restarts it automatically.
 | `instance/missions.docker.md` | `/app/instance/missions.md` | Isolated mission queue (see below) |
 | `./workspace/` | `/app/workspace/` | Project repositories |
 | `./logs/` | `/app/logs/` | Log files |
+| `./claude-auth/` | `/home/koan/.claude/` | Claude CLI auth state (interactive login) |
 | `projects.docker.yaml` | `/app/projects.yaml` | Project configuration |
 | `~/.config/gh` | `/home/koan/.config/gh` | GitHub CLI auth (read-only) |
 
@@ -187,6 +199,9 @@ make docker-test    # Run the test suite inside the container
 # Start in foreground (see logs directly)
 docker compose up --build
 
+# Authenticate Claude CLI interactively (one-time, for subscription users)
+docker compose run --rm -it koan auth
+
 # Interactive shell inside the container
 docker compose run --rm koan shell
 
@@ -210,10 +225,11 @@ Preview what `setup-docker.sh` would generate without writing files:
 
 ## Troubleshooting
 
-### "ANTHROPIC_API_KEY is required"
+### "Claude CLI is not authenticated"
 
-The container requires `ANTHROPIC_API_KEY` in `.env`. Get one at
-[console.anthropic.com](https://console.anthropic.com/settings/keys).
+The container needs one of:
+- **API key**: Set `ANTHROPIC_API_KEY` in `.env` ([console.anthropic.com](https://console.anthropic.com/settings/keys))
+- **Interactive login**: Run `docker compose run --rm -it koan auth` and follow the browser URL
 
 ### Permission errors on workspace files
 
