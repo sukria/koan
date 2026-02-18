@@ -175,13 +175,12 @@ def format_message(raw_content: str, soul: str, prefs: str,
         )
 
         if result.returncode == 0 and result.stdout.strip():
+            from app.text_utils import strip_markdown
+
             formatted = result.stdout.strip()
 
             # Safety check: remove any remaining markdown artifacts
-            formatted = formatted.replace("```", "")
-            formatted = formatted.replace("**", "")
-            formatted = formatted.replace("__", "")
-            formatted = formatted.replace("~~", "")
+            formatted = strip_markdown(formatted)
 
             return formatted
         else:
@@ -206,15 +205,14 @@ def fallback_format(raw_content: str) -> str:
     Returns:
         Minimally cleaned message
     """
-    # Remove markdown artifacts
-    cleaned = raw_content
-    for symbol in ["```", "**", "__", "~~", "##", "#"]:
-        cleaned = cleaned.replace(symbol, "")
+    from app.text_utils import strip_markdown, DEFAULT_MAX_LENGTH
+
+    cleaned = strip_markdown(raw_content)
     # Strip list markers at line start
     cleaned = re.sub(r'^[\-\*>]\s+', '', cleaned, flags=re.MULTILINE)
-    # Truncate for smartphone (Telegram limit is 4096, keep 2000 for readability)
-    if len(cleaned) > 2000:
-        cleaned = cleaned[:1997] + "..."
+    # Truncate for smartphone readability
+    if len(cleaned) > DEFAULT_MAX_LENGTH:
+        cleaned = cleaned[:DEFAULT_MAX_LENGTH - 3] + "..."
     return cleaned.strip()
 
 
