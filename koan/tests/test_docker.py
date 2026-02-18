@@ -104,6 +104,10 @@ class TestDockerfile:
         assert "/host-bin" not in self.dockerfile
         assert "/host-node" not in self.dockerfile
 
+    def test_sets_ipv4_node_options(self):
+        """NODE_OPTIONS should force IPv4 for OAuth callback server binding."""
+        assert "dns-result-order=ipv4first" in self.dockerfile
+
 
 class TestEntrypoint:
     """Validate docker-entrypoint.sh structure and correctness."""
@@ -174,6 +178,10 @@ class TestEntrypoint:
         """Should support 'auth' command for interactive login."""
         assert "auth)" in self.entrypoint
         assert "claude auth login" in self.entrypoint
+
+    def test_auth_section_explains_callback_flow(self):
+        """Auth section should explain host networking for OAuth callback."""
+        assert "make docker-auth" in self.entrypoint
 
     def test_checks_copilot_auth_dir(self):
         """Should check for ~/.copilot directory."""
@@ -414,6 +422,10 @@ class TestDockerCompose:
             assert not re.match(r'^-\s*"\d+:\d+"', line), \
                 f"Port exposed by default: {line}"
 
+    def test_auth_command_references_docker_auth(self):
+        """Auth comments should reference make docker-auth for OAuth."""
+        assert "docker-auth" in self.compose
+
     def test_no_named_volumes(self):
         """Bind mounts preferred over named volumes for transparency."""
         # Named volumes use a volumes: section at the root level
@@ -449,10 +461,18 @@ class TestMakefileDockerTargets:
     def test_docker_test_target(self):
         assert "docker-test:" in self.makefile
 
+    def test_docker_auth_target(self):
+        assert "docker-auth:" in self.makefile
+
+    def test_docker_auth_uses_auth_compose(self):
+        """docker-auth should use docker-compose.auth.yml for host networking."""
+        assert "docker-compose.auth.yml" in self.makefile
+
     def test_docker_phony_declarations(self):
         """Docker targets should be declared .PHONY."""
         assert "docker-setup" in self.makefile
         assert "docker-up" in self.makefile
+        assert "docker-auth" in self.makefile
 
 
 class TestGitIgnoreDockerEntries:

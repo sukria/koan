@@ -6,7 +6,7 @@ export
 .PHONY: awake run errand-run errand-awake dashboard
 .PHONY: ollama logs
 .PHONY: install-systemctl-service uninstall-systemctl-service
-.PHONY: docker-setup docker-up docker-down docker-logs docker-test
+.PHONY: docker-setup docker-up docker-down docker-logs docker-test docker-auth
 
 PYTHON_BIN ?= python3
 
@@ -141,3 +141,6 @@ docker-logs:
 
 docker-test:
 	docker compose run --rm koan test
+
+docker-auth:
+	docker compose -f docker-compose.yml -f docker-compose.auth.yml run --rm -it --build koan auth
