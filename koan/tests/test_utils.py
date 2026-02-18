@@ -650,7 +650,9 @@ class TestGetStartOnPause:
 class TestGetKnownProjects:
     """Tests for get_known_projects() — returns List[Tuple[str, str]]."""
 
-    def test_parses_koan_projects_env(self, monkeypatch):
+    def test_parses_koan_projects_env(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         monkeypatch.setenv("KOAN_PROJECTS", "koan:/home/koan;web:/home/web")
         from app.utils import get_known_projects
         result = get_known_projects()
@@ -658,33 +660,43 @@ class TestGetKnownProjects:
         assert result[0] == ("koan", "/home/koan")
         assert result[1] == ("web", "/home/web")
 
-    def test_sorted_alphabetically(self, monkeypatch):
+    def test_sorted_alphabetically(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         monkeypatch.setenv("KOAN_PROJECTS", "zebra:/z;alpha:/a")
         from app.utils import get_known_projects
         result = get_known_projects()
         assert result[0][0] == "alpha"
         assert result[1][0] == "zebra"
 
-    def test_project_path_no_longer_supported(self, monkeypatch):
+    def test_project_path_no_longer_supported(self, tmp_path, monkeypatch):
         """KOAN_PROJECT_PATH is no longer a fallback for get_known_projects()."""
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         monkeypatch.delenv("KOAN_PROJECTS", raising=False)
         monkeypatch.setenv("KOAN_PROJECT_PATH", "/single/path")
         from app.utils import get_known_projects
         assert get_known_projects() == []
 
-    def test_empty_when_no_config(self, monkeypatch):
+    def test_empty_when_no_config(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         monkeypatch.delenv("KOAN_PROJECTS", raising=False)
         from app.utils import get_known_projects
         assert get_known_projects() == []
 
-    def test_handles_whitespace(self, monkeypatch):
+    def test_handles_whitespace(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         monkeypatch.setenv("KOAN_PROJECTS", " koan : /home/koan ; web : /home/web ")
         from app.utils import get_known_projects
         result = get_known_projects()
         assert len(result) == 2
         assert result[0] == ("koan", "/home/koan")
 
-    def test_skips_malformed_entries(self, monkeypatch):
+    def test_skips_malformed_entries(self, tmp_path, monkeypatch):
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         monkeypatch.setenv("KOAN_PROJECTS", "koan:/home/koan;badentry;web:/home/web")
         from app.utils import get_known_projects
         result = get_known_projects()

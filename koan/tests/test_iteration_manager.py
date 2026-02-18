@@ -548,8 +548,9 @@ class TestPlanIteration:
     @patch("app.pick_mission.pick_mission", return_value="")
     @patch("app.usage_estimator.cmd_refresh")
     @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("app.iteration_manager._check_schedule", return_value=None)
     @patch("random.randint", return_value=99)  # No contemplation
-    def test_autonomous_mode(self, mock_rand, mock_focus, mock_refresh, mock_pick,
+    def test_autonomous_mode(self, mock_rand, mock_schedule, mock_focus, mock_refresh, mock_pick,
                              instance_dir, koan_root, usage_state):
         usage_md = instance_dir / "usage.md"
         usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
@@ -572,8 +573,9 @@ class TestPlanIteration:
     @patch("app.pick_mission.pick_mission", return_value="")
     @patch("app.usage_estimator.cmd_refresh")
     @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("app.iteration_manager._check_schedule", return_value=None)
     @patch("random.randint", return_value=3)  # Contemplation triggers (< 10%)
-    def test_contemplative_mode(self, mock_rand, mock_focus, mock_refresh, mock_pick,
+    def test_contemplative_mode(self, mock_rand, mock_schedule, mock_focus, mock_refresh, mock_pick,
                                 instance_dir, koan_root, usage_state):
         usage_md = instance_dir / "usage.md"
         usage_md.write_text("Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n")
@@ -1419,9 +1421,10 @@ projects:
     @patch("app.usage_estimator.cmd_refresh")
     @patch("app.iteration_manager._filter_exploration_projects")
     @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("app.iteration_manager._check_schedule", return_value=None)
     @patch("random.randint", return_value=3)  # Would trigger contemplation
     def test_contemplation_uses_filtered_project(
-        self, mock_rand, mock_focus, mock_filter, mock_refresh, mock_pick,
+        self, mock_rand, mock_schedule, mock_focus, mock_filter, mock_refresh, mock_pick,
         instance_dir, koan_root, usage_state,
     ):
         """Contemplative sessions use exploration-filtered project list."""

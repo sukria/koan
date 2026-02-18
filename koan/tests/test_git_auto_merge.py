@@ -81,7 +81,8 @@ class TestGetAutoMergeConfig:
         assert result["strategy"] == "merge"  # Overridden via projects.yaml
         assert result["enabled"] is True  # Inherited from defaults
 
-    def test_missing_config_section(self):
+    @patch("app.projects_config.load_projects_config", return_value=None)
+    def test_missing_config_section(self, mock_projects):
         """When git_auto_merge section missing, return safe defaults."""
         config = {}
         result = get_auto_merge_config(config, "koan")
@@ -343,7 +344,8 @@ class TestGetAuthorEnv:
 # --- Integration Tests ---
 
 class TestIntegration:
-    def test_full_config_resolution_global_only(self):
+    @patch("app.projects_config.load_projects_config", return_value=None)
+    def test_full_config_resolution_global_only(self, mock_projects):
         """Test full config resolution uses global config.yaml settings."""
         config = {
             "git_auto_merge": {

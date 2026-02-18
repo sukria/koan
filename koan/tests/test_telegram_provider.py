@@ -28,13 +28,15 @@ class TestConfigure:
         assert p._chat_id == "123"
         assert "tok" in p._api_base
 
-    def test_missing_token(self, monkeypatch):
+    @patch("app.utils.load_dotenv")
+    def test_missing_token(self, mock_dotenv, monkeypatch):
         monkeypatch.delenv("KOAN_TELEGRAM_TOKEN", raising=False)
         monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
         p = TelegramProvider()
         assert p.configure() is False
 
-    def test_missing_chat_id(self, monkeypatch):
+    @patch("app.utils.load_dotenv")
+    def test_missing_chat_id(self, mock_dotenv, monkeypatch):
         monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
         monkeypatch.delenv("KOAN_TELEGRAM_CHAT_ID", raising=False)
         p = TelegramProvider()

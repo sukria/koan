@@ -44,7 +44,8 @@ class TestBuildMissionCommand:
         from app.mission_runner import build_mission_command
 
         cmd = build_mission_command(prompt="test", extra_flags="")
-        assert "--model" not in cmd
+        base = build_mission_command(prompt="test")
+        assert len(cmd) == len(base)
 
     @patch("app.cli_provider.get_provider_name", return_value="claude")
     def test_whitespace_extra_flags_ignored(self, mock_provider):
@@ -269,7 +270,8 @@ class TestCheckAutoMerge:
 
     @patch("app.git_auto_merge.auto_merge_branch")
     @patch("app.git_sync.run_git", return_value="koan/my-feature")
-    def test_checks_koan_branch(self, mock_git, mock_merge, tmp_path):
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    def test_checks_koan_branch(self, mock_prefix, mock_git, mock_merge, tmp_path):
         from app.mission_runner import check_auto_merge
 
         result = check_auto_merge(str(tmp_path), "project", str(tmp_path))
