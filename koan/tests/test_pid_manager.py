@@ -19,6 +19,8 @@ from app.pid_manager import (
     _needs_ollama,
     _log_dir,
     _open_log_file,
+    _launch_python_process,
+    _wait_for_exit,
     acquire_pidfile,
     release_pidfile,
     acquire_pid,
@@ -1502,3 +1504,346 @@ class TestPrintStackResults:
         assert code == 0
         output = capsys.readouterr().out
         assert "make logs" in output
+
+
+# ---------------------------------------------------------------------------
+# _launch_python_process
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchPythonProcess:
+    """Tests for _launch_python_process() — core process launcher."""
+
+    def test_returns_already_running_if_pidfile_locked(self, tmp_path):
+        """Should return early if check_pidfile() finds a running process."""
+        with patch("app.pid_manager.check_pidfile", return_value=1234):
+            ok, msg = _launch_python_process(tmp_path, "app/run.py", "run", 1.0)
+        assert not ok
+        assert "already running" in msg.lower()
+        assert "1234" in msg
+
+    def test_returns_already_running_for_awake(self, tmp_path):
+        with patch("app.pid_manager.check_pidfile", return_value=5678):
+            ok, msg = _launch_python_process(tmp_path, "app/awake.py", "awake", 1.0)
+        assert not ok
+        assert "Awake already running (PID 5678)" == msg
+
+    def test_builds_correct_environment(self, tmp_path):
+        """Verify KOAN_ROOT, PYTHONPATH, KOAN_FORCE_COLOR are set."""
+        captured_env = {}
+
+        def capture_popen(cmd, **kwargs):
+            captured_env.update(kwargs.get("env", {}))
+            return MagicMock()
+
+        with patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", side_effect=capture_popen), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 999.0]
+            _launch_python_process(tmp_path, "app/run.py", "run", 0.1)
+
+        assert captured_env["KOAN_ROOT"] == str(tmp_path)
+        assert captured_env["PYTHONPATH"] == str(tmp_path / "koan")
+        assert captured_env["KOAN_FORCE_COLOR"] == "1"
+
+    def test_uses_start_new_session(self, tmp_path):
+        """Process must be launched in its own session group."""
+        captured_kwargs = {}
+
+        def capture_popen(cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
+
+        with patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", side_effect=capture_popen), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 999.0]
+            _launch_python_process(tmp_path, "app/run.py", "run", 0.1)
+
+        assert captured_kwargs["start_new_session"] is True
+        assert captured_kwargs["stdin"] == subprocess.DEVNULL
+
+    def test_returns_success_when_pid_appears(self, tmp_path):
+        """PID file appearing within timeout -> success."""
+        call_count = [0]
+
+        def check_pid(*args):
+            call_count[0] += 1
+            if call_count[0] >= 3:
+                return 42
+            return None
+
+        with patch("app.pid_manager.check_pidfile", side_effect=check_pid), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", return_value=MagicMock()), \
+             patch("app.pid_manager.time") as mock_time:
+            # First call: check if already running (None)
+            # Verification loop: monotonic calls for deadline check
+            mock_time.monotonic.side_effect = [0.0, 0.1, 0.2, 0.3]
+            mock_time.sleep = MagicMock()
+            ok, msg = _launch_python_process(tmp_path, "app/run.py", "run", 5.0)
+
+        assert ok
+        assert "Agent loop started" in msg
+        assert "42" in msg
+
+    def test_bridge_label_for_awake(self, tmp_path):
+        """process_name='awake' should use 'Bridge' label."""
+        call_count = [0]
+
+        def check_pid(*args):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                return 99
+            return None
+
+        with patch("app.pid_manager.check_pidfile", side_effect=check_pid), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", return_value=MagicMock()), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.1, 0.2]
+            mock_time.sleep = MagicMock()
+            ok, msg = _launch_python_process(tmp_path, "app/awake.py", "awake", 5.0)
+
+        assert ok
+        assert "Bridge started" in msg
+
+    def test_returns_failure_when_pid_never_appears(self, tmp_path):
+        """PID file never appears -> timeout failure."""
+        with patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", return_value=MagicMock()), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 999.0]
+            mock_time.sleep = MagicMock()
+            ok, msg = _launch_python_process(tmp_path, "app/run.py", "run", 1.0)
+
+        assert not ok
+        assert "PID not detected" in msg
+
+    def test_closes_log_on_popen_exception(self, tmp_path):
+        """Log file must be closed if Popen raises."""
+        mock_log = MagicMock()
+
+        with patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager._open_log_file", return_value=mock_log), \
+             patch("subprocess.Popen", side_effect=OSError("spawn failed")):
+            ok, msg = _launch_python_process(tmp_path, "app/run.py", "run", 1.0)
+
+        assert not ok
+        assert "Failed to launch" in msg
+        assert "spawn failed" in msg
+        mock_log.close.assert_called_once()
+
+    def test_closes_log_on_success(self, tmp_path):
+        """Log file handle must be closed in the parent after Popen succeeds."""
+        mock_log = MagicMock()
+
+        with patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager._open_log_file", return_value=mock_log), \
+             patch("subprocess.Popen", return_value=MagicMock()), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 999.0]
+            mock_time.sleep = MagicMock()
+            _launch_python_process(tmp_path, "app/run.py", "run", 0.1)
+
+        mock_log.close.assert_called_once()
+
+    def test_uses_sys_executable(self, tmp_path):
+        """Should use sys.executable as the Python binary."""
+        captured_cmd = []
+
+        def capture_popen(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            return MagicMock()
+
+        with patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", side_effect=capture_popen), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 999.0]
+            _launch_python_process(tmp_path, "app/run.py", "run", 0.1)
+
+        assert captured_cmd[0] == sys.executable
+        assert captured_cmd[1] == "app/run.py"
+
+    def test_cwd_is_koan_dir(self, tmp_path):
+        """Working directory should be koan_root/koan."""
+        captured_kwargs = {}
+
+        def capture_popen(cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
+
+        with patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", side_effect=capture_popen), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 999.0]
+            _launch_python_process(tmp_path, "app/run.py", "run", 0.1)
+
+        assert captured_kwargs["cwd"] == str(tmp_path / "koan")
+
+    def test_stderr_merged_to_stdout(self, tmp_path):
+        """stderr should be merged into stdout (same log file)."""
+        captured_kwargs = {}
+
+        def capture_popen(cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            return MagicMock()
+
+        with patch("app.pid_manager.check_pidfile", return_value=None), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", side_effect=capture_popen), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 999.0]
+            _launch_python_process(tmp_path, "app/run.py", "run", 0.1)
+
+        assert captured_kwargs["stderr"] == subprocess.STDOUT
+
+    def test_verification_polls_with_sleep(self, tmp_path):
+        """Verification loop should sleep between checks."""
+        call_count = [0]
+
+        def check_pid(*args):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return None  # Initial check: not running
+            if call_count[0] == 4:
+                return 77  # Found on 3rd poll
+            return None
+
+        with patch("app.pid_manager.check_pidfile", side_effect=check_pid), \
+             patch("app.pid_manager._open_log_file", return_value=MagicMock()), \
+             patch("subprocess.Popen", return_value=MagicMock()), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.1, 0.4, 0.7, 1.0]
+            mock_time.sleep = MagicMock()
+            ok, msg = _launch_python_process(tmp_path, "app/run.py", "run", 5.0)
+
+        assert ok
+        # Sleep should have been called during polling
+        mock_time.sleep.assert_called_with(0.3)
+
+
+# ---------------------------------------------------------------------------
+# _wait_for_exit
+# ---------------------------------------------------------------------------
+
+
+class TestWaitForExit:
+    """Tests for _wait_for_exit() — graceful process termination waiter."""
+
+    def test_returns_true_when_child_reaped(self):
+        """waitpid successfully reaps a child -> True."""
+        with patch("os.waitpid", return_value=(42, 0)), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.1]
+            result = _wait_for_exit(42, 5.0)
+        assert result is True
+
+    def test_returns_true_when_process_dead_via_kill_probe(self):
+        """Non-child process dies -> _is_process_alive returns False -> True."""
+        with patch("os.waitpid", side_effect=ChildProcessError("not our child")), \
+             patch("app.pid_manager._is_process_alive", return_value=False), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.1]
+            result = _wait_for_exit(999, 5.0)
+        assert result is True
+
+    def test_returns_false_when_timeout_exceeded(self):
+        """Process still alive after timeout -> False."""
+        with patch("os.waitpid", side_effect=ChildProcessError()), \
+             patch("app.pid_manager._is_process_alive", return_value=True), \
+             patch("app.pid_manager.time") as mock_time:
+            # First monotonic: start, second: already past deadline
+            mock_time.monotonic.side_effect = [0.0, 0.1, 999.0]
+            mock_time.sleep = MagicMock()
+            result = _wait_for_exit(123, 1.0)
+        assert result is False
+
+    def test_polls_with_sleep_intervals(self):
+        """Should sleep 0.2s between polls."""
+        poll_count = [0]
+
+        def fake_waitpid(pid, flags):
+            poll_count[0] += 1
+            raise ChildProcessError()
+
+        with patch("os.waitpid", side_effect=fake_waitpid), \
+             patch("app.pid_manager._is_process_alive", return_value=True), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.1, 0.3, 999.0]
+            mock_time.sleep = MagicMock()
+            _wait_for_exit(123, 1.0)
+
+        mock_time.sleep.assert_called_with(0.2)
+
+    def test_waitpid_zero_means_not_yet_exited(self):
+        """waitpid returning (0, 0) means child hasn't exited yet."""
+        call_count = [0]
+
+        def fake_waitpid(pid, flags):
+            call_count[0] += 1
+            if call_count[0] >= 3:
+                return (pid, 0)  # Reaped
+            return (0, 0)  # Not exited yet
+
+        with patch("os.waitpid", side_effect=fake_waitpid), \
+             patch("app.pid_manager._is_process_alive", return_value=True), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.1, 0.3, 0.5, 0.7]
+            mock_time.sleep = MagicMock()
+            result = _wait_for_exit(42, 5.0)
+
+        assert result is True
+
+    def test_child_process_error_falls_through_to_kill_probe(self):
+        """ChildProcessError means not our child — verify kill probe is used."""
+        alive_checks = []
+
+        def track_alive(pid):
+            alive_checks.append(pid)
+            return False  # Process is dead
+
+        with patch("os.waitpid", side_effect=ChildProcessError()), \
+             patch("app.pid_manager._is_process_alive", side_effect=track_alive), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.1]
+            result = _wait_for_exit(789, 5.0)
+
+        assert result is True
+        assert 789 in alive_checks
+
+    def test_final_alive_check_on_timeout(self):
+        """After loop exits, final _is_process_alive determines return value."""
+        check_count = [0]
+
+        def dynamic_alive(pid):
+            check_count[0] += 1
+            if check_count[0] <= 2:
+                return True  # Alive during loop
+            return False  # Dead on final check
+
+        with patch("os.waitpid", side_effect=ChildProcessError()), \
+             patch("app.pid_manager._is_process_alive", side_effect=dynamic_alive), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.1, 0.3, 999.0]
+            mock_time.sleep = MagicMock()
+            result = _wait_for_exit(42, 1.0)
+
+        # Process died just as timeout expired — final check returns True
+        assert result is True
+
+    def test_zero_timeout_checks_once(self):
+        """With timeout=0, should still do at least a final alive check."""
+        with patch("os.waitpid", side_effect=ChildProcessError()), \
+             patch("app.pid_manager._is_process_alive", return_value=False), \
+             patch("app.pid_manager.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 999.0]
+            mock_time.sleep = MagicMock()
+            result = _wait_for_exit(42, 0)
+
+        assert result is True
