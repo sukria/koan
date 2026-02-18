@@ -17,14 +17,15 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
+from app.bounded_set import BoundedSet
 from app.github import api, run_gh
 
 log = logging.getLogger(__name__)
 
 # In-memory set of processed comment IDs (resets on restart).
-# Bounded: evict all entries when limit is reached.
+# Bounded: FIFO eviction when limit is reached (oldest entries removed first).
 _MAX_PROCESSED_COMMENTS = 10000
-_processed_comments: Set[str] = set()
+_processed_comments: BoundedSet = BoundedSet(maxlen=_MAX_PROCESSED_COMMENTS)
 
 # Regex for extracting @mention commands, skipping code blocks
 _CODE_BLOCK_RE = re.compile(r'```.*?```|`[^`]+`', re.DOTALL)
@@ -202,8 +203,6 @@ def check_already_processed(comment_id: str, bot_username: str,
             for reaction in reactions:
                 if (reaction.get("user", {}).get("login") == bot_username
                         and reaction.get("content") == "+1"):
-                    if len(_processed_comments) >= _MAX_PROCESSED_COMMENTS:
-                        _processed_comments.clear()
                     _processed_comments.add(comment_id)
                     return True
     except (RuntimeError, json.JSONDecodeError):
@@ -230,8 +229,6 @@ def add_reaction(owner: str, repo: str, comment_id: str, emoji: str = "+1") -> b
             method="POST",
             extra_args=["-f", f"content={emoji}"],
         )
-        if len(_processed_comments) >= _MAX_PROCESSED_COMMENTS:
-            _processed_comments.clear()
         _processed_comments.add(comment_id)
         return True
     except RuntimeError:

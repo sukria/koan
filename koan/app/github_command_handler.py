@@ -14,6 +14,7 @@ import logging
 import re
 from typing import List, Optional, Set, Tuple
 
+from app.bounded_set import BoundedSet
 from app.github_config import get_github_authorized_users, get_github_nickname
 from app.github_notifications import (
     add_reaction,
@@ -32,9 +33,9 @@ from app.skills import SkillRegistry
 log = logging.getLogger(__name__)
 
 # Track error replies to avoid duplicate error messages per comment.
-# Bounded: evict oldest entries when limit is reached.
+# Bounded: FIFO eviction when limit is reached (oldest entries removed first).
 _MAX_TRACKED_ENTRIES = 10000
-_error_replies: Set[str] = set()
+_error_replies: BoundedSet = BoundedSet(maxlen=_MAX_TRACKED_ENTRIES)
 
 
 def validate_command(command_name: str, registry: SkillRegistry) -> Optional[object]:
@@ -401,8 +402,6 @@ def post_error_reply(
             method="POST",
             extra_args=["-f", f"body={body}"],
         )
-        if len(_error_replies) >= _MAX_TRACKED_ENTRIES:
-            _error_replies.clear()
         _error_replies.add(error_key)
 
         # Also add reaction to mark as processed
