@@ -88,6 +88,10 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 
 ENV KOAN_ROOT=/app
 ENV PYTHONPATH=/app/koan
+# Force Node.js to resolve localhost to IPv4 first — fixes Claude CLI's
+# OAuth callback server binding to [::1] only (IPv6), which breaks port
+# forwarding in Docker. See: anthropics/claude-code#9376
+ENV NODE_OPTIONS="--dns-result-order=ipv4first"
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["start"]

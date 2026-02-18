@@ -116,7 +116,7 @@ check_claude_auth() {
     # Neither method works
     error "Claude CLI is not authenticated"
     log "  Option 1: Set ANTHROPIC_API_KEY in .env (API billing)"
-    log "  Option 2: Run 'docker compose run --rm -it --build koan auth' (subscription login)"
+    log "  Option 2: Run 'make docker-auth' (subscription login — uses host networking for OAuth)"
     return 1
 }
 
@@ -329,8 +329,20 @@ case "$COMMAND" in
             success "Already authenticated — no action needed"
             exit 0
         fi
+        stty sane 2>/dev/null || true
         log "Starting interactive Claude CLI login..."
-        log "A browser URL will appear — open it to complete authentication."
+        log "A URL will appear — open it in your host browser."
+        log ""
+        log "This requires host networking so the OAuth callback can reach"
+        log "the container. If you didn't use host networking, press Ctrl-C and run:"
+        log "  make docker-auth"
+        log ""
+        log "If auth still hangs after completing sign-in in the browser:"
+        log "  1. Copy the full URL from the browser address bar (the localhost one)"
+        log "  2. In another terminal, run:"
+        log "     docker exec -it \$(docker ps -qf ancestor=koan-koan) \\"
+        log "       curl -s 'PASTE_CALLBACK_URL_HERE'"
+        log ""
         log "Auth state will persist in the mounted claude-auth/ volume."
         exec claude auth login
         ;;
