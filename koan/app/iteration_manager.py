@@ -118,6 +118,44 @@ def _inject_recurring(instance_dir: Path):
         return []
 
 
+def _fallback_mission_extract(instance_dir: Path, projects_str: str,
+                              context_msg: str):
+    """Attempt direct mission extraction when the picker fails or returns empty.
+
+    Safety net that bypasses the Claude-based picker and reads missions.md
+    directly.  Shared by both the "picker returned nothing" and "picker
+    crashed" branches inside ``_pick_mission()``.
+
+    Returns:
+        (project_name, mission_title) or (None, None)
+    """
+    try:
+        from app.missions import count_pending
+        from app.pick_mission import fallback_extract
+
+        missions_path = instance_dir / "missions.md"
+        if not missions_path.exists():
+            return None, None
+
+        pending_count = count_pending(missions_path.read_text())
+        if pending_count <= 0:
+            return None, None
+
+        _log_iteration("error",
+            f"{context_msg} — {pending_count} pending mission(s) exist "
+            f"— attempting direct extraction")
+        project, title = fallback_extract(missions_path, projects_str)
+        if project and title:
+            _log_iteration("mission",
+                f"Direct fallback picked: [{project}] {title[:60]}")
+            return project, title
+
+        _log_iteration("error", "Direct fallback also failed to extract a mission")
+    except Exception as e:
+        _log_iteration("error", f"Fallback mission extract failed: {e}")
+    return None, None
+
+
 def _pick_mission(instance_dir: Path, projects_str: str, run_num: int,
                   autonomous_mode: str, last_project: str):
     """Pick next mission from the queue.
@@ -135,45 +173,15 @@ def _pick_mission(instance_dir: Path, projects_str: str, run_num: int,
             parts = result.split(":", 1)
             if len(parts) == 2:
                 return parts[0], parts[1]
-        # pick_mission returned empty — check if there really are pending missions
-        # that we're failing to pick (safety net for silent picker failures)
-        try:
-            from app.missions import count_pending
-            missions_path = instance_dir / "missions.md"
-            if missions_path.exists():
-                pending_count = count_pending(missions_path.read_text())
-                if pending_count > 0:
-                    _log_iteration("error",
-                        f"Mission picker returned nothing but {pending_count} "
-                        f"pending mission(s) exist — attempting direct extraction")
-                    from app.pick_mission import fallback_extract
-                    project, title = fallback_extract(missions_path, projects_str)
-                    if project and title:
-                        _log_iteration("mission", f"Direct fallback picked: [{project}] {title[:60]}")
-                        return project, title
-                    _log_iteration("error", "Direct fallback also failed to extract a mission")
-        except Exception as e2:
-            _log_iteration("error", f"Safety net mission pick failed: {e2}")
-        return None, None
+        # pick_mission returned empty — safety net for silent picker failures
+        return _fallback_mission_extract(
+            instance_dir, projects_str,
+            "Mission picker returned nothing but")
     except Exception as e:
         _log_iteration("error", f"Mission picker error: {e}")
-        # Same safety net: try direct extraction on exception
-        try:
-            from app.missions import count_pending
-            from app.pick_mission import fallback_extract
-            missions_path = instance_dir / "missions.md"
-            if missions_path.exists():
-                pending_count = count_pending(missions_path.read_text())
-                if pending_count > 0:
-                    _log_iteration("error",
-                        f"Picker crashed but {pending_count} pending mission(s) exist — "
-                        f"attempting direct extraction")
-                    project, title = fallback_extract(missions_path, projects_str)
-                    if project and title:
-                        return project, title
-        except Exception as e:
-            _log_iteration("error", f"Fallback mission extract failed: {e}")
-        return None, None
+        return _fallback_mission_extract(
+            instance_dir, projects_str,
+            "Picker crashed but")
 
 
 def _projects_to_str(projects: List[Tuple[str, str]]) -> str:
@@ -377,6 +385,29 @@ def _check_schedule():
         return None
 
 
+def _make_result(*, action, project_name, project_path="",
+                 mission_title="", autonomous_mode, focus_area="",
+                 available_pct, decision_reason, display_lines,
+                 recurring_injected, focus_remaining=None,
+                 schedule_mode="normal", error=None):
+    """Build a standardised iteration-plan result dict."""
+    return {
+        "action": action,
+        "project_name": project_name,
+        "project_path": project_path or "",
+        "mission_title": mission_title,
+        "autonomous_mode": autonomous_mode,
+        "focus_area": focus_area,
+        "available_pct": available_pct,
+        "decision_reason": decision_reason,
+        "display_lines": display_lines,
+        "recurring_injected": recurring_injected,
+        "focus_remaining": focus_remaining,
+        "schedule_mode": schedule_mode,
+        "error": error,
+    }
+
+
 def plan_iteration(
     instance_dir: str,
     koan_root: str,
@@ -482,21 +513,18 @@ def plan_iteration(
 
         if project_path is None:
             known = _get_known_project_names(projects)
-            return {
-                "action": "error",
-                "project_name": project_name,
-                "project_path": "",
-                "mission_title": mission_title,
-                "autonomous_mode": autonomous_mode,
-                "focus_area": "",
-                "available_pct": available_pct,
-                "decision_reason": decision_reason,
-                "display_lines": display_lines,
-                "recurring_injected": recurring_injected,
-                "focus_remaining": None,
-                "schedule_mode": schedule_state.mode if schedule_state else "normal",
-                "error": f"Unknown project '{project_name}'. Known: {', '.join(known)}",
-            }
+            return _make_result(
+                action="error",
+                project_name=project_name,
+                mission_title=mission_title,
+                autonomous_mode=autonomous_mode,
+                available_pct=available_pct,
+                decision_reason=decision_reason,
+                display_lines=display_lines,
+                recurring_injected=recurring_injected,
+                schedule_mode=schedule_state.mode if schedule_state else "normal",
+                error=f"Unknown project '{project_name}'. Known: {', '.join(known)}",
+            )
     else:
         # No mission — autonomous mode
         mission_title = ""
@@ -519,21 +547,18 @@ def plan_iteration(
                 wait_reason = "All projects have exploration disabled — waiting for missions"
 
             focus_area = resolve_focus_area(autonomous_mode, has_mission=False)
-            return {
-                "action": wait_action,
-                "project_name": projects[0][0] if projects else "default",
-                "project_path": projects[0][1] if projects else "",
-                "mission_title": "",
-                "autonomous_mode": autonomous_mode,
-                "focus_area": focus_area,
-                "available_pct": available_pct,
-                "decision_reason": wait_reason,
-                "display_lines": display_lines,
-                "recurring_injected": recurring_injected,
-                "focus_remaining": None,
-                "schedule_mode": schedule_state.mode if schedule_state else "normal",
-                "error": None,
-            }
+            return _make_result(
+                action=wait_action,
+                project_name=projects[0][0] if projects else "default",
+                project_path=projects[0][1] if projects else "",
+                autonomous_mode=autonomous_mode,
+                focus_area=focus_area,
+                available_pct=available_pct,
+                decision_reason=wait_reason,
+                display_lines=display_lines,
+                recurring_injected=recurring_injected,
+                schedule_mode=schedule_state.mode if schedule_state else "normal",
+            )
 
         filtered_idx = recommended_idx % len(exploration_projects)
         project_name, project_path = _get_project_by_index(exploration_projects, filtered_idx)
@@ -555,7 +580,7 @@ def plan_iteration(
             from app.utils import get_contemplative_chance
             contemplative_chance = get_contemplative_chance()
         except Exception as e:
-            print(f"[iteration] Contemplative chance load error: {e}", file=sys.stderr)
+            _log_iteration("error", f"Contemplative chance load error: {e}")
             contemplative_chance = 10
 
         if _should_contemplate(autonomous_mode, focus_state is not None,
@@ -571,24 +596,22 @@ def plan_iteration(
                 try:
                     focus_remaining = focus_state.remaining_display()
                 except Exception as e:
-                    print(f"[iteration] Focus state display error: {e}", file=sys.stderr)
+                    _log_iteration("error", f"Focus state display error: {e}")
                     focus_remaining = "unknown"
 
-                return {
-                    "action": action,
-                    "project_name": project_name,
-                    "project_path": project_path or "",
-                    "mission_title": "",
-                    "autonomous_mode": autonomous_mode,
-                    "focus_area": focus_area,
-                    "available_pct": available_pct,
-                    "decision_reason": decision_reason,
-                    "display_lines": display_lines,
-                    "recurring_injected": recurring_injected,
-                    "focus_remaining": focus_remaining,
-                    "schedule_mode": schedule_state.mode if schedule_state else "normal",
-                    "error": None,
-                }
+                return _make_result(
+                    action=action,
+                    project_name=project_name,
+                    project_path=project_path,
+                    autonomous_mode=autonomous_mode,
+                    focus_area=focus_area,
+                    available_pct=available_pct,
+                    decision_reason=decision_reason,
+                    display_lines=display_lines,
+                    recurring_injected=recurring_injected,
+                    focus_remaining=focus_remaining,
+                    schedule_mode=schedule_state.mode if schedule_state else "normal",
+                )
 
             # 6b2: Schedule work_hours — suppress exploration, wait for missions
             if schedule_state is not None and schedule_state.in_work_hours:
@@ -596,21 +619,18 @@ def plan_iteration(
 
                 focus_area = resolve_focus_area(autonomous_mode, has_mission=False)
 
-                return {
-                    "action": action,
-                    "project_name": project_name,
-                    "project_path": project_path or "",
-                    "mission_title": "",
-                    "autonomous_mode": autonomous_mode,
-                    "focus_area": focus_area,
-                    "available_pct": available_pct,
-                    "decision_reason": decision_reason,
-                    "display_lines": display_lines,
-                    "recurring_injected": recurring_injected,
-                    "focus_remaining": None,
-                    "schedule_mode": "work",
-                    "error": None,
-                }
+                return _make_result(
+                    action=action,
+                    project_name=project_name,
+                    project_path=project_path,
+                    autonomous_mode=autonomous_mode,
+                    focus_area=focus_area,
+                    available_pct=available_pct,
+                    decision_reason=decision_reason,
+                    display_lines=display_lines,
+                    recurring_injected=recurring_injected,
+                    schedule_mode="work",
+                )
 
             # 6c: WAIT mode — budget exhausted
             if autonomous_mode == "wait":
@@ -620,21 +640,19 @@ def plan_iteration(
     has_mission = bool(mission_title)
     focus_area = resolve_focus_area(autonomous_mode, has_mission=has_mission)
 
-    return {
-        "action": action,
-        "project_name": project_name,
-        "project_path": project_path or "",
-        "mission_title": mission_title,
-        "autonomous_mode": autonomous_mode,
-        "focus_area": focus_area,
-        "available_pct": available_pct,
-        "decision_reason": decision_reason,
-        "display_lines": display_lines,
-        "recurring_injected": recurring_injected,
-        "focus_remaining": None,
-        "schedule_mode": schedule_state.mode if schedule_state else "normal",
-        "error": None,
-    }
+    return _make_result(
+        action=action,
+        project_name=project_name,
+        project_path=project_path,
+        mission_title=mission_title,
+        autonomous_mode=autonomous_mode,
+        focus_area=focus_area,
+        available_pct=available_pct,
+        decision_reason=decision_reason,
+        display_lines=display_lines,
+        recurring_injected=recurring_injected,
+        schedule_mode=schedule_state.mode if schedule_state else "normal",
+    )
 
 
 def main():

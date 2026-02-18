@@ -15,11 +15,13 @@ from app.iteration_manager import (
     FilterResult,
     _check_focus,
     _check_schedule,
+    _fallback_mission_extract,
     _filter_exploration_projects,
     _get_known_project_names,
     _get_project_by_index,
     _get_usage_decision,
     _inject_recurring,
+    _make_result,
     _pick_mission,
     _refresh_usage,
     _resolve_project_path,
@@ -244,6 +246,144 @@ class TestInjectRecurring:
         with patch("app.recurring.check_and_inject", side_effect=Exception("boom")):
             result = _inject_recurring(instance_dir)
             assert result == []
+
+
+# === Tests: _fallback_mission_extract ===
+
+
+class TestFallbackMissionExtract:
+
+    def test_no_missions_file(self, tmp_path):
+        """Returns (None, None) when missions.md doesn't exist."""
+        inst = tmp_path / "instance"
+        inst.mkdir()
+        project, title = _fallback_mission_extract(inst, PROJECTS_STR, "test context")
+        assert project is None
+        assert title is None
+
+    def test_no_pending_missions(self, tmp_path):
+        """Returns (None, None) when no pending missions."""
+        inst = tmp_path / "instance"
+        inst.mkdir()
+        (inst / "missions.md").write_text("# Missions\n\n## Pending\n\n## Done\n")
+        project, title = _fallback_mission_extract(inst, PROJECTS_STR, "test context")
+        assert project is None
+        assert title is None
+
+    @patch("app.pick_mission.fallback_extract", return_value=("koan", "Fix bug"))
+    def test_extracts_pending_mission(self, mock_extract, tmp_path):
+        """Extracts mission when pending count > 0."""
+        inst = tmp_path / "instance"
+        inst.mkdir()
+        (inst / "missions.md").write_text(
+            "# Missions\n\n## Pending\n- [project:koan] Fix bug\n\n## Done\n"
+        )
+        project, title = _fallback_mission_extract(inst, PROJECTS_STR, "test context")
+        assert project == "koan"
+        assert title == "Fix bug"
+
+    @patch("app.pick_mission.fallback_extract", return_value=(None, None))
+    def test_fallback_extract_fails(self, mock_extract, tmp_path):
+        """Returns (None, None) when fallback_extract fails to find a mission."""
+        inst = tmp_path / "instance"
+        inst.mkdir()
+        (inst / "missions.md").write_text(
+            "# Missions\n\n## Pending\n- [project:koan] Fix bug\n\n## Done\n"
+        )
+        project, title = _fallback_mission_extract(inst, PROJECTS_STR, "test context")
+        assert project is None
+        assert title is None
+
+    @patch("app.pick_mission.fallback_extract", side_effect=Exception("boom"))
+    def test_handles_import_error(self, mock_extract, tmp_path):
+        """Returns (None, None) on exception from fallback_extract."""
+        inst = tmp_path / "instance"
+        inst.mkdir()
+        (inst / "missions.md").write_text(
+            "# Missions\n\n## Pending\n- [project:koan] Fix bug\n\n## Done\n"
+        )
+        project, title = _fallback_mission_extract(inst, PROJECTS_STR, "test context")
+        assert project is None
+        assert title is None
+
+
+# === Tests: _make_result ===
+
+
+class TestMakeResult:
+
+    def test_returns_all_keys(self):
+        """Result dict contains all required keys."""
+        result = _make_result(
+            action="mission",
+            project_name="koan",
+            project_path="/path/to/koan",
+            mission_title="Fix the bug",
+            autonomous_mode="implement",
+            focus_area="code quality",
+            available_pct=50,
+            decision_reason="medium budget",
+            display_lines=["line1"],
+            recurring_injected=[],
+        )
+        expected_keys = {
+            "action", "project_name", "project_path", "mission_title",
+            "autonomous_mode", "focus_area", "available_pct", "decision_reason",
+            "display_lines", "recurring_injected", "focus_remaining",
+            "schedule_mode", "error",
+        }
+        assert set(result.keys()) == expected_keys
+
+    def test_defaults(self):
+        """Default values are applied correctly."""
+        result = _make_result(
+            action="autonomous",
+            project_name="koan",
+            autonomous_mode="deep",
+            available_pct=80,
+            decision_reason="high budget",
+            display_lines=[],
+            recurring_injected=[],
+        )
+        assert result["project_path"] == ""
+        assert result["mission_title"] == ""
+        assert result["focus_area"] == ""
+        assert result["focus_remaining"] is None
+        assert result["schedule_mode"] == "normal"
+        assert result["error"] is None
+
+    def test_overrides(self):
+        """Custom values override defaults."""
+        result = _make_result(
+            action="focus_wait",
+            project_name="koan",
+            project_path="/koan",
+            autonomous_mode="implement",
+            available_pct=30,
+            decision_reason="focus active",
+            display_lines=[],
+            recurring_injected=[],
+            focus_remaining="2h 30m",
+            schedule_mode="work",
+            error="something went wrong",
+        )
+        assert result["focus_remaining"] == "2h 30m"
+        assert result["schedule_mode"] == "work"
+        assert result["error"] == "something went wrong"
+
+    def test_none_project_path_becomes_empty(self):
+        """None project_path is coerced to empty string."""
+        result = _make_result(
+            action="error",
+            project_name="unknown",
+            project_path=None,
+            autonomous_mode="implement",
+            available_pct=50,
+            decision_reason="test",
+            display_lines=[],
+            recurring_injected=[],
+        )
+        assert result["project_path"] == ""
 
 
 # === Tests: _pick_mission ===
