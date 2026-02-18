@@ -3,6 +3,7 @@ name: email
 scope: core
 description: Email status and test
 version: 1.0.0
+audience: bridge
 commands:
   - name: email
     description: Email status and test
