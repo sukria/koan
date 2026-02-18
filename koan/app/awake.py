@@ -397,48 +397,73 @@ def flush_outbox():
     ALL outbox messages are formatted via Claude before sending to Telegram.
     This ensures consistent personality, French language, and conversational tone
     regardless of the message source (Claude session, run.py, retrospective).
+
+    The lock is held only during read+clear (microseconds), not during the slow
+    Claude formatting call. This prevents blocking writers (run.py, retrospective)
+    and eliminates the race where content appended during formatting was lost on
+    truncate.
     """
     if not OUTBOX_FILE.exists():
         return
+
+    # Phase 1: Read and clear under lock (fast — microseconds)
+    content = None
     try:
         with open(OUTBOX_FILE, "r+") as f:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            content = f.read().strip()
-            if content:
-                # Scan for potential data leakage before sending
-                scan_result = scan_and_log(content)
-                if scan_result.blocked:
-                    # Write blocked content to quarantine file for human review
-                    quarantine = INSTANCE_DIR / "outbox-quarantine.md"
-                    with open(quarantine, "a") as qf:
-                        from datetime import datetime as _dt
-                        qf.write(f"\n---\n[{_dt.now().isoformat()}] BLOCKED: {scan_result.reason}\n")
-                        qf.write(content[:500])
-                        qf.write("\n")
+            try:
+                content = f.read().strip()
+                if content:
                     f.seek(0)
                     f.truncate()
-                    print(f"[awake] Outbox BLOCKED by scanner: {scan_result.reason}")
-                    fcntl.flock(f, fcntl.LOCK_UN)
-                    return
-
-                # Format through Claude before sending
-                formatted = _format_outbox_message(content)
-                if send_telegram(formatted):
-                    f.seek(0)
-                    f.truncate()
-                    # Show preview of sent message (first 150 chars)
-                    preview = formatted[:150].replace("\n", " ")
-                    if len(formatted) > 150:
-                        preview += "..."
-                    log("outbox", f"Outbox flushed: {preview}")
-                else:
-                    log("error", "Outbox send failed — keeping messages for retry")
-            fcntl.flock(f, fcntl.LOCK_UN)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
     except BlockingIOError:
-        # Another process holds the lock — skip this cycle
-        pass
+        return
     except Exception as e:
-        log("error", f"Outbox error: {e}")
+        log("error", f"Outbox read error: {e}")
+        return
+
+    if not content:
+        return
+
+    # Phase 2: Scan, format, and send (slow — outside lock)
+    scan_result = scan_and_log(content)
+    if scan_result.blocked:
+        quarantine = INSTANCE_DIR / "outbox-quarantine.md"
+        try:
+            with open(quarantine, "a") as qf:
+                from datetime import datetime as _dt
+                qf.write(f"\n---\n[{_dt.now().isoformat()}] BLOCKED: {scan_result.reason}\n")
+                qf.write(content[:500])
+                qf.write("\n")
+        except OSError as e:
+            log("error", f"Quarantine write error: {e}")
+        log("outbox", f"Outbox BLOCKED by scanner: {scan_result.reason}")
+        return
+
+    formatted = _format_outbox_message(content)
+    if send_telegram(formatted):
+        preview = formatted[:150].replace("\n", " ")
+        if len(formatted) > 150:
+            preview += "..."
+        log("outbox", f"Outbox flushed: {preview}")
+    else:
+        log("error", "Outbox send failed — re-queuing for retry")
+        _requeue_outbox(content)
+
+
+def _requeue_outbox(content: str):
+    """Re-append content to outbox.md after a failed send attempt."""
+    try:
+        with open(OUTBOX_FILE, "a", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.write(content + "\n")
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    except Exception as e:
+        log("error", f"Failed to re-queue outbox message: {e}")
 
 
 def _format_outbox_message(raw_content: str) -> str:

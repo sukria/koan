@@ -17,6 +17,7 @@ from app.awake import (
     handle_chat,
     handle_message,
     flush_outbox,
+    _requeue_outbox,
     _format_outbox_message,
     _clean_chat_response,
     _run_in_worker,
@@ -798,8 +799,8 @@ class TestFlushOutbox:
         outbox.write_text("Important message")
         with patch("app.awake.OUTBOX_FILE", outbox):
             flush_outbox()
-        # Message preserved on send failure
-        assert outbox.read_text() == "Important message"
+        # Message re-queued to outbox on send failure
+        assert "Important message" in outbox.read_text()
 
     def test_flush_no_file(self, tmp_path):
         outbox = tmp_path / "outbox.md"
@@ -823,6 +824,108 @@ class TestFlushOutbox:
         with patch("app.awake.OUTBOX_FILE", outbox):
             flush_outbox()
         mock_send.assert_not_called()
+
+    @patch("app.awake._format_outbox_message", return_value="Formatted msg")
+    @patch("app.awake.send_telegram", return_value=True)
+    def test_flush_clears_before_format(self, mock_send, mock_fmt, tmp_path):
+        """File should be cleared BEFORE the slow format call, not after."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("Original message")
+
+        file_content_during_format = []
+
+        def capture_format(content):
+            # During formatting, the file should already be empty
+            file_content_during_format.append(outbox.read_text())
+            return "Formatted"
+
+        mock_fmt.side_effect = capture_format
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            flush_outbox()
+        # File was cleared before format was called
+        assert file_content_during_format == [""]
+
+    @patch("app.awake._format_outbox_message", return_value="Fmt")
+    @patch("app.awake.send_telegram", return_value=True)
+    def test_flush_concurrent_write_during_format_preserved(self, mock_send, mock_fmt, tmp_path):
+        """Messages written during formatting should survive (not be truncated)."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("Message A")
+
+        def format_and_inject(content):
+            # Simulate another process appending during the slow format call
+            with open(outbox, "a") as f:
+                f.write("Message B\n")
+            return "Formatted A"
+
+        mock_fmt.side_effect = format_and_inject
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            flush_outbox()
+        # Message B was written AFTER the file was cleared — it should survive
+        assert "Message B" in outbox.read_text()
+
+    @patch("app.awake._format_outbox_message", return_value="Fmt")
+    @patch("app.awake.send_telegram", return_value=False)
+    def test_flush_requeue_on_failure_preserves_new_writes(self, mock_send, mock_fmt, tmp_path):
+        """On send failure, re-queued content should not overwrite new messages."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("Message A")
+
+        def format_and_inject(content):
+            # Another message arrives during formatting
+            with open(outbox, "a") as f:
+                f.write("Message B\n")
+            return "Formatted A"
+
+        mock_fmt.side_effect = format_and_inject
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            flush_outbox()
+        content = outbox.read_text()
+        # Both messages should be in the file
+        assert "Message B" in content
+        assert "Message A" in content
+
+    @patch("app.awake.scan_and_log")
+    def test_flush_blocked_clears_file_before_quarantine(self, mock_scan, tmp_path):
+        """Blocked messages should still clear the outbox promptly."""
+        from types import SimpleNamespace
+        mock_scan.return_value = SimpleNamespace(blocked=True, reason="secret detected")
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("SECRET_KEY=abc123")
+        with patch("app.awake.OUTBOX_FILE", outbox), \
+             patch("app.awake.INSTANCE_DIR", tmp_path):
+            flush_outbox()
+        # File is cleared
+        assert outbox.read_text() == ""
+        # Quarantine file has the content
+        quarantine = tmp_path / "outbox-quarantine.md"
+        assert quarantine.exists()
+        assert "SECRET_KEY" in quarantine.read_text()
+
+
+class TestRequeueOutbox:
+    def test_requeue_appends_content(self, tmp_path):
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("")
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _requeue_outbox("Failed message")
+        assert "Failed message" in outbox.read_text()
+
+    def test_requeue_preserves_existing_content(self, tmp_path):
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("New message\n")
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _requeue_outbox("Failed message")
+        content = outbox.read_text()
+        assert "New message" in content
+        assert "Failed message" in content
+
+    def test_requeue_handles_missing_file(self, tmp_path):
+        outbox = tmp_path / "outbox.md"
+        # File doesn't exist — requeue should create it
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _requeue_outbox("Recovered message")
+        assert "Recovered message" in outbox.read_text()
 
 
 # ---------------------------------------------------------------------------
