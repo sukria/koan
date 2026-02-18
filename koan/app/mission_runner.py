@@ -31,6 +31,7 @@ def build_mission_command(
     autonomous_mode: str = "implement",
     extra_flags: str = "",
     project_name: str = "",
+    plugin_dirs: Optional[List[str]] = None,
 ) -> List[str]:
     """Build the CLI command for mission execution (provider-agnostic).
 
@@ -39,6 +40,7 @@ def build_mission_command(
         autonomous_mode: Current mode (review/implement/deep).
         extra_flags: Space-separated extra CLI flags from config.
         project_name: Optional project name for per-project tool overrides.
+        plugin_dirs: Optional list of plugin directory paths to load.
 
     Returns:
         Complete command list ready for subprocess.
@@ -68,6 +70,7 @@ def build_mission_command(
         model=model,
         fallback=fallback,
         output_format="json",
+        plugin_dirs=plugin_dirs,
     )
 
     # Append any extra flags from config
