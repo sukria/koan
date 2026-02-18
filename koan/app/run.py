@@ -617,20 +617,37 @@ def _commit_instance(instance: str, message: str = ""):
     if not message:
         message = f"koan: {time.strftime('%Y-%m-%d-%H:%M')}"
     try:
-        subprocess.run(["git", "add", "-A"], cwd=instance, capture_output=True, timeout=10)
+        add_result = subprocess.run(
+            ["git", "add", "-A"], cwd=instance, capture_output=True, timeout=10,
+        )
+        if add_result.returncode != 0:
+            log("error", f"git add failed (rc={add_result.returncode}): "
+                f"{add_result.stderr.decode(errors='replace')[:200]}")
+            return
+
         diff = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             cwd=instance, capture_output=True, timeout=10,
         )
-        if diff.returncode != 0:
-            subprocess.run(
-                ["git", "commit", "-m", message],
-                cwd=instance, capture_output=True, timeout=30,
-            )
-            subprocess.run(
-                ["git", "push", "origin", "main"],
-                cwd=instance, capture_output=True, timeout=30,
-            )
+        if diff.returncode == 0:
+            return  # Nothing staged
+
+        commit_result = subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=instance, capture_output=True, timeout=30,
+        )
+        if commit_result.returncode != 0:
+            log("error", f"git commit failed (rc={commit_result.returncode}): "
+                f"{commit_result.stderr.decode(errors='replace')[:200]}")
+            return
+
+        push_result = subprocess.run(
+            ["git", "push", "origin", "main"],
+            cwd=instance, capture_output=True, timeout=30,
+        )
+        if push_result.returncode != 0:
+            log("error", f"git push failed (rc={push_result.returncode}): "
+                f"{push_result.stderr.decode(errors='replace')[:200]}")
     except Exception as e:
         log("error", f"Instance commit/push failed: {e}")
 

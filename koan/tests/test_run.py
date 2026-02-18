@@ -537,9 +537,10 @@ class TestCleanupTemp:
 # ---------------------------------------------------------------------------
 
 class TestCommitInstance:
-    def test_commits_when_changes(self, tmp_path):
-        from app.run import _commit_instance
-        # Init git repo
+
+    @staticmethod
+    def _init_repo(tmp_path):
+        """Helper: create a minimal git repo with one commit."""
         subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"],
                        cwd=str(tmp_path), capture_output=True)
@@ -549,16 +550,166 @@ class TestCommitInstance:
         subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), capture_output=True)
         subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmp_path), capture_output=True)
 
-        # Make a change
+    def test_commits_when_changes(self, tmp_path):
+        from app.run import _commit_instance
+        self._init_repo(tmp_path)
+
         (tmp_path / "file.txt").write_text("modified")
         _commit_instance(str(tmp_path), "test commit")
 
-        # Verify commit happened
         result = subprocess.run(
             ["git", "log", "--oneline", "-1"],
             cwd=str(tmp_path), capture_output=True, text=True,
         )
         assert "test commit" in result.stdout
+
+    def test_skips_when_no_changes(self, tmp_path):
+        """No commit created when there are no staged changes."""
+        from app.run import _commit_instance
+        self._init_repo(tmp_path)
+
+        # Get current commit count
+        before = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=str(tmp_path), capture_output=True, text=True,
+        )
+        count_before = int(before.stdout.strip())
+
+        _commit_instance(str(tmp_path), "should not appear")
+
+        after = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=str(tmp_path), capture_output=True, text=True,
+        )
+        count_after = int(after.stdout.strip())
+        assert count_after == count_before
+
+    def test_default_message_format(self, tmp_path):
+        """Default commit message includes timestamp pattern."""
+        from app.run import _commit_instance
+        self._init_repo(tmp_path)
+
+        (tmp_path / "file.txt").write_text("changed")
+        _commit_instance(str(tmp_path))
+
+        result = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=str(tmp_path), capture_output=True, text=True,
+        )
+        assert "koan:" in result.stdout
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.log")
+    def test_logs_error_on_add_failure(self, mock_log, mock_run):
+        """Logs error and returns early if git add fails."""
+        from app.run import _commit_instance
+        mock_run.return_value = MagicMock(
+            returncode=128, stderr=b"fatal: not a git repository"
+        )
+        _commit_instance("/fake/instance", "test")
+        mock_log.assert_called_once()
+        assert "git add failed" in mock_log.call_args[0][1]
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.log")
+    def test_logs_error_on_commit_failure(self, mock_log, mock_run):
+        """Logs error and returns early if git commit fails."""
+        from app.run import _commit_instance
+
+        def side_effect(cmd, **kwargs):
+            if cmd[1] == "add":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "diff":
+                return MagicMock(returncode=1)  # Has staged changes
+            elif cmd[1] == "commit":
+                return MagicMock(returncode=1, stderr=b"error: something broke")
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = side_effect
+        _commit_instance("/fake/instance", "test")
+        mock_log.assert_called_once()
+        assert "git commit failed" in mock_log.call_args[0][1]
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.log")
+    def test_logs_error_on_push_failure(self, mock_log, mock_run):
+        """Logs error if git push fails (but commit succeeds)."""
+        from app.run import _commit_instance
+
+        def side_effect(cmd, **kwargs):
+            if cmd[1] == "add":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "diff":
+                return MagicMock(returncode=1)
+            elif cmd[1] == "commit":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "push":
+                return MagicMock(returncode=1, stderr=b"remote: Permission denied")
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = side_effect
+        _commit_instance("/fake/instance", "test")
+        mock_log.assert_called_once()
+        assert "git push failed" in mock_log.call_args[0][1]
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.log")
+    def test_does_not_push_when_commit_fails(self, mock_log, mock_run):
+        """When commit fails, push is never attempted."""
+        from app.run import _commit_instance
+
+        calls = []
+
+        def side_effect(cmd, **kwargs):
+            calls.append(cmd[1])
+            if cmd[1] == "add":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "diff":
+                return MagicMock(returncode=1)
+            elif cmd[1] == "commit":
+                return MagicMock(returncode=1, stderr=b"error")
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = side_effect
+        _commit_instance("/fake/instance", "test")
+        assert "push" not in calls
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.log")
+    def test_does_not_commit_when_add_fails(self, mock_log, mock_run):
+        """When add fails, commit is never attempted."""
+        from app.run import _commit_instance
+
+        calls = []
+
+        def side_effect(cmd, **kwargs):
+            calls.append(cmd[1])
+            if cmd[1] == "add":
+                return MagicMock(returncode=128, stderr=b"fatal")
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = side_effect
+        _commit_instance("/fake/instance", "test")
+        assert "commit" not in calls
+        assert "push" not in calls
+
+    @patch("app.run.subprocess.run", side_effect=subprocess.TimeoutExpired("git", 10))
+    @patch("app.run.log")
+    def test_handles_timeout_exception(self, mock_log, mock_run):
+        """Timeout during any git operation is caught and logged."""
+        from app.run import _commit_instance
+        _commit_instance("/fake/instance", "test")
+        mock_log.assert_called_once()
+        assert "failed" in mock_log.call_args[0][1]
+
+    @patch("app.run.subprocess.run", side_effect=OSError("disk full"))
+    @patch("app.run.log")
+    def test_handles_os_error(self, mock_log, mock_run):
+        """OS errors during git operations are caught and logged."""
+        from app.run import _commit_instance
+        _commit_instance("/fake/instance", "test")
+        mock_log.assert_called_once()
+        assert "failed" in mock_log.call_args[0][1]
 
 
 # ---------------------------------------------------------------------------
