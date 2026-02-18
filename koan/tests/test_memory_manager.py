@@ -1,9 +1,12 @@
 """Tests for memory_manager.py — scoped summary, compaction, learnings dedup, journal archival."""
 
+import os
 import pytest
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from app.memory_manager import (
+    MemoryManager,
     parse_summary_sessions,
     scoped_summary,
     compact_summary,
@@ -441,3 +444,240 @@ class TestCapLearnings:
         cap_learnings(str(tmp_path), "koan", max_lines=10)
         content = path.read_text()
         assert content.startswith("# Learnings")
+
+
+# ---------------------------------------------------------------------------
+# Archive safety: write archives BEFORE deleting sources
+# ---------------------------------------------------------------------------
+
+class TestArchiveSafety:
+    """Tests verifying the archive-before-delete ordering."""
+
+    def _make_journal_day(self, tmp_path, date_str, project, content):
+        day_dir = tmp_path / "journal" / date_str
+        day_dir.mkdir(parents=True, exist_ok=True)
+        (day_dir / f"{project}.md").write_text(content)
+
+    def test_archive_written_before_source_deleted(self, tmp_path):
+        """Verify archive file exists even if deletion would fail."""
+        old_date = (date.today() - timedelta(days=35)).strftime("%Y-%m-%d")
+        old_month = old_date[:7]
+        self._make_journal_day(
+            tmp_path, old_date, "koan",
+            "## Session 1\n\n### Important work\n\nDetails.\n"
+        )
+
+        stats = archive_journals(str(tmp_path), archive_after_days=30)
+        archive = tmp_path / "journal" / "archives" / old_month / "koan.md"
+        assert archive.exists()
+        assert "Important work" in archive.read_text()
+        assert stats["archived_days"] == 1
+
+    def test_archive_survives_rmtree_failure(self, tmp_path):
+        """If rmtree fails, archive is still written and stats reflect partial success."""
+        old_date = (date.today() - timedelta(days=35)).strftime("%Y-%m-%d")
+        old_month = old_date[:7]
+        self._make_journal_day(
+            tmp_path, old_date, "koan",
+            "## Session 1\n\n### Critical data\n\nMust survive.\n"
+        )
+
+        original_rmtree = __import__("shutil").rmtree
+
+        def failing_rmtree(path, **kwargs):
+            raise OSError("Permission denied")
+
+        with patch("app.memory_manager.shutil.rmtree", side_effect=failing_rmtree):
+            stats = archive_journals(str(tmp_path), archive_after_days=30)
+
+        # Archive was written despite deletion failure
+        archive = tmp_path / "journal" / "archives" / old_month / "koan.md"
+        assert archive.exists()
+        assert "Critical data" in archive.read_text()
+        # Source still exists (deletion failed)
+        assert (tmp_path / "journal" / old_date).exists()
+        # No days counted as archived/deleted since deletion failed
+        assert stats["archived_days"] == 0
+        assert stats["deleted_days"] == 0
+
+    def test_archive_survives_unlink_failure_legacy(self, tmp_path):
+        """Legacy flat journal: archive written even if unlink fails."""
+        old_date = (date.today() - timedelta(days=40)).strftime("%Y-%m-%d")
+        old_month = old_date[:7]
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir(parents=True)
+        (journal_dir / f"{old_date}.md").write_text(
+            "## Session 1\n\n### Legacy data\n\nOld stuff.\n"
+        )
+
+        def failing_unlink(missing_ok=False):
+            raise OSError("Read-only filesystem")
+
+        with patch.object(type(journal_dir / f"{old_date}.md"), "unlink", failing_unlink):
+            stats = archive_journals(str(tmp_path), archive_after_days=30)
+
+        archive = tmp_path / "journal" / "archives" / old_month / "legacy.md"
+        assert archive.exists()
+        assert "Legacy data" in archive.read_text()
+
+    def test_multiple_days_partial_delete_failure(self, tmp_path):
+        """If one day fails to delete, others still succeed."""
+        dates = []
+        for offset in [35, 36, 37]:
+            d = (date.today() - timedelta(days=offset)).strftime("%Y-%m-%d")
+            dates.append(d)
+            self._make_journal_day(
+                tmp_path, d, "koan",
+                f"## Session {offset}\n\n### Work {offset}\n\nDetails.\n"
+            )
+
+        call_count = [0]
+        original_rmtree = __import__("shutil").rmtree
+
+        def sometimes_failing_rmtree(path, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise OSError("Transient failure")
+            original_rmtree(path, **kwargs)
+
+        with patch("app.memory_manager.shutil.rmtree", side_effect=sometimes_failing_rmtree):
+            stats = archive_journals(str(tmp_path), archive_after_days=30)
+
+        # 2 of 3 days deleted successfully
+        assert stats["archived_days"] == 2
+
+
+# ---------------------------------------------------------------------------
+# File I/O error handling
+# ---------------------------------------------------------------------------
+
+class TestFileErrorHandling:
+
+    def _write_learnings(self, tmp_path, project, content):
+        p = tmp_path / "memory" / "projects" / project
+        p.mkdir(parents=True, exist_ok=True)
+        (p / "learnings.md").write_text(content)
+        return p / "learnings.md"
+
+    def test_cleanup_learnings_unreadable_file(self, tmp_path):
+        """cleanup_learnings returns 0 on read error, doesn't crash."""
+        path = self._write_learnings(tmp_path, "koan", "# Learnings\n\n- dup\n- dup\n")
+        with patch.object(type(path), "read_text", side_effect=OSError("Permission denied")):
+            result = cleanup_learnings(str(tmp_path), "koan")
+        assert result == 0
+
+    def test_cap_learnings_unreadable_file(self, tmp_path):
+        """cap_learnings returns 0 on read error, doesn't crash."""
+        lines = ["# L\n", ""]
+        for i in range(300):
+            lines.append(f"- fact {i}")
+        path = self._write_learnings(tmp_path, "koan", "\n".join(lines))
+        with patch.object(type(path), "read_text", side_effect=UnicodeDecodeError("utf-8", b"", 0, 1, "bad")):
+            result = cap_learnings(str(tmp_path), "koan", max_lines=10)
+        assert result == 0
+
+    def test_archive_skips_unreadable_journal_file(self, tmp_path):
+        """Unreadable journal file is skipped, others still processed."""
+        old_date1 = (date.today() - timedelta(days=35)).strftime("%Y-%m-%d")
+        old_date2 = (date.today() - timedelta(days=36)).strftime("%Y-%m-%d")
+        old_month = old_date1[:7]
+
+        for d in [old_date1, old_date2]:
+            day_dir = tmp_path / "journal" / d
+            day_dir.mkdir(parents=True, exist_ok=True)
+            (day_dir / "koan.md").write_text(
+                f"## Session\n\n### Work {d}\n\nDetails.\n"
+            )
+
+        original_read_text = type(tmp_path / "journal" / old_date1 / "koan.md").read_text
+        calls = [0]
+
+        def selective_read_error(self_path, *args, **kwargs):
+            calls[0] += 1
+            if old_date1 in str(self_path) and "koan.md" in str(self_path):
+                raise OSError("Disk error")
+            return original_read_text(self_path, *args, **kwargs)
+
+        with patch("pathlib.PosixPath.read_text", selective_read_error):
+            stats = archive_journals(str(tmp_path), archive_after_days=30)
+
+        # At least one day was processed
+        assert stats["archive_lines"] >= 1
+
+    def test_run_cleanup_projects_dir_is_file(self, tmp_path):
+        """run_cleanup handles projects_dir being a file (not directory)."""
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        (mem / "summary.md").write_text("# Summary\n")
+        (mem / "projects").write_text("oops")  # file, not dir
+
+        stats = run_cleanup(str(tmp_path))
+        assert stats["summary_compacted"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Archive fsync safety
+# ---------------------------------------------------------------------------
+
+class TestArchiveFsync:
+
+    def _make_journal_day(self, tmp_path, date_str, project, content):
+        day_dir = tmp_path / "journal" / date_str
+        day_dir.mkdir(parents=True, exist_ok=True)
+        (day_dir / f"{project}.md").write_text(content)
+
+    def test_archive_write_calls_fsync(self, tmp_path):
+        """Verify archive writes are fsynced for crash safety."""
+        old_date = (date.today() - timedelta(days=35)).strftime("%Y-%m-%d")
+        self._make_journal_day(
+            tmp_path, old_date, "koan",
+            "## Session 1\n\n### Work\n\nDetails.\n"
+        )
+
+        fsync_calls = []
+        original_fsync = os.fsync
+
+        def tracking_fsync(fd):
+            fsync_calls.append(fd)
+            return original_fsync(fd)
+
+        with patch("app.memory_manager.os.fsync", side_effect=tracking_fsync):
+            archive_journals(str(tmp_path), archive_after_days=30)
+
+        assert len(fsync_calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# MemoryManager class tests
+# ---------------------------------------------------------------------------
+
+class TestMemoryManagerClass:
+
+    def test_constructor_sets_paths(self, tmp_path):
+        mgr = MemoryManager(str(tmp_path))
+        assert mgr.memory_dir == tmp_path / "memory"
+        assert mgr.journal_dir == tmp_path / "journal"
+        assert mgr.summary_path == tmp_path / "memory" / "summary.md"
+        assert mgr.projects_dir == tmp_path / "memory" / "projects"
+
+    def test_learnings_path(self, tmp_path):
+        mgr = MemoryManager(str(tmp_path))
+        assert mgr._learnings_path("koan") == tmp_path / "memory" / "projects" / "koan" / "learnings.md"
+
+    def test_run_cleanup_caps_learnings(self, tmp_path):
+        """run_cleanup calls cap_learnings and respects max_learnings_lines."""
+        proj = tmp_path / "memory" / "projects" / "koan"
+        proj.mkdir(parents=True)
+        mem = tmp_path / "memory"
+        (mem / "summary.md").write_text("# Summary\n")
+
+        lines = ["# Learnings\n", ""]
+        for i in range(300):
+            lines.append(f"- fact {i}")
+        (proj / "learnings.md").write_text("\n".join(lines))
+
+        stats = run_cleanup(str(tmp_path), max_learnings_lines=50)
+        assert stats.get("learnings_capped_koan", 0) == 250
+        content = (proj / "learnings.md").read_text()
+        assert "fact 299" in content
+        assert "fact 0" not in content

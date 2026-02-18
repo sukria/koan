@@ -24,6 +24,7 @@ Commands:
     cleanup                         Run all cleanup tasks
 """
 
+import os
 import re
 import shutil
 import sys
@@ -218,7 +219,12 @@ class MemoryManager:
         if not learnings_path.exists():
             return 0
 
-        content = learnings_path.read_text()
+        try:
+            content = learnings_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            print(f"[memory_manager] Error reading {learnings_path}: {e}", file=sys.stderr)
+            return 0
+
         lines = content.splitlines()
 
         seen = set()
@@ -269,6 +275,9 @@ class MemoryManager:
         archive_lines = 0
 
         monthly: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+        # Collect paths to delete AFTER archives are safely written
+        to_delete_dirs: List[Tuple[Path, bool]] = []  # (path, is_old)
+        to_delete_files: List[Tuple[Path, bool]] = []
 
         for entry in sorted(self.journal_dir.iterdir()):
             name = entry.name
@@ -287,7 +296,11 @@ class MemoryManager:
             if entry.is_dir():
                 for md_file in sorted(entry.glob("*.md")):
                     project = md_file.stem
-                    content = md_file.read_text()
+                    try:
+                        content = md_file.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError) as e:
+                        print(f"[memory_manager] Error reading {md_file}: {e}", file=sys.stderr)
+                        continue
                     digests = _extract_session_digest(content)
                     if digests:
                         monthly[(month_key, project)].extend(
@@ -295,15 +308,15 @@ class MemoryManager:
                         )
                         archive_lines += len(digests)
 
-                if entry_date < delete_cutoff:
-                    shutil.rmtree(entry)
-                    deleted_days += 1
-                else:
-                    shutil.rmtree(entry)
-                    archived_days += 1
+                is_old = entry_date < delete_cutoff
+                to_delete_dirs.append((entry, is_old))
 
             elif entry.is_file() and entry.suffix == ".md":
-                content = entry.read_text()
+                try:
+                    content = entry.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError) as e:
+                    print(f"[memory_manager] Error reading {entry}: {e}", file=sys.stderr)
+                    continue
                 digests = _extract_session_digest(content)
                 if digests:
                     monthly[(month_key, "legacy")].extend(
@@ -311,13 +324,10 @@ class MemoryManager:
                     )
                     archive_lines += len(digests)
 
-                if entry_date < delete_cutoff:
-                    entry.unlink()
-                    deleted_days += 1
-                else:
-                    entry.unlink()
-                    archived_days += 1
+                is_old = entry_date < delete_cutoff
+                to_delete_files.append((entry, is_old))
 
+        # Write archives BEFORE deleting source files
         archives_dir = self.journal_dir / "archives"
         for (month, project), lines in monthly.items():
             month_dir = archives_dir / month
@@ -334,6 +344,31 @@ class MemoryManager:
                     if not existing:
                         f.write(f"# Journal archive — {project} — {month}\n\n")
                     f.write("\n".join(new_lines) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+
+        # Now safe to delete source files
+        for path, is_old in to_delete_dirs:
+            try:
+                shutil.rmtree(path)
+            except OSError as e:
+                print(f"[memory_manager] Error deleting {path}: {e}", file=sys.stderr)
+                continue
+            if is_old:
+                deleted_days += 1
+            else:
+                archived_days += 1
+
+        for path, is_old in to_delete_files:
+            try:
+                path.unlink()
+            except OSError as e:
+                print(f"[memory_manager] Error deleting {path}: {e}", file=sys.stderr)
+                continue
+            if is_old:
+                deleted_days += 1
+            else:
+                archived_days += 1
 
         return {
             "archived_days": archived_days,
@@ -351,7 +386,12 @@ class MemoryManager:
         if not learnings_path.exists():
             return 0
 
-        content = learnings_path.read_text()
+        try:
+            content = learnings_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            print(f"[memory_manager] Error reading {learnings_path}: {e}", file=sys.stderr)
+            return 0
+
         lines = content.splitlines()
 
         headers = []
@@ -385,7 +425,7 @@ class MemoryManager:
         stats = {}
         stats["summary_compacted"] = self.compact_summary(max_sessions)
 
-        if self.projects_dir.exists():
+        if self.projects_dir.exists() and self.projects_dir.is_dir():
             for project_dir in self.projects_dir.iterdir():
                 if project_dir.is_dir():
                     name = project_dir.name
