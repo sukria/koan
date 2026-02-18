@@ -164,8 +164,16 @@ def compact_history(history_file: Path, topics_file: Path, min_messages: int = 2
                     topics_by_date[date].append(topic)
 
     if not topics_by_date:
-        # No extractable topics, just purge
-        history_file.write_text("")
+        # No extractable topics, just purge (with lock to prevent race with save_conversation_message)
+        try:
+            with open(history_file, "w", encoding="utf-8") as f:
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    f.truncate(0)
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+        except OSError:
+            pass
         return len(messages)
 
     # Build compaction entry
@@ -206,8 +214,16 @@ def compact_history(history_file: Path, topics_file: Path, min_messages: int = 2
             pass
         return 0
 
-    # Truncate history
-    history_file.write_text("")
+    # Truncate history (with lock to prevent race with save_conversation_message)
+    try:
+        with open(history_file, "w", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.truncate(0)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    except OSError:
+        return 0
 
     count = len(messages)
     print(f"[conversation_history] Compacted {count} messages \u2192 {topics_file.name}")

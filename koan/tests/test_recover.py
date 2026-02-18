@@ -200,6 +200,41 @@ class TestRecoverMissions:
         assert content.count("## Done") == 1
 
 
+class TestRecoverAtomicity:
+    """Test that recovery uses atomic read-modify-write (no TOCTOU)."""
+
+    def test_uses_modify_missions_file(self, instance_dir):
+        """recover_missions uses modify_missions_file for atomic updates."""
+        missions = instance_dir / "missions.md"
+        missions.write_text(_missions(in_progress="- Stale task"))
+
+        with patch("app.utils.modify_missions_file") as mock_modify:
+            # Make modify_missions_file actually call the transform so we get the count
+            def _call_transform(path, transform):
+                content = path.read_text()
+                new_content = transform(content)
+                path.write_text(new_content)
+                return new_content
+            mock_modify.side_effect = _call_transform
+
+            count = recover_missions(str(instance_dir))
+            assert count == 1
+            mock_modify.assert_called_once()
+
+    def test_no_modify_when_nothing_to_recover(self, instance_dir):
+        """When no stale missions, modify_missions_file is still called but content unchanged."""
+        missions = instance_dir / "missions.md"
+        missions.write_text(_missions(pending="- Valid task"))
+
+        with patch("app.utils.modify_missions_file") as mock_modify:
+            original_content = missions.read_text()
+            mock_modify.side_effect = lambda path, transform: transform(original_content)
+
+            count = recover_missions(str(instance_dir))
+            assert count == 0
+            mock_modify.assert_called_once()
+
+
 class TestRecoverCLI:
     """Test the __main__ CLI behavior."""
 
