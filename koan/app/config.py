@@ -42,7 +42,8 @@ def _load_project_overrides(project_name: str) -> dict:
         if project_name not in projects_config.get("projects", {}):
             return {}
         return get_project_config(projects_config, project_name)
-    except Exception:
+    except Exception as e:
+        print(f"[config] Error loading project overrides for {project_name}: {e}", file=sys.stderr)
         return {}
 
 
@@ -67,7 +68,11 @@ def _get_tools_for_role(role: str, default: List[str], project_name: str = "") -
 
     config = _load_config()
     tools = config.get("tools", {}).get(role, default)
-    return ",".join(tools)
+    if isinstance(tools, str):
+        return tools
+    if isinstance(tools, list):
+        return ",".join(tools)
+    return ",".join(default)
 
 
 def get_chat_tools(project_name: str = "") -> str:
