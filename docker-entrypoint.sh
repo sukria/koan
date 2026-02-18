@@ -116,7 +116,7 @@ check_claude_auth() {
     # Neither method works
     error "Claude CLI is not authenticated"
     log "  Option 1: Set ANTHROPIC_API_KEY in .env (API billing)"
-    log "  Option 2: Run 'docker compose run --rm -it koan auth' (subscription login)"
+    log "  Option 2: Run 'docker compose run --rm -it --build koan auth' (subscription login)"
     return 1
 }
 

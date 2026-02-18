@@ -172,7 +172,7 @@ log "Detecting host environment..."
 section "Auth Directories"
 log "Claude CLI: installed in Docker image via npm"
 log "  Auth option 1: ANTHROPIC_API_KEY in .env (API billing)"
-log "  Auth option 2: docker compose run --rm -it koan auth (subscription login)"
+log "  Auth option 2: docker compose run --rm -it --build koan auth (subscription login)"
 
 # Create claude-auth/ for interactive login persistence
 if [ ! -d "claude-auth" ]; then
@@ -263,7 +263,7 @@ if [ "$DRY_RUN" = false ]; then
     printf "${BOLD}${CYAN}│${RESET}  1. Review %-43s ${BOLD}${CYAN}│${RESET}\n" "$OVERRIDE_FILE"
     printf "${BOLD}${CYAN}│${RESET}  2. Auth (pick one):                                     ${BOLD}${CYAN}│${RESET}\n"
     printf "${BOLD}${CYAN}│${RESET}     a. Set ANTHROPIC_API_KEY in .env (API billing)        ${BOLD}${CYAN}│${RESET}\n"
-    printf "${BOLD}${CYAN}│${RESET}     b. docker compose run --rm -it koan auth (sub login)  ${BOLD}${CYAN}│${RESET}\n"
+    printf "${BOLD}${CYAN}│${RESET}     b. docker compose run --rm -it --build koan auth     ${BOLD}${CYAN}│${RESET}\n"
     printf "${BOLD}${CYAN}│${RESET}  3. docker compose up --build                            ${BOLD}${CYAN}│${RESET}\n"
     printf "${BOLD}${CYAN}╰──────────────────────────────────────────────────────────╯${RESET}\n"
 fi
