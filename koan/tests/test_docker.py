@@ -173,6 +173,7 @@ class TestEntrypoint:
     def test_supports_auth_command(self):
         """Should support 'auth' command for interactive login."""
         assert "auth)" in self.entrypoint
+        assert "claude auth login" in self.entrypoint
 
     def test_checks_copilot_auth_dir(self):
         """Should check for ~/.copilot directory."""

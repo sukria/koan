@@ -320,14 +320,19 @@ case "$COMMAND" in
 
     auth)
         section "Claude CLI Authentication"
-        if check_claude_auth 2>/dev/null; then
+        if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            success "Already authenticated via API key — no login needed"
+            exit 0
+        fi
+        log "Checking existing auth state..."
+        if claude auth status >/dev/null 2>&1; then
             success "Already authenticated — no action needed"
             exit 0
         fi
         log "Starting interactive Claude CLI login..."
         log "A browser URL will appear — open it to complete authentication."
         log "Auth state will persist in the mounted claude-auth/ volume."
-        exec claude
+        exec claude auth login
         ;;
 
     shell)
