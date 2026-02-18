@@ -149,22 +149,9 @@ def _get_missions_context(instance_dir: Path) -> str:
 
 def _clean_response(text: str) -> str:
     """Clean Claude CLI output for Telegram delivery."""
-    import re
+    from app.text_utils import clean_cli_response
 
-    lines = text.splitlines()
-    lines = [
-        line for line in lines
-        if not re.match(r'^Error:.*max turns', line, re.IGNORECASE)
-    ]
-    cleaned = "\n".join(lines).strip()
-    cleaned = cleaned.replace("```", "")
-    cleaned = cleaned.replace("**", "")
-    cleaned = cleaned.replace("__", "")
-    cleaned = cleaned.replace("~~", "")
-    cleaned = re.sub(r'^#{1,6}\s+', '', cleaned, flags=re.MULTILINE)
-    if len(cleaned) > 2000:
-        cleaned = cleaned[:1997] + "..."
-    return cleaned.strip()
+    return clean_cli_response(text)
 
 
 # ---------------------------------------------------------------------------

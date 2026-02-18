@@ -281,24 +281,9 @@ def _clean_chat_response(text: str) -> str:
 
     Strips error artifacts, markdown, and truncates for smartphone reading.
     """
-    # Remove Claude CLI error lines
-    lines = text.splitlines()
-    lines = [l for l in lines if not re.match(r'^Error:.*max turns', l, re.IGNORECASE)]
-    cleaned = "\n".join(lines).strip()
+    from app.text_utils import clean_cli_response
 
-    # Strip markdown artifacts
-    cleaned = cleaned.replace("```", "")
-    cleaned = cleaned.replace("**", "")
-    cleaned = cleaned.replace("__", "")
-    cleaned = cleaned.replace("~~", "")
-    # Strip heading markers
-    cleaned = re.sub(r'^#{1,6}\s+', '', cleaned, flags=re.MULTILINE)
-
-    # Truncate for smartphone (Telegram limit is 4096, keep 2000 for readability)
-    if len(cleaned) > 2000:
-        cleaned = cleaned[:1997] + "..."
-
-    return cleaned.strip()
+    return clean_cli_response(text)
 
 
 def handle_chat(text: str):
