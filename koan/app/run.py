@@ -869,6 +869,226 @@ def main_loop():
 
 
 # ---------------------------------------------------------------------------
+# Iteration helpers (extracted from _run_iteration for readability)
+# ---------------------------------------------------------------------------
+
+
+def _sleep_between_runs(
+    koan_root: str,
+    instance: str,
+    interval: int,
+    run_num: int = 0,
+    max_runs: int = 0,
+    context: str = "",
+):
+    """Sleep between runs, waking early if new missions arrive.
+
+    Checks for pending missions first — skips sleep entirely if found.
+    """
+    if check_pending_missions(instance):
+        log("koan", "Pending missions found — skipping sleep")
+        if run_num:
+            set_status(koan_root, f"Run {run_num}/{max_runs} — done, next run starting")
+        return
+
+    status_suffix = f" ({time.strftime('%H:%M')})"
+    if context:
+        set_status(koan_root, f"{context}{status_suffix}")
+    else:
+        set_status(koan_root, f"Idle — sleeping {interval}s{status_suffix}")
+    log("koan", f"Sleeping {interval}s (checking for new missions every 10s)...")
+    with protected_phase("Sleeping between runs"):
+        wake = interruptible_sleep(interval, koan_root, instance)
+    if wake == "mission":
+        log("koan", "New mission detected during sleep — waking up early")
+        if run_num:
+            set_status(koan_root, f"Run {run_num}/{max_runs} — done, new mission detected")
+
+
+def _handle_contemplative(
+    plan: dict,
+    run_num: int,
+    max_runs: int,
+    koan_root: str,
+    instance: str,
+    interval: int,
+):
+    """Run a contemplative session and sleep afterwards."""
+    project_name = plan["project_name"]
+    log("pause", "Decision: CONTEMPLATIVE mode (random reflection)")
+    print("  Action: Running contemplative session instead of autonomous work")
+    print()
+    _notify(instance, f"🪷 Run {run_num}/{max_runs} — Contemplative mode on {project_name}")
+
+    log("pause", "Running contemplative session...")
+    try:
+        from app.contemplative_runner import build_contemplative_command
+        cmd = build_contemplative_command(
+            instance=instance,
+            project_name=project_name,
+            session_info=f"Run {run_num}/{max_runs} on {project_name}. Mode: {plan['autonomous_mode']}.",
+        )
+        run_claude_task(cmd, os.devnull, os.devnull, cwd=koan_root)
+    except KeyboardInterrupt:
+        raise
+    except Exception as e:
+        log("error", f"Contemplative error: {e}")
+    log("pause", "Contemplative session ended.")
+
+    if check_pending_missions(instance):
+        log("koan", "Pending missions found after contemplation — skipping sleep")
+    else:
+        set_status(koan_root, f"Idle — post-contemplation sleep ({time.strftime('%H:%M')})")
+        log("pause", f"Contemplative session complete. Sleeping {interval}s...")
+        with protected_phase("Sleeping between runs"):
+            wake = interruptible_sleep(interval, koan_root, instance)
+        if wake == "mission":
+            log("koan", "New mission detected during sleep — waking up early")
+
+
+def _handle_wait_pause(
+    plan: dict,
+    count: int,
+    koan_root: str,
+    instance: str,
+):
+    """Enter pause mode when budget is exhausted (WAIT action)."""
+    project_name = plan["project_name"]
+    log("quota", "Decision: WAIT mode (budget exhausted)")
+    print(f"  Reason: {plan['decision_reason']}")
+    print("  Action: Entering pause mode (will auto-resume when quota resets)")
+    print()
+    try:
+        from app.send_retrospective import create_retrospective
+        create_retrospective(Path(instance), project_name)
+    except Exception as e:
+        log("error", f"Retrospective sending failed: {e}")
+
+    reset_ts, reset_display = _compute_quota_reset_ts(instance)
+    from app.pause_manager import create_pause
+    create_pause(koan_root, "quota", reset_ts, reset_display)
+
+    quota_details = plan['decision_reason']
+    if plan["display_lines"]:
+        quota_details += "\n" + "\n".join(plan["display_lines"])
+
+    _notify(instance, (
+        f"⏸️ Kōan paused: budget exhausted after {count} runs on [{project_name}].\n"
+        f"{quota_details}\n"
+        f"Auto-resume when session resets or use /resume."
+    ))
+
+
+def _run_preflight_check(
+    plan: dict,
+    koan_root: str,
+    instance: str,
+    count: int,
+) -> bool:
+    """Run pre-flight quota check before mission/autonomous execution.
+
+    Returns True if quota is exhausted (caller should abort), False to proceed.
+    """
+    project_path = plan["project_path"]
+    project_name = plan["project_name"]
+    try:
+        from app.preflight import preflight_quota_check
+        pf_ok, pf_error = preflight_quota_check(
+            project_path=project_path,
+            instance_dir=instance,
+            project_name=project_name,
+        )
+        if not pf_ok:
+            log("quota", "Pre-flight probe detected quota exhaustion")
+            pf_reset_ts, pf_reset_display = _compute_preflight_reset_ts(pf_error)
+            from app.pause_manager import create_pause
+            create_pause(koan_root, "quota", pf_reset_ts, pf_reset_display)
+            label = plan["mission_title"] if plan["mission_title"] else "autonomous run"
+            _notify(instance, (
+                f"⏸️ Pre-flight quota check failed before [{project_name}] {label}.\n"
+                f"Pausing until quota resets. Use /resume to restart manually."
+            ))
+            return True
+    except Exception as e:
+        log("error", f"Pre-flight quota check error: {e}")
+    return False
+
+
+def _handle_skill_dispatch(
+    mission_title: str,
+    project_name: str,
+    project_path: str,
+    koan_root: str,
+    instance: str,
+    run_num: int,
+    max_runs: int,
+    autonomous_mode: str,
+    interval: int,
+) -> bool:
+    """Try to dispatch a mission as a skill command.
+
+    Returns True if the mission was handled (skill found or skill failed),
+    False if it's not a skill mission (caller should proceed to Claude).
+    """
+    from app.debug import debug_log as _debug_log
+    preview = f"{mission_title[:100]}..." if len(mission_title) > 100 else mission_title
+    _debug_log(f"[run] checking skill dispatch for: {preview}")
+
+    from app.skill_dispatch import dispatch_skill_mission, is_skill_mission
+    skill_cmd = dispatch_skill_mission(
+        mission_text=mission_title,
+        project_name=project_name,
+        project_path=project_path,
+        koan_root=koan_root,
+        instance_dir=instance,
+    )
+    if skill_cmd:
+        _debug_log(f"[run] skill dispatch matched: {' '.join(skill_cmd[:5])}")
+        log("mission", "Decision: SKILL DISPATCH (direct runner)")
+        print(f"  Mission: {mission_title}")
+        print(f"  Project: {project_name}")
+        print(f"  Runner: {' '.join(skill_cmd[:4])}...")
+        print()
+        set_status(koan_root, f"Run {run_num}/{max_runs} — skill dispatch on {project_name}")
+        _notify(instance, f"🚀 Run {run_num}/{max_runs} — [{project_name}] Skill: {mission_title}")
+
+        with protected_phase(f"Skill: {mission_title[:50]}"):
+            exit_code = _run_skill_mission(
+                skill_cmd=skill_cmd,
+                koan_root=koan_root,
+                instance=instance,
+                project_name=project_name,
+                project_path=project_path,
+                run_num=run_num,
+                mission_title=mission_title,
+                autonomous_mode=autonomous_mode,
+            )
+
+        if exit_code == 0:
+            log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
+        _notify_mission_end(
+            instance, project_name, run_num, max_runs,
+            exit_code, mission_title,
+        )
+
+        _finalize_mission(instance, mission_title, project_name, exit_code)
+        _commit_instance(instance)
+
+        _sleep_between_runs(koan_root, instance, interval)
+        return True
+
+    if is_skill_mission(mission_title):
+        _debug_log(f"[run] skill mission unhandled, failing: {mission_title[:200]}")
+        log("warning", f"Skill mission has no runner, failing: {mission_title[:80]}")
+        _notify(instance, f"⚠️ [{project_name}] Unknown skill command: {mission_title[:80]}")
+        _finalize_mission(instance, mission_title, project_name, exit_code=1)
+        _commit_instance(instance)
+        return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Iteration body (extracted for exception isolation)
 # ---------------------------------------------------------------------------
 
@@ -947,36 +1167,7 @@ def _run_iteration(
         raise RuntimeError(f"Mission error: {plan.get('error', 'Unknown')}")
 
     if action == "contemplative":
-        log("pause", f"Decision: CONTEMPLATIVE mode (random reflection)")
-        print("  Action: Running contemplative session instead of autonomous work")
-        print()
-        _notify(instance, f"🪷 Run {run_num}/{max_runs} — Contemplative mode on {project_name}")
-
-        log("pause", "Running contemplative session...")
-        try:
-            from app.contemplative_runner import build_contemplative_command
-            cmd = build_contemplative_command(
-                instance=instance,
-                project_name=project_name,
-                session_info=f"Run {run_num}/{max_runs} on {project_name}. Mode: {plan['autonomous_mode']}.",
-            )
-            run_claude_task(cmd, os.devnull, os.devnull, cwd=koan_root)
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            log("error", f"Contemplative error: {e}")
-        log("pause", "Contemplative session ended.")
-
-        # Check for pending before sleeping
-        if check_pending_missions(instance):
-            log("koan", "Pending missions found after contemplation — skipping sleep")
-        else:
-            set_status(koan_root, f"Idle — post-contemplation sleep ({time.strftime('%H:%M')})")
-            log("pause", f"Contemplative session complete. Sleeping {interval}s...")
-            with protected_phase("Sleeping between runs"):
-                wake = interruptible_sleep(interval, koan_root, instance)
-            if wake == "mission":
-                log("koan", "New mission detected during sleep — waking up early")
+        _handle_contemplative(plan, run_num, max_runs, koan_root, instance, interval)
         return
 
     # Idle wait actions — all follow the same sleep-and-check pattern
@@ -1009,57 +1200,13 @@ def _run_iteration(
         return
 
     if action == "wait_pause":
-        log("quota", "Decision: WAIT mode (budget exhausted)")
-        print(f"  Reason: {plan['decision_reason']}")
-        print("  Action: Entering pause mode (will auto-resume when quota resets)")
-        print()
-        try:
-            from app.send_retrospective import create_retrospective
-            create_retrospective(Path(instance), project_name)
-        except Exception as e:
-            log("error", f"Retrospective sending failed: {e}")
-        # Compute a proper future reset timestamp to avoid instant auto-resume
-        reset_ts, reset_display = _compute_quota_reset_ts(instance)
-        from app.pause_manager import create_pause
-        create_pause(koan_root, "quota", reset_ts, reset_display)
-
-        # Build quota detail string for the notification
-        quota_details = plan['decision_reason']
-        if plan["display_lines"]:
-            quota_details += "\n" + "\n".join(plan["display_lines"])
-
-        _notify(instance, (
-            f"⏸️ Kōan paused: budget exhausted after {count} runs on [{project_name}].\n"
-            f"{quota_details}\n"
-            f"Auto-resume when session resets or use /resume."
-        ))
+        _handle_wait_pause(plan, count, koan_root, instance)
         return
 
     # --- Pre-flight quota check ---
     if action in ("mission", "autonomous"):
-        try:
-            from app.preflight import preflight_quota_check
-            pf_ok, pf_error = preflight_quota_check(
-                project_path=project_path,
-                instance_dir=instance,
-                project_name=project_name,
-            )
-            if not pf_ok:
-                log("quota", "Pre-flight probe detected quota exhaustion")
-                pf_reset_ts, pf_reset_display = _compute_preflight_reset_ts(pf_error)
-                from app.pause_manager import create_pause
-                create_pause(koan_root, "quota", pf_reset_ts, pf_reset_display)
-                label = plan["mission_title"] if plan["mission_title"] else "autonomous run"
-                _notify(instance, (
-                    f"⏸️ Pre-flight quota check failed before [{project_name}] {label}.\n"
-                    f"Pausing until quota resets. Use /resume to restart manually."
-                ))
-                # Mission stays In Progress — crash recovery will
-                # move it back to Pending on next startup.
-                return
-        except Exception as e:
-            log("error", f"Pre-flight quota check error: {e}")
-            # Proceed optimistically on error
+        if _run_preflight_check(plan, koan_root, instance, count):
+            return
 
     # --- Execute mission or autonomous run ---
     mission_title = plan["mission_title"]
@@ -1093,73 +1240,11 @@ def _run_iteration(
         _start_mission_in_file(instance, mission_title)
 
     # --- Check for skill-dispatched mission ---
-    # Missions starting with /command (e.g. "/plan Add dark mode")
-    # are dispatched directly to the skill's CLI runner, bypassing
-    # the Claude agent.
     if mission_title:
-        from app.debug import debug_log as _debug_log
-        preview = f"{mission_title[:100]}..." if len(mission_title) > 100 else mission_title
-        _debug_log(f"[run] checking skill dispatch for: {preview}")
-        from app.skill_dispatch import dispatch_skill_mission, is_skill_mission
-        skill_cmd = dispatch_skill_mission(
-            mission_text=mission_title,
-            project_name=project_name,
-            project_path=project_path,
-            koan_root=koan_root,
-            instance_dir=instance,
-        )
-        if skill_cmd:
-            _debug_log(f"[run] skill dispatch matched: {' '.join(skill_cmd[:5])}")
-            log("mission", "Decision: SKILL DISPATCH (direct runner)")
-            print(f"  Mission: {mission_title}")
-            print(f"  Project: {project_name}")
-            print(f"  Runner: {' '.join(skill_cmd[:4])}...")
-            print()
-            set_status(koan_root, f"Run {run_num}/{max_runs} — skill dispatch on {project_name}")
-            _notify(instance, f"🚀 Run {run_num}/{max_runs} — [{project_name}] Skill: {mission_title}")
-
-            with protected_phase(f"Skill: {mission_title[:50]}"):
-                exit_code = _run_skill_mission(
-                    skill_cmd=skill_cmd,
-                    koan_root=koan_root,
-                    instance=instance,
-                    project_name=project_name,
-                    project_path=project_path,
-                    run_num=run_num,
-                    mission_title=mission_title,
-                    autonomous_mode=autonomous_mode,
-                )
-
-            if exit_code == 0:
-                log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
-            _notify_mission_end(
-                instance, project_name, run_num, max_runs,
-                exit_code, mission_title,
-            )
-
-            _finalize_mission(instance, mission_title, project_name, exit_code)
-            _commit_instance(instance)
-
-            if check_pending_missions(instance):
-                log("koan", "Pending missions — skipping sleep")
-            else:
-                set_status(koan_root, f"Idle — sleeping ({time.strftime('%H:%M')})")
-                with protected_phase("Sleeping between runs"):
-                    wake = interruptible_sleep(interval, koan_root, instance)
-                if wake == "mission":
-                    log("koan", "New mission detected during sleep — waking up early")
-            return
-        elif is_skill_mission(mission_title):
-            # Skill mission but no runner matched — fail it instead
-            # of falling through to Claude (which would re-queue it).
-            # Note: is_skill_mission() is called again intentionally —
-            # dispatch returns None for both "not a skill" and "unknown
-            # runner", and we need to distinguish the two cases here.
-            _debug_log(f"[run] skill mission unhandled, failing: {mission_title[:200]}")
-            log("warning", f"Skill mission has no runner, failing: {mission_title[:80]}")
-            _notify(instance, f"⚠️ [{project_name}] Unknown skill command: {mission_title[:80]}")
-            _finalize_mission(instance, mission_title, project_name, exit_code=1)
-            _commit_instance(instance)
+        if _handle_skill_dispatch(
+            mission_title, project_name, project_path, koan_root,
+            instance, run_num, max_runs, autonomous_mode, interval,
+        ):
             return
 
     # Lifecycle notification
@@ -1337,17 +1422,7 @@ def _run_iteration(
         return
 
     # Sleep between runs (skip if pending missions)
-    if check_pending_missions(instance):
-        log("koan", "Pending missions found — skipping sleep, starting next run immediately")
-        set_status(koan_root, f"Run {run_num}/{max_runs} — done, next run starting")
-    else:
-        set_status(koan_root, f"Idle — sleeping {interval}s ({time.strftime('%H:%M')})")
-        log("koan", f"Sleeping {interval}s (checking for new missions every 10s)...")
-        with protected_phase("Sleeping between runs"):
-            wake = interruptible_sleep(interval, koan_root, instance)
-        if wake == "mission":
-            log("koan", "New mission detected during sleep — waking up early")
-            set_status(koan_root, f"Run {run_num}/{max_runs} — done, new mission detected")
+    _sleep_between_runs(koan_root, instance, interval, run_num, max_runs)
 
 
 # ---------------------------------------------------------------------------
