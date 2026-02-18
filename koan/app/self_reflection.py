@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.cli_provider import build_full_command
-from app.utils import atomic_write
+from app.utils import append_to_outbox, atomic_write
 
 
 def should_reflect(instance_dir: Path, interval: int = 10) -> bool:
@@ -168,9 +168,10 @@ def notify_outbox(instance_dir: Path, observations: str):
 
 {observations}
 
-(Periodic self-reflection, see personality-evolution.md)"""
+(Periodic self-reflection, see personality-evolution.md)
+"""
 
-    atomic_write(outbox_file, message)
+    append_to_outbox(outbox_file, message)
 
 
 def main():

@@ -121,13 +121,21 @@ class TestNotifyOutbox:
         assert "🪷" in content
         assert "personality-evolution.md" in content
 
-    def test_overwrites_existing_outbox(self, instance_dir):
+    def test_appends_to_existing_outbox(self, instance_dir):
         outbox = instance_dir / "outbox.md"
-        outbox.write_text("old message")
+        outbox.write_text("old message\n")
         notify_outbox(instance_dir, "- new reflection")
         content = outbox.read_text()
-        assert "old message" not in content
+        assert "old message" in content
         assert "new reflection" in content
+
+    def test_multiple_reflections_preserve_all(self, instance_dir):
+        outbox = instance_dir / "outbox.md"
+        notify_outbox(instance_dir, "- first reflection")
+        notify_outbox(instance_dir, "- second reflection")
+        content = outbox.read_text()
+        assert "first reflection" in content
+        assert "second reflection" in content
 
 
 class TestShouldReflectEdgeCases:

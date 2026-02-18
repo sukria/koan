@@ -8,7 +8,6 @@ for delivery via Telegram. Called when usage tracker enters WAIT mode.
 Usage: python send_retrospective.py <instance_dir> <project_name>
 """
 
-import fcntl
 import sys
 from datetime import date
 from pathlib import Path
@@ -61,13 +60,11 @@ def append_to_outbox(instance_dir: Path, message: str):
         instance_dir: Path to instance directory
         message: Message to append
     """
-    outbox_file = instance_dir / "outbox.md"
+    from app.utils import append_to_outbox as _append
 
+    outbox_file = instance_dir / "outbox.md"
     try:
-        with open(outbox_file, "a") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            f.write(message + "\n")
-            fcntl.flock(f, fcntl.LOCK_UN)
+        _append(outbox_file, message + "\n")
     except OSError as e:
         print(f"[send_retrospective] Error writing to outbox: {e}", file=sys.stderr)
 
