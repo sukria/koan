@@ -1020,3 +1020,90 @@ class TestRunCommand:
         )
         cmd = mock_run.call_args[0][0]
         assert "--model" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# Plugin directory support (--plugin-dir)
+# ---------------------------------------------------------------------------
+
+class TestPluginDirSupport:
+    """Tests for --plugin-dir flag support across providers."""
+
+    def setup_method(self):
+        reset_provider()
+
+    def teardown_method(self):
+        reset_provider()
+
+    def test_claude_build_plugin_args_single(self):
+        provider = ClaudeProvider()
+        result = provider.build_plugin_args(["/tmp/plugins"])
+        assert result == ["--plugin-dir", "/tmp/plugins"]
+
+    def test_claude_build_plugin_args_multiple(self):
+        provider = ClaudeProvider()
+        result = provider.build_plugin_args(["/tmp/a", "/tmp/b"])
+        assert result == ["--plugin-dir", "/tmp/a", "--plugin-dir", "/tmp/b"]
+
+    def test_claude_build_plugin_args_none(self):
+        provider = ClaudeProvider()
+        assert provider.build_plugin_args(None) == []
+        assert provider.build_plugin_args([]) == []
+
+    def test_copilot_build_plugin_args_returns_empty(self):
+        """Copilot doesn't support --plugin-dir."""
+        provider = CopilotProvider()
+        assert provider.build_plugin_args(["/tmp/plugins"]) == []
+
+    def test_local_build_plugin_args_returns_empty(self):
+        """Local LLM doesn't support --plugin-dir."""
+        provider = LocalLLMProvider()
+        assert provider.build_plugin_args(["/tmp/plugins"]) == []
+
+    def test_claude_build_command_includes_plugin_dir(self):
+        provider = ClaudeProvider()
+        cmd = provider.build_command(
+            prompt="hello",
+            plugin_dirs=["/tmp/koan-plugins"],
+        )
+        assert "--plugin-dir" in cmd
+        idx = cmd.index("--plugin-dir")
+        assert cmd[idx + 1] == "/tmp/koan-plugins"
+
+    def test_claude_build_command_no_plugin_dir(self):
+        provider = ClaudeProvider()
+        cmd = provider.build_command(prompt="hello")
+        assert "--plugin-dir" not in cmd
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    def test_build_full_command_with_plugin_dirs(self):
+        cmd = build_full_command(
+            prompt="hello",
+            plugin_dirs=["/tmp/koan-plugins"],
+        )
+        assert "--plugin-dir" in cmd
+        idx = cmd.index("--plugin-dir")
+        assert cmd[idx + 1] == "/tmp/koan-plugins"
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    def test_build_full_command_without_plugin_dirs(self):
+        cmd = build_full_command(prompt="hello")
+        assert "--plugin-dir" not in cmd
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "copilot"})
+    @patch("app.provider.copilot.shutil.which")
+    def test_build_full_command_copilot_ignores_plugin_dirs(self, mock_which):
+        """Copilot silently ignores plugin_dirs."""
+        mock_which.side_effect = lambda x: "/usr/local/bin/copilot" if x == "copilot" else None
+        cmd = build_full_command(
+            prompt="hello",
+            plugin_dirs=["/tmp/koan-plugins"],
+        )
+        assert "--plugin-dir" not in cmd
+
+    def test_base_provider_build_plugin_args_returns_empty(self):
+        """Base CLIProvider returns empty for plugin dirs."""
+        from app.provider.base import CLIProvider
+        provider = CLIProvider()
+        assert provider.build_plugin_args(["/tmp/plugins"]) == []
+        assert provider.build_plugin_args(None) == []

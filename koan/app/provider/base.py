@@ -90,6 +90,17 @@ class CLIProvider:
         """Build args for MCP server configuration."""
         raise NotImplementedError
 
+    def build_plugin_args(self, plugin_dirs: Optional[List[str]] = None) -> List[str]:
+        """Build args for plugin directory loading.
+
+        Args:
+            plugin_dirs: Paths to plugin directories to load.
+
+        Returns:
+            CLI flags list. Base implementation returns empty (not supported).
+        """
+        return []
+
     def build_command(
         self,
         prompt: str,
@@ -100,6 +111,7 @@ class CLIProvider:
         output_format: str = "",
         max_turns: int = 0,
         mcp_configs: Optional[List[str]] = None,
+        plugin_dirs: Optional[List[str]] = None,
     ) -> List[str]:
         """Build a complete CLI command from generic parameters.
 
@@ -112,6 +124,7 @@ class CLIProvider:
         cmd.extend(self.build_output_args(output_format))
         cmd.extend(self.build_max_turns_args(max_turns))
         cmd.extend(self.build_mcp_args(mcp_configs))
+        cmd.extend(self.build_plugin_args(plugin_dirs))
         return cmd
 
     def check_quota_available(self, project_path: str, timeout: int = 15) -> Tuple[bool, str]:

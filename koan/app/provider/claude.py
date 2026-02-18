@@ -54,6 +54,14 @@ class ClaudeProvider(CLIProvider):
         flags.extend(configs)
         return flags
 
+    def build_plugin_args(self, plugin_dirs: Optional[List[str]] = None) -> List[str]:
+        if not plugin_dirs:
+            return []
+        flags: List[str] = []
+        for d in plugin_dirs:
+            flags.extend(["--plugin-dir", d])
+        return flags
+
     def check_quota_available(self, project_path: str, timeout: int = 15) -> Tuple[bool, str]:
         """Check Claude API quota via ``claude usage`` (no tokens consumed).
 

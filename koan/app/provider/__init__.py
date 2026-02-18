@@ -158,6 +158,7 @@ def build_full_command(
     output_format: str = "",
     max_turns: int = 0,
     mcp_configs: Optional[List[str]] = None,
+    plugin_dirs: Optional[List[str]] = None,
 ) -> List[str]:
     """Build a complete CLI command for the configured provider.
 
@@ -173,6 +174,7 @@ def build_full_command(
         output_format=output_format,
         max_turns=max_turns,
         mcp_configs=mcp_configs,
+        plugin_dirs=plugin_dirs,
     )
 
 

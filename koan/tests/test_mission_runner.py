@@ -69,6 +69,25 @@ class TestBuildMissionCommand:
         # Clean up
         reset_provider()
 
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_plugin_dirs_forwarded(self, mock_provider):
+        from app.mission_runner import build_mission_command
+
+        cmd = build_mission_command(
+            prompt="test",
+            plugin_dirs=["/tmp/koan-plugins"],
+        )
+        assert "--plugin-dir" in cmd
+        idx = cmd.index("--plugin-dir")
+        assert cmd[idx + 1] == "/tmp/koan-plugins"
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_plugin_dirs_none_excluded(self, mock_provider):
+        from app.mission_runner import build_mission_command
+
+        cmd = build_mission_command(prompt="test")
+        assert "--plugin-dir" not in cmd
+
 
 class TestGetMissionFlags:
     """Test get_mission_flags function."""
