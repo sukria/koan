@@ -30,6 +30,18 @@ class TestGetChatTools:
         with _mock_config({"tools": {"chat": ["Read", "Write"]}}):
             assert get_chat_tools() == "Read,Write"
 
+    def test_string_value_passed_through(self):
+        from app.config import get_chat_tools
+
+        with _mock_config({"tools": {"chat": "Read,Custom"}}):
+            assert get_chat_tools() == "Read,Custom"
+
+    def test_non_list_non_string_uses_default(self):
+        from app.config import get_chat_tools
+
+        with _mock_config({"tools": {"chat": 42}}):
+            assert get_chat_tools() == "Read,Glob,Grep"
+
 
 # --- get_mission_tools ---
 
