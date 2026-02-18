@@ -68,6 +68,35 @@ def _read_journal(target_date: date) -> str:
     return read_all_journals(INSTANCE_DIR, target_date)
 
 
+def _extract_mission_title(line: str) -> Optional[str]:
+    """Extract a clean title from a mission line.
+
+    Handles both current format ``- [project:name] text ⏳(...) ▶(...) ✅(...)``
+    and legacy bold format ``- **title** (extra)``.
+    Returns None if the line doesn't look like a mission.
+    """
+    line = line.strip()
+    if not line.startswith("- "):
+        return None
+    text = line[2:].strip()
+    if not text:
+        return None
+
+    # Strip lifecycle timestamps: ⏳(...) ▶(...) ✅(...) ❌(...)
+    text = re.sub(r"\s*[⏳▶✅❌]\s*\([^)]*\)", "", text).strip()
+
+    # Strip project tag: [project:name]
+    text = re.sub(r"^\[project:[^\]]+\]\s*", "", text).strip()
+
+    # Legacy bold format: **title** — strip markdown bold
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text).strip()
+
+    # Strip trailing metadata: (session N), — session N, — PR #NNN
+    text = re.split(r"\s*[\(\—–—]", text)[0].strip()
+
+    return text if text else None
+
+
 def _parse_completed_missions() -> List[str]:
     """Extract recently completed missions from missions.md."""
     if not MISSIONS_FILE.exists():
@@ -79,10 +108,9 @@ def _parse_completed_missions() -> List[str]:
     sections = parse_sections(content)
     completed = []
     for item in sections["done"]:
-        first_line = item.split("\n")[0].strip()
-        if first_line.startswith("- **"):
-            title = re.sub(r"[*_]", "", first_line[2:]).strip()
-            title = re.split(r"\s*[\(\—]", title)[0].strip()
+        first_line = item.split("\n")[0]
+        title = _extract_mission_title(first_line)
+        if title:
             completed.append(title)
 
     return completed
@@ -150,22 +178,28 @@ def generate_report(report_type: str = "morning") -> str:
         lines.append("No activity recorded.")
         lines.append("")
 
-    # In-progress long-running items
+    # In-progress items
     if MISSIONS_FILE.exists():
         from app.missions import parse_sections
 
         content = MISSIONS_FILE.read_text()
         sections = parse_sections(content)
-        long_running = []
+        in_progress = []
         for item in sections["in_progress"]:
-            first_line = item.split("\n")[0].strip()
-            if first_line.startswith("### "):
-                long_running.append(first_line[4:].strip())
+            first_line = item.split("\n")[0]
+            # Handle ### multi-line blocks (legacy)
+            stripped = first_line.strip()
+            if stripped.startswith("### "):
+                in_progress.append(stripped[4:].strip())
+            else:
+                title = _extract_mission_title(first_line)
+                if title:
+                    in_progress.append(title)
 
-        if long_running:
-            lines.append("In Progress (long-running):")
-            for lr in long_running:
-                lines.append(f"  . {lr}")
+        if in_progress:
+            lines.append("In Progress:")
+            for ip in in_progress:
+                lines.append(f"  . {ip}")
             lines.append("")
 
     lines.append("-- Kōan")

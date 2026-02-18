@@ -10,6 +10,7 @@ import pytest
 from app.daily_report import (
     should_send_report,
     _read_journal,
+    _extract_mission_title,
     _parse_completed_missions,
     _count_pending_missions,
     generate_report,
@@ -86,24 +87,91 @@ class TestReadJournal:
 
 
 # ---------------------------------------------------------------------------
+# _extract_mission_title
+# ---------------------------------------------------------------------------
+
+class TestExtractMissionTitle:
+    def test_standard_format_with_project_tag(self):
+        line = "- [project:koan] fix the auth bug ⏳(2026-02-17T16:00) ▶(2026-02-17T16:12) ✅ (2026-02-17 21:16)"
+        assert _extract_mission_title(line) == "fix the auth bug"
+
+    def test_standard_format_without_timestamps(self):
+        assert _extract_mission_title("- [project:koan] fix the bug") == "fix the bug"
+
+    def test_no_project_tag(self):
+        assert _extract_mission_title("- fix the bug ✅ (2026-02-17 21:16)") == "fix the bug"
+
+    def test_legacy_bold_format(self):
+        assert _extract_mission_title("- **Fix IDOR** (session 22)") == "Fix IDOR"
+
+    def test_failed_marker(self):
+        line = "- [project:koan] broken thing ⏳(2026-02-16T11:38) ▶(2026-02-16T11:38) ❌ (2026-02-16 11:38)"
+        assert _extract_mission_title(line) == "broken thing"
+
+    def test_not_a_mission_line(self):
+        assert _extract_mission_title("some random text") is None
+        assert _extract_mission_title("## Section header") is None
+
+    def test_empty_after_strip(self):
+        assert _extract_mission_title("- ") is None
+
+    def test_dash_separator_metadata(self):
+        line = "- [project:koan] do stuff — PR #271"
+        assert _extract_mission_title(line) == "do stuff"
+
+    def test_queued_and_started_only(self):
+        line = "- [project:koan] working on it ⏳(2026-02-18T08:00) ▶(2026-02-18T08:05)"
+        assert _extract_mission_title(line) == "working on it"
+
+    def test_plain_mission(self):
+        assert _extract_mission_title("- simple task") == "simple task"
+
+
+# ---------------------------------------------------------------------------
 # _parse_completed_missions
 # ---------------------------------------------------------------------------
 
 class TestParseCompletedMissions:
-    def test_bold_entries(self, tmp_path):
+    def test_real_format_with_timestamps(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## Done\n\n"
+            "- [project:koan] fix auth bug ⏳(2026-02-17T16:00) ▶(2026-02-17T16:12) ✅ (2026-02-17 21:16)\n"
+            "- [project:wp-toolkit] plan for case EXTWPTOOLK-11339 ✅ (2026-02-17 16:12)\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file):
+            result = _parse_completed_missions()
+        assert len(result) == 2
+        assert "fix auth bug" in result[0]
+        assert "plan for case EXTWPTOOLK-11339" in result[1]
+
+    def test_legacy_bold_entries(self, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
             "## Done\n\n"
             "- **Fix IDOR** (session 22)\n"
             "- **Dunning emails** — session 20\n"
-            "- Old plain entry\n"
         )
         with patch("app.daily_report.MISSIONS_FILE", missions_file):
             result = _parse_completed_missions()
         assert len(result) == 2
         assert "Fix IDOR" in result[0]
         assert "Dunning emails" in result[1]
+
+    def test_mixed_formats(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## Done\n\n"
+            "- [project:koan] new format ✅ (2026-02-17 21:16)\n"
+            "- **Old format** (session 1)\n"
+            "- plain entry no tags\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file):
+            result = _parse_completed_missions()
+        assert len(result) == 3
 
     def test_empty_done_section(self, tmp_path):
         missions_file = tmp_path / "missions.md"
@@ -142,7 +210,29 @@ class TestCountPendingMissions:
 # ---------------------------------------------------------------------------
 
 class TestGenerateReport:
-    def test_morning_report(self, tmp_path):
+    def test_morning_report_real_format(self, tmp_path):
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "- [project:koan] task 1\n\n"
+            "## In Progress\n\n"
+            "- [project:koan] working on stuff ⏳(2026-02-18T08:00) ▶(2026-02-18T08:05)\n\n"
+            "## Done\n\n"
+            "- [project:koan] done thing ✅ (2026-02-17 21:16)\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path):
+            report = generate_report("morning")
+
+        assert "Report for" in report
+        assert "done thing" in report
+        assert "Pending: 1" in report
+        assert "working on stuff" in report
+        assert "In Progress:" in report
+        assert "-- Kōan" in report
+
+    def test_morning_report_legacy_format(self, tmp_path):
         missions_file = tmp_path / "missions.md"
         missions_file.write_text(
             "# Missions\n\n"
@@ -212,6 +302,24 @@ class TestGenerateReport:
             report = generate_report("morning")
         assert "Report for" in report
         assert "-- Kōan" in report
+
+    def test_in_progress_with_real_missions(self, tmp_path):
+        """In-progress missions in real format should appear in report."""
+        missions_file = tmp_path / "missions.md"
+        missions_file.write_text(
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- [project:koan] refactoring utils ⏳(2026-02-18T08:00) ▶(2026-02-18T08:05)\n"
+            "- [project:ulc] fixing SSL cert reuse\n\n"
+            "## Done\n\n"
+        )
+        with patch("app.daily_report.MISSIONS_FILE", missions_file), \
+             patch("app.daily_report.INSTANCE_DIR", tmp_path):
+            report = generate_report("evening")
+        assert "In Progress:" in report
+        assert "refactoring utils" in report
+        assert "fixing SSL cert reuse" in report
 
 
 # ---------------------------------------------------------------------------
