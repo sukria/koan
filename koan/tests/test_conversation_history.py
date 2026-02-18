@@ -254,6 +254,54 @@ class TestLockSafety:
         assert len(msgs) == 2
 
 
+class TestCompactHistoryLocking:
+    """Verify compact_history uses locked truncation."""
+
+    def test_truncation_uses_flock(self, tmp_path):
+        """compact_history truncates with fcntl.flock, not bare write_text."""
+        import json
+        from app.conversation_history import compact_history
+
+        history = tmp_path / "history.jsonl"
+        topics = tmp_path / "topics.json"
+
+        # Write enough messages to trigger compaction
+        messages = []
+        for i in range(25):
+            msg = {"timestamp": f"2026-02-18T10:{i:02d}:00", "role": "user", "text": f"Message {i} about testing"}
+            messages.append(json.dumps(msg, ensure_ascii=False))
+        history.write_text("\n".join(messages) + "\n")
+
+        count = compact_history(history, topics)
+        assert count == 25
+        # History should be empty after compaction
+        assert history.read_text() == ""
+        # Topics file should exist with compaction data
+        assert topics.exists()
+        topics_data = json.loads(topics.read_text())
+        assert len(topics_data) == 1
+        assert topics_data[0]["message_count"] == 25
+
+    def test_no_topics_path_uses_locked_truncation(self, tmp_path):
+        """When no topics are extractable, truncation is still locked."""
+        import json
+        from app.conversation_history import compact_history
+
+        history = tmp_path / "history.jsonl"
+        topics = tmp_path / "topics.json"
+
+        # Write messages with no extractable topics (assistant-only, short text)
+        messages = []
+        for i in range(25):
+            msg = {"timestamp": f"2026-02-18T10:{i:02d}:00", "role": "assistant", "text": "ok"}
+            messages.append(json.dumps(msg, ensure_ascii=False))
+        history.write_text("\n".join(messages) + "\n")
+
+        count = compact_history(history, topics)
+        assert count == 25
+        assert history.read_text() == ""
+
+
 # --- backward compatibility ---
 
 
