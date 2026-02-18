@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
-from app.github import run_gh, issue_create, api
+from app.github import run_gh, issue_create, api, fetch_issue_with_comments
 from app.prompts import load_prompt, load_skill_prompt
 
 
@@ -343,35 +343,19 @@ def _get_repo_info(project_path):
 
 def _fetch_issue_context(owner, repo, issue_number):
     """Fetch issue title, body and comments via gh CLI."""
-    issue_json = api(
-        f"repos/{owner}/{repo}/issues/{issue_number}",
-        jq='{"title": .title, "body": .body}',
-    )
-    try:
-        data = json.loads(issue_json)
-        title = data.get("title", "")
-        body = data.get("body", "")
-    except (json.JSONDecodeError, TypeError):
-        title = ""
-        body = issue_json
-
-    comments_json = api(
-        f"repos/{owner}/{repo}/issues/{issue_number}/comments",
-        jq='[.[] | {author: .user.login, date: .created_at, body: .body}]',
-    )
-
-    comments_text = _format_comments(comments_json)
+    title, body, comments = fetch_issue_with_comments(owner, repo, issue_number)
+    comments_text = _format_comments(comments)
     return title, body, comments_text
 
 
-def _format_comments(comments_json):
-    """Format comments JSON into readable text with authorship."""
-    try:
-        comments = json.loads(comments_json)
-        if not isinstance(comments, list) or not comments:
-            return ""
-    except (json.JSONDecodeError, TypeError):
-        return comments_json.strip() if comments_json else ""
+def _format_comments(comments):
+    """Format comments list into readable text with authorship.
+
+    Args:
+        comments: List of dicts with keys: author, date, body.
+    """
+    if not isinstance(comments, list) or not comments:
+        return ""
 
     parts = []
     for c in comments:

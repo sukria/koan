@@ -764,31 +764,30 @@ class TestGetRepoInfo:
 # ---------------------------------------------------------------------------
 
 class TestFetchIssueContext:
-    @patch("app.github.subprocess.run")
-    def test_returns_title_body_and_comments(self, mock_run):
-        comments_data = json.dumps([
-            {"author": "alice", "date": "2026-02-01T10:00:00Z", "body": "Looks good"},
-        ])
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=json.dumps(
-                {"title": "My Issue", "body": "Body"}
-            )),
-            MagicMock(returncode=0, stdout=comments_data),
-        ]
+    @patch("app.plan_runner.fetch_issue_with_comments")
+    def test_returns_title_body_and_comments(self, mock_fetch):
+        mock_fetch.return_value = (
+            "My Issue", "Body",
+            [{"author": "alice", "date": "2026-02-01T10:00:00Z", "body": "Looks good"}],
+        )
         title, body, comments = _fetch_issue_context("sukria", "koan", "64")
         assert title == "My Issue"
         assert body == "Body"
         assert "alice" in comments
+        mock_fetch.assert_called_once_with("sukria", "koan", "64")
 
-    @patch("app.github.subprocess.run")
-    def test_handles_non_json(self, mock_run):
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="plain text"),
-            MagicMock(returncode=0, stdout=""),
-        ]
-        title, body, _ = _fetch_issue_context("o", "r", "1")
-        assert title == ""
-        assert body == "plain text"
+    @patch("app.plan_runner.fetch_issue_with_comments")
+    def test_handles_empty_comments(self, mock_fetch):
+        mock_fetch.return_value = ("Title", "Body", [])
+        title, body, comments = _fetch_issue_context("o", "r", "1")
+        assert title == "Title"
+        assert comments == ""
+
+    @patch("app.plan_runner.fetch_issue_with_comments")
+    def test_propagates_runtime_error(self, mock_fetch):
+        mock_fetch.side_effect = RuntimeError("gh failed")
+        with pytest.raises(RuntimeError):
+            _fetch_issue_context("o", "r", "1")
 
 
 # ---------------------------------------------------------------------------
@@ -797,27 +796,27 @@ class TestFetchIssueContext:
 
 class TestFormatComments:
     def test_formats_with_author_and_date(self):
-        data = json.dumps([
+        data = [
             {"author": "alice", "date": "2026-02-01T10:00:00Z", "body": "Good"},
-        ])
+        ]
         result = _format_comments(data)
         assert "alice" in result
         assert "2026-02-01" in result
 
     def test_empty_list(self):
-        assert _format_comments("[]") == ""
+        assert _format_comments([]) == ""
 
-    def test_invalid_json(self):
-        assert _format_comments("not json") == "not json"
+    def test_none_input(self):
+        assert _format_comments(None) == ""
 
-    def test_empty_string(self):
-        assert _format_comments("") == ""
+    def test_non_list_input(self):
+        assert _format_comments("not a list") == ""
 
     def test_skips_empty_body(self):
-        data = json.dumps([
+        data = [
             {"author": "a", "date": "2026-01-01T00:00:00Z", "body": ""},
             {"author": "b", "date": "2026-01-02T00:00:00Z", "body": "useful"},
-        ])
+        ]
         result = _format_comments(data)
         assert "useful" in result
         assert result.count("**") == 2
