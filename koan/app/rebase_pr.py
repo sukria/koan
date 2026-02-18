@@ -14,14 +14,22 @@ Pipeline:
 """
 
 import json
-import re
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.claude_step import _rebase_onto_target, _run_git, _truncate
-from app.github import pr_create, run_gh
-from app.prompts import load_prompt, load_skill_prompt
+from app.claude_step import (
+    _build_pr_prompt,
+    _get_current_branch,
+    _is_permission_error,
+    _push_with_pr_fallback,
+    _rebase_onto_target,
+    _run_git,
+    _safe_checkout,
+    _truncate,
+)
+from app.github import run_gh
+from app.prompts import load_prompt, load_skill_prompt  # noqa: F401 — safety import
 
 
 def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
@@ -258,29 +266,7 @@ def run_rebase(
 
 def _build_rebase_prompt(context: dict, skill_dir: Optional[Path] = None) -> str:
     """Build a prompt for Claude to analyze and apply review feedback."""
-    if skill_dir is not None:
-        return load_skill_prompt(
-            skill_dir, "rebase",
-            TITLE=context["title"],
-            BODY=context.get("body", ""),
-            BRANCH=context["branch"],
-            BASE=context["base"],
-            DIFF=context.get("diff", ""),
-            REVIEW_COMMENTS=context.get("review_comments", ""),
-            REVIEWS=context.get("reviews", ""),
-            ISSUE_COMMENTS=context.get("issue_comments", ""),
-        )
-    return load_prompt(
-        "rebase",
-        TITLE=context["title"],
-        BODY=context.get("body", ""),
-        BRANCH=context["branch"],
-        BASE=context["base"],
-        DIFF=context.get("diff", ""),
-        REVIEW_COMMENTS=context.get("review_comments", ""),
-        REVIEWS=context.get("reviews", ""),
-        ISSUE_COMMENTS=context.get("issue_comments", ""),
-    )
+    return _build_pr_prompt("rebase", context, skill_dir=skill_dir)
 
 
 def _apply_review_feedback(
@@ -304,16 +290,6 @@ def _apply_review_feedback(
         max_turns=20,
     )
 
-
-def _get_current_branch(project_path: str) -> str:
-    """Get the current branch name."""
-    try:
-        return _run_git(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=project_path,
-        )
-    except Exception:
-        return "main"
 
 
 def _checkout_pr_branch(branch: str, project_path: str) -> None:
@@ -356,101 +332,11 @@ def _push_with_fallback(
     context: dict,
     project_path: str,
 ) -> dict:
-    """Push rebased branch, falling back to new draft PR if permission denied.
-
-    Returns:
-        dict with keys: success (bool), actions (list), error (str).
-    """
-    actions = []
-
-    # Option 1: Try force-pushing to the existing branch
-    try:
-        _run_git(
-            ["git", "push", "origin", branch, "--force-with-lease"],
-            cwd=project_path,
-        )
-        actions.append(f"Force-pushed `{branch}`")
-        return {"success": True, "actions": actions, "error": ""}
-    except Exception as push_error:
-        error_msg = str(push_error)
-
-    # Option 2: Permission denied — create a new draft PR
-    if not _is_permission_error(error_msg):
-        return {
-            "success": False,
-            "actions": actions,
-            "error": error_msg,
-        }
-
-    # Create new branch and draft PR
-    from app.config import get_branch_prefix
-    prefix = get_branch_prefix()
-    new_branch = f"{prefix}rebase-{branch.replace('/', '-')}"
-    try:
-        _run_git(
-            ["git", "checkout", "-b", new_branch],
-            cwd=project_path,
-        )
-        _run_git(
-            ["git", "push", "-u", "origin", new_branch],
-            cwd=project_path,
-        )
-        actions.append(f"Created new branch `{new_branch}` (no push permission on `{branch}`)")
-
-        # Create draft PR
-        title = context.get("title", f"Rebase of #{pr_number}")
-        new_pr_body = (
-            f"Supersedes #{pr_number}.\n\n"
-            f"This PR contains the rebased version of `{branch}` onto `{base}`.\n"
-            f"Original PR: {context.get('url', f'#{pr_number}')}\n\n"
-            f"---\n_Automated by Kōan_"
-        )
-        new_pr_url = pr_create(
-            title=f"[Rebase] {title}",
-            body=new_pr_body,
-            draft=True,
-            base=base,
-            repo=full_repo,
-            head=new_branch,
-        )
-        actions.append(f"Created draft PR: {new_pr_url.strip()}")
-
-        # Comment on the original PR to cross-link
-        new_pr_match = re.search(r'/pull/(\d+)', new_pr_url)
-        new_pr_ref = new_pr_match.group(0) if new_pr_match else new_pr_url.strip()
-
-        try:
-            run_gh(
-                "pr", "comment", pr_number,
-                "--repo", full_repo,
-                "--body",
-                f"This PR has been rebased and superseded by {new_pr_ref}.\n\n"
-                f"The new PR contains the same changes rebased onto `{base}`.\n\n"
-                f"---\n_Automated by Kōan_",
-            )
-            actions.append("Cross-linked original PR")
-        except Exception as e:
-            print(f"[rebase_pr] Cross-link comment failed: {e}", file=sys.stderr)
-
-        return {"success": True, "actions": actions, "error": ""}
-
-    except Exception as e:
-        return {
-            "success": False,
-            "actions": actions,
-            "error": f"Failed to create fallback PR: {e}",
-        }
-
-
-def _is_permission_error(error_msg: str) -> bool:
-    """Check if an error message indicates a permission/access problem."""
-    indicators = [
-        "permission", "denied", "forbidden", "403",
-        "protected branch", "not allowed",
-        "unable to access", "authentication failed",
-    ]
-    lower = error_msg.lower()
-    return any(ind in lower for ind in indicators)
+    """Push rebased branch, falling back to new draft PR if permission denied."""
+    return _push_with_pr_fallback(
+        branch, base, full_repo, pr_number, context, project_path,
+        pr_type="rebase",
+    )
 
 
 def _build_rebase_comment(
@@ -475,14 +361,6 @@ def _build_rebase_comment(
         f"---\n"
         f"_Automated by Kōan_"
     )
-
-
-def _safe_checkout(branch: str, project_path: str) -> None:
-    """Checkout a branch without raising on failure."""
-    try:
-        _run_git(["git", "checkout", branch], cwd=project_path)
-    except Exception as e:
-        print(f"[rebase_pr] Safe checkout failed for {branch}: {e}", file=sys.stderr)
 
 
 def _is_conflict_failure(summary: str) -> bool:

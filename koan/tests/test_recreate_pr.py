@@ -117,7 +117,7 @@ class TestBuildRecreatePrompt:
     def test_without_skill_dir_uses_system_prompts(self, pr_context):
         """Without skill_dir, falls back to system-prompts/recreate.md which
         may not exist. That's fine -- the test just verifies the code path."""
-        with patch("app.recreate_pr.load_prompt", return_value="fallback prompt") as mock:
+        with patch("app.claude_step.load_prompt", return_value="fallback prompt") as mock:
             prompt = _build_recreate_prompt(pr_context, skill_dir=None)
             mock.assert_called_once()
             assert prompt == "fallback prompt"
@@ -176,7 +176,7 @@ class TestBuildRecreateComment:
 
 class TestPushRecreated:
     def test_force_push_succeeds(self, pr_context):
-        with patch("app.recreate_pr._run_git") as mock_git:
+        with patch("app.claude_step._run_git") as mock_git:
             result = _push_recreated(
                 "koan/feat", "main", "sukria/koan", "71",
                 pr_context, "/project",
@@ -189,9 +189,9 @@ class TestPushRecreated:
             )
 
     def test_permission_denied_creates_new_pr(self, pr_context):
-        with patch("app.recreate_pr._run_git") as mock_git, \
-             patch("app.recreate_pr.pr_create", return_value="https://github.com/sukria/koan/pull/120"), \
-             patch("app.recreate_pr.run_gh"), \
+        with patch("app.claude_step._run_git") as mock_git, \
+             patch("app.claude_step.pr_create", return_value="https://github.com/sukria/koan/pull/120"), \
+             patch("app.claude_step.run_gh"), \
              patch("app.utils.get_branch_prefix", return_value="koan/"):
             mock_git.side_effect = [
                 RuntimeError("permission denied"),  # force-push fails
@@ -207,7 +207,7 @@ class TestPushRecreated:
             assert any("draft PR" in a for a in result["actions"])
 
     def test_non_permission_error_fails(self, pr_context):
-        with patch("app.recreate_pr._run_git") as mock_git:
+        with patch("app.claude_step._run_git") as mock_git:
             mock_git.side_effect = RuntimeError("network error")
             result = _push_recreated(
                 "koan/feat", "main", "sukria/koan", "71",
