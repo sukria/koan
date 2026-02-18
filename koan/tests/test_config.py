@@ -315,6 +315,165 @@ class TestGetAutoMergeConfig:
         assert result["strategy"] == "squash"
 
 
+# --- _safe_int ---
+
+
+class TestSafeInt:
+    def test_int_value(self):
+        from app.config import _safe_int
+        assert _safe_int(42, 0) == 42
+
+    def test_string_int_value(self):
+        from app.config import _safe_int
+        assert _safe_int("30", 0) == 30
+
+    def test_invalid_string_returns_default(self):
+        from app.config import _safe_int
+        assert _safe_int("abc", 20) == 20
+
+    def test_none_returns_default(self):
+        from app.config import _safe_int
+        assert _safe_int(None, 10) == 10
+
+    def test_float_string_returns_default(self):
+        from app.config import _safe_int
+        assert _safe_int("3.14", 5) == 5
+
+    def test_empty_string_returns_default(self):
+        from app.config import _safe_int
+        assert _safe_int("", 7) == 7
+
+
+class TestGetMaxRunsInvalidConfig:
+    def test_invalid_string_returns_default(self):
+        from app.config import get_max_runs
+        with _mock_config({"max_runs_per_day": "not_a_number"}):
+            assert get_max_runs() == 20
+
+    def test_none_returns_default(self):
+        from app.config import get_max_runs
+        with _mock_config({"max_runs_per_day": None}):
+            assert get_max_runs() == 20
+
+
+class TestGetIntervalSecondsInvalidConfig:
+    def test_invalid_string_returns_default(self):
+        from app.config import get_interval_seconds
+        with _mock_config({"interval_seconds": "slow"}):
+            assert get_interval_seconds() == 300
+
+
+class TestGetContemplativeChanceInvalidConfig:
+    def test_invalid_string_returns_default(self):
+        from app.config import get_contemplative_chance
+        with _mock_config({"contemplative_chance": "high"}):
+            assert get_contemplative_chance() == 10
+
+
+# --- get_claude_flags_for_role ---
+
+
+class TestGetClaudeFlagsForRole:
+    def test_mission_role(self):
+        from app.config import get_claude_flags_for_role
+        with _mock_config({}), \
+             patch("app.config.get_model_config", return_value={
+                 "mission": "sonnet", "chat": "haiku", "lightweight": "haiku",
+                 "fallback": "opus", "review_mode": "",
+             }), \
+             patch("app.cli_provider.get_provider") as mock_prov:
+            mock_prov.return_value.build_extra_flags.return_value = ["--model", "sonnet", "--fallback", "opus"]
+            result = get_claude_flags_for_role("mission")
+            mock_prov.return_value.build_extra_flags.assert_called_once_with(
+                model="sonnet", fallback="opus", disallowed_tools=None
+            )
+            assert result == "--model sonnet --fallback opus"
+
+    def test_mission_review_mode(self):
+        from app.config import get_claude_flags_for_role
+        with _mock_config({}), \
+             patch("app.config.get_model_config", return_value={
+                 "mission": "sonnet", "chat": "haiku", "lightweight": "haiku",
+                 "fallback": "opus", "review_mode": "haiku",
+             }), \
+             patch("app.cli_provider.get_provider") as mock_prov:
+            mock_prov.return_value.build_extra_flags.return_value = []
+            get_claude_flags_for_role("mission", autonomous_mode="review")
+            call_kwargs = mock_prov.return_value.build_extra_flags.call_args[1]
+            assert call_kwargs["model"] == "haiku"
+            assert call_kwargs["disallowed_tools"] == ["Bash", "Edit", "Write"]
+
+    def test_contemplative_role(self):
+        from app.config import get_claude_flags_for_role
+        with _mock_config({}), \
+             patch("app.config.get_model_config", return_value={
+                 "mission": "sonnet", "chat": "haiku", "lightweight": "haiku",
+                 "fallback": "opus", "review_mode": "",
+             }), \
+             patch("app.cli_provider.get_provider") as mock_prov:
+            mock_prov.return_value.build_extra_flags.return_value = ["--model", "haiku"]
+            get_claude_flags_for_role("contemplative")
+            call_kwargs = mock_prov.return_value.build_extra_flags.call_args[1]
+            assert call_kwargs["model"] == "haiku"
+            assert call_kwargs["fallback"] == ""
+
+    def test_chat_role(self):
+        from app.config import get_claude_flags_for_role
+        with _mock_config({}), \
+             patch("app.config.get_model_config", return_value={
+                 "mission": "sonnet", "chat": "opus", "lightweight": "haiku",
+                 "fallback": "sonnet", "review_mode": "",
+             }), \
+             patch("app.cli_provider.get_provider") as mock_prov:
+            mock_prov.return_value.build_extra_flags.return_value = []
+            get_claude_flags_for_role("chat")
+            call_kwargs = mock_prov.return_value.build_extra_flags.call_args[1]
+            assert call_kwargs["model"] == "opus"
+            assert call_kwargs["fallback"] == "sonnet"
+            assert call_kwargs["disallowed_tools"] is None
+
+    def test_unknown_role_passes_empty(self):
+        from app.config import get_claude_flags_for_role
+        with _mock_config({}), \
+             patch("app.config.get_model_config", return_value={
+                 "mission": "sonnet", "chat": "haiku", "lightweight": "haiku",
+                 "fallback": "opus", "review_mode": "",
+             }), \
+             patch("app.cli_provider.get_provider") as mock_prov:
+            mock_prov.return_value.build_extra_flags.return_value = []
+            result = get_claude_flags_for_role("lightweight")
+            call_kwargs = mock_prov.return_value.build_extra_flags.call_args[1]
+            # "lightweight" has no explicit branch — model stays ""
+            assert call_kwargs["model"] == ""
+            assert result == ""
+
+    def test_project_name_passed_to_model_config(self):
+        from app.config import get_claude_flags_for_role
+        with _mock_config({}), \
+             patch("app.config.get_model_config", return_value={
+                 "mission": "sonnet", "chat": "haiku", "lightweight": "haiku",
+                 "fallback": "", "review_mode": "",
+             }) as mock_models, \
+             patch("app.cli_provider.get_provider") as mock_prov:
+            mock_prov.return_value.build_extra_flags.return_value = []
+            get_claude_flags_for_role("mission", project_name="myapp")
+            mock_models.assert_called_once_with("myapp")
+
+    def test_mission_review_mode_empty_uses_mission_model(self):
+        from app.config import get_claude_flags_for_role
+        with _mock_config({}), \
+             patch("app.config.get_model_config", return_value={
+                 "mission": "sonnet", "chat": "haiku", "lightweight": "haiku",
+                 "fallback": "opus", "review_mode": "",
+             }), \
+             patch("app.cli_provider.get_provider") as mock_prov:
+            mock_prov.return_value.build_extra_flags.return_value = []
+            get_claude_flags_for_role("mission", autonomous_mode="review")
+            call_kwargs = mock_prov.return_value.build_extra_flags.call_args[1]
+            # review_mode="" means keep mission model
+            assert call_kwargs["model"] == "sonnet"
+
+
 # --- backward compatibility ---
 
 

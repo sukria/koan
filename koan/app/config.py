@@ -155,6 +155,14 @@ def get_model_config(project_name: str = "") -> dict:
     return result
 
 
+def _safe_int(value, default: int) -> int:
+    """Safely convert a config value to int, returning default on failure."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def get_start_on_pause() -> bool:
     """Check if start_on_pause is enabled in config.yaml.
 
@@ -180,7 +188,7 @@ def get_max_runs() -> int:
     Returns default of 20 if not configured.
     """
     config = _load_config()
-    return int(config.get("max_runs_per_day", 20))
+    return _safe_int(config.get("max_runs_per_day", 20), 20)
 
 
 def get_interval_seconds() -> int:
@@ -190,7 +198,7 @@ def get_interval_seconds() -> int:
     Returns default of 300 (5 minutes) if not configured.
     """
     config = _load_config()
-    return int(config.get("interval_seconds", 300))
+    return _safe_int(config.get("interval_seconds", 300), 300)
 
 
 def get_fast_reply_model() -> str:
@@ -239,7 +247,7 @@ def get_contemplative_chance() -> int:
         Integer percentage (0-100). Default: 10 (one in ten autonomous runs).
     """
     config = _load_config()
-    return int(config.get("contemplative_chance", 10))
+    return _safe_int(config.get("contemplative_chance", 10), 10)
 
 
 def build_claude_flags(

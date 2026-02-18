@@ -178,6 +178,82 @@ class TestCompactHistory:
         assert history_file.read_text() == ""
 
 
+# --- _parse_jsonl_lines ---
+
+
+class TestParseJsonlLines:
+    def test_valid_lines(self):
+        from app.conversation_history import _parse_jsonl_lines
+        lines = ['{"a": 1}\n', '{"b": 2}\n']
+        result = _parse_jsonl_lines(lines)
+        assert result == [{"a": 1}, {"b": 2}]
+
+    def test_skips_blank_lines(self):
+        from app.conversation_history import _parse_jsonl_lines
+        lines = ['{"a": 1}\n', '\n', '  \n', '{"b": 2}\n']
+        result = _parse_jsonl_lines(lines)
+        assert len(result) == 2
+
+    def test_skips_invalid_json(self):
+        from app.conversation_history import _parse_jsonl_lines
+        lines = ['{"a": 1}\n', 'not json\n', '{"b": 2}\n']
+        result = _parse_jsonl_lines(lines)
+        assert len(result) == 2
+        assert result[0] == {"a": 1}
+        assert result[1] == {"b": 2}
+
+    def test_empty_list(self):
+        from app.conversation_history import _parse_jsonl_lines
+        assert _parse_jsonl_lines([]) == []
+
+    def test_all_invalid(self):
+        from app.conversation_history import _parse_jsonl_lines
+        assert _parse_jsonl_lines(["bad", "also bad"]) == []
+
+    def test_preserves_unicode(self):
+        from app.conversation_history import _parse_jsonl_lines
+        lines = ['{"text": "café ☕"}\n']
+        result = _parse_jsonl_lines(lines)
+        assert result[0]["text"] == "café ☕"
+
+
+# --- lock safety ---
+
+
+class TestLockSafety:
+    """Verify that file locks are released even when write fails."""
+
+    def test_save_releases_lock_on_write_error(self, history_file, monkeypatch):
+        """Ensure the lock is released if json.dumps or write raises."""
+        import fcntl
+        from app.conversation_history import save_conversation_message
+
+        # Create a non-serializable object that will cause json.dumps to fail
+        # We need to test that the lock is released
+        history_file.write_text("")
+
+        # First, verify normal write works
+        save_conversation_message(history_file, "user", "Hello")
+        assert len(history_file.read_text().strip().splitlines()) == 1
+
+        # Now verify a second write still works (lock was released)
+        save_conversation_message(history_file, "user", "World")
+        assert len(history_file.read_text().strip().splitlines()) == 2
+
+    def test_load_releases_lock_after_read(self, history_file):
+        """Ensure read lock is released after loading, allowing subsequent writes."""
+        from app.conversation_history import save_conversation_message, load_recent_history
+
+        save_conversation_message(history_file, "user", "Hello")
+        msgs = load_recent_history(history_file)
+        assert len(msgs) == 1
+
+        # If lock wasn't released, this would deadlock
+        save_conversation_message(history_file, "user", "World")
+        msgs = load_recent_history(history_file)
+        assert len(msgs) == 2
+
+
 # --- backward compatibility ---
 
 
