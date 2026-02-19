@@ -5,14 +5,14 @@ set -euo pipefail
 # Kōan Docker Entrypoint
 # =========================================================================
 # Claude CLI is installed in the image via npm.
-# Auth: ANTHROPIC_API_KEY (API billing) or interactive login (subscription).
+# Auth: ANTHROPIC_API_KEY (API billing) or CLAUDE_CODE_OAUTH_TOKEN (subscription).
 # GitHub CLI auth (~/.config/gh) is mounted from the host.
 #
 # Commands:
 #   start    — Run both agent loop and Telegram bridge (default)
 #   agent    — Run agent loop only
 #   bridge   — Run Telegram bridge only
-#   auth     — Authenticate Claude CLI interactively (browser login)
+#   auth     — Check Claude CLI auth status and show setup instructions
 #   test     — Run the test suite
 #   shell    — Drop into bash shell
 # =========================================================================
@@ -97,7 +97,7 @@ verify_binaries() {
 # 2. Verify Auth State
 # -------------------------------------------------------------------------
 
-# Check Claude authentication (API key or interactive login).
+# Check Claude authentication (API key, OAuth token, or interactive login).
 # Returns 0 if authenticated, 1 if not.
 check_claude_auth() {
     # Option 1: API key (works with API billing accounts)
@@ -106,17 +106,22 @@ check_claude_auth() {
         return 0
     fi
 
-    # Option 2: Interactive login (works with Claude subscriptions)
-    # The auth state lives in ~/.claude/ (mounted from host's claude-auth/)
+    # Option 2: OAuth token from setup-token (works with Claude subscriptions)
+    if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+        success "Claude auth: OAuth token (setup-token)"
+        return 0
+    fi
+
+    # Option 3: Interactive login (works with Claude subscriptions)
     if timeout 10 claude -p "ok" --max-turns 1 >/dev/null 2>&1; then
         success "Claude auth: interactive login"
         return 0
     fi
 
-    # Neither method works
+    # No method works
     error "Claude CLI is not authenticated"
-    log "  Option 1: Set ANTHROPIC_API_KEY in .env (API billing)"
-    log "  Option 2: Run 'make docker-auth' (subscription login — uses host networking for OAuth)"
+    log "  Option 1: Run 'make docker-auth' on the HOST (subscription — generates OAuth token)"
+    log "  Option 2: Set ANTHROPIC_API_KEY in .env (API billing)"
     return 1
 }
 
@@ -324,27 +329,27 @@ case "$COMMAND" in
             success "Already authenticated via API key — no login needed"
             exit 0
         fi
+        if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            success "Already authenticated via OAuth token — no login needed"
+            exit 0
+        fi
         log "Checking existing auth state..."
         if claude auth status >/dev/null 2>&1; then
             success "Already authenticated — no action needed"
             exit 0
         fi
-        stty sane 2>/dev/null || true
-        log "Starting interactive Claude CLI login..."
-        log "A URL will appear — open it in your host browser."
+        error "Not authenticated."
         log ""
-        log "This requires host networking so the OAuth callback can reach"
-        log "the container. If you didn't use host networking, press Ctrl-C and run:"
+        log "Browser-based login does not work reliably inside Docker."
+        log "Instead, generate an OAuth token on your HOST machine:"
+        log ""
         log "  make docker-auth"
         log ""
-        log "If auth still hangs after completing sign-in in the browser:"
-        log "  1. Copy the full URL from the browser address bar (the localhost one)"
-        log "  2. In another terminal, run:"
-        log "     docker exec -it \$(docker ps -qf ancestor=koan-koan) \\"
-        log "       curl -s 'PASTE_CALLBACK_URL_HERE'"
+        log "This runs 'claude setup-token' on the host and saves the"
+        log "token to .env as CLAUDE_CODE_OAUTH_TOKEN."
         log ""
-        log "Auth state will persist in the mounted claude-auth/ volume."
-        exec claude auth login
+        log "Alternatively, set ANTHROPIC_API_KEY in .env (API billing accounts)."
+        exit 1
         ;;
 
     shell)

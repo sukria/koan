@@ -143,4 +143,15 @@ docker-test:
 	docker compose run --rm koan test
 
 docker-auth:
-	docker compose -f docker-compose.yml -f docker-compose.auth.yml run --rm -it --build koan auth
+	@command -v claude >/dev/null 2>&1 || { echo "Error: Claude CLI not found on host."; echo "Install: npm install -g @anthropic-ai/claude-code"; echo "Then: claude auth login"; exit 1; }
+	@echo "Generating OAuth token from host Claude CLI..."
+	@raw=$$(claude setup-token 2>/dev/null) && \
+		token=$$(echo "$$raw" | LC_ALL=C grep -oE 'sk-ant-[A-Za-z0-9_-]+' | head -1) && \
+		if [ -z "$$token" ]; then echo "Error: setup-token returned empty. Run 'claude auth login' on host first."; exit 1; fi && \
+		touch .env && \
+		if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' .env 2>/dev/null; then \
+			sed -i '' 's|^CLAUDE_CODE_OAUTH_TOKEN=.*|CLAUDE_CODE_OAUTH_TOKEN='"$$token"'|' .env; \
+		else \
+			echo "CLAUDE_CODE_OAUTH_TOKEN=$$token" >> .env; \
+		fi && \
+		echo "✓ Token saved to .env — container will use it on next start."

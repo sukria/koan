@@ -9,7 +9,7 @@
 - **Docker Engine 20+** and **Docker Compose v2+**
 - **Claude authentication** (one of):
   - **ANTHROPIC_API_KEY** in `.env` — for API billing accounts ([console.anthropic.com](https://console.anthropic.com/settings/keys))
-  - **Interactive login** — for Claude subscription users (browser-based, one-time)
+  - **`claude setup-token`** — for Claude subscription users (requires Claude CLI on host: `npm install -g @anthropic-ai/claude-code`)
 - **GitHub CLI (`gh`)** authenticated on the host (for PR/issue operations)
 - A messaging platform configured (**Telegram** or **Slack** — see [INSTALL.md](../INSTALL.md#2-set-up-a-messaging-platform))
 
@@ -37,10 +37,10 @@ ln -s /path/to/your/project workspace/myproject
 
 # 6. Authenticate Claude CLI (pick one)
 # Option A: API key — just set ANTHROPIC_API_KEY in .env (done in step 3)
-# Option B: Interactive login (for Claude subscription users):
+# Option B: Subscription users (requires Claude CLI on host):
 make docker-auth
-# Uses host networking so the OAuth callback server (localhost:random-port)
-# is reachable from your browser. Auth state is saved in claude-auth/.
+# Generates an OAuth token from your host's Claude CLI and saves it to .env.
+# If you haven't authenticated on the host yet: claude auth login
 
 # 7. Build and start
 docker compose up --build
@@ -128,9 +128,10 @@ If either process crashes, the entrypoint restarts it automatically.
 
 - **Claude CLI** supports two auth methods:
   - **API key**: Set `ANTHROPIC_API_KEY` in `.env` (for API billing accounts).
-  - **Interactive login**: Run `make docker-auth`. The CLI starts a localhost callback
-    server for the OAuth redirect — host networking is required so the browser can
-    reach it. Auth state persists in `claude-auth/` on the host (one-time process).
+  - **OAuth token** (subscription): Run `make docker-auth`. This calls `claude setup-token`
+    on the host to generate a token, then saves it to `.env` as `CLAUDE_CODE_OAUTH_TOKEN`.
+    Requires Claude CLI installed and authenticated on the host
+    (`npm install -g @anthropic-ai/claude-code && claude auth login`).
 - **GitHub CLI** uses `~/.config/gh` mounted read-only from the host.
 - **Git** uses a default identity (`Koan <koan@noreply.github.com>`), overridable
   by mounting `~/.gitconfig`.
@@ -201,7 +202,7 @@ make docker-test    # Run the test suite inside the container
 # Start in foreground (see logs directly)
 docker compose up --build
 
-# Authenticate Claude CLI interactively (one-time, for subscription users)
+# Generate OAuth token from host CLI (one-time, for subscription users)
 make docker-auth
 
 # Interactive shell inside the container
@@ -231,7 +232,7 @@ Preview what `setup-docker.sh` would generate without writing files:
 
 The container needs one of:
 - **API key**: Set `ANTHROPIC_API_KEY` in `.env` ([console.anthropic.com](https://console.anthropic.com/settings/keys))
-- **Interactive login**: `make docker-auth`
+- **OAuth token**: Run `make docker-auth` on the HOST (not inside Docker)
 
 ### Permission errors on workspace files
 
@@ -269,35 +270,14 @@ docker compose logs --tail=50
 Common causes: missing API key, invalid messaging credentials, no projects
 configured.
 
-### Auth hangs after signing in
+### `make docker-auth` fails
 
-`claude auth login` starts a localhost HTTP server on a random port for the
-OAuth callback. The browser must reach this server after you sign in. Common
-causes of failure:
+`make docker-auth` runs `claude setup-token` on your host machine. For this to work:
 
-- **Missing host networking** — the browser can't reach the container's
-  localhost without it. Always run `make docker-auth` (which uses
-  `docker-compose.auth.yml` to enable `network_mode: host`).
-- **Docker Desktop too old** — host networking on macOS requires Docker Desktop
-  4.34+. Update Docker Desktop if auth hangs even with `--network host`.
-
-**Manual callback workaround** (when the above doesn't work):
-
-```bash
-# Terminal 1: start a shell in the container
-docker compose run --rm -it --build --entrypoint bash koan
-
-# Inside the container:
-claude auth login
-# Open the URL in your browser and sign in.
-# The browser will redirect to a localhost URL that may not load.
-# Copy the FULL URL from the browser's address bar.
-
-# Terminal 2: deliver the callback manually
-docker exec -it $(docker ps -qf ancestor=koan-koan) \
-  curl -s 'PASTE_CALLBACK_URL_HERE'
-# Auth completes in Terminal 1. Credentials persist in claude-auth/.
-```
+- **Claude CLI must be installed** on the host: `npm install -g @anthropic-ai/claude-code`
+- **Claude CLI must be authenticated** on the host: `claude auth login`
+- The `setup-token` command requires `~/.claude.json` with `{"hasCompletedOnboarding": true}`.
+  If you've run `claude` at least once, this file should already exist.
 
 ### Docker and native Koan sharing state
 
