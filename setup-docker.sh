@@ -88,12 +88,20 @@ detect_dir() {
 # Detect host UID/GID
 # -------------------------------------------------------------------------
 detect_uid_gid() {
-    local uid gid
+    local uid gid tz
     uid=$(id -u)
     gid=$(id -g)
-    log "Host user: UID=$uid GID=$gid"
-    echo "HOST_UID=$uid" > .env.docker
-    echo "HOST_GID=$gid" >> .env.docker
+    if [ -n "${TZ:-}" ]; then
+        tz="$TZ"
+    elif [ -L /etc/localtime ]; then
+        tz=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
+    elif [ -f /etc/timezone ]; then
+        tz=$(cat /etc/timezone)
+    else
+        tz="UTC"
+    fi
+    log "Host user: UID=$uid GID=$gid TZ=$tz"
+    { echo "HOST_UID=$uid"; echo "HOST_GID=$gid"; echo "TZ=$tz"; } > .env.docker
 }
 
 # -------------------------------------------------------------------------

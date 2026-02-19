@@ -24,6 +24,8 @@ services:
     container_name: koan
     env_file:
       - .env
+      - path: .env.docker
+        required: false
     environment:
       - KOAN_ROOT=/app
       - PYTHONPATH=/app/koan
