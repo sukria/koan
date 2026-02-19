@@ -12,6 +12,7 @@ directly as a ``-p`` argument.
 
 import os
 import subprocess
+import sys
 import tempfile
 from typing import Callable, List, Optional, Tuple
 
@@ -29,7 +30,8 @@ def _uses_stdin_passing() -> bool:
     try:
         from app.provider import get_provider_name
         return get_provider_name() not in ("copilot",)
-    except Exception:
+    except Exception as e:
+        print(f"[cli_exec] Provider check failed: {e}", file=sys.stderr)
         return True
 
 

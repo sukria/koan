@@ -8,6 +8,7 @@ Claude usage, other tools) that internal token estimation cannot detect.
 Uses ``claude usage`` which consumes zero tokens (no API call).
 """
 
+import sys
 from typing import Optional, Tuple
 
 
@@ -32,15 +33,15 @@ def preflight_quota_check(
         from app.usage_tracker import _get_budget_mode
         if _get_budget_mode() == "disabled":
             return True, None
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[preflight] Budget mode check failed: {e}", file=sys.stderr)
 
     # Get the provider for this project (falls back to global)
     try:
         from app.provider import get_provider
         provider = get_provider()
-    except Exception:
-        # Can't resolve provider — proceed optimistically
+    except Exception as e:
+        print(f"[preflight] Provider resolution failed: {e}", file=sys.stderr)
         return True, None
 
     available, error_detail = provider.check_quota_available(project_path)

@@ -184,7 +184,8 @@ def _get_current_branch(project_path: str) -> str:
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=project_path,
         )
-    except Exception:
+    except Exception as e:
+        print(f"[claude_step] Branch detection failed, defaulting to main: {e}", file=sys.stderr)
         return "main"
 
 

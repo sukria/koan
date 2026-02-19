@@ -100,7 +100,8 @@ class DeepResearch:
                 cwd=self.project_path,
             )
             return json.loads(output)
-        except Exception:
+        except Exception as e:
+            print(f"[deep_research] Issue fetch failed: {e}", file=sys.stderr)
             return []
 
     def get_pending_prs(self) -> list[dict]:
@@ -114,7 +115,8 @@ class DeepResearch:
                 cwd=self.project_path,
             )
             return json.loads(output)
-        except Exception:
+        except Exception as e:
+            print(f"[deep_research] PR fetch failed: {e}", file=sys.stderr)
             return []
 
     def get_recent_journal_topics(self, days: int = 7) -> list[str]:

@@ -263,10 +263,8 @@ def _launch_python_process(
             start_new_session=True,
         )
     except Exception as e:
-        log_fh.close()
         return False, f"Failed to launch: {e}"
-    else:
-        # Child inherited the FD — close parent's copy to avoid leak
+    finally:
         log_fh.close()
 
     # Wait briefly for process to acquire its PID file
@@ -322,10 +320,8 @@ def start_ollama(koan_root: Path, verify_timeout: float = OLLAMA_VERIFY_TIMEOUT)
             start_new_session=True,
         )
     except Exception as e:
-        log_fh.close()
         return False, f"Failed to launch ollama: {e}"
-    else:
-        # Child inherited the FD — close parent's copy to avoid leak
+    finally:
         log_fh.close()
 
     # Write PID file — ollama serve is an external binary (no flock)

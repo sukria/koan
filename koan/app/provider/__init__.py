@@ -20,6 +20,7 @@ Package structure:
 
 import os
 import subprocess
+import sys
 from typing import List, Optional
 
 # Re-export base class and constants for convenience
@@ -77,8 +78,8 @@ def get_provider_name() -> str:
         config_val = str(config.get("cli_provider", "")).strip().lower()
         if config_val and config_val in _PROVIDERS:
             return config_val
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[provider] Config loading failed: {e}", file=sys.stderr)
 
     return "claude"
 

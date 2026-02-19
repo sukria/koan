@@ -21,6 +21,7 @@ import fcntl
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import yaml
@@ -271,9 +272,8 @@ def get_known_projects() -> list:
         result = get_all_projects(str(KOAN_ROOT))
         if result:
             return result
-    except Exception:
-        # Import error or scan failure — fall through
-        pass
+    except Exception as e:
+        print(f"[utils] Merged project registry failed: {e}", file=sys.stderr)
 
     # 2. Try projects.yaml alone (fallback if merged module fails)
     try:
@@ -281,8 +281,8 @@ def get_known_projects() -> list:
         config = load_projects_config(str(KOAN_ROOT))
         if config is not None:
             return get_projects_from_config(config)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[utils] projects.yaml loader failed: {e}", file=sys.stderr)
 
     # 3. KOAN_PROJECTS env var
     projects_str = os.environ.get("KOAN_PROJECTS", "")
@@ -335,8 +335,8 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
                             path = project.get("path")
                             if path:
                                 return path
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[utils] GitHub URL match via projects.yaml failed: {e}", file=sys.stderr)
         # Also check in-memory github_url cache (workspace projects)
         try:
             from app.projects_merged import get_github_url_cache
@@ -345,8 +345,8 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
                     for name, path in projects:
                         if name == proj_name:
                             return path
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[utils] GitHub URL cache lookup failed: {e}", file=sys.stderr)
 
     # 2. Exact match on project name
     for name, path in projects:
@@ -372,14 +372,14 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
                         if isinstance(proj, dict) and proj.get("path"):
                             proj["github_url"] = gh_url
                             save_projects_config(str(KOAN_ROOT), config)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[utils] Failed to persist github_url for {name}: {e}", file=sys.stderr)
                 # Also cache in memory (works for workspace projects)
                 try:
                     from app.projects_merged import set_github_url
                     set_github_url(name, gh_url)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[utils] Failed to cache github_url for {name}: {e}", file=sys.stderr)
                 return path
 
     # 5. Fallback to single project (skip when owner-specific lookup found nothing)

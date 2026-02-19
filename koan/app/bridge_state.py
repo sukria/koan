@@ -61,8 +61,8 @@ def _resolve_default_project_path() -> str:
         projects = get_known_projects()
         if projects:
             return projects[0][1]
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[bridge_state] Default project resolution failed: {e}", file=sys.stderr)
     return ""
 
 

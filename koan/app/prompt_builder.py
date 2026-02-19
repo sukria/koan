@@ -23,6 +23,7 @@ Usage:
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 
@@ -73,8 +74,8 @@ def _get_deep_research(instance: str, project_name: str, project_path: str) -> s
         suggestions = research.format_for_agent()
         if suggestions:
             return f"\n\n# Deep Research Analysis\n\n{suggestions}\n"
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[prompt_builder] Deep research failed: {e}", file=sys.stderr)
     return ""
 
 
@@ -84,7 +85,8 @@ def _get_focus_section(instance: str) -> str:
     try:
         from app.focus_manager import check_focus
         state = check_focus(koan_root)
-    except Exception:
+    except Exception as e:
+        print(f"[prompt_builder] Focus check failed: {e}", file=sys.stderr)
         return ""
 
     if state is None:
