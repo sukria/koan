@@ -1041,11 +1041,14 @@ def _handle_skill_dispatch(
     max_runs: int,
     autonomous_mode: str,
     interval: int,
-) -> bool:
+) -> tuple:
     """Try to dispatch a mission as a skill command.
 
-    Returns True if the mission was handled (skill found or skill failed),
-    False if it's not a skill mission (caller should proceed to Claude).
+    Returns:
+        (handled: bool, mission_title: str) — if handled is True the caller
+        should return immediately; if False the caller should proceed to Claude
+        using the returned mission_title (which may have been translated by a
+        cli_skill mapping).
     """
     from app.debug import debug_log as _debug_log
     preview = f"{mission_title[:100]}..." if len(mission_title) > 100 else mission_title
@@ -1092,17 +1095,33 @@ def _handle_skill_dispatch(
         _commit_instance(instance)
 
         _sleep_between_runs(koan_root, instance, interval)
-        return True
+        return True, mission_title
 
+    # Check for cli_skill translation before failing unrecognized /commands
     if is_skill_mission(mission_title):
+        from pathlib import Path as _Path
+        from app.skill_dispatch import translate_cli_skill_mission
+        translated = translate_cli_skill_mission(
+            mission_text=mission_title,
+            koan_root=_Path(koan_root),
+            instance_dir=_Path(instance),
+        )
+        if translated is not None:
+            _debug_log(
+                f"[run] cli_skill translation: '{mission_title[:80]}' -> '{translated[:80]}'"
+            )
+            log("mission", "Decision: CLI SKILL (provider slash command)")
+            # Return untranslated=False so caller falls through to Claude with translated title
+            return False, translated
+
         _debug_log(f"[run] skill mission unhandled, failing: {mission_title[:200]}")
         log("warning", f"Skill mission has no runner, failing: {mission_title[:80]}")
         _notify(instance, f"⚠️ [{project_name}] Unknown skill command: {mission_title[:80]}")
         _finalize_mission(instance, mission_title, project_name, exit_code=1)
         _commit_instance(instance)
-        return True
+        return True, mission_title
 
-    return False
+    return False, mission_title
 
 
 # ---------------------------------------------------------------------------
@@ -1258,10 +1277,11 @@ def _run_iteration(
 
     # --- Check for skill-dispatched mission ---
     if mission_title:
-        if _handle_skill_dispatch(
+        handled, mission_title = _handle_skill_dispatch(
             mission_title, project_name, project_path, koan_root,
             instance, run_num, max_runs, autonomous_mode, interval,
-        ):
+        )
+        if handled:
             return
 
     # Lifecycle notification

@@ -380,6 +380,121 @@ class TestDispatchSkill:
 
 
 # ---------------------------------------------------------------------------
+# Test: cli_skill dispatch (queue as mission instead of inline execution)
+# ---------------------------------------------------------------------------
+
+class TestCliSkillDispatch:
+    """Tests for the cli_skill + audience:agent → queue-as-mission path."""
+
+    @patch("app.command_handlers.insert_pending_mission")
+    def test_cli_skill_agent_queues_mission(
+        self, mock_insert, patch_bridge_state, mock_send, mock_registry
+    ):
+        """A cli_skill skill with audience:agent queues a mission instead of executing inline."""
+        from app.command_handlers import _dispatch_skill
+        from app.skills import Skill, SkillCommand
+        from unittest.mock import patch as _patch
+
+        skill = Skill(
+            name="myskill",
+            scope="group",
+            description="Bridge to my-tool",
+            audience="agent",
+            cli_skill="my-tool",
+            commands=[SkillCommand(name="myskill", description="Invoke /my-tool")],
+        )
+
+        with _patch("app.command_handlers.execute_skill") as mock_exec:
+            _dispatch_skill(skill, "myskill", "do something")
+
+        # Must NOT call execute_skill (no inline execution)
+        mock_exec.assert_not_called()
+        # Must queue a mission
+        mock_insert.assert_called_once()
+        entry = mock_insert.call_args[0][1]
+        assert "/group.myskill do something" in entry
+        # Should ack to user
+        mock_send.assert_called_once()
+        assert "Mission queued" in mock_send.call_args[0][0]
+
+    @patch("app.command_handlers.insert_pending_mission")
+    def test_cli_skill_agent_extracts_project(
+        self, mock_insert, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Project name is extracted from first arg word when it matches a known project."""
+        from app.command_handlers import _dispatch_skill
+        from app.skills import Skill, SkillCommand
+        from unittest.mock import patch as _patch
+
+        skill = Skill(
+            name="deploy",
+            scope="ops",
+            description="Bridge to deploy-tool",
+            audience="agent",
+            cli_skill="deploy-tool",
+            commands=[SkillCommand(name="deploy", description="Invoke /deploy-tool")],
+        )
+
+        with _patch("app.command_handlers.execute_skill"), \
+             _patch("app.utils.get_known_projects", return_value=[("myproject", "/path")]):
+            _dispatch_skill(skill, "deploy", "myproject staging")
+
+        entry = mock_insert.call_args[0][1]
+        assert "[project:myproject]" in entry
+        assert "/ops.deploy staging" in entry
+        assert "project: myproject" in mock_send.call_args[0][0]
+
+    @patch("app.command_handlers.insert_pending_mission")
+    def test_cli_skill_without_agent_audience_executes_inline(
+        self, mock_insert, patch_bridge_state, mock_send, mock_registry
+    ):
+        """A cli_skill skill WITHOUT audience:agent still executes inline (bridge audience)."""
+        from app.command_handlers import _dispatch_skill
+        from app.skills import Skill, SkillCommand
+        from unittest.mock import patch as _patch
+
+        skill = Skill(
+            name="check",
+            scope="ops",
+            description="Check something",
+            audience="bridge",  # NOT agent
+            cli_skill="some-tool",
+            commands=[SkillCommand(name="check", description="Check")],
+        )
+
+        with _patch("app.command_handlers.execute_skill", return_value="done") as mock_exec:
+            _dispatch_skill(skill, "check", "args")
+
+        # cli_skill + bridge audience → execute inline, not queue
+        mock_exec.assert_called_once()
+        mock_insert.assert_not_called()
+
+    @patch("app.command_handlers.insert_pending_mission")
+    def test_normal_skill_with_no_cli_skill_executes_inline(
+        self, mock_insert, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Skills without cli_skill field are always executed inline."""
+        from app.command_handlers import _dispatch_skill
+        from app.skills import Skill, SkillCommand
+        from unittest.mock import patch as _patch
+
+        skill = Skill(
+            name="status",
+            scope="core",
+            description="Show status",
+            audience="agent",
+            cli_skill=None,  # no cli_skill
+            commands=[SkillCommand(name="status", description="Show status")],
+        )
+
+        with _patch("app.command_handlers.execute_skill", return_value="ok") as mock_exec:
+            _dispatch_skill(skill, "status", "")
+
+        mock_exec.assert_called_once()
+        mock_insert.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Test: _handle_help
 # ---------------------------------------------------------------------------
 

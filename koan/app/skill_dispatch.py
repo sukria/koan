@@ -23,6 +23,7 @@ Scoped skills:
 import os
 import re
 import sys
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from app.github_url_parser import ISSUE_URL_PATTERN, PR_URL_PATTERN
@@ -320,6 +321,70 @@ def _build_claudemd_cmd(
         project_path,
         "--project-name", project_name,
     ]
+
+
+def translate_cli_skill_mission(
+    mission_text: str,
+    koan_root: Path,
+    instance_dir: Path,
+) -> Optional[str]:
+    """If the mission is a cli_skill mission, return the translated CLI task text.
+
+    A cli_skill mission is one where the referenced skill has a ``cli_skill``
+    field set in its SKILL.md. The Kōan slash command is replaced with the
+    provider slash command declared in that field.
+
+    Example:
+        SKILL.md has ``cli_skill: my-tool``
+        Mission: ``[project:foo] /group.myskill do something``
+        Returns: ``/my-tool do something``
+
+    Returns:
+        Translated task text (e.g. "/my-tool do something"), or None if the
+        mission is not a cli_skill mission or the skill cannot be found.
+    """
+    from app.debug import debug_log
+    from app.skills import build_registry
+
+    _, bare = _strip_project_prefix(mission_text)
+    if not bare.startswith("/"):
+        return None
+
+    parts = bare[1:].split(None, 1)  # ["group.myskill", "do something"]
+    command_part = parts[0]
+    args = parts[1] if len(parts) > 1 else ""
+
+    # Only handle scoped commands (scope.name) — unscoped ones go to _SKILL_RUNNERS
+    if "." not in command_part:
+        return None
+
+    segments = command_part.split(".", 1)
+    scope = segments[0]
+    name = segments[1]
+
+    # Skip core scope (handled by _SKILL_RUNNERS)
+    if scope == "core":
+        return None
+
+    # Look up skill in registry
+    instance_skills_dir = instance_dir / "skills"
+    extra = [instance_skills_dir] if instance_skills_dir.is_dir() else []
+    registry = build_registry(extra)
+
+    skill = registry.get(scope, name)
+    if skill is None or not skill.cli_skill:
+        return None
+
+    # Translate: replace koan skill name with CLI provider skill name
+    translated = f"/{skill.cli_skill}"
+    if args:
+        translated += f" {args}"
+
+    debug_log(
+        f"[skill_dispatch] translate_cli_skill: '{command_part}' -> '{skill.cli_skill}'"
+        f" args='{args[:80]}'"
+    )
+    return translated
 
 
 def dispatch_skill_mission(

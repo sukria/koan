@@ -67,6 +67,7 @@ class Skill:
     audience: str = DEFAULT_AUDIENCE
     github_enabled: bool = False
     github_context_aware: bool = False
+    cli_skill: Optional[str] = None
 
     @property
     def qualified_name(self) -> str:
@@ -226,6 +227,9 @@ def parse_skill_md(path: Path) -> Optional[Skill]:
     if audience not in VALID_AUDIENCES:
         audience = DEFAULT_AUDIENCE
 
+    # Parse cli_skill (optional provider slash command name)
+    cli_skill = meta.get("cli_skill") or None
+
     return Skill(
         name=meta["name"],
         scope=meta.get("scope", skill_dir.parent.name),
@@ -239,6 +243,7 @@ def parse_skill_md(path: Path) -> Optional[Skill]:
         audience=audience,
         github_enabled=github_enabled,
         github_context_aware=github_context_aware,
+        cli_skill=cli_skill,
     )
 
 

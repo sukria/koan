@@ -261,6 +261,68 @@ class TestParseSkillMd:
         assert skill is not None
         assert skill.scope == "myproject"
 
+    def test_cli_skill_field_parsed(self, tmp_path):
+        """cli_skill field is parsed from frontmatter and stored on the Skill."""
+        skill_dir = tmp_path / "group" / "myskill"
+        skill_dir.mkdir(parents=True)
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(textwrap.dedent("""\
+            ---
+            name: myskill
+            scope: group
+            description: Bridge to my-tool
+            audience: agent
+            cli_skill: my-tool
+            commands:
+              - name: myskill
+                description: Invoke /my-tool
+            ---
+        """))
+
+        skill = parse_skill_md(skill_md)
+        assert skill is not None
+        assert skill.cli_skill == "my-tool"
+        assert skill.audience == "agent"
+
+    def test_cli_skill_absent_defaults_none(self, tmp_path):
+        """Skills without cli_skill field have cli_skill=None."""
+        skill_dir = tmp_path / "core" / "status"
+        skill_dir.mkdir(parents=True)
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(textwrap.dedent("""\
+            ---
+            name: status
+            scope: core
+            commands:
+              - name: status
+                description: Quick status
+            ---
+        """))
+
+        skill = parse_skill_md(skill_md)
+        assert skill is not None
+        assert skill.cli_skill is None
+
+    def test_cli_skill_empty_value_treated_as_none(self, tmp_path):
+        """An empty cli_skill value is treated as None (not set)."""
+        skill_dir = tmp_path / "group" / "empty"
+        skill_dir.mkdir(parents=True)
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(textwrap.dedent("""\
+            ---
+            name: empty
+            scope: group
+            cli_skill:
+            commands:
+              - name: empty
+                description: Empty cli_skill
+            ---
+        """))
+
+        skill = parse_skill_md(skill_md)
+        assert skill is not None
+        assert skill.cli_skill is None
+
 
 # ---------------------------------------------------------------------------
 # SkillRegistry

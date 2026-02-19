@@ -122,6 +122,11 @@ def handle_command(text: str):
 
 def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
     """Dispatch a skill execution — handles worker threads and standard calls."""
+    # cli_skill + audience:agent → queue as mission for the runner, don't execute inline
+    if skill.cli_skill and skill.audience == "agent":
+        _queue_cli_skill_mission(skill, command_args)
+        return
+
     ctx = SkillContext(
         koan_root=KOAN_ROOT,
         instance_dir=INSTANCE_DIR,
@@ -145,6 +150,40 @@ def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
     result = execute_skill(skill, ctx)
     if result is not None:
         send_telegram(result)
+
+
+def _queue_cli_skill_mission(skill: Skill, args: str):
+    """Queue a cli_skill mission for the runner to execute via the CLI provider."""
+    from app.utils import get_known_projects
+
+    # Try to extract project from the first word of args
+    project = None
+    mission_args = args
+    words = args.split(None, 1)
+    if words:
+        known = {name for name, _ in get_known_projects()}
+        if words[0] in known:
+            project = words[0]
+            mission_args = words[1] if len(words) > 1 else ""
+
+    # Reconstruct the Kōan scoped command
+    koan_cmd = f"/{skill.scope}.{skill.name}"
+    if mission_args:
+        koan_cmd += f" {mission_args}"
+
+    # Format mission entry with optional project tag
+    if project:
+        entry = f"- [project:{project}] {koan_cmd}"
+    else:
+        entry = f"- {koan_cmd}"
+
+    insert_pending_mission(MISSIONS_FILE, entry)
+
+    ack = f"✅ Mission queued"
+    if project:
+        ack += f" (project: {project})"
+    ack += f":\n\n{koan_cmd[:500]}"
+    send_telegram(ack)
 
 
 def _handle_skill_command(args: str):
