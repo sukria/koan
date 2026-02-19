@@ -472,9 +472,9 @@ class TestMakefileDockerTargets:
     def test_docker_auth_target(self):
         assert "docker-auth:" in self.makefile
 
-    def test_docker_auth_uses_setup_token(self):
-        """docker-auth should run claude setup-token on the host."""
-        assert "setup-token" in self.makefile
+    def test_docker_auth_captures_with_script(self):
+        """docker-auth should use script to capture setup-token output."""
+        assert "script -q" in self.makefile
 
     def test_docker_phony_declarations(self):
         """Docker targets should be declared .PHONY."""

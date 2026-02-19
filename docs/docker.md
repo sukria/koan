@@ -74,11 +74,14 @@ git clone https://github.com/you/myapp.git workspace/myapp
 
 When you run `./setup-docker.sh`, it:
 
-1. **Resolves symlinks** — Docker can't follow host symlinks, so the script
-   creates explicit bind mounts for each symlinked project.
+1. **Resolves symlinks** — Docker can't follow host symlinks. The script
+   resolves all workspace entries to their real paths, computes their common
+   parent directory, and emits a **single** bind mount covering that parent
+   as `/app/workspace`. This replaces N per-project mounts with one.
 2. **Generates `projects.docker.yaml`** — maps each workspace entry to its
-   container path (`/app/workspace/<name>`). This file is mounted as
-   `projects.yaml` inside the container.
+   container path (e.g. `/app/workspace/<name>`). This file is mounted as
+   `/app/projects.docker.yaml` and copied to `/app/projects.yaml` at
+   container startup so atomic writes work correctly.
 3. **Generates `docker-compose.override.yml`** — adds the resolved volume
    mounts and host UID/GID.
 
@@ -145,7 +148,7 @@ If either process crashes, the entrypoint restarts it automatically.
 | `./workspace/` | `/app/workspace/` | Project repositories |
 | `./logs/` | `/app/logs/` | Log files |
 | `./claude-auth/` | `/home/koan/.claude/` | Claude CLI auth state (interactive login) |
-| `projects.docker.yaml` | `/app/projects.yaml` | Project configuration |
+| `projects.docker.yaml` | `/app/projects.docker.yaml` | Project config template (copied to `projects.yaml` on startup) |
 | `~/.config/gh` | `/home/koan/.config/gh` | GitHub CLI auth (read-only) |
 
 ### Isolated mission queue
@@ -272,12 +275,20 @@ configured.
 
 ### `make docker-auth` fails
 
-`make docker-auth` runs `claude setup-token` on your host machine. For this to work:
+`make docker-auth` runs `claude setup-token` interactively on your host and captures the
+resulting 1-year OAuth token from its output. For this to work:
 
 - **Claude CLI must be installed** on the host: `npm install -g @anthropic-ai/claude-code`
 - **Claude CLI must be authenticated** on the host: `claude auth login`
 - The `setup-token` command requires `~/.claude.json` with `{"hasCompletedOnboarding": true}`.
   If you've run `claude` at least once, this file should already exist.
+
+If the token extraction fails, you can manually copy the token from the `setup-token`
+output and add it to `.env`:
+
+```
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+```
 
 ### Docker and native Koan sharing state
 

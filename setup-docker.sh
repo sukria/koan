@@ -43,6 +43,7 @@ section() { printf "\n${BOLD}${CYAN}--- %s ---${RESET}\n" "$*"; }
 # -------------------------------------------------------------------------
 declare -a VOLUME_MOUNTS=()
 declare -a FOUND_BINS=()
+WORKSPACE_COMMON_PARENT=""
 
 detect_binary() {
     local name="$1"
@@ -97,6 +98,32 @@ detect_uid_gid() {
 }
 
 # -------------------------------------------------------------------------
+# Compute longest common parent directory for a list of absolute paths
+# -------------------------------------------------------------------------
+find_common_parent() {
+    local paths=("$@")
+    if [ ${#paths[@]} -eq 0 ]; then
+        echo "/"
+        return
+    fi
+    if [ ${#paths[@]} -eq 1 ]; then
+        dirname "${paths[0]}"
+        return
+    fi
+    local common="${paths[0]}"
+    local path
+    for path in "${paths[@]:1}"; do
+        while [ "$common" != "/" ]; do
+            if [ "$path" = "$common" ] || [[ "$path" == "$common/"* ]]; then
+                break
+            fi
+            common=$(dirname "$common")
+        done
+    done
+    echo "$common"
+}
+
+# -------------------------------------------------------------------------
 # Resolve workspace symlinks for Docker bind mounts
 # -------------------------------------------------------------------------
 resolve_workspace() {
@@ -105,25 +132,36 @@ resolve_workspace() {
         return
     fi
 
-    local count=0
+    local -a resolved_paths=()
+    local entry name resolved
     for entry in workspace/*/; do
         [ -d "$entry" ] || continue
-        local name
         name=$(basename "$entry")
-
-        if [ -L "workspace/$name" ]; then
-            local target
-            target=$(realpath "workspace/$name")
-            log "Workspace symlink: $name → $target"
-            # Symlinks need explicit bind mounts since Docker doesn't follow them
-            VOLUME_MOUNTS+=("      - ${target}:/app/workspace/${name}")
-            count=$((count + 1))
-        fi
+        resolved=$(realpath "workspace/$name" 2>/dev/null || echo "$(pwd)/workspace/$name")
+        resolved_paths+=("$resolved")
     done
 
-    if [ $count -gt 0 ]; then
-        success "Resolved $count workspace symlink(s)"
+    if [ ${#resolved_paths[@]} -eq 0 ]; then
+        log "No workspace entries found"
+        return
     fi
+
+    # Single mount covering the common parent of all resolved paths
+    WORKSPACE_COMMON_PARENT=$(find_common_parent "${resolved_paths[@]}")
+    log "Workspace common parent: $WORKSPACE_COMMON_PARENT"
+    VOLUME_MOUNTS+=("      - ${WORKSPACE_COMMON_PARENT}:/app/workspace")
+    success "Workspace: $WORKSPACE_COMMON_PARENT → /app/workspace (${#resolved_paths[@]} project(s))"
+
+    # Any entry outside the common parent needs its own explicit mount
+    local i
+    for i in "${!resolved_paths[@]}"; do
+        resolved="${resolved_paths[$i]}"
+        name=$(basename "$resolved")
+        if [ "$resolved" != "$WORKSPACE_COMMON_PARENT" ] && [[ "$resolved" != "$WORKSPACE_COMMON_PARENT/"* ]]; then
+            warn "Project '$name' is outside common parent — adding explicit mount"
+            VOLUME_MOUNTS+=("      - ${resolved}:/app/workspace/${name}")
+        fi
+    done
 }
 
 # -------------------------------------------------------------------------
@@ -226,13 +264,28 @@ generate_projects_yaml() {
 projects:"
 
     local count=0
+    local entry name resolved rel_path container_path
     for entry in workspace/*/; do
         [ -d "$entry" ] || continue
-        local name
         name=$(basename "$entry")
+
+        # Compute container path relative to the common parent mount point
+        if [ -n "${WORKSPACE_COMMON_PARENT:-}" ]; then
+            resolved=$(realpath "workspace/$name" 2>/dev/null || echo "$(pwd)/workspace/$name")
+            rel_path="${resolved#${WORKSPACE_COMMON_PARENT}/}"
+            if [ "$rel_path" = "$resolved" ]; then
+                # Outside common parent — has its own explicit mount
+                container_path="/app/workspace/${name}"
+            else
+                container_path="/app/workspace/${rel_path}"
+            fi
+        else
+            container_path="/app/workspace/${name}"
+        fi
+
         content="$content
   $name:
-    path: /app/workspace/$name"
+    path: ${container_path}"
         count=$((count + 1))
     done
 
@@ -249,7 +302,7 @@ projects:"
 }
 
 generate_projects_yaml
-VOLUME_MOUNTS+=("      - ./projects.docker.yaml:/app/projects.yaml")
+VOLUME_MOUNTS+=("      - ./projects.docker.yaml:/app/projects.docker.yaml:rw")
 
 # 3. Generate files
 section "Generating"
