@@ -265,7 +265,7 @@ Include the kōan inside your conclusion message (not as a separate outbox write
 
 When a mission or autonomous run completes, write **exactly one** message to
 {INSTANCE}/outbox.md. This message should contain:
-- Start with 🏁 to clearly mark mission completion
+- Start with 🏁 [{PROJECT_NAME}] to clearly mark mission completion (project prefix helps the human identify which project this is about)
 - A concise summary of what you did (2-5 lines max)
 - Key decisions or findings worth highlighting
 - **If you pushed a branch**: include the branch name (e.g. "Branch: {BRANCH_PREFIX}fix-xyz pushed")

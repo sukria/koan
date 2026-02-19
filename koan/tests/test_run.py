@@ -2136,7 +2136,8 @@ class TestNotifyMissionEnd:
         mock_notify.assert_called_once()
         msg = mock_notify.call_args[0][1]
         assert msg.startswith("✅")
-        assert "Autonomous run on koan" in msg
+        assert "[koan]" in msg
+        assert "Autonomous run" in msg
 
     @patch("app.run._notify")
     def test_failure_autonomous_no_title(self, mock_notify):
@@ -2201,6 +2202,30 @@ class TestNotifyMissionEnd:
         assert mock_notify.call_count == 1
         _notify_mission_end("/tmp/inst", "proj", 1, 5, 1, "task")
         assert mock_notify.call_count == 2
+
+    @patch("app.run._notify")
+    def test_project_prefix_after_emoji_success(self, mock_notify):
+        """Project name must appear right after the emoji prefix."""
+        from app.run import _notify_mission_end
+        _notify_mission_end("/tmp/inst", "myapp", 2, 10, 0, "Deploy fix")
+        msg = mock_notify.call_args[0][1]
+        assert msg.startswith("✅ [myapp]")
+
+    @patch("app.run._notify")
+    def test_project_prefix_after_emoji_failure(self, mock_notify):
+        """Project name must appear right after the emoji prefix on failure."""
+        from app.run import _notify_mission_end
+        _notify_mission_end("/tmp/inst", "backend", 3, 10, 1, "Broken deploy")
+        msg = mock_notify.call_args[0][1]
+        assert msg.startswith("❌ [backend]")
+
+    @patch("app.run._notify")
+    def test_project_prefix_after_emoji_autonomous(self, mock_notify):
+        """Autonomous run (no title) still gets project prefix after emoji."""
+        from app.run import _notify_mission_end
+        _notify_mission_end("/tmp/inst", "koan", 1, 5, 0, "")
+        msg = mock_notify.call_args[0][1]
+        assert msg.startswith("✅ [koan]")
 
 
 # ---------------------------------------------------------------------------
