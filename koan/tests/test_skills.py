@@ -1119,6 +1119,101 @@ class TestResolveScopedCommand:
         registry = self._make_registry(tmp_path)
         assert registry.resolve_scoped_command("status") is None
 
+    def test_resolve_by_command_name_when_skill_name_differs(self, tmp_path):
+        """Scoped lookup should work by command name, not just skill name.
+
+        When a custom skill has name 'refactor' but a command named 'wp-refactor',
+        /wp.wp-refactor should still resolve via command name fallback.
+        """
+        # Create a custom skill where command name ≠ skill name
+        custom_dir = tmp_path / "wp" / "refactor"
+        custom_dir.mkdir(parents=True)
+        (custom_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: refactor
+            scope: wp
+            description: WP refactoring
+            commands:
+              - name: wp-refactor
+                description: Refactor WP code
+            ---
+        """))
+        registry = SkillRegistry(tmp_path)
+        # /wp.wp-refactor should find the skill via command name
+        result = registry.resolve_scoped_command("wp.wp-refactor")
+        assert result is not None
+        skill, cmd, args = result
+        assert skill.name == "refactor"
+        assert skill.scope == "wp"
+        assert cmd == "wp-refactor"
+
+    def test_resolve_by_command_alias_in_scope(self, tmp_path):
+        """Scoped lookup should also match command aliases within a scope."""
+        custom_dir = tmp_path / "wp" / "checker"
+        custom_dir.mkdir(parents=True)
+        (custom_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: checker
+            scope: wp
+            description: WP checker
+            commands:
+              - name: check
+                description: Run checks
+                aliases: [chk, verify]
+            ---
+        """))
+        registry = SkillRegistry(tmp_path)
+        # /wp.chk should resolve via alias
+        result = registry.resolve_scoped_command("wp.chk")
+        assert result is not None
+        skill, cmd, args = result
+        assert skill.name == "checker"
+        assert cmd == "chk"
+
+    def test_resolve_by_command_name_with_args(self, tmp_path):
+        """Command name fallback should preserve args."""
+        custom_dir = tmp_path / "wp" / "refactor"
+        custom_dir.mkdir(parents=True)
+        (custom_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: refactor
+            scope: wp
+            description: WP refactoring
+            commands:
+              - name: wp-refactor
+                description: Refactor WP code
+            ---
+        """))
+        registry = SkillRegistry(tmp_path)
+        result = registry.resolve_scoped_command("wp.wp-refactor some args here")
+        assert result is not None
+        skill, cmd, args = result
+        assert skill.name == "refactor"
+        assert cmd == "wp-refactor"
+        assert args == "some args here"
+
+    def test_skill_name_lookup_still_preferred(self, tmp_path):
+        """Skill name match should be preferred over command name match."""
+        # Skill with name matching the segment directly
+        s1_dir = tmp_path / "wp" / "deploy"
+        s1_dir.mkdir(parents=True)
+        (s1_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: deploy
+            scope: wp
+            description: Deploy tool
+            commands:
+              - name: deploy
+                description: Deploy
+            ---
+        """))
+        registry = SkillRegistry(tmp_path)
+        # /wp.deploy should resolve via skill name (preferred path)
+        result = registry.resolve_scoped_command("wp.deploy")
+        assert result is not None
+        skill, cmd, args = result
+        assert skill.name == "deploy"
+
 
 # ---------------------------------------------------------------------------
 # PR skill handler

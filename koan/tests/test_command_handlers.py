@@ -629,6 +629,33 @@ class TestHandleSkillCommand:
         assert "core" in msg
         assert "/status" in msg
 
+    def test_skill_scoped_invocation_uses_resolve(
+        self, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Test /skill wp.refactor uses resolve_scoped_command for dispatch."""
+        from app.command_handlers import _handle_skill_command
+        from app.skills import Skill, SkillCommand
+
+        skill = MagicMock(spec=Skill)
+        skill.worker = False
+        skill.cli_skill = None
+        skill.audience = "bridge"
+        mock_registry.resolve_scoped_command.return_value = (skill, "refactor", "")
+
+        with patch("app.command_handlers.execute_skill", return_value="done"):
+            _handle_skill_command("wp.refactor")
+        mock_registry.resolve_scoped_command.assert_called_once_with("wp.refactor")
+
+    def test_skill_scoped_invocation_not_found(
+        self, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Test /skill wp.nonexistent shows error."""
+        from app.command_handlers import _handle_skill_command
+        mock_registry.resolve_scoped_command.return_value = None
+        _handle_skill_command("wp.nonexistent")
+        msg = mock_send.call_args[0][0]
+        assert "not found" in msg
+
 
 # ---------------------------------------------------------------------------
 # Test: set_callbacks

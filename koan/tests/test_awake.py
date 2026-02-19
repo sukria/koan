@@ -2143,6 +2143,60 @@ class TestScopedDispatch:
         mock_worker.assert_not_called()
         _reset_registry()
 
+    @patch("app.command_handlers.send_telegram")
+    def test_custom_skill_command_name_differs_from_skill_name(self, mock_send, tmp_path):
+        """Custom skill with command name ≠ skill name must dispatch correctly.
+
+        When instance/skills/wp/refactor/SKILL.md has name: refactor but
+        commands: [name: wp-refactor], /wp.wp-refactor should resolve via
+        command name fallback in resolve_scoped_command.
+        """
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        skill_dir = instance / "skills" / "wp" / "refactor"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: refactor\ndescription: WP refactoring\n"
+            "commands:\n  - name: wp-refactor\n    description: Refactor WP\n"
+            "handler: handler.py\n---\n"
+        )
+        (skill_dir / "handler.py").write_text(
+            "def handle(ctx): return f'Refactored via {ctx.command_name}!'"
+        )
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", instance), \
+             patch("app.bridge_state.INSTANCE_DIR", instance):
+            _reset_registry()
+            handle_command("/wp.wp-refactor")
+        mock_send.assert_called()
+        assert "Refactored via wp-refactor" in mock_send.call_args[0][0]
+        _reset_registry()
+
+    @patch("app.command_handlers.send_telegram")
+    def test_custom_skill_plain_command_dispatch(self, mock_send, tmp_path):
+        """Custom skill command can be invoked without scope prefix via /command_name."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        skill_dir = instance / "skills" / "wp" / "deploy"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: deploy\ndescription: Deploy tool\n"
+            "commands:\n  - name: wp-deploy\n    description: Deploy WP\n"
+            "handler: handler.py\n---\n"
+        )
+        (skill_dir / "handler.py").write_text(
+            "def handle(ctx): return f'Deployed via {ctx.command_name}!'"
+        )
+        with patch("app.command_handlers.KOAN_ROOT", tmp_path), \
+             patch("app.command_handlers.INSTANCE_DIR", instance), \
+             patch("app.bridge_state.INSTANCE_DIR", instance):
+            _reset_registry()
+            # Plain command name (no scope prefix) should work via _command_map
+            handle_command("/wp-deploy")
+        mock_send.assert_called()
+        assert "Deployed via wp-deploy" in mock_send.call_args[0][0]
+        _reset_registry()
+
 
 # ---------------------------------------------------------------------------
 # Phase 2: Worker dispatch via skill.worker field

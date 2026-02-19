@@ -312,6 +312,11 @@ class SkillRegistry:
     def resolve_scoped_command(self, text: str) -> Optional[Tuple["Skill", str, str]]:
         """Resolve a scoped command like 'anantys.review' or 'core.status.ping'.
 
+        Tries two lookup strategies:
+        1. By skill name: scope.skill_name (e.g., wp.refactor → skill "wp.refactor")
+        2. By command name: scope.command_name (e.g., wp.wp-refactor → skill in
+           scope "wp" that has a command named "wp-refactor")
+
         Returns:
             (skill, command_name, args) tuple, or None if no match.
         """
@@ -328,11 +333,20 @@ class SkillRegistry:
         skill_name = segments[1]
         subcommand = segments[2] if len(segments) > 2 else skill_name
 
+        # Strategy 1: look up by skill name (scope.skill_name)
         skill = self.get(scope, skill_name)
-        if skill is None:
-            return None
+        if skill is not None:
+            return skill, subcommand, args
 
-        return skill, subcommand, args
+        # Strategy 2: look up by command name or alias within the scope
+        # This handles the case where /skill listing shows /{scope}.{cmd.name}
+        # but the command name differs from the skill name.
+        for s in self.list_by_scope(scope):
+            for cmd in s.commands:
+                if cmd.name == skill_name or skill_name in cmd.aliases:
+                    return s, skill_name, args
+
+        return None
 
     def __contains__(self, qualified_name: str) -> bool:
         return qualified_name in self._skills

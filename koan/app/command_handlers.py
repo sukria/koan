@@ -269,15 +269,15 @@ def _handle_skill_command(args: str):
         send_telegram("\n".join(parts))
         return
 
-    scope = segments[0]
-    skill_name = segments[1]
-    subcommand = segments[2] if len(segments) > 2 else skill_name
-
-    skill = registry.get(scope, skill_name)
-    if skill is None:
+    # Use resolve_scoped_command for consistent lookup (by skill name + command name fallback)
+    resolved = registry.resolve_scoped_command(args)
+    if resolved is None:
+        scope = segments[0]
+        skill_name = segments[1]
         send_telegram(f"❌ Skill '{scope}.{skill_name}' not found. /skill to list available skills.")
         return
 
+    skill, subcommand, skill_args = resolved
     _dispatch_skill(skill, subcommand, skill_args)
 
 
