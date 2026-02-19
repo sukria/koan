@@ -52,6 +52,21 @@ def test_agent_prompt_has_branch_pr_notification_instructions():
     assert "draft PR" in agent_prompt
 
 
+def test_agent_prompt_conclusion_has_project_prefix():
+    """Conclusion message instruction must include project name prefix after emoji."""
+    agent_prompt = (PROMPTS_DIR / "agent.md").read_text()
+
+    # The 🏁 instruction should include {PROJECT_NAME} prefix
+    assert "🏁 [{PROJECT_NAME}]" in agent_prompt
+
+
+def test_format_message_preserves_project_prefix():
+    """Format-message prompt must instruct to preserve project prefixes."""
+    prompt = (PROMPTS_DIR / "format-message.md").read_text()
+
+    assert "project prefix" in prompt.lower()
+
+
 def test_all_prompts_exist():
     """All referenced prompt files should exist."""
     expected_prompts = [

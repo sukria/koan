@@ -597,8 +597,8 @@ def _notify_mission_end(
     """
     if exit_code == 0:
         prefix = "✅"
-        label = mission_title if mission_title else f"Autonomous run on {project_name}"
-        msg = f"{prefix} Run {run_num}/{max_runs} — [{project_name}] {label}"
+        label = mission_title if mission_title else "Autonomous run"
+        msg = f"{prefix} [{project_name}] Run {run_num}/{max_runs} — {label}"
         # Try to attach a brief summary from the journal
         try:
             from app.mission_summary import get_mission_summary
@@ -610,7 +610,7 @@ def _notify_mission_end(
     else:
         prefix = "❌"
         label = mission_title if mission_title else "Run"
-        msg = f"{prefix} Run {run_num}/{max_runs} — [{project_name}] Failed: {label}"
+        msg = f"{prefix} [{project_name}] Run {run_num}/{max_runs} — Failed: {label}"
 
     _notify(instance, msg)
 
@@ -1040,7 +1040,7 @@ def _handle_skill_dispatch(
         print(f"  Runner: {' '.join(skill_cmd[:4])}...")
         print()
         set_status(koan_root, f"Run {run_num}/{max_runs} — skill dispatch on {project_name}")
-        _notify(instance, f"🚀 Run {run_num}/{max_runs} — [{project_name}] Skill: {mission_title}")
+        _notify(instance, f"🚀 [{project_name}] Run {run_num}/{max_runs} — Skill: {mission_title}")
 
         with protected_phase(f"Skill: {mission_title[:50]}"):
             exit_code = _run_skill_mission(
@@ -1269,7 +1269,7 @@ def _run_iteration(
         print(f"  Mission: {mission_title}")
         print(f"  Project: {project_name}")
         print()
-        _notify(instance, f"🚀 Run {run_num}/{max_runs} — [{project_name}] Mission taken: {mission_title}")
+        _notify(instance, f"🚀 [{project_name}] Run {run_num}/{max_runs} — Mission taken: {mission_title}")
     else:
         mode_upper = autonomous_mode.upper()
         log("mission", f"Decision: {mode_upper} mode (estimated cost: 5.0% session)")
@@ -1277,7 +1277,7 @@ def _run_iteration(
         print(f"  Project: {project_name}")
         print(f"  Focus: {focus_area}")
         print()
-        _notify(instance, f"🚀 Run {run_num}/{max_runs} — Autonomous: {autonomous_mode} mode on {project_name}")
+        _notify(instance, f"🚀 [{project_name}] Run {run_num}/{max_runs} — Autonomous: {autonomous_mode} mode")
 
     # Build prompt
     from app.prompt_builder import build_agent_prompt
