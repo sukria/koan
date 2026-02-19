@@ -55,7 +55,7 @@ WORKDIR /app
 # Python dependencies (cached layer — changes rarely)
 COPY koan/requirements.txt /app/koan/requirements.txt
 RUN pip install --no-cache-dir -r /app/koan/requirements.txt \
-    && pip install --no-cache-dir pytest
+    && pip install --no-cache-dir pytest supervisor
 
 # Copy application code
 COPY koan/ /app/koan/
@@ -64,6 +64,11 @@ COPY Makefile /app/
 COPY CLAUDE.md /app/
 COPY docs/ /app/docs/
 COPY projects.example.yaml /app/
+
+# Supervisor config + restart-delay wrapper
+COPY koan/docker/supervisord.conf /etc/supervisord.conf
+COPY koan/docker/supervised-run.sh /app/koan/docker/supervised-run.sh
+RUN chmod +x /app/koan/docker/supervised-run.sh
 
 # Entrypoint
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh

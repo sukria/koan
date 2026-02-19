@@ -208,32 +208,45 @@ class TestEntrypoint:
         """Should support 'gh-auth' command for GitHub auth status."""
         assert "gh-auth)" in self.entrypoint
 
-    def test_traps_signals(self):
-        """Must handle SIGINT/SIGTERM for graceful shutdown."""
-        assert "trap" in self.entrypoint
-        assert "INT TERM" in self.entrypoint
+    def test_delegates_to_supervisord(self):
+        """Entrypoint should hand off to supervisord for process management."""
+        assert "supervisord" in self.entrypoint
 
-    def test_creates_stop_signal_on_shutdown(self):
-        """Graceful shutdown should create .koan-stop signal."""
-        assert ".koan-stop" in self.entrypoint
+    def test_supervisord_conf_exists(self):
+        """supervisord.conf must exist in the docker directory."""
+        assert (REPO_ROOT / "koan" / "docker" / "supervisord.conf").exists()
+
+    def test_supervisord_conf_has_both_programs(self):
+        """supervisord.conf must define both bridge and agent programs."""
+        conf = (REPO_ROOT / "koan" / "docker" / "supervisord.conf").read_text()
+        assert "[program:bridge]" in conf
+        assert "[program:agent]" in conf
+
+    def test_supervisord_conf_autorestart(self):
+        """Both programs should auto-restart on crash."""
+        conf = (REPO_ROOT / "koan" / "docker" / "supervisord.conf").read_text()
+        assert "autorestart=true" in conf
+
+    def test_supervisord_conf_stopasgroup(self):
+        """Programs should use stopasgroup for graceful group shutdown."""
+        conf = (REPO_ROOT / "koan" / "docker" / "supervisord.conf").read_text()
+        assert "stopasgroup=true" in conf
+
+    def test_supervisord_conf_has_heartbeat(self):
+        """supervisord.conf must define a heartbeat program."""
+        conf = (REPO_ROOT / "koan" / "docker" / "supervisord.conf").read_text()
+        assert "[program:heartbeat]" in conf
+        assert "koan-heartbeat" in conf
+
+    def test_supervised_run_wrapper_has_restart_delay(self):
+        """supervised-run.sh wrapper should delay restarts after crash."""
+        wrapper = REPO_ROOT / "koan" / "docker" / "supervised-run.sh"
+        assert wrapper.exists()
+        content = wrapper.read_text()
+        assert "sleep 10" in content
 
     def test_initializes_instance_from_template(self):
         assert "instance.example" in self.entrypoint
-
-    def test_has_process_monitoring(self):
-        assert "monitor_processes" in self.entrypoint
-
-    def test_restarts_processes_on_crash(self):
-        """Both bridge and agent should auto-restart."""
-        assert "restarting" in self.entrypoint.lower()
-
-    def test_graceful_shutdown_timeout(self):
-        """Should not kill -9 immediately."""
-        assert "kill -9" in self.entrypoint
-        # Graceful kill should come first
-        graceful_pos = self.entrypoint.index("kill \"$BRIDGE_PID\"")
-        force_pos = self.entrypoint.index("kill -9")
-        assert graceful_pos < force_pos
 
     def test_writes_heartbeat_during_monitoring(self):
         """Monitor loop should write heartbeat for HEALTHCHECK."""

@@ -21,7 +21,6 @@ set -euo pipefail
 KOAN_ROOT="${KOAN_ROOT:-/app}"
 PYTHON="${KOAN_ROOT}/.venv/bin/python3"
 INSTANCE="${KOAN_ROOT}/instance"
-STOPPING=false
 
 # Fall back to system Python if venv doesn't exist (Docker image uses system pip)
 if [ ! -x "$PYTHON" ]; then
@@ -195,88 +194,6 @@ setup_workspace() {
     fi
 }
 
-# -------------------------------------------------------------------------
-# 5. Process Supervision
-# -------------------------------------------------------------------------
-start_bridge() {
-    log "Starting Telegram bridge (awake.py)"
-    cd "$KOAN_ROOT/koan" && \
-        $PYTHON app/awake.py &
-    BRIDGE_PID=$!
-    log "Bridge PID: $BRIDGE_PID"
-}
-
-start_agent() {
-    log "Starting agent loop (run.py)"
-    cd "$KOAN_ROOT/koan" && \
-        $PYTHON app/run.py &
-    AGENT_PID=$!
-    log "Agent PID: $AGENT_PID"
-}
-
-cleanup() {
-    if [ "$STOPPING" = true ]; then
-        return
-    fi
-    STOPPING=true
-    log "Shutting down..."
-
-    # Create stop signal for graceful shutdown
-    touch "$KOAN_ROOT/.koan-stop"
-
-    # Graceful stop
-    [ -n "${BRIDGE_PID:-}" ] && kill "$BRIDGE_PID" 2>/dev/null
-    [ -n "${AGENT_PID:-}" ]  && kill "$AGENT_PID" 2>/dev/null
-
-    # Wait up to 10s for graceful exit
-    local timeout=10
-    while [ $timeout -gt 0 ]; do
-        local alive=false
-        [ -n "${BRIDGE_PID:-}" ] && kill -0 "$BRIDGE_PID" 2>/dev/null && alive=true
-        [ -n "${AGENT_PID:-}" ]  && kill -0 "$AGENT_PID" 2>/dev/null  && alive=true
-        [ "$alive" = false ] && break
-        sleep 1
-        timeout=$((timeout - 1))
-    done
-
-    # Force kill if still alive
-    [ -n "${BRIDGE_PID:-}" ] && kill -9 "$BRIDGE_PID" 2>/dev/null || true
-    [ -n "${AGENT_PID:-}" ]  && kill -9 "$AGENT_PID" 2>/dev/null  || true
-
-    # Clean up signal files
-    rm -f "$KOAN_ROOT/.koan-stop"
-
-    success "Shutdown complete"
-    exit 0
-}
-
-monitor_processes() {
-    while true; do
-        if [ -n "${AGENT_PID:-}" ] && ! kill -0 "$AGENT_PID" 2>/dev/null; then
-            wait "$AGENT_PID" 2>/dev/null || true
-            warn "Agent loop exited — restarting in 5s"
-            sleep 5
-            # Only restart if we're not shutting down
-            if [ "$STOPPING" = false ]; then
-                start_agent
-            fi
-        fi
-
-        if [ -n "${BRIDGE_PID:-}" ] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
-            wait "$BRIDGE_PID" 2>/dev/null || true
-            warn "Bridge exited — restarting in 2s"
-            sleep 2
-            if [ "$STOPPING" = false ]; then
-                start_bridge
-            fi
-        fi
-
-        # Write heartbeat for HEALTHCHECK
-        date +%s > "$KOAN_ROOT/.koan-heartbeat"
-
-        sleep 5
-    done
-}
 
 # =========================================================================
 # Main
@@ -292,17 +209,11 @@ case "$COMMAND" in
         setup_instance
         setup_workspace
 
-        trap cleanup INT TERM
-
         # Touch heartbeat so HEALTHCHECK doesn't fail during boot
         date +%s > "$KOAN_ROOT/.koan-heartbeat"
 
-        start_bridge
-        sleep 2  # Let bridge initialize before agent
-        start_agent
-
-        log "Both processes running — monitoring"
-        monitor_processes
+        log "Handing off to supervisord"
+        exec supervisord -c /etc/supervisord.conf
         ;;
 
     agent)
@@ -313,7 +224,6 @@ case "$COMMAND" in
         setup_instance
         setup_workspace
 
-        trap cleanup INT TERM
         cd "$KOAN_ROOT/koan" && exec $PYTHON app/run.py
         ;;
 
@@ -321,7 +231,6 @@ case "$COMMAND" in
         log "Kōan Docker — bridge only"
         setup_instance
 
-        trap cleanup INT TERM
         cd "$KOAN_ROOT/koan" && exec $PYTHON app/awake.py
         ;;
 
