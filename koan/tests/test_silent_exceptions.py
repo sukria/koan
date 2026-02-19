@@ -33,7 +33,7 @@ APP_DIR = Path(__file__).parent.parent / "app"
 # When adding: include a short justification comment.
 ALLOWLIST: Set[Tuple[str, int]] = {
     # --- Shutdown / terminal cleanup (terminal may be gone) ---
-    ("run.py", 77),                  # ANSI reset on shutdown
+    ("run.py", 78),                  # ANSI reset on shutdown
     # --- Best-effort display / info gathering ---
     ("ai_runner.py", 127),           # dir listing for prompt context
     ("startup_info.py", 25),         # config value fallback
@@ -70,11 +70,11 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     # --- CLI runners: cleanup after main work done ---
     ("rebase_pr.py", 313),           # branch cleanup after success
     ("rebase_pr.py", 416),           # branch cleanup after success
-    ("recreate_pr.py", 117),         # label addition retry
-    ("recreate_pr.py", 219),         # branch cleanup after success
-    ("recreate_pr.py", 269),         # branch cleanup after success
-    ("run.py", 1588),                # post-iteration cleanup
-    ("run.py", 1732),                # session-end cleanup
+    ("recreate_pr.py", 118),         # local branch delete (may not exist)
+    ("recreate_pr.py", 222),         # fetch from origin/upstream fallback
+    ("recreate_pr.py", 272),         # git log check fallback
+    ("run.py", 1613),                # get current branch (best-effort)
+    ("run.py", 1757),                # temp file cleanup
     # --- Prompt/config loading with hardcoded fallback ---
     ("local_llm_runner.py", 321),    # system prompt file fallback
     ("pid_manager.py", 468),         # provider detection fallback
