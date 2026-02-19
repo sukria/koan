@@ -35,3 +35,4 @@ projects.yaml
 
 # Process log files
 logs/
+.aider*
