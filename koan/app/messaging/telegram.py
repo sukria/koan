@@ -12,12 +12,12 @@ from typing import List, Optional
 
 import requests
 
-from app.messaging.base import Message, MessagingProvider, Update
+from app.messaging.base import DEFAULT_MAX_MESSAGE_SIZE, Message, MessagingProvider, Update
 from app.messaging import register_provider
 
 
 FLOOD_WINDOW_SECONDS = 300  # 5 minutes
-MAX_MESSAGE_SIZE = 4000  # Telegram API limit
+MAX_MESSAGE_SIZE = DEFAULT_MAX_MESSAGE_SIZE
 
 
 @register_provider("telegram")

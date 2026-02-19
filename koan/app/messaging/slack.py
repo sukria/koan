@@ -18,13 +18,13 @@ import threading
 import time
 from typing import List, Optional
 
-from app.messaging.base import Message, MessagingProvider, Update
+from app.messaging.base import DEFAULT_MAX_MESSAGE_SIZE, Message, MessagingProvider, Update
 from app.messaging import register_provider
 
 
 # Rate limit: Slack allows ~1 msg/sec for chat.postMessage
 SLACK_RATE_LIMIT_SECONDS = 1.0
-MAX_MESSAGE_SIZE = 4000  # Slack text block limit
+MAX_MESSAGE_SIZE = DEFAULT_MAX_MESSAGE_SIZE
 
 
 @register_provider("slack")
