@@ -737,7 +737,7 @@ class TestHandlePause:
         (koan_root / ".koan-pause").touch()
 
         with patch("app.pause_manager.check_and_resume", return_value="Quota reset"):
-            result = handle_pause(str(koan_root), instance, [("test", "/tmp")], 5)
+            result = handle_pause(str(koan_root), instance, 5)
         assert result == "resume"
 
     def test_manual_resume(self, koan_root):
@@ -747,40 +747,87 @@ class TestHandlePause:
         # No .koan-pause file = manual resume
 
         with patch("app.pause_manager.check_and_resume", return_value=None):
-            result = handle_pause(str(koan_root), instance, [("test", "/tmp")], 5)
+            result = handle_pause(str(koan_root), instance, 5)
         assert result == "resume"
 
     @patch("app.run.time.sleep")
-    @patch("app.run.run_claude_task")
-    def test_contemplative_on_pause(self, mock_claude, mock_sleep, koan_root):
+    def test_no_work_on_pause(self, mock_sleep, koan_root):
+        """Pause must NOT run any Claude CLI calls — no contemplative, no autonomous work."""
         from app.run import handle_pause
-        import random
 
         instance = str(koan_root / "instance")
         (koan_root / ".koan-pause").touch()
 
-        # Force contemplative to trigger (roll < 50)
+        sleep_count = [0]
+        def remove_pause_after_3(duration):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 3:
+                (koan_root / ".koan-pause").unlink(missing_ok=True)
+
+        mock_sleep.side_effect = remove_pause_after_3
+
         with patch("app.pause_manager.check_and_resume", return_value=None), \
-             patch("random.randint", return_value=10), \
-             patch("app.run.subprocess.run") as mock_sub:
-            # focus_manager check returns not in focus
-            mock_sub.return_value = MagicMock(returncode=1)
-            mock_claude.return_value = 0
-
-            # Remove pause file partway through to simulate resume
-            original_exists = Path.exists
-            call_count = [0]
-            def fake_exists(self):
-                if str(self).endswith(".koan-pause"):
-                    call_count[0] += 1
-                    if call_count[0] > 3:
-                        return False
-                return original_exists(self)
-
-            with patch.object(Path, "exists", fake_exists):
-                result = handle_pause(str(koan_root), instance, [("test", str(koan_root))], 5)
+             patch("app.run.run_claude_task") as mock_claude:
+            result = handle_pause(str(koan_root), instance, 5)
 
             assert result == "resume"
+            mock_claude.assert_not_called()
+
+    @patch("app.run.time.sleep")
+    def test_pause_sleeps_full_cycle_when_not_resumed(self, mock_sleep, koan_root):
+        """While paused, the agent sleeps 60 × 5s and returns None."""
+        from app.run import handle_pause
+
+        instance = str(koan_root / "instance")
+        (koan_root / ".koan-pause").touch()
+
+        with patch("app.pause_manager.check_and_resume", return_value=None), \
+             patch("app.run.run_claude_task") as mock_claude:
+            result = handle_pause(str(koan_root), instance, 5)
+
+            assert result is None
+            mock_claude.assert_not_called()
+            assert mock_sleep.call_count == 60
+
+    @patch("app.run.time.sleep")
+    def test_pause_resumes_on_file_removal(self, mock_sleep, koan_root):
+        """Pause returns 'resume' when .koan-pause is removed during sleep."""
+        from app.run import handle_pause
+
+        instance = str(koan_root / "instance")
+        (koan_root / ".koan-pause").touch()
+
+        sleep_count = [0]
+        def remove_pause_after_3(duration):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 3:
+                (koan_root / ".koan-pause").unlink(missing_ok=True)
+
+        mock_sleep.side_effect = remove_pause_after_3
+
+        with patch("app.pause_manager.check_and_resume", return_value=None):
+            result = handle_pause(str(koan_root), instance, 5)
+            assert result == "resume"
+
+    @patch("app.run.time.sleep")
+    def test_pause_breaks_on_restart_signal(self, mock_sleep, koan_root):
+        """Pause breaks out when .koan-restart appears, returns None."""
+        from app.run import handle_pause
+
+        instance = str(koan_root / "instance")
+        (koan_root / ".koan-pause").touch()
+
+        sleep_count = [0]
+        def create_restart_after_2(duration):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 2:
+                (koan_root / ".koan-restart").touch()
+
+        mock_sleep.side_effect = create_restart_after_2
+
+        with patch("app.pause_manager.check_and_resume", return_value=None):
+            result = handle_pause(str(koan_root), instance, 5)
+            assert result is None
 
 
 # ---------------------------------------------------------------------------

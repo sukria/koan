@@ -657,11 +657,16 @@ def _commit_instance(instance: str, message: str = ""):
 # ---------------------------------------------------------------------------
 
 def handle_pause(
-    koan_root: str, instance: str, projects: list, max_runs: int,
+    koan_root: str, instance: str, max_runs: int,
 ) -> Optional[str]:
-    """Handle pause mode. Returns "resume" if resumed, None to stay paused."""
-    set_status(koan_root, f"Paused ({time.strftime('%H:%M')})")
-    log("pause", f"Paused. Contemplative mode. ({time.strftime('%H:%M')})")
+    """Handle pause mode. Returns "resume" if resumed, None to stay paused.
+
+    When paused, NO autonomous or contemplative work is performed.
+    The agent only checks for resume conditions and sleeps.
+    """
+    timestamp = time.strftime('%H:%M')
+    set_status(koan_root, f"Paused ({timestamp})")
+    log("pause", f"Paused. Waiting for resume. ({timestamp})")
 
     # Check auto-resume
     try:
@@ -682,57 +687,6 @@ def handle_pause(
         log("pause", "Manual resume detected")
         _reset_usage_session(instance)
         return "resume"
-
-    # Contemplative session (~50% chance, skip in focus mode)
-    import random
-    roll = random.randint(0, 99)
-    in_focus = False
-    try:
-        from app.focus_manager import check_focus
-        in_focus = check_focus(koan_root) is not None
-    except Exception as e:
-        log("error", f"Focus mode check failed in pause: {e}")
-
-    # Find first exploration-enabled project for contemplation
-    exploration_project = None
-    try:
-        from app.projects_config import load_projects_config, get_project_exploration
-        config = load_projects_config(koan_root)
-        if config is not None:
-            for name, path in projects:
-                if get_project_exploration(config, name):
-                    exploration_project = (name, path)
-                    break
-        else:
-            exploration_project = projects[0] if projects else None
-    except Exception as e:
-        log("error", f"Exploration config check failed in pause: {e}")
-        exploration_project = projects[0] if projects else None
-
-    if roll < 50 and not in_focus and exploration_project is not None:
-        log("pause", "A thought stirs...")
-        project_name, project_path = exploration_project
-        atomic_write(Path(koan_root, ".koan-project"), project_name)
-
-        log("pause", "Running contemplative session...")
-        try:
-            from app.contemplative_runner import build_contemplative_command
-            cmd = build_contemplative_command(
-                instance=instance,
-                project_name=project_name,
-                session_info="Pause mode. Run loop paused.",
-            )
-            exit_code = run_claude_task(
-                cmd=cmd,
-                stdout_file=os.devnull,
-                stderr_file=os.devnull,
-                cwd=koan_root,
-            )
-            log("pause", "Contemplative session ended.")
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            log("error", f"Contemplative session error: {e}")
 
     # Sleep 5 min in 5s increments — check for resume/restart
     with protected_phase("Paused — waiting for resume"):
@@ -841,7 +795,7 @@ def main_loop():
 
             # --- Pause mode ---
             if Path(koan_root, ".koan-pause").exists():
-                result = handle_pause(koan_root, instance, projects, max_runs)
+                result = handle_pause(koan_root, instance, max_runs)
                 if result == "resume":
                     count = 0
                     consecutive_errors = 0
