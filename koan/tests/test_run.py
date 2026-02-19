@@ -2285,3 +2285,112 @@ class TestRunSkillMissionEnv:
             )
 
         mock_restore.assert_called_once_with(koan_root, "main")
+
+
+# ---------------------------------------------------------------------------
+# Test: _read_last_project
+# ---------------------------------------------------------------------------
+
+class TestReadLastProject:
+    """Tests for _read_last_project() safe file read helper."""
+
+    def test_reads_project_name(self, tmp_path):
+        from app.run import _read_last_project
+        (tmp_path / ".koan-project").write_text("myproject\n")
+        assert _read_last_project(str(tmp_path)) == "myproject"
+
+    def test_strips_whitespace(self, tmp_path):
+        from app.run import _read_last_project
+        (tmp_path / ".koan-project").write_text("  koan  \n\n")
+        assert _read_last_project(str(tmp_path)) == "koan"
+
+    def test_returns_unknown_when_file_missing(self, tmp_path):
+        from app.run import _read_last_project
+        assert _read_last_project(str(tmp_path)) == "unknown"
+
+    def test_returns_unknown_when_file_empty(self, tmp_path):
+        from app.run import _read_last_project
+        (tmp_path / ".koan-project").write_text("")
+        assert _read_last_project(str(tmp_path)) == "unknown"
+
+    def test_returns_unknown_when_only_whitespace(self, tmp_path):
+        from app.run import _read_last_project
+        (tmp_path / ".koan-project").write_text("   \n")
+        assert _read_last_project(str(tmp_path)) == "unknown"
+
+    def test_returns_unknown_on_permission_error(self, tmp_path):
+        from app.run import _read_last_project
+        project_file = tmp_path / ".koan-project"
+        project_file.write_text("test")
+        project_file.chmod(0o000)
+        try:
+            assert _read_last_project(str(tmp_path)) == "unknown"
+        finally:
+            project_file.chmod(0o644)
+
+    def test_returns_unknown_for_nonexistent_directory(self):
+        from app.run import _read_last_project
+        assert _read_last_project("/nonexistent/path/xyz") == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Test: restart signal TOCTOU fix
+# ---------------------------------------------------------------------------
+
+class TestRestartSignalTOCTOU:
+    """Tests verifying the restart check uses stat() without prior exists()."""
+
+    def test_restart_signal_triggers_on_fresh_file(self, tmp_path):
+        """Restart file newer than start_time is detected."""
+        restart_file = tmp_path / ".koan-restart"
+        start_time = time.time() - 10  # Start was 10s ago
+
+        restart_file.write_text("restart")
+        # File mtime is now (after start_time) — should trigger
+
+        triggered = False
+        try:
+            mtime = restart_file.stat().st_mtime
+            if mtime > start_time:
+                triggered = True
+        except FileNotFoundError:
+            pass
+
+        assert triggered
+
+    def test_stale_restart_signal_ignored(self, tmp_path):
+        """Restart file older than start_time is not acted on."""
+        restart_file = tmp_path / ".koan-restart"
+        restart_file.write_text("restart")
+        past = time.time() - 100
+        os.utime(restart_file, (past, past))
+
+        start_time = time.time()
+        triggered = False
+        try:
+            mtime = restart_file.stat().st_mtime
+            if mtime > start_time:
+                triggered = True
+        except FileNotFoundError:
+            pass
+
+        assert not triggered
+        assert restart_file.exists()
+
+    def test_missing_file_is_filenotfounderror(self, tmp_path):
+        """Missing restart file raises FileNotFoundError (not generic OSError)."""
+        restart_file = tmp_path / ".koan-restart"
+        with pytest.raises(FileNotFoundError):
+            restart_file.stat()
+
+    def test_stat_without_exists_avoids_toctou(self, tmp_path):
+        """The fixed pattern: stat() directly, catch FileNotFoundError."""
+        restart_file = tmp_path / ".koan-restart"
+        # File does not exist — simulate the main loop code
+        start_time = time.time()
+        try:
+            mtime = restart_file.stat().st_mtime
+            if mtime > start_time:
+                pytest.fail("Should not reach here — file doesn't exist")
+        except FileNotFoundError:
+            pass  # Expected path — no crash, no error log

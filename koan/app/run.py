@@ -174,6 +174,18 @@ def set_status(koan_root: str, message: str):
         log("error", f"Failed to write status: {e}")
 
 
+def _read_last_project(koan_root: str) -> str:
+    """Read the last active project name from .koan-project, safely.
+
+    Returns the project name or "unknown" if the file cannot be read
+    (missing, locked, or corrupt).
+    """
+    try:
+        return Path(koan_root, ".koan-project").read_text().strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
 def _build_startup_status(koan_root: str) -> str:
     """Build a human-readable status line for startup notification.
 
@@ -766,7 +778,7 @@ def main_loop():
             if stop_file.exists():
                 log("koan", "Stop requested.")
                 stop_file.unlink(missing_ok=True)
-                current = Path(koan_root, ".koan-project").read_text().strip()
+                current = _read_last_project(koan_root)
                 _notify(instance, f"Kōan stopped on request after {count} runs. Last project: {current}.")
                 break
 
@@ -774,24 +786,24 @@ def main_loop():
             if is_shutdown_requested(koan_root, start_time):
                 log("koan", "Shutdown requested. Exiting.")
                 clear_shutdown(koan_root)
-                current = Path(koan_root, ".koan-project").read_text().strip()
+                current = _read_last_project(koan_root)
                 _notify(instance, f"Kōan shutdown after {count} runs. Last project: {current}.")
                 break
 
             # --- Restart check ---
+            # Use stat() directly instead of exists()-then-stat() to avoid a
+            # TOCTOU race: the bridge can delete the file between the two calls.
             restart_file = Path(koan_root, ".koan-restart")
-            if restart_file.exists():
-                try:
-                    mtime = restart_file.stat().st_mtime
-                    if mtime > start_time:
-                        log("koan", "Restart requested. Exiting for re-launch...")
-                        # Clear the restart signal before exiting to prevent
-                        # the restarted process from seeing a stale file and
-                        # entering a restart loop.
-                        restart_file.unlink(missing_ok=True)
-                        sys.exit(42)
-                except Exception as e:
-                    log("error", f"Restart signal check failed: {e}")
+            try:
+                mtime = restart_file.stat().st_mtime
+                if mtime > start_time:
+                    log("koan", "Restart requested. Exiting for re-launch...")
+                    restart_file.unlink(missing_ok=True)
+                    sys.exit(42)
+            except FileNotFoundError:
+                pass  # No restart signal — normal path
+            except Exception as e:
+                log("error", f"Restart signal check failed: {e}")
 
             # --- Pause mode ---
             if Path(koan_root, ".koan-pause").exists():
@@ -825,11 +837,7 @@ def main_loop():
                 )
 
     except KeyboardInterrupt:
-        current = "unknown"
-        try:
-            current = Path(koan_root, ".koan-project").read_text().strip()
-        except Exception as e:
-            log("error", f"Failed to read last project: {e}")
+        current = _read_last_project(koan_root)
         _notify(instance, f"Kōan interrupted after {count} runs. Last project: {current}.")
     finally:
         # Cleanup
@@ -1109,11 +1117,7 @@ def _run_iteration(
     print(bold_cyan(f"=== Run {run_num}/{max_runs} — {time.strftime('%Y-%m-%d %H:%M:%S')} ==="))
 
     # Plan iteration (delegated to iteration_manager)
-    last_project = ""
-    try:
-        last_project = Path(koan_root, ".koan-project").read_text().strip()
-    except Exception as e:
-        log("error", f"Failed to read last project file: {e}")
+    last_project = _read_last_project(koan_root)
     plan = plan_iteration(
         instance_dir=instance,
         koan_root=koan_root,
