@@ -140,15 +140,21 @@ def archive_pending(instance_dir: str, project_name: str, run_num: int) -> bool:
     if not pending_path.exists():
         return False
 
+    # Read pending content — guard against file disappearing between
+    # exists() check and read (TOCTOU race with the agent's own cleanup).
+    try:
+        pending_content = pending_path.read_text()
+    except FileNotFoundError:
+        return False
+
     # Append pending content to daily journal (with file locking)
     from app.journal import append_to_journal
-    pending_content = pending_path.read_text()
     now = datetime.now().strftime("%H:%M")
     entry = f"\n## Run {run_num} — {now} (auto-archived from pending)\n\n{pending_content}"
 
     append_to_journal(Path(instance_dir), project_name, entry)
 
-    pending_path.unlink()
+    pending_path.unlink(missing_ok=True)
     return True
 
 
@@ -366,7 +372,10 @@ def commit_instance(instance_dir: str) -> bool:
 
         now = datetime.now().strftime("%Y-%m-%d-%H:%M")
         run_git(instance_dir, "commit", "-m", f"koan: {now}")
-        run_git(instance_dir, "push", "origin", "main")
+
+        # Push to the current branch (not hard-coded "main")
+        branch = run_git(instance_dir, "rev-parse", "--abbrev-ref", "HEAD")
+        run_git(instance_dir, "push", "origin", branch or "main")
         return True
     except Exception as e:
         print(f"[mission_runner] Instance commit failed: {e}", file=sys.stderr)
