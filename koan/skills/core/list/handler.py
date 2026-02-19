@@ -6,6 +6,7 @@ import re
 _CATEGORY_PREFIXES = {
     "plan": "🧠",
     "implement": "🔨",
+    "fix": "🐞",
     "rebase": "🔄",
     "recreate": "🔁",
     "ai": "✨",

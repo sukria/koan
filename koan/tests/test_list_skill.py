@@ -41,6 +41,14 @@ class TestMissionPrefix:
         from skills.core.list.handler import mission_prefix
         assert mission_prefix("- /magic koan") == "\u2728"
 
+    def test_fix_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /fix https://github.com/owner/repo/issues/42") == "\U0001f41e"
+
+    def test_fix_with_project_tag(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- [project:backend] /fix https://github.com/o/r/issues/1") == "\U0001f41e"
+
     def test_regular_mission_gets_clipboard(self):
         from skills.core.list.handler import mission_prefix
         assert mission_prefix("- fix the login bug") == "\U0001f4cb"
@@ -253,6 +261,7 @@ class TestListHandler:
 
             - [project:koan] /plan add dark mode
             - [project:koan] /implement https://github.com/issue/1
+            - [project:koan] /fix https://github.com/owner/repo/issues/5
             - [project:koan] /rebase https://github.com/pr/42
             - fix some bug
 
@@ -264,6 +273,7 @@ class TestListHandler:
         result = handle(ctx)
         assert "\U0001f9e0" in result  # plan
         assert "\U0001f528" in result  # implement
+        assert "\U0001f41e" in result  # fix
         assert "\U0001f504" in result  # rebase
         assert "\U0001f4cb" in result  # regular mission
 
