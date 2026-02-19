@@ -151,6 +151,183 @@ class TestGetGithubRemote:
 
 
 # ─────────────────────────────────────────────────────
+# Phase 1b: get_all_github_remotes()
+# ─────────────────────────────────────────────────────
+
+
+class TestGetAllGithubRemotes:
+    """Tests for get_all_github_remotes() — extracting ALL owner/repo from all git remotes."""
+
+    def test_single_origin(self, tmp_path):
+        """Returns single remote when only origin exists."""
+        from app.utils import get_all_github_remotes
+
+        list_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\n")
+        url_result = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="https://github.com/atoomic/koan.git\n"
+        )
+
+        def side_effect(cmd, **kwargs):
+            if cmd == ["git", "remote"]:
+                return list_result
+            return url_result
+
+        with patch("app.utils.subprocess.run", side_effect=side_effect):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert result == ["atoomic/koan"]
+
+    def test_origin_and_upstream(self, tmp_path):
+        """Returns both origin and upstream remotes."""
+        from app.utils import get_all_github_remotes
+
+        list_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\nupstream\n")
+        origin_url = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="git@github.com:atoomic/koan.git\n"
+        )
+        upstream_url = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="https://github.com/sukria/koan.git\n"
+        )
+
+        def side_effect(cmd, **kwargs):
+            if cmd == ["git", "remote"]:
+                return list_result
+            if "origin" in cmd:
+                return origin_url
+            return upstream_url
+
+        with patch("app.utils.subprocess.run", side_effect=side_effect):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert "atoomic/koan" in result
+        assert "sukria/koan" in result
+        assert len(result) == 2
+
+    def test_deduplicates(self, tmp_path):
+        """Does not return duplicate entries for same owner/repo."""
+        from app.utils import get_all_github_remotes
+
+        list_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\nbackup\n")
+        url_result = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="https://github.com/atoomic/koan.git\n"
+        )
+
+        def side_effect(cmd, **kwargs):
+            if cmd == ["git", "remote"]:
+                return list_result
+            return url_result
+
+        with patch("app.utils.subprocess.run", side_effect=side_effect):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert result == ["atoomic/koan"]
+
+    def test_non_github_remotes_skipped(self, tmp_path):
+        """Skips remotes that don't point to GitHub."""
+        from app.utils import get_all_github_remotes
+
+        list_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\ngitlab\n")
+        origin_url = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="https://github.com/atoomic/koan.git\n"
+        )
+        gitlab_url = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="https://gitlab.com/atoomic/koan.git\n"
+        )
+
+        def side_effect(cmd, **kwargs):
+            if cmd == ["git", "remote"]:
+                return list_result
+            if "origin" in cmd:
+                return origin_url
+            return gitlab_url
+
+        with patch("app.utils.subprocess.run", side_effect=side_effect):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert result == ["atoomic/koan"]
+
+    def test_no_remotes(self, tmp_path):
+        """Returns empty list when no remotes exist."""
+        from app.utils import get_all_github_remotes
+
+        list_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="")
+
+        with patch("app.utils.subprocess.run", return_value=list_result):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert result == []
+
+    def test_git_remote_fails(self, tmp_path):
+        """Returns empty list when git remote command fails."""
+        from app.utils import get_all_github_remotes
+
+        fail_result = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="fatal")
+
+        with patch("app.utils.subprocess.run", return_value=fail_result):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert result == []
+
+    def test_timeout_handled(self, tmp_path):
+        """Handles subprocess timeout gracefully."""
+        from app.utils import get_all_github_remotes
+
+        with patch("app.utils.subprocess.run", side_effect=subprocess.TimeoutExpired("git", 5)):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert result == []
+
+    def test_case_normalization(self, tmp_path):
+        """Owner/repo are normalized to lowercase."""
+        from app.utils import get_all_github_remotes
+
+        list_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\n")
+        url_result = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="https://github.com/Sukria/Koan.git\n"
+        )
+
+        def side_effect(cmd, **kwargs):
+            if cmd == ["git", "remote"]:
+                return list_result
+            return url_result
+
+        with patch("app.utils.subprocess.run", side_effect=side_effect):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert result == ["sukria/koan"]
+
+    def test_individual_url_fetch_failure(self, tmp_path):
+        """Continues past individual remote URL fetch failures."""
+        from app.utils import get_all_github_remotes
+
+        list_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\nupstream\n")
+        origin_fail = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="fatal")
+        upstream_ok = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="https://github.com/sukria/koan.git\n"
+        )
+
+        def side_effect(cmd, **kwargs):
+            if cmd == ["git", "remote"]:
+                return list_result
+            if "origin" in cmd:
+                return origin_fail
+            return upstream_ok
+
+        with patch("app.utils.subprocess.run", side_effect=side_effect):
+            result = get_all_github_remotes(str(tmp_path))
+
+        assert result == ["sukria/koan"]
+
+
+# ─────────────────────────────────────────────────────
 # Phase 2: save_projects_config() + ensure_github_urls()
 # ─────────────────────────────────────────────────────
 
@@ -404,11 +581,19 @@ class TestResolveProjectPathWithOwner:
         }
         (tmp_path / "projects.yaml").write_text(yaml.dump(config))
 
-        result = subprocess.CompletedProcess(
+        # get_all_github_remotes calls: git remote (list), git remote get-url <name>
+        list_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\n")
+        url_result = subprocess.CompletedProcess(
             args=[], returncode=0,
             stdout="https://github.com/sukria/koan.git\n"
         )
-        with patch("app.utils.subprocess.run", return_value=result):
+
+        def side_effect(cmd, **kwargs):
+            if cmd == ["git", "remote"]:
+                return list_result
+            return url_result
+
+        with patch("app.utils.subprocess.run", side_effect=side_effect):
             from app.utils import resolve_project_path
             path = resolve_project_path("koan", owner="sukria")
 
@@ -433,7 +618,7 @@ class TestResolveProjectPathWithOwner:
         monkeypatch.setattr(utils, "KOAN_ROOT", Path("/tmp/test"))
         monkeypatch.setenv("KOAN_PROJECTS", "koan:/home/koan;web:/home/web")
 
-        with patch("app.utils.get_github_remote", return_value=None):
+        with patch("app.utils.get_all_github_remotes", return_value=[]):
             from app.utils import resolve_project_path
             assert resolve_project_path("unknown", owner="somebody") is None
 
@@ -466,6 +651,95 @@ class TestResolveProjectPathWithOwner:
         # URL is from fork owner — doesn't match github_url
         # Should still match on project name
         assert resolve_project_path("koan", owner="atoomic") == "/home/koan"
+
+    def test_cross_owner_via_upstream_remote(self, tmp_path, monkeypatch):
+        """Cross-owner PR: URL owner is upstream, local project is fork.
+
+        This is the key bug fix: /recreate https://github.com/sukria/koan/pull/171
+        should find the local project even when github_url is atoomic/koan (fork)
+        because the upstream git remote points to sukria/koan.
+        """
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+
+        project_dir = tmp_path / "koan"
+        project_dir.mkdir()
+        config = {
+            "projects": {
+                "koan": {
+                    "path": str(project_dir),
+                    "github_url": "atoomic/koan"  # Fork!
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        # get_all_github_remotes returns both origin (fork) and upstream (original)
+        with patch("app.utils.get_all_github_remotes",
+                   return_value=["atoomic/koan", "sukria/koan"]), \
+             patch("app.utils.get_github_remote", return_value="atoomic/koan"):
+            from app.utils import resolve_project_path
+            # URL points to sukria/koan (upstream owner) — name "koan" matches
+            # so it resolves via step 2 (exact name match)
+            path = resolve_project_path("koan", owner="sukria")
+
+        assert path == str(project_dir)
+
+    def test_cross_owner_different_project_name(self, tmp_path, monkeypatch):
+        """Cross-owner PR with non-matching project name.
+
+        Project is named "my-fork" locally, github_url is "atoomic/koan" (fork),
+        upstream remote points to "sukria/koan". URL: sukria/koan/pull/X.
+        Steps 1-3 all fail — only step 4 (all remotes) catches it.
+        """
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+
+        project_dir = tmp_path / "my-fork"
+        project_dir.mkdir()
+        config = {
+            "projects": {
+                "my-fork": {
+                    "path": str(project_dir),
+                    "github_url": "atoomic/koan"  # Fork origin
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        # get_all_github_remotes returns both fork and upstream
+        with patch("app.utils.get_all_github_remotes",
+                   return_value=["atoomic/koan", "sukria/koan"]), \
+             patch("app.utils.get_github_remote", return_value="atoomic/koan"):
+            from app.utils import resolve_project_path
+            path = resolve_project_path("koan", owner="sukria")
+
+        assert path == str(project_dir)
+
+    def test_cross_owner_no_upstream_remote(self, tmp_path, monkeypatch):
+        """When project only has origin (no upstream), cross-owner doesn't match."""
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+
+        project_dir = tmp_path / "my-fork"
+        project_dir.mkdir()
+        config = {
+            "projects": {
+                "my-fork": {
+                    "path": str(project_dir),
+                    "github_url": "atoomic/koan"
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        # Only origin remote, no upstream
+        with patch("app.utils.get_all_github_remotes",
+                   return_value=["atoomic/koan"]):
+            from app.utils import resolve_project_path
+            path = resolve_project_path("koan", owner="sukria")
+
+        assert path is None
 
 
 # ─────────────────────────────────────────────────────

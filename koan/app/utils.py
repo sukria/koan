@@ -26,7 +26,7 @@ import tempfile
 import threading
 import yaml
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 
 if "KOAN_ROOT" not in os.environ:
@@ -174,6 +174,50 @@ def get_github_remote(project_path: str) -> Optional[str]:
     return None
 
 
+def get_all_github_remotes(project_path: str) -> List[str]:
+    """Extract owner/repo from ALL git remotes in a project.
+
+    Returns a list of "owner/repo" strings (normalized lowercase) for every
+    remote that points to GitHub.  Useful for matching a GitHub URL against
+    a local project that may have both an origin (fork) and an upstream.
+    """
+    remotes: List[str] = []
+    try:
+        result = subprocess.run(
+            ["git", "remote"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=5,
+            cwd=project_path,
+        )
+        if result.returncode != 0:
+            return remotes
+        remote_names = result.stdout.strip().splitlines()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return remotes
+
+    for remote in remote_names:
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", remote.strip()],
+                stdin=subprocess.DEVNULL,
+                capture_output=True, text=True, timeout=5,
+                cwd=project_path,
+            )
+            if result.returncode != 0:
+                continue
+            url = result.stdout.strip()
+            match = _GITHUB_REMOTE_RE.search(url)
+            if match:
+                owner = match.group(1).lower()
+                repo = match.group(2).lower()
+                slug = f"{owner}/{repo}"
+                if slug not in remotes:
+                    remotes.append(slug)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            continue
+    return remotes
+
+
 def atomic_write(path: Path, content: str):
     """Write content to a file atomically using write-to-temp + rename.
 
@@ -318,7 +362,9 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
     1. GitHub URL match (if owner provided): check github_url in projects.yaml
     2. Exact match on project name (case-insensitive)
     3. Match on directory basename (case-insensitive)
-    4. Auto-discover and retry (if owner provided): scan git remotes
+    4. Auto-discover from ALL git remotes (if owner provided): checks origin,
+       upstream, and any other remote — catches cross-owner matches (e.g.
+       URL points to upstream owner but local origin is a fork)
     5. Fallback to single project if only one configured
     """
     projects = get_known_projects()
@@ -360,28 +406,33 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
         if Path(path).name.lower() == repo_name.lower():
             return path
 
-    # 4. Auto-discover from git remotes and retry
+    # 4. Auto-discover from ALL git remotes (origin, upstream, etc.)
+    #    This catches cross-owner matches: e.g. local origin is atoomic/koan
+    #    but the PR URL points to sukria/koan (the upstream remote).
     if target:
         for name, path in projects:
-            gh_url = get_github_remote(path)
-            if gh_url and gh_url.lower() == target:
+            all_remotes = get_all_github_remotes(path)
+            if target in all_remotes:
                 # Persist discovery to projects.yaml for yaml projects
-                try:
-                    from app.projects_config import load_projects_config, save_projects_config
-                    config = load_projects_config(str(KOAN_ROOT))
-                    if config and name in config.get("projects", {}):
-                        proj = config["projects"][name]
-                        if isinstance(proj, dict) and proj.get("path"):
-                            proj["github_url"] = gh_url
-                            save_projects_config(str(KOAN_ROOT), config)
-                except Exception as e:
-                    print(f"[utils] Failed to persist github_url for {name}: {e}", file=sys.stderr)
-                # Also cache in memory (works for workspace projects)
-                try:
-                    from app.projects_merged import set_github_url
-                    set_github_url(name, gh_url)
-                except Exception as e:
-                    print(f"[utils] Failed to cache github_url for {name}: {e}", file=sys.stderr)
+                # (use the primary remote for the github_url field)
+                primary = get_github_remote(path)
+                if primary:
+                    try:
+                        from app.projects_config import load_projects_config, save_projects_config
+                        config = load_projects_config(str(KOAN_ROOT))
+                        if config and name in config.get("projects", {}):
+                            proj = config["projects"][name]
+                            if isinstance(proj, dict) and proj.get("path"):
+                                proj["github_url"] = primary
+                                save_projects_config(str(KOAN_ROOT), config)
+                    except Exception as e:
+                        print(f"[utils] Failed to persist github_url for {name}: {e}", file=sys.stderr)
+                    # Also cache in memory (works for workspace projects)
+                    try:
+                        from app.projects_merged import set_github_url
+                        set_github_url(name, primary)
+                    except Exception as e:
+                        print(f"[utils] Failed to cache github_url for {name}: {e}", file=sys.stderr)
                 return path
 
     # 5. Fallback to single project (skip when owner-specific lookup found nothing)
