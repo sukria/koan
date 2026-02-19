@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.missions import count_pending
+from app.signals import PAUSE_FILE, RESTART_FILE, SHUTDOWN_FILE, STOP_FILE
 
 
 # --- Focus area resolution ---
@@ -443,13 +444,13 @@ def interruptible_sleep(
 
         if check_pending_missions(instance_dir):
             return "mission"
-        if _check_signal_file(koan_root, ".koan-stop"):
+        if _check_signal_file(koan_root, STOP_FILE):
             return "stop"
-        if _check_signal_file(koan_root, ".koan-pause"):
+        if _check_signal_file(koan_root, PAUSE_FILE):
             return "pause"
-        if _check_signal_file(koan_root, ".koan-restart"):
+        if _check_signal_file(koan_root, RESTART_FILE):
             return "restart"
-        if _check_signal_file(koan_root, ".koan-shutdown"):
+        if _check_signal_file(koan_root, SHUTDOWN_FILE):
             return "shutdown"
 
         # Check GitHub notifications (throttled to once per 60s)

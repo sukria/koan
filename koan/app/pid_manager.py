@@ -29,10 +29,19 @@ import time
 from pathlib import Path
 from typing import Optional, IO
 
+from app.signals import (
+    PAUSE_FILE,
+    PAUSE_REASON_FILE,
+    PROJECT_FILE,
+    STATUS_FILE,
+    STOP_FILE,
+    pid_file as signal_pid_file,
+)
+
 
 def _pidfile_path(koan_root: Path, process_name: str) -> Path:
     """Return the PID file path for a given process type."""
-    return koan_root / f".koan-pid-{process_name}"
+    return koan_root / signal_pid_file(process_name)
 
 
 def _log_dir(koan_root: Path) -> Path:
@@ -288,7 +297,7 @@ def start_runner(koan_root: Path, verify_timeout: float = DEFAULT_VERIFY_TIMEOUT
     Returns (success: bool, message: str).
     """
     # Clear stop signal so run.py doesn't exit immediately
-    stop_file = koan_root / ".koan-stop"
+    stop_file = koan_root / STOP_FILE
     stop_file.unlink(missing_ok=True)
 
     return _launch_python_process(koan_root, "app/run.py", "run", verify_timeout)
@@ -367,24 +376,24 @@ def _read_runner_state(koan_root: Path) -> dict:
     """
     state = {"status": "", "paused": False, "pause_reason": "", "project": ""}
 
-    status_file = koan_root / ".koan-status"
+    status_file = koan_root / STATUS_FILE
     if status_file.exists():
         try:
             state["status"] = status_file.read_text().strip()
         except OSError:
             pass
 
-    pause_file = koan_root / ".koan-pause"
+    pause_file = koan_root / PAUSE_FILE
     if pause_file.exists():
         state["paused"] = True
-        reason_file = koan_root / ".koan-pause-reason"
+        reason_file = koan_root / PAUSE_REASON_FILE
         if reason_file.exists():
             try:
                 state["pause_reason"] = reason_file.read_text().strip().split("\n")[0]
             except OSError:
                 pass
 
-    project_file = koan_root / ".koan-project"
+    project_file = koan_root / PROJECT_FILE
     if project_file.exists():
         try:
             state["project"] = project_file.read_text().strip()
@@ -569,7 +578,7 @@ def stop_processes(koan_root: Path, timeout: float = 5.0) -> dict:
     results = {}
 
     # Create .koan-stop signal file for graceful run loop shutdown
-    stop_file = koan_root / ".koan-stop"
+    stop_file = koan_root / STOP_FILE
     stop_file.write_text("STOP")
 
     for name in PROCESS_NAMES:

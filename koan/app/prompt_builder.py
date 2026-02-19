@@ -26,6 +26,8 @@ import os
 import sys
 from pathlib import Path
 
+from app.signals import VERBOSE_FILE
+
 
 def _load_config_safe() -> dict:
     """Load config.yaml, returning empty dict on failure."""
@@ -101,7 +103,7 @@ def _get_focus_section(instance: str) -> str:
 def _get_verbose_section(instance: str) -> str:
     """Build the verbose mode section if .koan-verbose exists."""
     koan_root = str(Path(instance).parent)
-    if not os.path.isfile(os.path.join(koan_root, ".koan-verbose")):
+    if not os.path.isfile(os.path.join(koan_root, VERBOSE_FILE)):
         return ""
 
     from app.prompts import load_prompt
