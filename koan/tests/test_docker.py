@@ -105,8 +105,13 @@ class TestDockerfile:
         assert "/host-node" not in self.dockerfile
 
     def test_sets_ipv4_node_options(self):
-        """NODE_OPTIONS should force IPv4 for OAuth callback server binding."""
+        """NODE_OPTIONS should force IPv4 for potential localhost binding."""
         assert "dns-result-order=ipv4first" in self.dockerfile
+
+    def test_creates_onboarding_json(self):
+        """~/.claude.json with hasCompletedOnboarding must exist for setup-token."""
+        assert "hasCompletedOnboarding" in self.dockerfile
+        assert ".claude.json" in self.dockerfile
 
 
 class TestEntrypoint:
@@ -175,13 +180,17 @@ class TestEntrypoint:
         assert "check_claude_auth" in self.entrypoint
 
     def test_supports_auth_command(self):
-        """Should support 'auth' command for interactive login."""
+        """Should support 'auth' command for auth status check."""
         assert "auth)" in self.entrypoint
-        assert "claude auth login" in self.entrypoint
 
-    def test_auth_section_explains_callback_flow(self):
-        """Auth section should explain host networking for OAuth callback."""
+    def test_auth_section_explains_setup_token(self):
+        """Auth section should explain setup-token flow via make docker-auth."""
         assert "make docker-auth" in self.entrypoint
+        assert "setup-token" in self.entrypoint
+
+    def test_check_claude_auth_supports_oauth_token(self):
+        """check_claude_auth should recognize CLAUDE_CODE_OAUTH_TOKEN."""
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in self.entrypoint
 
     def test_checks_copilot_auth_dir(self):
         """Should check for ~/.copilot directory."""
@@ -235,10 +244,9 @@ class TestEntrypoint:
         """Mounted binaries approach: no repo cloning in container."""
         assert "git clone" not in self.entrypoint
 
-    def test_no_credential_setup(self):
-        """Auth comes from mounted directories, not env vars."""
+    def test_no_credential_helper(self):
+        """Should not set up credential helpers."""
         assert "credential.helper" not in self.entrypoint
-        assert "setup-token" not in self.entrypoint
 
     def test_setup_workspace(self):
         """Entrypoint should set up workspace directory."""
@@ -464,9 +472,9 @@ class TestMakefileDockerTargets:
     def test_docker_auth_target(self):
         assert "docker-auth:" in self.makefile
 
-    def test_docker_auth_uses_auth_compose(self):
-        """docker-auth should use docker-compose.auth.yml for host networking."""
-        assert "docker-compose.auth.yml" in self.makefile
+    def test_docker_auth_uses_setup_token(self):
+        """docker-auth should run claude setup-token on the host."""
+        assert "setup-token" in self.makefile
 
     def test_docker_phony_declarations(self):
         """Docker targets should be declared .PHONY."""
@@ -501,10 +509,11 @@ class TestDesignPrinciples:
         dockerfile = (REPO_ROOT / "Dockerfile").read_text()
         assert "npm install -g @anthropic-ai/claude-code" in dockerfile
 
-    def test_no_setup_token_in_entrypoint(self):
-        """Auth comes from mounted dirs, not setup-token."""
+    def test_entrypoint_explains_setup_token(self):
+        """Auth section should guide users to setup-token via make docker-auth."""
         entrypoint = (REPO_ROOT / "docker-entrypoint.sh").read_text()
-        assert "setup-token" not in entrypoint
+        assert "setup-token" in entrypoint
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in entrypoint
 
     def test_no_credential_helper_in_entrypoint(self):
         """Should not set up credential helpers with embedded tokens."""

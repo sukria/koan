@@ -71,7 +71,8 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 # Workspace + runtime directories
 RUN mkdir -p /app/workspace /app/instance /app/logs /home/koan/.claude \
-    && chown -R ${HOST_UID}:${HOST_GID} /app /home/koan/.claude
+    && echo '{"hasCompletedOnboarding": true}' > /home/koan/.claude.json \
+    && chown -R ${HOST_UID}:${HOST_GID} /app /home/koan/.claude /home/koan/.claude.json
 
 # Switch to non-root user
 USER ${HOST_UID}
@@ -88,9 +89,8 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 
 ENV KOAN_ROOT=/app
 ENV PYTHONPATH=/app/koan
-# Force Node.js to resolve localhost to IPv4 first — fixes Claude CLI's
-# OAuth callback server binding to [::1] only (IPv6), which breaks port
-# forwarding in Docker. See: anthropics/claude-code#9376
+# Force Node.js to resolve localhost to IPv4 first — avoids IPv6 binding
+# issues in some Docker setups. See: anthropics/claude-code#9376
 ENV NODE_OPTIONS="--dns-result-order=ipv4first"
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
