@@ -609,6 +609,19 @@ def _notify_mission_end(
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_current_project(koan_root: str) -> str:
+    """Read the current project name from .koan-project, with fallback."""
+    try:
+        return Path(koan_root, ".koan-project").read_text().strip()
+    except (FileNotFoundError, OSError):
+        return "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Instance commit helper
 # ---------------------------------------------------------------------------
 
@@ -641,8 +654,17 @@ def _commit_instance(instance: str, message: str = ""):
                 f"{commit_result.stderr.decode(errors='replace')[:200]}")
             return
 
+        # Detect the current branch instead of assuming "main"
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=instance, capture_output=True, timeout=5,
+        )
+        branch = branch_result.stdout.decode().strip() if branch_result.returncode == 0 else "main"
+        if not branch or branch == "HEAD":
+            branch = "main"
+
         push_result = subprocess.run(
-            ["git", "push", "origin", "main"],
+            ["git", "push", "origin", branch],
             cwd=instance, capture_output=True, timeout=30,
         )
         if push_result.returncode != 0:
@@ -766,7 +788,7 @@ def main_loop():
             if stop_file.exists():
                 log("koan", "Stop requested.")
                 stop_file.unlink(missing_ok=True)
-                current = Path(koan_root, ".koan-project").read_text().strip()
+                current = _read_current_project(koan_root)
                 _notify(instance, f"Kōan stopped on request after {count} runs. Last project: {current}.")
                 break
 
@@ -774,7 +796,7 @@ def main_loop():
             if is_shutdown_requested(koan_root, start_time):
                 log("koan", "Shutdown requested. Exiting.")
                 clear_shutdown(koan_root)
-                current = Path(koan_root, ".koan-project").read_text().strip()
+                current = _read_current_project(koan_root)
                 _notify(instance, f"Kōan shutdown after {count} runs. Last project: {current}.")
                 break
 
@@ -825,11 +847,7 @@ def main_loop():
                 )
 
     except KeyboardInterrupt:
-        current = "unknown"
-        try:
-            current = Path(koan_root, ".koan-project").read_text().strip()
-        except Exception as e:
-            log("error", f"Failed to read last project: {e}")
+        current = _read_current_project(koan_root)
         _notify(instance, f"Kōan interrupted after {count} runs. Last project: {current}.")
     finally:
         # Cleanup
