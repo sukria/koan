@@ -153,11 +153,22 @@ def strip_timestamps(text: str) -> str:
     return text.rstrip()
 
 
+def _normalize_now_flag(text: str) -> str:
+    """Normalize Unicode dash variants of --now to ASCII --now.
+
+    Mobile keyboards often auto-correct -- to em dash (\u2014) or en dash (\u2013),
+    so "\u2014now" and "\u2013now" should be treated as "--now".
+    """
+    return text.replace("\u2014now", "--now").replace("\u2013now", "--now")
+
+
 def extract_now_flag(text: str) -> Tuple[bool, str]:
     """Check for --now flag in the first 5 words of mission text.
 
     Returns (is_urgent, cleaned_text) where cleaned_text has --now removed.
+    Accepts Unicode dash variants (\u2014now, \u2013now) as synonyms for --now.
     """
+    text = _normalize_now_flag(text)
     words = text.split()
     first_five = words[:5]
     if "--now" in first_five:
