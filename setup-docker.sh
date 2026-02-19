@@ -43,7 +43,6 @@ section() { printf "\n${BOLD}${CYAN}--- %s ---${RESET}\n" "$*"; }
 # -------------------------------------------------------------------------
 declare -a VOLUME_MOUNTS=()
 declare -a FOUND_BINS=()
-WORKSPACE_COMMON_PARENT=""
 
 detect_binary() {
     local name="$1"
@@ -98,70 +97,28 @@ detect_uid_gid() {
 }
 
 # -------------------------------------------------------------------------
-# Compute longest common parent directory for a list of absolute paths
-# -------------------------------------------------------------------------
-find_common_parent() {
-    local paths=("$@")
-    if [ ${#paths[@]} -eq 0 ]; then
-        echo "/"
-        return
-    fi
-    if [ ${#paths[@]} -eq 1 ]; then
-        dirname "${paths[0]}"
-        return
-    fi
-    local common="${paths[0]}"
-    local path
-    for path in "${paths[@]:1}"; do
-        while [ "$common" != "/" ]; do
-            if [ "$path" = "$common" ] || [[ "$path" == "$common/"* ]]; then
-                break
-            fi
-            common=$(dirname "$common")
-        done
-    done
-    echo "$common"
-}
-
-# -------------------------------------------------------------------------
-# Resolve workspace symlinks for Docker bind mounts
+# Resolve workspace entries for Docker bind mounts (per-project, no symlinks)
 # -------------------------------------------------------------------------
 resolve_workspace() {
     if [ ! -d "workspace" ]; then
-        log "No workspace/ directory — skipping project mount resolution"
+        log "No workspace/ directory — skipping"
         return
     fi
 
-    local -a resolved_paths=()
-    local entry name resolved
+    local count=0
+    local entry name real_path
     for entry in workspace/*/; do
         [ -d "$entry" ] || continue
         name=$(basename "$entry")
-        resolved=$(realpath "workspace/$name" 2>/dev/null || echo "$(pwd)/workspace/$name")
-        resolved_paths+=("$resolved")
+        real_path=$(realpath "workspace/$name" 2>/dev/null || echo "$(pwd)/workspace/$name")
+        VOLUME_MOUNTS+=("      - ${real_path}:/app/workspace/${name}")
+        count=$((count + 1))
+        log "Workspace: $name → $real_path"
     done
 
-    if [ ${#resolved_paths[@]} -eq 0 ]; then
-        log "No workspace entries found"
-        return
+    if [ $count -gt 0 ]; then
+        success "Resolved $count workspace project(s)"
     fi
-
-    # Single mount covering the common parent of all resolved paths
-    WORKSPACE_COMMON_PARENT=$(find_common_parent "${resolved_paths[@]}")
-    log "Workspace common parent: $WORKSPACE_COMMON_PARENT"
-    VOLUME_MOUNTS+=("      - ${WORKSPACE_COMMON_PARENT}:/app/workspace")
-    success "Workspace: $WORKSPACE_COMMON_PARENT → /app/workspace (${#resolved_paths[@]} project(s))"
-
-    # Any entry outside the common parent needs its own explicit mount
-    local i
-    for i in "${!resolved_paths[@]}"; do
-        resolved="${resolved_paths[$i]}"
-        name=$(basename "$resolved")
-        if [ "$resolved" != "$WORKSPACE_COMMON_PARENT" ] && [[ "$resolved" != "$WORKSPACE_COMMON_PARENT/"* ]]; then
-            warn "Project '$name' is outside common parent — adding explicit mount"
-            VOLUME_MOUNTS+=("      - ${resolved}:/app/workspace/${name}")
-        fi
-    done
 }
 
 # -------------------------------------------------------------------------
@@ -241,64 +198,49 @@ else
     success "Found instance/missions.docker.md"
 fi
 
-# 2c. Generate projects.docker.yaml with workspace entries
+# 2c. Generate projects.docker.yaml with workspace entries (smart merge)
 generate_projects_yaml() {
     local yaml_file="projects.docker.yaml"
 
-    if [ -f "$yaml_file" ]; then
-        # Keep existing file if it already has project entries
-        if grep -q '^projects:' "$yaml_file" && grep -qE '^  [a-zA-Z]' "$yaml_file"; then
-            success "Found $yaml_file with project entries"
-            return
-        fi
-    fi
-
-    # Build from scratch with workspace entries
-    local content="defaults:
+    # Create skeleton if file doesn't exist
+    if [ ! -f "$yaml_file" ]; then
+        cat > "$yaml_file" << 'EOF'
+defaults:
   git_auto_merge:
     enabled: false
-    base_branch: \"main\"
-    strategy: \"squash\"
+    base_branch: "main"
+    strategy: "squash"
   max_open_prs: 10
 
-projects:"
+projects:
+EOF
+        log "Created $yaml_file"
+    fi
 
-    local count=0
-    local entry name resolved rel_path container_path
+    # Ensure projects: section exists (handles files generated before this fix)
+    if ! grep -q '^projects:' "$yaml_file"; then
+        printf '\nprojects:\n' >> "$yaml_file"
+        log "Added projects: section to $yaml_file"
+    fi
+
+    # Append workspace entries not already present
+    local added=0
+    local entry name
     for entry in workspace/*/; do
         [ -d "$entry" ] || continue
         name=$(basename "$entry")
-
-        # Compute container path relative to the common parent mount point
-        if [ -n "${WORKSPACE_COMMON_PARENT:-}" ]; then
-            resolved=$(realpath "workspace/$name" 2>/dev/null || echo "$(pwd)/workspace/$name")
-            rel_path="${resolved#${WORKSPACE_COMMON_PARENT}/}"
-            if [ "$rel_path" = "$resolved" ]; then
-                # Outside common parent — has its own explicit mount
-                container_path="/app/workspace/${name}"
-            else
-                container_path="/app/workspace/${rel_path}"
-            fi
-        else
-            container_path="/app/workspace/${name}"
+        if ! grep -qE "^  ${name}:" "$yaml_file"; then
+            printf '  %s:\n    path: /app/workspace/%s\n' "$name" "$name" >> "$yaml_file"
+            added=$((added + 1))
+            log "Added project '$name'"
         fi
-
-        content="$content
-  $name:
-    path: ${container_path}"
-        count=$((count + 1))
     done
 
-    if [ $count -eq 0 ]; then
-        warn "No workspace projects found — projects.docker.yaml will have no entries"
-        content="$content
-  # Add your projects here:
-  # myproject:
-  #   path: /app/workspace/myproject"
+    if [ $added -gt 0 ]; then
+        success "Added $added new workspace project(s) to $yaml_file"
+    else
+        success "$yaml_file up to date"
     fi
-
-    echo "$content" > "$yaml_file"
-    success "Generated $yaml_file with $count workspace project(s)"
 }
 
 generate_projects_yaml

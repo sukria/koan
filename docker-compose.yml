@@ -32,8 +32,6 @@ services:
       - ./instance:/app/instance
       # Isolated mission queue for Docker (overlays instance/ mount)
       - ./instance/missions.docker.md:/app/instance/missions.md
-      # Workspace — host project repos (read-write)
-      - ./workspace:/app/workspace
       # Logs
       - ./logs:/app/logs
     restart: unless-stopped

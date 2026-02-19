@@ -101,7 +101,7 @@ projects:
         assert result[0][1] == str(yaml_dir)
 
     def test_duplicate_warning(self, koan_root):
-        """Duplicates generate a warning."""
+        """Duplicate with different paths generates a warning."""
         yaml_dir = koan_root / "yaml-path"
         yaml_dir.mkdir()
         _write_projects_yaml(koan_root, f"""
@@ -117,6 +117,22 @@ projects:
         assert len(warnings) == 1
         assert "Duplicate" in warnings[0]
         assert "myproj" in warnings[0]
+
+    def test_no_warning_when_paths_identical(self, koan_root):
+        """Duplicate with identical paths (yaml path == workspace path) emits no warning."""
+        ws = koan_root / "workspace"
+        (ws / "myproj").mkdir()
+        ws_path = str(ws / "myproj")
+        # yaml entry points to the exact same path as workspace discovery
+        _write_projects_yaml(koan_root, f"""
+projects:
+  myproj:
+    path: "{ws_path}"
+""")
+
+        refresh_projects(str(koan_root))
+        warnings = get_warnings()
+        assert not any("Duplicate" in w for w in warnings)
 
     def test_workspace_with_yaml_override_no_path(self, koan_root):
         """Yaml entry without path uses workspace path for the project."""

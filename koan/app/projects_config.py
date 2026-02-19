@@ -57,16 +57,13 @@ def _validate_config(config: dict) -> None:
     if defaults is not None and not isinstance(defaults, dict):
         raise ValueError("'defaults' must be a mapping")
 
-    # projects section is required
+    # projects section is optional — missing means 0 projects (workspace provides them)
     projects = config.get("projects")
     if projects is None:
-        raise ValueError("'projects' section is required in projects.yaml")
+        return
 
     if not isinstance(projects, dict):
         raise ValueError("'projects' must be a mapping of project_name -> config")
-
-    if not projects:
-        raise ValueError("'projects' must contain at least one project")
 
     if len(projects) > 50:
         raise ValueError(f"Max 50 projects allowed. You have {len(projects)}.")

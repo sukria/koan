@@ -89,15 +89,20 @@ projects:
         with pytest.raises(ValueError, match="must be a YAML mapping"):
             load_projects_config(koan_root)
 
-    def test_raises_when_projects_missing(self, koan_root):
+    def test_missing_projects_section_is_valid(self, koan_root):
+        """projects: section is optional — defaults-only yaml is valid."""
         _write_yaml(koan_root, "defaults:\n  enabled: true\n")
-        with pytest.raises(ValueError, match="'projects' section is required"):
-            load_projects_config(koan_root)
+        config = load_projects_config(koan_root)
+        assert config is not None
+        assert "defaults" in config
+        assert config.get("projects") is None
 
-    def test_raises_when_projects_empty(self, koan_root):
+    def test_empty_projects_is_valid(self, koan_root):
+        """Empty projects: dict is valid — workspace will provide projects."""
         _write_yaml(koan_root, "projects: {}")
-        with pytest.raises(ValueError, match="at least one project"):
-            load_projects_config(koan_root)
+        config = load_projects_config(koan_root)
+        assert config is not None
+        assert config["projects"] == {}
 
     def test_raises_when_projects_not_a_dict(self, koan_root):
         _write_yaml(koan_root, "projects:\n  - item1\n  - item2")
@@ -722,17 +727,18 @@ projects:
         assert len(result) == 1
         assert result[0] == ("fallback", "/fallback")
 
-    def test_falls_back_on_schema_error(self, tmp_path, monkeypatch):
+    def test_defaults_only_yaml_returns_no_projects(self, tmp_path, monkeypatch):
+        """projects.yaml with only defaults: and no projects: is valid; returns [] projects."""
         from app import utils
         monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
         monkeypatch.setenv("KOAN_PROJECTS", "fallback:/fallback")
 
-        # Valid YAML but missing 'projects' section
+        # Valid YAML with only defaults: — no longer a schema error
         (tmp_path / "projects.yaml").write_text("defaults:\n  enabled: true\n")
         from app.utils import get_known_projects
         result = get_known_projects()
-        assert len(result) == 1
-        assert result[0] == ("fallback", "/fallback")
+        # No projects configured — empty list (no fallback to KOAN_PROJECTS)
+        assert result == []
 
     def test_legacy_project_path_no_longer_supported(self, tmp_path, monkeypatch):
         """KOAN_PROJECT_PATH is no longer a fallback — returns empty list."""

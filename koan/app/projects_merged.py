@@ -119,12 +119,13 @@ def _merge_projects(
     for ws_name, ws_path in workspace_projects:
         yaml_entry = yaml_by_name.get(ws_name.lower())
         if yaml_entry:
-            # Duplicate: yaml wins, emit warning
+            # Duplicate: yaml wins; only warn when paths actually differ
             yaml_name, yaml_path = yaml_entry
-            warnings.append(
-                f"⚠️ Duplicate project '{ws_name}': "
-                f"using {yaml_path} (yaml) instead of {ws_path} (workspace)"
-            )
+            if yaml_path != ws_path:
+                warnings.append(
+                    f"⚠️ Duplicate project '{ws_name}': "
+                    f"using {yaml_path} (yaml) instead of {ws_path} (workspace)"
+                )
         else:
             # New workspace project
             merged[ws_name] = ws_path
