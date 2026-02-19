@@ -90,9 +90,13 @@ def should_auto_resume(state: PauseState, now: Optional[int] = None) -> bool:
     """
     Determine if auto-resume conditions are met.
 
+    For manual pauses: never auto-resume (only /resume clears them).
     For quota pauses: resume when current time >= reset timestamp.
     For max_runs/other: resume after DEFAULT_COOLDOWN_SECONDS (5h).
     """
+    if state.reason == "manual":
+        return False
+
     if now is None:
         now = int(time.time())
 
@@ -163,12 +167,10 @@ def check_and_resume(koan_root: str) -> Optional[str]:
     """
     state = get_pause_state(koan_root)
     if state is None:
-        # Orphan .koan-pause with no reason file — clean up and resume.
-        # This prevents permanent pause when the reason file is missing
-        # (e.g., crash between file operations, manual deletion).
-        if is_paused(koan_root):
-            remove_pause(koan_root)
-            return "orphan pause file cleaned up (missing reason)"
+        # Orphan .koan-pause with no reason file — stay paused (safe default).
+        # The user can always /resume manually.  Auto-resuming orphans used to
+        # override user-initiated pauses whose reason file was lost (e.g. by
+        # start_on_pause cleanup or a crash).
         return None
 
     if not should_auto_resume(state):
