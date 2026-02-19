@@ -225,6 +225,7 @@ def insert_pending_mission(missions_path: Path, entry: str, *, urgent: bool = Fa
             f.seek(0)
             f.truncate()
             f.write(content)
+            f.flush()
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
@@ -252,6 +253,7 @@ def modify_missions_file(missions_path: Path, transform):
             f.seek(0)
             f.truncate()
             f.write(new_content)
+            f.flush()
             fcntl.flock(f, fcntl.LOCK_UN)
 
     return new_content
@@ -398,6 +400,7 @@ def append_to_outbox(outbox_path: Path, content: str):
     with open(outbox_path, "a", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         f.write(content)
+        f.flush()
         fcntl.flock(f, fcntl.LOCK_UN)
 
 

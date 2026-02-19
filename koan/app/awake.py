@@ -404,6 +404,7 @@ def flush_outbox():
                 if content:
                     f.seek(0)
                     f.truncate()
+                    f.flush()
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
     except BlockingIOError:
@@ -448,6 +449,7 @@ def _requeue_outbox(content: str):
             fcntl.flock(f, fcntl.LOCK_EX)
             try:
                 f.write(content + "\n")
+                f.flush()
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
     except Exception as e:

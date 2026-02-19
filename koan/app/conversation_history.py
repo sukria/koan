@@ -48,6 +48,7 @@ def save_conversation_message(history_file: Path, role: str, text: str):
             fcntl.flock(f, fcntl.LOCK_EX)
             try:
                 f.write(json.dumps(message, ensure_ascii=False) + "\n")
+                f.flush()
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
     except OSError as e:
@@ -170,6 +171,7 @@ def compact_history(history_file: Path, topics_file: Path, min_messages: int = 2
                 fcntl.flock(f, fcntl.LOCK_EX)
                 try:
                     f.truncate(0)
+                    f.flush()
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
         except OSError:
@@ -220,6 +222,7 @@ def compact_history(history_file: Path, topics_file: Path, min_messages: int = 2
             fcntl.flock(f, fcntl.LOCK_EX)
             try:
                 f.truncate(0)
+                f.flush()
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
     except OSError:
