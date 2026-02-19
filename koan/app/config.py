@@ -252,7 +252,8 @@ def get_contemplative_chance() -> int:
         Integer percentage (0-100). Default: 10 (one in ten autonomous runs).
     """
     config = _load_config()
-    return _safe_int(config.get("contemplative_chance", 10), 10)
+    value = _safe_int(config.get("contemplative_chance", 10), 10)
+    return max(0, min(100, value))
 
 
 def build_claude_flags(

@@ -406,11 +406,11 @@ def _check_signal_file(koan_root: str, filename: str) -> bool:
 
 def check_pending_missions(instance_dir: str) -> bool:
     """Check if there are pending missions in missions.md."""
-    missions_path = Path(instance_dir) / "missions.md"
-    if not missions_path.exists():
-        return False
     try:
-        return count_pending(missions_path.read_text()) > 0
+        content = (Path(instance_dir) / "missions.md").read_text()
+        return count_pending(content) > 0
+    except FileNotFoundError:
+        return False
     except Exception as e:
         print(f"[loop_manager] Error reading missions.md: {e}", file=sys.stderr)
         return False

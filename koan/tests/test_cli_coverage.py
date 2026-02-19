@@ -496,6 +496,22 @@ class TestModelConfig:
             chance = get_contemplative_chance()
         assert chance == 100
 
+    def test_get_contemplative_chance_clamped_above_100(self):
+        """Values above 100 are clamped to 100."""
+        from app.utils import get_contemplative_chance
+        config = {"contemplative_chance": 500}
+        with patch("app.utils.load_config", return_value=config):
+            chance = get_contemplative_chance()
+        assert chance == 100
+
+    def test_get_contemplative_chance_clamped_below_zero(self):
+        """Negative values are clamped to 0."""
+        from app.utils import get_contemplative_chance
+        config = {"contemplative_chance": -10}
+        with patch("app.utils.load_config", return_value=config):
+            chance = get_contemplative_chance()
+        assert chance == 0
+
 
 class TestUtilsConversationHistory:
     """Cover save/load/format conversation history edge cases."""

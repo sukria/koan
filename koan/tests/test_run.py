@@ -752,6 +752,80 @@ class TestCommitInstance:
         mock_log.assert_called_once()
         assert "failed" in mock_log.call_args[0][1]
 
+    @patch("app.run.subprocess.run")
+    @patch("app.run.log")
+    def test_pushes_to_current_branch_not_hardcoded_main(self, mock_log, mock_run):
+        """Push targets the actual branch from rev-parse, not hardcoded 'main'."""
+        from app.run import _commit_instance
+
+        def side_effect(cmd, **kwargs):
+            if cmd[1] == "add":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "diff":
+                return MagicMock(returncode=1)  # Has staged changes
+            elif cmd[1] == "commit":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "rev-parse":
+                return MagicMock(returncode=0, stdout=b"instance-branch\n")
+            elif cmd[1] == "push":
+                return MagicMock(returncode=0)
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = side_effect
+        _commit_instance("/fake/instance", "test")
+
+        push_calls = [c for c in mock_run.call_args_list if c[0][0][1] == "push"]
+        assert len(push_calls) == 1
+        assert "instance-branch" in push_calls[0][0][0]
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.log")
+    def test_push_falls_back_to_main_on_rev_parse_failure(self, mock_log, mock_run):
+        """Falls back to 'main' when rev-parse fails."""
+        from app.run import _commit_instance
+
+        def side_effect(cmd, **kwargs):
+            if cmd[1] == "add":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "diff":
+                return MagicMock(returncode=1)
+            elif cmd[1] == "commit":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "rev-parse":
+                return MagicMock(returncode=128, stdout=b"")
+            elif cmd[1] == "push":
+                return MagicMock(returncode=0)
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = side_effect
+        _commit_instance("/fake/instance", "test")
+
+        push_calls = [c for c in mock_run.call_args_list if c[0][0][1] == "push"]
+        assert len(push_calls) == 1
+        assert "main" in push_calls[0][0][0]
+
+
+class TestReadCurrentProject:
+    """Tests for _read_current_project helper."""
+
+    def test_reads_project_from_file(self, tmp_path):
+        from app.run import _read_current_project
+        (tmp_path / ".koan-project").write_text("my-project\n")
+        assert _read_current_project(str(tmp_path)) == "my-project"
+
+    def test_returns_unknown_when_file_missing(self, tmp_path):
+        from app.run import _read_current_project
+        assert _read_current_project(str(tmp_path)) == "unknown"
+
+    def test_returns_unknown_on_os_error(self):
+        from app.run import _read_current_project
+        assert _read_current_project("/nonexistent/path/that/cannot/exist") == "unknown"
+
+    def test_strips_whitespace(self, tmp_path):
+        from app.run import _read_current_project
+        (tmp_path / ".koan-project").write_text("  spaced-project  \n")
+        assert _read_current_project(str(tmp_path)) == "spaced-project"
+
 
 # ---------------------------------------------------------------------------
 # Test: _notify
