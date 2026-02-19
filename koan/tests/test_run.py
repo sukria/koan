@@ -901,11 +901,12 @@ class TestMain:
     @patch("app.run.time.sleep")
     def test_restart_on_42(self, mock_sleep, mock_loop):
         from app.run import main
+        from app.restart_manager import RESTART_EXIT_CODE
         call_count = [0]
         def side_effect():
             call_count[0] += 1
             if call_count[0] == 1:
-                raise SystemExit(42)
+                raise SystemExit(RESTART_EXIT_CODE)
             # Second call: normal exit
         mock_loop.side_effect = side_effect
         main()
@@ -1027,6 +1028,7 @@ class TestMainLoop:
     @patch("app.run.release_pidfile")
     def test_restart_file_exits_42(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
         from app.run import main_loop
+        from app.restart_manager import RESTART_EXIT_CODE
 
         os.environ["KOAN_ROOT"] = str(koan_root)
         os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
@@ -1045,17 +1047,18 @@ class TestMainLoop:
         with pytest.raises(SystemExit) as exc:
             with patch("app.run._notify"):
                 main_loop()
-        assert exc.value.code == 42
+        assert exc.value.code == RESTART_EXIT_CODE
 
     @patch("app.run.subprocess.run")
     @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
     @patch("app.run.acquire_pidfile")
     @patch("app.run.release_pidfile")
     def test_restart_file_cleared_before_exit(self, mock_release, mock_acquire, mock_startup, mock_subproc, koan_root):
-        """Regression: run.py must clear .koan-restart before sys.exit(42)
+        """Regression: run.py must clear .koan-restart before sys.exit(RESTART_EXIT_CODE)
         to prevent the restarted process from seeing a stale file and
         entering a restart loop."""
         from app.run import main_loop
+        from app.restart_manager import RESTART_EXIT_CODE
 
         os.environ["KOAN_ROOT"] = str(koan_root)
         os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
@@ -1073,7 +1076,7 @@ class TestMainLoop:
         with pytest.raises(SystemExit) as exc:
             with patch("app.run._notify"):
                 main_loop()
-        assert exc.value.code == 42
+        assert exc.value.code == RESTART_EXIT_CODE
         # The restart file must be deleted BEFORE exit
         assert not restart_file.exists(), \
             ".koan-restart was not cleared before exit — restart loop risk"
@@ -1828,14 +1831,15 @@ class TestMainCrashRecovery:
     @patch("app.run.main_loop")
     @patch("app.run.time.sleep")
     def test_crash_count_resets_on_restart(self, mock_sleep, mock_loop):
-        """SystemExit(42) resets the crash counter."""
+        """SystemExit(RESTART_EXIT_CODE) resets the crash counter."""
         from app.run import main
+        from app.restart_manager import RESTART_EXIT_CODE
 
         call_count = [0]
         def side_effect():
             call_count[0] += 1
             if call_count[0] == 1:
-                raise SystemExit(42)  # restart signal
+                raise SystemExit(RESTART_EXIT_CODE)  # restart signal
             # Second call: normal exit
 
         mock_loop.side_effect = side_effect
@@ -2285,3 +2289,101 @@ class TestRunSkillMissionEnv:
             )
 
         mock_restore.assert_called_once_with(koan_root, "main")
+
+
+# ---------------------------------------------------------------------------
+# Test: restart_manager integration — run.py must use restart_manager API
+# ---------------------------------------------------------------------------
+
+class TestRestartManagerIntegration:
+    """Verify run.py uses restart_manager functions instead of raw file ops."""
+
+    def test_run_imports_restart_manager(self):
+        """run.py must import check_restart, clear_restart, RESTART_EXIT_CODE."""
+        import app.run as run_mod
+        assert hasattr(run_mod, "check_restart")
+        assert hasattr(run_mod, "clear_restart")
+        assert hasattr(run_mod, "RESTART_EXIT_CODE")
+
+    def test_no_raw_restart_file_access(self):
+        """run.py must not construct Path(..., '.koan-restart').
+
+        All restart signal operations should go through restart_manager.
+        """
+        import ast
+        import inspect
+        import app.run as run_mod
+        source = inspect.getsource(run_mod)
+        tree = ast.parse(source)
+        violations = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value == ".koan-restart":
+                    violations.append(node.lineno)
+        assert violations == [], (
+            f"run.py still references '.koan-restart' as a string literal "
+            f"at line(s) {violations}. Use restart_manager functions instead."
+        )
+
+    def test_pause_loop_uses_check_restart(self, koan_root):
+        """handle_pause() uses check_restart() to detect restart signals."""
+        from app.run import handle_pause
+
+        instance = str(koan_root / "instance")
+        (koan_root / ".koan-pause").touch()
+
+        with patch("app.run.time.sleep"), \
+             patch("app.pause_manager.check_and_resume", return_value=None), \
+             patch("app.run.check_restart", side_effect=[False, True]) as mock_check:
+            result = handle_pause(str(koan_root), instance, 5)
+            assert result is None  # breaks out of pause loop
+            mock_check.assert_called_with(str(koan_root))
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
+    def test_startup_uses_clear_restart(self, mock_release, mock_acquire,
+                                         mock_startup, mock_subproc, koan_root):
+        """main_loop() uses clear_restart() to clean stale signal on startup."""
+        from app.run import main_loop
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+        (koan_root / ".koan-project").write_text("test")
+
+        def startup_then_stop(*args, **kwargs):
+            (koan_root / ".koan-stop").touch()
+            return (5, 10, "koan/")
+        mock_startup.side_effect = startup_then_stop
+
+        with patch("app.run._notify"), \
+             patch("app.run.clear_restart") as mock_clear:
+            main_loop()
+            mock_clear.assert_called_once_with(str(koan_root))
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
+    def test_loop_uses_check_restart_with_since(self, mock_release, mock_acquire,
+                                                  mock_startup, mock_subproc, koan_root):
+        """main_loop() restart check uses check_restart(since=start_time)."""
+        from app.run import main_loop
+        from app.restart_manager import RESTART_EXIT_CODE
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+
+        with patch("app.run._notify"), \
+             patch("app.run.check_restart", return_value=True) as mock_check, \
+             patch("app.run.clear_restart") as mock_clear:
+            with pytest.raises(SystemExit) as exc:
+                main_loop()
+            assert exc.value.code == RESTART_EXIT_CODE
+            # check_restart was called with since= (a float timestamp)
+            calls = [c for c in mock_check.call_args_list
+                     if c.kwargs.get("since") is not None or
+                     (len(c.args) > 1 and c.args[1] > 0)]
+            assert len(calls) >= 1, "check_restart must be called with since=start_time"
+            mock_clear.assert_called()

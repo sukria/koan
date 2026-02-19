@@ -32,6 +32,7 @@ from typing import Optional
 from app.iteration_manager import plan_iteration
 from app.loop_manager import check_pending_missions, interruptible_sleep
 from app.pid_manager import acquire_pidfile, release_pidfile
+from app.restart_manager import check_restart, clear_restart, RESTART_EXIT_CODE
 from app.shutdown_manager import is_shutdown_requested, clear_shutdown
 from app.utils import atomic_write
 
@@ -693,7 +694,7 @@ def handle_pause(
         for _ in range(60):
             if not Path(koan_root, ".koan-pause").exists():
                 return "resume"
-            if Path(koan_root, ".koan-restart").exists():
+            if check_restart(koan_root):
                 break
             time.sleep(5)
 
@@ -742,7 +743,7 @@ def main_loop():
     # file persists and would cause an immediate exit on next startup.
     Path(koan_root, ".koan-stop").unlink(missing_ok=True)
     Path(koan_root, ".koan-shutdown").unlink(missing_ok=True)
-    Path(koan_root, ".koan-restart").unlink(missing_ok=True)
+    clear_restart(koan_root)
 
     # Install SIGINT handler
     signal.signal(signal.SIGINT, _on_sigint)
@@ -779,19 +780,10 @@ def main_loop():
                 break
 
             # --- Restart check ---
-            restart_file = Path(koan_root, ".koan-restart")
-            if restart_file.exists():
-                try:
-                    mtime = restart_file.stat().st_mtime
-                    if mtime > start_time:
-                        log("koan", "Restart requested. Exiting for re-launch...")
-                        # Clear the restart signal before exiting to prevent
-                        # the restarted process from seeing a stale file and
-                        # entering a restart loop.
-                        restart_file.unlink(missing_ok=True)
-                        sys.exit(42)
-                except Exception as e:
-                    log("error", f"Restart signal check failed: {e}")
+            if check_restart(koan_root, since=start_time):
+                log("koan", "Restart requested. Exiting for re-launch...")
+                clear_restart(koan_root)
+                sys.exit(RESTART_EXIT_CODE)
 
             # --- Pause mode ---
             if Path(koan_root, ".koan-pause").exists():
@@ -1754,7 +1746,7 @@ def main():
         except KeyboardInterrupt:
             break
         except SystemExit as e:
-            if e.code == 42:
+            if e.code == RESTART_EXIT_CODE:
                 # Restart signal
                 crash_count = 0
                 print("[koan] Restarting run loop...")
