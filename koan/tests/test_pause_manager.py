@@ -306,15 +306,13 @@ class TestCheckAndResume:
 
         assert check_and_resume(str(tmp_path)) is None
 
-    def test_cleans_up_orphan_pause_without_reason_file(self, tmp_path):
-        from app.pause_manager import check_and_resume
+    def test_orphan_pause_stays_paused(self, tmp_path):
+        from app.pause_manager import check_and_resume, is_paused
 
         (tmp_path / ".koan-pause").touch()
         msg = check_and_resume(str(tmp_path))
-        assert msg is not None
-        assert "orphan" in msg
-        # Both files should be cleaned up
-        assert not (tmp_path / ".koan-pause").exists()
+        assert msg is None, "Orphan pause should stay paused"
+        assert is_paused(str(tmp_path)), "Pause file should remain"
 
     def test_auto_resumes_quota_past_reset(self, tmp_path, monkeypatch):
         from app.pause_manager import check_and_resume
@@ -552,51 +550,47 @@ class TestCLI:
         assert result.returncode == 1
 
 
-class TestOrphanPauseCleanup:
-    """Tests for orphan .koan-pause cleanup (missing reason file).
+class TestOrphanPauseStaysPaused:
+    """Tests for orphan .koan-pause handling (missing reason file).
 
-    The bug: if .koan-pause exists but .koan-pause-reason is missing,
-    get_pause_state() returns None, and check_and_resume() returned None
-    without cleaning up. This caused the agent to stay permanently paused
-    with no auto-resume path.
+    Orphan .koan-pause files (missing or empty reason) stay paused as a safe
+    default.  The user can always /resume manually.  The old behavior
+    auto-resumed orphans, which overrode user-initiated /pause when the
+    reason file was lost (e.g. start_on_pause cleanup, crash).
     """
 
-    def test_orphan_pause_file_cleaned_up(self, tmp_path):
-        """Orphan .koan-pause with no reason file should be cleaned up."""
-        from app.pause_manager import check_and_resume
+    def test_orphan_pause_stays_paused(self, tmp_path):
+        """Orphan .koan-pause with no reason file should stay paused."""
+        from app.pause_manager import check_and_resume, is_paused
 
         (tmp_path / ".koan-pause").touch()
         # No .koan-pause-reason
 
         msg = check_and_resume(str(tmp_path))
-        assert msg is not None
-        assert "orphan" in msg
-        assert not (tmp_path / ".koan-pause").exists()
+        assert msg is None, "Orphan pause should stay paused (safe default)"
+        assert is_paused(str(tmp_path)), "Pause file should still exist"
 
     def test_orphan_pause_with_empty_reason_file(self, tmp_path):
-        """Orphan .koan-pause with empty reason file should be cleaned up."""
-        from app.pause_manager import check_and_resume
+        """Orphan .koan-pause with empty reason file should stay paused."""
+        from app.pause_manager import check_and_resume, is_paused
 
         (tmp_path / ".koan-pause").touch()
         (tmp_path / ".koan-pause-reason").write_text("")
 
         msg = check_and_resume(str(tmp_path))
-        assert msg is not None
-        assert "orphan" in msg
-        assert not (tmp_path / ".koan-pause").exists()
+        assert msg is None, "Orphan pause should stay paused"
+        assert is_paused(str(tmp_path))
 
-    def test_orphan_cleanup_is_idempotent(self, tmp_path):
-        """Calling check_and_resume twice after orphan cleanup returns None."""
-        from app.pause_manager import check_and_resume
+    def test_orphan_stays_paused_repeatedly(self, tmp_path):
+        """Calling check_and_resume on orphan always returns None."""
+        from app.pause_manager import check_and_resume, is_paused
 
         (tmp_path / ".koan-pause").touch()
 
-        msg1 = check_and_resume(str(tmp_path))
-        assert msg1 is not None
-
-        # Second call: no longer paused
-        msg2 = check_and_resume(str(tmp_path))
-        assert msg2 is None
+        for _ in range(3):
+            msg = check_and_resume(str(tmp_path))
+            assert msg is None
+            assert is_paused(str(tmp_path))
 
     def test_normal_pause_not_treated_as_orphan(self, tmp_path, monkeypatch):
         """A valid pause (with reason file) should NOT be treated as orphan."""
@@ -610,7 +604,7 @@ class TestOrphanPauseCleanup:
         assert (tmp_path / ".koan-pause").exists()
 
     def test_orphan_pause_lifecycle(self, tmp_path):
-        """Full lifecycle: create pause, delete reason, check_and_resume cleans up."""
+        """Full lifecycle: create pause, delete reason, stays paused."""
         from app.pause_manager import check_and_resume, create_pause, is_paused
 
         create_pause(str(tmp_path), "quota", 9999999999, "future")
@@ -620,11 +614,112 @@ class TestOrphanPauseCleanup:
         (tmp_path / ".koan-pause-reason").unlink()
         assert is_paused(str(tmp_path)) is True  # Still "paused"
 
-        # check_and_resume should detect and clean up
+        # check_and_resume should NOT auto-resume — stays paused
+        msg = check_and_resume(str(tmp_path))
+        assert msg is None
+        assert is_paused(str(tmp_path)) is True
+
+    def test_orphan_cleared_by_manual_resume(self, tmp_path):
+        """Orphan pause can be cleared via remove_pause (like /resume does)."""
+        from app.pause_manager import check_and_resume, is_paused, remove_pause
+
+        (tmp_path / ".koan-pause").touch()
+
+        # Stays paused
+        assert check_and_resume(str(tmp_path)) is None
+        assert is_paused(str(tmp_path))
+
+        # Manual resume clears it
+        remove_pause(str(tmp_path))
+        assert not is_paused(str(tmp_path))
+
+
+class TestManualPauseNeverAutoResumes:
+    """Tests that manual pauses (reason='manual') never auto-resume.
+
+    Manual pauses represent explicit user intent via /pause or /sleep.
+    Only /resume should clear them — no timeout, no orphan cleanup.
+    """
+
+    def test_manual_pause_never_auto_resumes_via_should_auto_resume(self):
+        """should_auto_resume always returns False for manual pauses."""
+        from app.pause_manager import PauseState, should_auto_resume
+
+        pause_time = 1000
+        five_hours = 5 * 60 * 60
+        state = PauseState(reason="manual", timestamp=pause_time, display="paused via Telegram")
+        # Even after 5h, manual pause should NOT auto-resume
+        assert should_auto_resume(state, now=pause_time + five_hours) is False
+        assert should_auto_resume(state, now=pause_time + 10 * five_hours) is False
+
+    def test_manual_pause_never_auto_resumes_via_check_and_resume(self, tmp_path, monkeypatch):
+        """check_and_resume never resumes a manual pause regardless of time elapsed."""
+        from app.pause_manager import check_and_resume, create_pause, is_paused
+
+        pause_time = 1000
+        create_pause(str(tmp_path), "manual", pause_time, "paused via Telegram")
+
+        # Even 24h later, should stay paused
+        monkeypatch.setattr("app.pause_manager.time.time", lambda: pause_time + 24 * 3600)
+        msg = check_and_resume(str(tmp_path))
+        assert msg is None
+        assert is_paused(str(tmp_path))
+
+    def test_manual_pause_with_zero_timestamp(self):
+        """Manual pause with zero timestamp should not auto-resume."""
+        from app.pause_manager import PauseState, should_auto_resume
+
+        state = PauseState(reason="manual", timestamp=0, display="")
+        assert should_auto_resume(state, now=9999999999) is False
+
+    def test_manual_pause_cleared_only_by_resume(self, tmp_path, monkeypatch):
+        """Manual pause stays until explicitly removed via /resume."""
+        from app.pause_manager import (
+            check_and_resume,
+            create_pause,
+            is_paused,
+            remove_pause,
+        )
+
+        create_pause(str(tmp_path), "manual", 1000, "paused via Telegram")
+
+        # Time passes — still paused
+        monkeypatch.setattr("app.pause_manager.time.time", lambda: 999999)
+        assert check_and_resume(str(tmp_path)) is None
+        assert is_paused(str(tmp_path))
+
+        # Only remove_pause (triggered by /resume) clears it
+        remove_pause(str(tmp_path))
+        assert not is_paused(str(tmp_path))
+
+    def test_manual_pause_survives_start_on_pause_reason_deletion(self, tmp_path):
+        """Regression: start_on_pause deleting reason should not override manual pause.
+
+        Even if something removes the reason file, the orphan handler
+        should not auto-resume — it stays paused as a safe default.
+        """
+        from app.pause_manager import check_and_resume, create_pause, is_paused
+
+        create_pause(str(tmp_path), "manual", 1000, "paused via Telegram")
+
+        # Simulate start_on_pause deleting reason file
+        (tmp_path / ".koan-pause-reason").unlink()
+
+        # Orphan should stay paused (not auto-resume)
+        msg = check_and_resume(str(tmp_path))
+        assert msg is None
+        assert is_paused(str(tmp_path))
+
+    def test_system_pauses_still_auto_resume(self, tmp_path, monkeypatch):
+        """Non-manual pauses (quota, max_runs) still auto-resume as before."""
+        from app.pause_manager import check_and_resume, create_pause
+
+        # Quota pause with past reset time
+        create_pause(str(tmp_path), "quota", 1000, "resets 10am")
+        monkeypatch.setattr("app.pause_manager.time.time", lambda: 2000)
         msg = check_and_resume(str(tmp_path))
         assert msg is not None
-        assert "orphan" in msg
-        assert is_paused(str(tmp_path)) is False
+        assert "quota reset time reached" in msg
 
 
 class TestBudgetLoopRegression:

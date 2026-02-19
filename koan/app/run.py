@@ -495,12 +495,18 @@ def run_startup(koan_root: str, instance: str, projects: list):
 
     # Start on pause
     if get_start_on_pause():
-        # Remove stale reason file to prevent auto-resume from a previous
-        # session's quota/max_runs pause.  Without this, handle_pause() →
-        # check_and_resume() reads the old reason, finds the cooldown
-        # elapsed, and immediately resumes — bypassing start_on_pause.
+        # Remove stale system-generated reason files (quota, max_runs) to
+        # prevent auto-resume from a previous session.  Preserve manual
+        # pauses — user explicitly requested them via /pause.
         koan_root_path = Path(koan_root)
-        (koan_root_path / ".koan-pause-reason").unlink(missing_ok=True)
+        reason_file = koan_root_path / ".koan-pause-reason"
+        if reason_file.exists():
+            try:
+                first_line = reason_file.read_text().strip().splitlines()[0]
+            except (OSError, IndexError):
+                first_line = ""
+            if first_line != "manual":
+                reason_file.unlink(missing_ok=True)
         if not (koan_root_path / ".koan-pause").exists():
             log("pause", "start_on_pause=true in config. Entering pause mode.")
             (koan_root_path / ".koan-pause").touch()

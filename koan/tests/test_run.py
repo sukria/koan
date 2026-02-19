@@ -248,13 +248,20 @@ class TestStartOnPause:
 
     def _apply_start_on_pause_logic(self, koan_root, start_on_pause_enabled):
         """Helper: directly invoke the start_on_pause logic without full run_startup().
-        
+
         This directly tests the logic block without mocking 18+ unrelated functions.
         """
         # Direct implementation of the logic from run_startup
         if start_on_pause_enabled:
             koan_root_path = Path(koan_root)
-            (koan_root_path / ".koan-pause-reason").unlink(missing_ok=True)
+            reason_file = koan_root_path / ".koan-pause-reason"
+            if reason_file.exists():
+                try:
+                    first_line = reason_file.read_text().strip().splitlines()[0]
+                except (OSError, IndexError):
+                    first_line = ""
+                if first_line != "manual":
+                    reason_file.unlink(missing_ok=True)
             if not (koan_root_path / ".koan-pause").exists():
                 (koan_root_path / ".koan-pause").touch()
 
@@ -293,21 +300,55 @@ class TestStartOnPause:
         assert (koan_root / ".koan-pause").exists()
         assert (koan_root / ".koan-pause-reason").exists()
 
-    def test_orphan_pause_cleaned_up_without_reason_file(self, koan_root):
-        """Verify that check_and_resume cleans up orphan .koan-pause files.
+    def test_preserves_manual_pause_reason(self, koan_root):
+        """start_on_pause=true should NOT delete manual pause reason files."""
+        (koan_root / ".koan-pause").touch()
+        (koan_root / ".koan-pause-reason").write_text("manual\n1700000000\npaused via Telegram\n")
+        self._apply_start_on_pause_logic(koan_root, True)
+        assert (koan_root / ".koan-pause").exists()
+        assert (koan_root / ".koan-pause-reason").exists()
+        content = (koan_root / ".koan-pause-reason").read_text()
+        assert content.startswith("manual")
 
-        An orphan .koan-pause (no reason file) previously caused permanent
-        pause with no auto-resume path. Now check_and_resume detects this
-        as an orphan and removes the pause file.
+    def test_removes_quota_reason_but_not_manual(self, koan_root):
+        """Quota reason is removed but manual reason is preserved."""
+        # First: quota gets removed
+        (koan_root / ".koan-pause").touch()
+        (koan_root / ".koan-pause-reason").write_text("quota\n1700000000\nresets 10am\n")
+        self._apply_start_on_pause_logic(koan_root, True)
+        assert not (koan_root / ".koan-pause-reason").exists()
+
+        # Reset
+        (koan_root / ".koan-pause").unlink(missing_ok=True)
+
+        # Second: manual is preserved
+        (koan_root / ".koan-pause").touch()
+        (koan_root / ".koan-pause-reason").write_text("manual\n1700000000\n\n")
+        self._apply_start_on_pause_logic(koan_root, True)
+        assert (koan_root / ".koan-pause-reason").exists()
+
+    def test_handles_corrupted_reason_file(self, koan_root):
+        """Corrupted reason file (unreadable first line) should be removed."""
+        (koan_root / ".koan-pause").touch()
+        (koan_root / ".koan-pause-reason").write_text("\n\n")
+        self._apply_start_on_pause_logic(koan_root, True)
+        # Empty first line ≠ "manual" → should be removed
+        assert not (koan_root / ".koan-pause-reason").exists()
+
+    def test_orphan_pause_stays_paused(self, koan_root):
+        """Orphan .koan-pause (no reason file) should stay paused.
+
+        The safe default is to stay paused — the user can always /resume.
+        Previously, orphans auto-resumed, which overrode user-initiated
+        /pause when the reason file was lost.
         """
-        from app.pause_manager import check_and_resume
+        from app.pause_manager import check_and_resume, is_paused
 
         (koan_root / ".koan-pause").touch()
         # No reason file = orphan state (crash, partial cleanup, etc.)
         result = check_and_resume(str(koan_root))
-        assert result is not None, "Should auto-resume from orphan pause"
-        assert "orphan" in result
-        assert not (koan_root / ".koan-pause").exists()
+        assert result is None, "Orphan pause should stay paused"
+        assert is_paused(str(koan_root)), "Pause file should remain"
 
 
 
