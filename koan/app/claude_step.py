@@ -173,6 +173,51 @@ def run_claude_step(
     return False
 
 
+def run_project_tests(project_path: str, test_cmd: str = "make test",
+                      timeout: int = 300) -> dict:
+    """Run a project's test suite and return structured results.
+
+    Args:
+        project_path: Path to the project root.
+        test_cmd: Shell command to run tests (default: "make test").
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        Dict with keys: passed (bool), output (str), details (str).
+    """
+    try:
+        result = subprocess.run(
+            test_cmd,
+            stdin=subprocess.DEVNULL,
+            shell=True,
+            capture_output=True, text=True,
+            timeout=timeout, cwd=project_path,
+        )
+        output = result.stdout + result.stderr
+        passed = result.returncode == 0
+
+        details = "OK" if passed else "FAILED"
+        count_match = re.search(
+            r'(\d+)\s+(?:tests?|passed)', output, re.IGNORECASE
+        )
+        if count_match:
+            if passed:
+                details = count_match.group(0)
+            else:
+                # Keep FAILED prefix with count info for context
+                failed_match = re.search(r'(\d+)\s+failed', output, re.IGNORECASE)
+                if failed_match:
+                    details = f"{failed_match.group(0)}, {count_match.group(0)}"
+
+        return {"passed": passed, "output": output[-3000:], "details": details}
+    except subprocess.TimeoutExpired:
+        return {"passed": False, "output": "", "details": f"timeout ({timeout}s)"}
+    except FileNotFoundError:
+        return {"passed": False, "output": "", "details": "command not found"}
+    except Exception as e:
+        return {"passed": False, "output": str(e), "details": str(e)[:100]}
+
+
 # ---------------------------------------------------------------------------
 # Shared PR pipeline helpers
 # ---------------------------------------------------------------------------

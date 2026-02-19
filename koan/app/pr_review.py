@@ -23,6 +23,7 @@ from app.claude_step import (
     _run_git,
     _rebase_onto_target,
     run_claude_step as _run_claude_step,
+    run_project_tests,
 )
 from app.github import run_gh
 from app.github_url_parser import parse_pr_url
@@ -293,7 +294,7 @@ def run_pr_review(
     test_cmd = detect_test_command(project_path)
     if test_cmd:
         notify_fn("Running tests...")
-        test_result = _run_tests(test_cmd, project_path)
+        test_result = run_project_tests(project_path, test_cmd=test_cmd)
         if test_result["passed"]:
             actions_log.append(
                 f"Tests passing ({test_result.get('details', 'OK')})"
@@ -319,7 +320,7 @@ def run_pr_review(
             )
 
             # Re-run tests to confirm
-            retest = _run_tests(test_cmd, project_path)
+            retest = run_project_tests(project_path, test_cmd=test_cmd)
             if retest["passed"]:
                 actions_log.append("Tests fixed and passing")
             else:
@@ -365,38 +366,6 @@ def run_pr_review(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _run_tests(test_cmd: str, project_path: str) -> dict:
-    """Run the test suite and return results.
-
-    Returns:
-        Dict with keys: passed (bool), output (str), details (str).
-    """
-    try:
-        result = subprocess.run(
-            test_cmd,
-            stdin=subprocess.DEVNULL,
-            shell=True,
-            capture_output=True, text=True,
-            timeout=300, cwd=project_path,
-        )
-        output = result.stdout + result.stderr
-        passed = result.returncode == 0
-
-        # Try to extract test count from output
-        details = "OK" if passed else "FAILED"
-        count_match = re.search(
-            r'(\d+)\s+(?:tests?|passed)', output, re.IGNORECASE
-        )
-        if count_match:
-            details = count_match.group(0)
-
-        return {"passed": passed, "output": output[-3000:], "details": details}
-    except subprocess.TimeoutExpired:
-        return {"passed": False, "output": "", "details": "timeout (300s)"}
-    except Exception as e:
-        return {"passed": False, "output": str(e), "details": str(e)[:100]}
 
 
 def _build_pr_comment(
