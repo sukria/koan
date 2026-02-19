@@ -911,6 +911,40 @@ class TestExtractNowFlag:
         assert urgent is False
         assert text == "--nowhere fix bug"
 
+    def test_em_dash_variant_at_start(self):
+        """Mobile keyboards auto-correct -- to em dash (\u2014)."""
+        urgent, text = extract_now_flag("\u2014now fix the login bug")
+        assert urgent is True
+        assert text == "fix the login bug"
+
+    def test_em_dash_variant_in_middle(self):
+        urgent, text = extract_now_flag("fix \u2014now the login bug")
+        assert urgent is True
+        assert text == "fix the login bug"
+
+    def test_en_dash_variant_at_start(self):
+        """En dash (\u2013) variant also works."""
+        urgent, text = extract_now_flag("\u2013now fix the login bug")
+        assert urgent is True
+        assert text == "fix the login bug"
+
+    def test_em_dash_variant_with_project_tag(self):
+        urgent, text = extract_now_flag("\u2014now [project:koan] fix auth")
+        assert urgent is True
+        assert text == "[project:koan] fix auth"
+
+    def test_em_dash_variant_stripped_from_text(self):
+        urgent, text = extract_now_flag("\u2014now deploy hotfix")
+        assert urgent is True
+        assert "\u2014now" not in text
+        assert "--now" not in text
+        assert text == "deploy hotfix"
+
+    def test_em_dash_only_flag(self):
+        urgent, text = extract_now_flag("\u2014now")
+        assert urgent is True
+        assert text == ""
+
 
 # ---------------------------------------------------------------------------
 # insert_mission — queue ordering
