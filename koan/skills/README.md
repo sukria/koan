@@ -169,7 +169,7 @@ cli_skill: audit
 commands:
   - name: audit
     description: Queue a security/maintainability audit for a project
-    usage: /ops.audit <project>
+    usage: /ops.audit <project> [args]
 ---
 ```
 
@@ -178,17 +178,17 @@ No `handler` field, no `handler.py` — the `cli_skill` field is all that's need
 **Step 3 — Use it from Telegram**
 
 ```
-/ops.audit my-project
+/ops.audit my-project Run a deep scan on the auth module
 ```
 
 Kōan replies:
 ```
 ✅ Mission queued (project: my-project):
 
-/ops.audit
+/ops.audit Run a deep scan on the auth module
 ```
 
-The runner then executes the Claude CLI with task `/audit` inside `my-project`.
+Everything after the project name is forwarded as-is to the CLI task. The runner executes the Claude CLI with task `/audit Run a deep scan on the auth module` inside `my-project`.
 
 **Step 4 — (Optional) Create the `/audit` command for Claude Code**
 
@@ -218,9 +218,10 @@ Claude Code automatically discovers `.claude/commands/audit.md` as `/audit`.
 When you type `/ops.audit my-project extra args`, Kōan checks whether the first word (`my-project`) matches a known project in your `projects.yaml`. If it does, it prefixes the mission entry with `[project:my-project]` so the runner executes in the right directory. Otherwise all words are passed as arguments to the slash command.
 
 ```
-/ops.audit my-project        → [project:my-project] /ops.audit
-/ops.audit my-project --deep → [project:my-project] /ops.audit --deep
-/ops.audit                   → /ops.audit   (no project tag)
+/ops.audit my-project                              → [project:my-project] /ops.audit
+/ops.audit my-project --deep                       → [project:my-project] /ops.audit --deep
+/ops.audit my-project Run a deep scan on auth      → [project:my-project] /ops.audit Run a deep scan on auth
+/ops.audit                                         → /ops.audit   (no project tag)
 ```
 
 ### Using with any provider slash command
