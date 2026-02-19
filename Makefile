@@ -156,7 +156,7 @@ docker-auth:
 		if [ -z "$$token" ]; then echo "Error: Could not extract token. Run 'claude auth login' first."; exit 1; fi && \
 		touch .env && \
 		if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' .env 2>/dev/null; then \
-			sed -i '' 's|^CLAUDE_CODE_OAUTH_TOKEN=.*|CLAUDE_CODE_OAUTH_TOKEN='"$$token"'|' .env; \
+			sed -i.bak 's|^CLAUDE_CODE_OAUTH_TOKEN=.*|CLAUDE_CODE_OAUTH_TOKEN='"$$token"'|' .env && rm -f .env.bak; \
 		else \
 			echo "CLAUDE_CODE_OAUTH_TOKEN=$$token" >> .env; \
 		fi && \
@@ -165,11 +165,11 @@ docker-auth:
 docker-gh-auth:
 	@command -v gh >/dev/null 2>&1 || { echo "Error: GitHub CLI (gh) not found on host."; echo "Install: https://cli.github.com"; exit 1; }
 	@echo "Extracting GitHub token from host..."
-	@token=$$(gh auth token 2>/dev/null) && \
+	@token=$$(gh auth token 2>/dev/null || true) && \
 		if [ -z "$$token" ]; then echo "Error: No GitHub token found. Run 'gh auth login' first."; exit 1; fi && \
 		touch .env && \
 		if grep -q '^GH_TOKEN=' .env 2>/dev/null; then \
-			sed -i '' 's|^GH_TOKEN=.*|GH_TOKEN='"$$token"'|' .env; \
+			sed -i.bak 's|^GH_TOKEN=.*|GH_TOKEN='"$$token"'|' .env && rm -f .env.bak; \
 		else \
 			echo "GH_TOKEN=$$token" >> .env; \
 		fi && \

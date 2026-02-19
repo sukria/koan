@@ -13,6 +13,7 @@ set -euo pipefail
 #   agent    — Run agent loop only
 #   bridge   — Run Telegram bridge only
 #   auth     — Check Claude CLI auth status and show setup instructions
+#   gh-auth  — Check GitHub CLI auth status
 #   test     — Run the test suite
 #   shell    — Drop into bash shell
 # =========================================================================
