@@ -170,12 +170,18 @@ setup_workspace() {
         mkdir -p "$workspace"
     fi
 
+    # Initialize projects.yaml from template (avoids EBUSY from atomic rename over a bind-mount point)
+    if [ -f "$KOAN_ROOT/projects.docker.yaml" ] && [ ! -f "$KOAN_ROOT/projects.yaml" ]; then
+        cp "$KOAN_ROOT/projects.docker.yaml" "$KOAN_ROOT/projects.yaml"
+        log "projects.yaml initialized from projects.docker.yaml"
+    fi
+
     # Count projects
     local count
     count=$(find "$workspace" -maxdepth 1 -mindepth 1 -type d -o -type l 2>/dev/null | wc -l | tr -d ' ')
     log "Workspace: $count project(s) mounted"
 
-    # Check for projects.yaml (mounted from host's projects.docker.yaml)
+    # Check for projects.yaml
     if [ ! -f "$KOAN_ROOT/projects.yaml" ]; then
         if [ "$count" -gt 0 ]; then
             log "No projects.yaml — $count workspace project(s) will be auto-discovered"
@@ -345,8 +351,8 @@ case "$COMMAND" in
         log ""
         log "  make docker-auth"
         log ""
-        log "This runs 'claude setup-token' on the host and saves the"
-        log "token to .env as CLAUDE_CODE_OAUTH_TOKEN."
+        log "This runs 'claude setup-token' interactively, captures the"
+        log "token from its output, and saves it to .env as CLAUDE_CODE_OAUTH_TOKEN."
         log ""
         log "Alternatively, set ANTHROPIC_API_KEY in .env (API billing accounts)."
         exit 1

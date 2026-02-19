@@ -143,11 +143,17 @@ docker-test:
 	docker compose run --rm koan test
 
 docker-auth:
-	@command -v claude >/dev/null 2>&1 || { echo "Error: Claude CLI not found on host."; echo "Install: npm install -g @anthropic-ai/claude-code"; echo "Then: claude auth login"; exit 1; }
-	@echo "Generating OAuth token from host Claude CLI..."
-	@raw=$$(claude setup-token 2>/dev/null) && \
-		token=$$(echo "$$raw" | LC_ALL=C grep -oE 'sk-ant-[A-Za-z0-9_-]+' | head -1) && \
-		if [ -z "$$token" ]; then echo "Error: setup-token returned empty. Run 'claude auth login' on host first."; exit 1; fi && \
+	@command -v claude >/dev/null 2>&1 || { echo "Error: Claude CLI not found on host."; echo "Install: https://docs.anthropic.com/en/docs/claude-code/overview"; exit 1; }
+	@echo "Running 'claude setup-token' to generate a long-lived OAuth token..."
+	@echo "(Complete the flow in your browser if prompted)"
+	@echo ""
+	@tmpfile=$$(mktemp /tmp/koan-auth.XXXXXX) && \
+		(script -q "$$tmpfile" claude setup-token || true) && \
+		echo "" && \
+		echo "Extracting token from output..." && \
+		token=$$(perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\r//g' "$$tmpfile" | grep -oE 'sk-ant-[A-Za-z0-9_-]+' | head -1) && \
+		rm -f "$$tmpfile" && \
+		if [ -z "$$token" ]; then echo "Error: Could not extract token. Run 'claude auth login' first."; exit 1; fi && \
 		touch .env && \
 		if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' .env 2>/dev/null; then \
 			sed -i '' 's|^CLAUDE_CODE_OAUTH_TOKEN=.*|CLAUDE_CODE_OAUTH_TOKEN='"$$token"'|' .env; \
