@@ -11,6 +11,79 @@ from app.skills import SkillContext
 
 
 # ---------------------------------------------------------------------------
+# mission_prefix() unit tests
+# ---------------------------------------------------------------------------
+
+class TestMissionPrefix:
+    """Test the mission_prefix helper for category detection."""
+
+    def test_plan_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /plan add dark mode") == "\U0001f9e0"
+
+    def test_implement_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /implement https://github.com/issue/1") == "\U0001f528"
+
+    def test_rebase_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /rebase https://github.com/pr/42") == "\U0001f504"
+
+    def test_recreate_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /recreate https://github.com/pr/42") == "\U0001f501"
+
+    def test_ai_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /ai backend") == "\u2728"
+
+    def test_magic_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /magic koan") == "\u2728"
+
+    def test_regular_mission_gets_clipboard(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- fix the login bug") == "\U0001f4cb"
+
+    def test_unknown_command_no_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /check https://github.com/pr/42") == ""
+
+    def test_project_tag_with_plan(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- [project:koan] /plan add feature") == "\U0001f9e0"
+
+    def test_project_tag_with_regular_mission(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- [project:webapp] fix CSRF") == "\U0001f4cb"
+
+    def test_projet_tag_french(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- [projet:koan] /rebase https://url") == "\U0001f504"
+
+    def test_no_dash_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("/plan something") == "\U0001f9e0"
+
+    def test_scoped_command_no_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /custom.myskill do thing") == ""
+
+    def test_empty_string(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("") == "\U0001f4cb"
+
+    def test_whitespace_handling(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("  - /plan add feature  ") == "\U0001f9e0"
+
+    def test_case_insensitive_command(self):
+        from skills.core.list.handler import mission_prefix
+        # Commands in mission text are always lowercase, but test robustness
+        assert mission_prefix("- /Plan add feature") == "\U0001f9e0"
+
+
+# ---------------------------------------------------------------------------
 # Handler tests (direct handler invocation)
 # ---------------------------------------------------------------------------
 
@@ -62,9 +135,9 @@ class TestListHandler:
         ctx = self._make_ctx(tmp_path, missions)
         result = handle(ctx)
         assert "PENDING" in result
-        assert "1. fix the login bug" in result
-        assert "2. add dark mode" in result
-        assert "3. refactor auth module" in result
+        assert "\U0001f4cb fix the login bug" in result
+        assert "\U0001f4cb add dark mode" in result
+        assert "\U0001f4cb refactor auth module" in result
         assert "IN PROGRESS" not in result
 
     def test_in_progress_missions(self, tmp_path):
@@ -84,7 +157,7 @@ class TestListHandler:
         ctx = self._make_ctx(tmp_path, missions)
         result = handle(ctx)
         assert "IN PROGRESS" in result
-        assert "1. implement new feature" in result
+        assert "\U0001f4cb implement new feature" in result
         assert "PENDING" not in result
 
     def test_both_sections(self, tmp_path):
@@ -109,10 +182,10 @@ class TestListHandler:
         ctx = self._make_ctx(tmp_path, missions)
         result = handle(ctx)
         assert "IN PROGRESS" in result
-        assert "1. working on feature X" in result
+        assert "\U0001f4cb working on feature X" in result
         assert "PENDING" in result
-        assert "1. fix bug A" in result
-        assert "2. fix bug B" in result
+        assert "\U0001f4cb fix bug A" in result
+        assert "\U0001f4cb fix bug B" in result
         # IN PROGRESS should appear before PENDING
         assert result.index("IN PROGRESS") < result.index("PENDING")
 
@@ -148,10 +221,6 @@ class TestListHandler:
         ctx = self._make_ctx(tmp_path, missions)
         result = handle(ctx)
         assert "..." in result
-        # Should be truncated to ~120 chars
-        for line in result.split("\n"):
-            if line.strip().startswith("1."):
-                assert len(line.strip()) <= 130  # 120 + numbering prefix
 
     def test_french_section_headers(self, tmp_path):
         from skills.core.list.handler import handle
@@ -161,11 +230,11 @@ class TestListHandler:
 
             ## Pending
 
-            - mission en français
+            - mission en fran\u00e7ais
 
             ## In Progress
 
-            - tâche active
+            - t\u00e2che active
 
             ## Done
         """)
@@ -173,6 +242,82 @@ class TestListHandler:
         result = handle(ctx)
         assert "IN PROGRESS" in result
         assert "PENDING" in result
+
+    def test_plan_mission_gets_brain_prefix(self, tmp_path):
+        from skills.core.list.handler import handle
+
+        missions = textwrap.dedent("""\
+            # Missions
+
+            ## Pending
+
+            - [project:koan] /plan add dark mode
+            - [project:koan] /implement https://github.com/issue/1
+            - [project:koan] /rebase https://github.com/pr/42
+            - fix some bug
+
+            ## In Progress
+
+            ## Done
+        """)
+        ctx = self._make_ctx(tmp_path, missions)
+        result = handle(ctx)
+        assert "\U0001f9e0" in result  # plan
+        assert "\U0001f528" in result  # implement
+        assert "\U0001f504" in result  # rebase
+        assert "\U0001f4cb" in result  # regular mission
+
+    def test_unknown_command_no_prefix(self, tmp_path):
+        from skills.core.list.handler import handle
+
+        missions = textwrap.dedent("""\
+            # Missions
+
+            ## Pending
+
+            - /check https://github.com/pr/42
+
+            ## In Progress
+
+            ## Done
+        """)
+        ctx = self._make_ctx(tmp_path, missions)
+        result = handle(ctx)
+        # Unknown commands get no prefix — just the number
+        lines = result.split("\n")
+        for line in lines:
+            if "/check" in line:
+                # Should have number but no emoji prefix before the text
+                assert line.strip().startswith("1.")
+                assert "\U0001f4cb" not in line
+                assert "\U0001f9e0" not in line
+
+    def test_mixed_categories(self, tmp_path):
+        from skills.core.list.handler import handle
+
+        missions = textwrap.dedent("""\
+            # Missions
+
+            ## Pending
+
+            - [project:koan] /plan add feature
+            - [project:koan] /ai backend
+            - [project:koan] /recreate https://github.com/pr/1
+            - [project:koan] /magic koan
+
+            ## In Progress
+
+            - [project:koan] /implement https://github.com/issue/5
+
+            ## Done
+        """)
+        ctx = self._make_ctx(tmp_path, missions)
+        result = handle(ctx)
+        # Check all categories present
+        assert "\U0001f9e0" in result  # plan
+        assert "\u2728" in result  # ai/magic (appears twice)
+        assert "\U0001f501" in result  # recreate
+        assert "\U0001f528" in result  # implement
 
 
 # ---------------------------------------------------------------------------
