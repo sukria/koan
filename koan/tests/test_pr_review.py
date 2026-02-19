@@ -17,6 +17,7 @@ from app.claude_step import (
     _rebase_onto_target,
 )
 from app.github import run_gh
+from app.claude_step import run_project_tests
 from app.pr_review import (
     parse_pr_url,
     fetch_pr_context,
@@ -27,7 +28,6 @@ from app.pr_review import (
     detect_skills,
     run_pr_review,
     _build_pr_comment,
-    _run_tests,
 )
 
 
@@ -361,27 +361,29 @@ class TestRebaseOntoTarget:
 # ---------------------------------------------------------------------------
 
 class TestRunTests:
-    @patch("app.pr_review.subprocess.run")
+    """Tests for run_project_tests (moved to claude_step.py)."""
+
+    @patch("app.claude_step.subprocess.run")
     def test_passing(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="42 tests passed", stderr=""
         )
-        result = _run_tests("make test", "/tmp/p")
+        result = run_project_tests("/tmp/p", test_cmd="make test")
         assert result["passed"] is True
         assert "42" in result["details"]
 
-    @patch("app.pr_review.subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_failing(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=1, stdout="3 failed", stderr=""
         )
-        result = _run_tests("make test", "/tmp/p")
+        result = run_project_tests("/tmp/p", test_cmd="make test")
         assert result["passed"] is False
 
-    @patch("app.pr_review.subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="make", timeout=300)
-        result = _run_tests("make test", "/tmp/p")
+        result = run_project_tests("/tmp/p", test_cmd="make test")
         assert result["passed"] is False
         assert "timeout" in result["details"]
 
@@ -671,7 +673,7 @@ class TestRunPrReview:
 
     @patch("app.pr_review.detect_skills", return_value=("atoomic.refactor", "atoomic.review"))
     @patch("app.pr_review.detect_test_command", return_value="make test")
-    @patch("app.pr_review._run_tests")
+    @patch("app.pr_review.run_project_tests")
     @patch("app.pr_review.run_gh")
     @patch("app.pr_review._run_git")
     @patch("app.claude_step.run_claude")
@@ -739,7 +741,7 @@ class TestRunPrReview:
 
     @patch("app.pr_review.detect_skills", return_value=(None, None))
     @patch("app.pr_review.detect_test_command", return_value="make test")
-    @patch("app.pr_review._run_tests")
+    @patch("app.pr_review.run_project_tests")
     @patch("app.pr_review.run_gh")
     @patch("app.pr_review._run_git")
     @patch("app.claude_step.run_claude")

@@ -8,10 +8,32 @@ any messaging provider.
 import fcntl
 import json
 import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
+
+
+def _atomic_write(path: Path, content: str):
+    """Crash-safe file write using temp file + rename.
+
+    Local wrapper to avoid circular import with utils.py (which re-exports
+    from this module). Uses the same mkstemp + fsync + replace pattern.
+    """
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".koan-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _parse_jsonl_lines(lines: list) -> List[Dict]:
@@ -165,15 +187,9 @@ def compact_history(history_file: Path, topics_file: Path, min_messages: int = 2
                     topics_by_date[date].append(topic)
 
     if not topics_by_date:
-        # No extractable topics, just purge (with lock to prevent race with save_conversation_message)
+        # No extractable topics, just purge atomically
         try:
-            with open(history_file, "w", encoding="utf-8") as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
-                try:
-                    f.truncate(0)
-                    f.flush()
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+            _atomic_write(history_file, "")
         except OSError:
             pass
         return len(messages)
@@ -202,29 +218,14 @@ def compact_history(history_file: Path, topics_file: Path, min_messages: int = 2
     existing.append(entry)
 
     # Write topics file atomically
-    tmp_fd, tmp_path = tempfile.mkstemp(
-        dir=str(topics_file.parent), suffix=".tmp"
-    )
     try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(existing, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, str(topics_file))
+        _atomic_write(topics_file, json.dumps(existing, ensure_ascii=False, indent=2))
     except OSError:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
         return 0
 
-    # Truncate history (with lock to prevent race with save_conversation_message)
+    # Truncate history atomically
     try:
-        with open(history_file, "w", encoding="utf-8") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            try:
-                f.truncate(0)
-                f.flush()
-            finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
+        _atomic_write(history_file, "")
     except OSError:
         return 0
 

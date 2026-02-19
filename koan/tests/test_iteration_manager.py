@@ -1102,6 +1102,15 @@ projects:
         assert names == ["koan"]
 
 
+    def test_config_load_error_logs_to_stderr(self, koan_root, capsys):
+        """When load_projects_config raises, error is logged to stderr."""
+        with patch("app.projects_config.load_projects_config", side_effect=ValueError("bad yaml")):
+            result = _filter_exploration_projects(PROJECTS_LIST, str(koan_root))
+        assert result.projects == PROJECTS_LIST  # Fail-open
+        captured = capsys.readouterr()
+        assert "bad yaml" in captured.err
+
+
 # === Tests: _filter_exploration_projects with PR limits ===
 
 

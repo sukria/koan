@@ -254,18 +254,85 @@ class TestLockSafety:
         assert len(msgs) == 2
 
 
-class TestCompactHistoryLocking:
-    """Verify compact_history uses locked truncation."""
+class TestCompactHistoryAtomicWrite:
+    """Verify compact_history uses atomic_write for truncation and topics."""
 
-    def test_truncation_uses_flock(self, tmp_path):
-        """compact_history truncates with fcntl.flock, not bare write_text."""
+    def test_truncation_uses_atomic_write(self, tmp_path):
+        """compact_history truncates history via atomic_write, not bare open('w')."""
+        import json
+        from unittest.mock import patch
+        from app.conversation_history import compact_history
+
+        history = tmp_path / "history.jsonl"
+        topics = tmp_path / "topics.json"
+
+        messages = []
+        for i in range(25):
+            msg = {"timestamp": f"2026-02-18T10:{i:02d}:00", "role": "user", "text": f"Message {i} about testing"}
+            messages.append(json.dumps(msg, ensure_ascii=False))
+        history.write_text("\n".join(messages) + "\n")
+
+        with patch("app.conversation_history._atomic_write") as mock_aw:
+            compact_history(history, topics)
+            # atomic_write should be called twice: once for topics, once for truncation
+            assert mock_aw.call_count == 2
+            # Second call should truncate history to empty
+            last_call = mock_aw.call_args_list[-1]
+            assert last_call[0][0] == history
+            assert last_call[0][1] == ""
+
+    def test_topics_written_via_atomic_write(self, tmp_path):
+        """compact_history writes topics file via atomic_write."""
+        import json
+        from unittest.mock import patch
+        from app.conversation_history import compact_history
+
+        history = tmp_path / "history.jsonl"
+        topics = tmp_path / "topics.json"
+
+        messages = []
+        for i in range(25):
+            msg = {"timestamp": f"2026-02-18T10:{i:02d}:00", "role": "user", "text": f"Message {i} about testing"}
+            messages.append(json.dumps(msg, ensure_ascii=False))
+        history.write_text("\n".join(messages) + "\n")
+
+        with patch("app.conversation_history._atomic_write") as mock_aw:
+            compact_history(history, topics)
+            # First call writes topics file
+            first_call = mock_aw.call_args_list[0]
+            assert first_call[0][0] == topics
+            content = json.loads(first_call[0][1])
+            assert isinstance(content, list)
+            assert content[0]["message_count"] == 25
+
+    def test_no_topics_uses_atomic_write(self, tmp_path):
+        """When no topics are extractable, truncation still uses atomic_write."""
+        import json
+        from unittest.mock import patch
+        from app.conversation_history import compact_history
+
+        history = tmp_path / "history.jsonl"
+        topics = tmp_path / "topics.json"
+
+        messages = []
+        for i in range(25):
+            msg = {"timestamp": f"2026-02-18T10:{i:02d}:00", "role": "assistant", "text": "ok"}
+            messages.append(json.dumps(msg, ensure_ascii=False))
+        history.write_text("\n".join(messages) + "\n")
+
+        with patch("app.conversation_history._atomic_write") as mock_aw:
+            count = compact_history(history, topics)
+            assert count == 25
+            mock_aw.assert_called_once_with(history, "")
+
+    def test_end_to_end_compaction(self, tmp_path):
+        """Full compaction cycle: messages in, topics out, history empty."""
         import json
         from app.conversation_history import compact_history
 
         history = tmp_path / "history.jsonl"
         topics = tmp_path / "topics.json"
 
-        # Write enough messages to trigger compaction
         messages = []
         for i in range(25):
             msg = {"timestamp": f"2026-02-18T10:{i:02d}:00", "role": "user", "text": f"Message {i} about testing"}
@@ -274,23 +341,20 @@ class TestCompactHistoryLocking:
 
         count = compact_history(history, topics)
         assert count == 25
-        # History should be empty after compaction
         assert history.read_text() == ""
-        # Topics file should exist with compaction data
         assert topics.exists()
         topics_data = json.loads(topics.read_text())
         assert len(topics_data) == 1
         assert topics_data[0]["message_count"] == 25
 
-    def test_no_topics_path_uses_locked_truncation(self, tmp_path):
-        """When no topics are extractable, truncation is still locked."""
+    def test_end_to_end_no_topics(self, tmp_path):
+        """Compaction with no extractable topics still clears history."""
         import json
         from app.conversation_history import compact_history
 
         history = tmp_path / "history.jsonl"
         topics = tmp_path / "topics.json"
 
-        # Write messages with no extractable topics (assistant-only, short text)
         messages = []
         for i in range(25):
             msg = {"timestamp": f"2026-02-18T10:{i:02d}:00", "role": "assistant", "text": "ok"}

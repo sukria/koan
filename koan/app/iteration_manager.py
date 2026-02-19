@@ -315,7 +315,8 @@ def _filter_exploration_projects(
 
     try:
         config = load_projects_config(koan_root)
-    except Exception:
+    except Exception as e:
+        print(f"[iteration_manager] Could not load projects config: {e}", file=sys.stderr)
         return FilterResult(projects=projects, pr_limited=[])
 
     if config is None:

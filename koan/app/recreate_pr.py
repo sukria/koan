@@ -25,6 +25,7 @@ from app.claude_step import (
     _run_git,
     _safe_checkout,
     run_claude_step,
+    run_project_tests,
 )
 from app.github import run_gh
 from app.prompts import load_prompt, load_skill_prompt  # noqa: F401 — safety import
@@ -158,9 +159,11 @@ def run_recreate(
 
     # -- Step 4: Run tests ----------------------------------------------------
     notify_fn("Running tests...")
-    test_result = _run_tests(project_path)
-    if test_result:
-        actions_log.append(test_result)
+    test_result = run_project_tests(project_path)
+    if test_result["passed"]:
+        actions_log.append(f"Tests pass ({test_result['details']})")
+    elif test_result["details"] != "command not found":
+        actions_log.append(f"Tests: {test_result['details']} (non-blocking)")
 
     # -- Step 5: Push the result -----------------------------------------------
     notify_fn(f"Pushing `{work_branch}`...")
@@ -269,36 +272,6 @@ def _has_commits_on_branch(
         except Exception:
             continue
     return False
-
-
-def _run_tests(project_path: str) -> Optional[str]:
-    """Run the project test suite, return summary or None."""
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["make", "test"],
-            stdin=subprocess.DEVNULL,
-            capture_output=True, text=True,
-            timeout=300, cwd=project_path,
-        )
-        if result.returncode == 0:
-            # Extract test count from output
-            output = result.stdout + result.stderr
-            passed_match = re.search(r'(\d+)\s+passed', output)
-            if passed_match:
-                return f"Tests pass ({passed_match.group(1)} passed)"
-            return "Tests pass"
-        else:
-            # Extract failure info
-            output = result.stdout + result.stderr
-            failed_match = re.search(r'(\d+)\s+failed', output)
-            if failed_match:
-                return f"Tests: {failed_match.group(1)} failures (non-blocking)"
-            return "Tests: some failures (non-blocking)"
-    except subprocess.TimeoutExpired:
-        return "Tests: timeout (non-blocking)"
-    except FileNotFoundError:
-        return None  # No Makefile or make not available
 
 
 def _push_recreated(

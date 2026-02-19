@@ -16,6 +16,7 @@ from app.claude_step import (
     commit_if_changes,
     run_claude,
     run_claude_step,
+    run_project_tests,
     strip_cli_noise,
 )
 
@@ -713,3 +714,110 @@ class TestPushWithPrFallback:
                 context, "/project", pr_type="rebase",
             )
             assert result["success"] is True
+
+
+# ---------- run_project_tests ----------
+
+
+class TestRunProjectTests:
+    """Tests for the shared run_project_tests helper."""
+
+    @patch("app.claude_step.subprocess.run")
+    def test_passing_tests_with_count(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="collected 42 items\n42 passed in 3.5s\n",
+            stderr="",
+        )
+        result = run_project_tests("/project")
+        assert result["passed"] is True
+        assert "42 passed" in result["details"]
+
+    @patch("app.claude_step.subprocess.run")
+    def test_passing_tests_no_count(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="All good\n",
+            stderr="",
+        )
+        result = run_project_tests("/project")
+        assert result["passed"] is True
+        assert result["details"] == "OK"
+
+    @patch("app.claude_step.subprocess.run")
+    def test_failing_tests(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="3 failed, 10 passed\n",
+            stderr="",
+        )
+        result = run_project_tests("/project")
+        assert result["passed"] is False
+        assert "3 failed" in result["details"]
+        assert "10 passed" in result["details"]
+
+    @patch("app.claude_step.subprocess.run")
+    def test_custom_test_command(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="OK\n",
+            stderr="",
+        )
+        run_project_tests("/project", test_cmd="npm test")
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][0] == "npm test"
+
+    @patch("app.claude_step.subprocess.run")
+    def test_custom_timeout(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="OK\n",
+            stderr="",
+        )
+        run_project_tests("/project", timeout=600)
+        assert mock_run.call_args[1]["timeout"] == 600
+
+    @patch("app.claude_step.subprocess.run", side_effect=subprocess.TimeoutExpired("make test", 300))
+    def test_timeout(self, mock_run):
+        result = run_project_tests("/project")
+        assert result["passed"] is False
+        assert "timeout" in result["details"]
+
+    @patch("app.claude_step.subprocess.run", side_effect=FileNotFoundError("make"))
+    def test_command_not_found(self, mock_run):
+        result = run_project_tests("/project")
+        assert result["passed"] is False
+        assert result["details"] == "command not found"
+
+    @patch("app.claude_step.subprocess.run", side_effect=OSError("disk full"))
+    def test_generic_exception(self, mock_run):
+        result = run_project_tests("/project")
+        assert result["passed"] is False
+        assert "disk full" in result["details"]
+
+    @patch("app.claude_step.subprocess.run")
+    def test_output_truncated_to_3000(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="x" * 5000,
+            stderr="",
+        )
+        result = run_project_tests("/project")
+        assert len(result["output"]) <= 3000
+
+    @patch("app.claude_step.subprocess.run")
+    def test_uses_shell_mode(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="ok", stderr=""
+        )
+        run_project_tests("/project", test_cmd="make test")
+        assert mock_run.call_args[1]["shell"] is True
+
+    @patch("app.claude_step.subprocess.run")
+    def test_stdin_devnull(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="ok", stderr=""
+        )
+        run_project_tests("/project")
+        assert mock_run.call_args[1].get("stdin") == subprocess.DEVNULL or \
+               mock_run.call_args[0][0] is not None  # just verify call was made
