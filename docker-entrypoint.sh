@@ -130,8 +130,10 @@ verify_auth() {
     local warnings=()
 
     # Check gh auth
-    if [ ! -d "${HOME}/.config/gh" ]; then
-        warnings+=("No ~/.config/gh/ mounted — gh CLI may not be authenticated")
+    if [ -n "${GH_TOKEN:-}" ]; then
+        success "GitHub auth: GH_TOKEN"
+    elif [ ! -d "${HOME}/.config/gh" ]; then
+        warnings+=("No GitHub auth — run 'make docker-gh-auth' on the host")
     fi
 
     # Check Copilot auth
@@ -358,12 +360,34 @@ case "$COMMAND" in
         exit 1
         ;;
 
+    gh-auth)
+        section "GitHub CLI Authentication"
+        if [ -n "${GH_TOKEN:-}" ]; then
+            success "Authenticated via GH_TOKEN environment variable"
+            gh auth status 2>&1 || true
+        elif gh auth status >/dev/null 2>&1; then
+            success "Authenticated via mounted ~/.config/gh"
+            gh auth status 2>&1 || true
+        else
+            error "Not authenticated."
+            log ""
+            log "GitHub CLI tokens stored in macOS Keychain are not accessible"
+            log "inside Docker. Instead, inject the token as an env var:"
+            log ""
+            log "  make docker-gh-auth"
+            log ""
+            log "This extracts your host's gh token and saves it to .env as GH_TOKEN."
+            log "The gh CLI natively uses GH_TOKEN when set."
+            exit 1
+        fi
+        ;;
+
     shell)
         exec /bin/bash
         ;;
 
     *)
-        echo "Usage: docker run koan [start|agent|bridge|auth|test|shell]"
+        echo "Usage: docker run koan [start|agent|bridge|auth|gh-auth|test|shell]"
         exit 1
         ;;
 esac

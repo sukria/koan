@@ -6,7 +6,7 @@ export
 .PHONY: awake run errand-run errand-awake dashboard
 .PHONY: ollama logs
 .PHONY: install-systemctl-service uninstall-systemctl-service
-.PHONY: docker-setup docker-up docker-down docker-logs docker-test docker-auth
+.PHONY: docker-setup docker-up docker-down docker-logs docker-test docker-auth docker-gh-auth
 
 PYTHON_BIN ?= python3
 
@@ -161,3 +161,16 @@ docker-auth:
 			echo "CLAUDE_CODE_OAUTH_TOKEN=$$token" >> .env; \
 		fi && \
 		echo "✓ Token saved to .env — container will use it on next start."
+
+docker-gh-auth:
+	@command -v gh >/dev/null 2>&1 || { echo "Error: GitHub CLI (gh) not found on host."; echo "Install: https://cli.github.com"; exit 1; }
+	@echo "Extracting GitHub token from host..."
+	@token=$$(gh auth token 2>/dev/null) && \
+		if [ -z "$$token" ]; then echo "Error: No GitHub token found. Run 'gh auth login' first."; exit 1; fi && \
+		touch .env && \
+		if grep -q '^GH_TOKEN=' .env 2>/dev/null; then \
+			sed -i '' 's|^GH_TOKEN=.*|GH_TOKEN='"$$token"'|' .env; \
+		else \
+			echo "GH_TOKEN=$$token" >> .env; \
+		fi && \
+		echo "✓ GitHub token saved to .env — container will use it on next start."

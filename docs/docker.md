@@ -42,7 +42,12 @@ make docker-auth
 # Generates an OAuth token from your host's Claude CLI and saves it to .env.
 # If you haven't authenticated on the host yet: claude auth login
 
-# 7. Build and start
+# 7. Inject GitHub token for container use
+make docker-gh-auth
+# Extracts your host's gh token and saves it to .env as GH_TOKEN.
+# Required because macOS Keychain tokens aren't accessible inside Docker.
+
+# 8. Build and start
 docker compose up --build
 ```
 
@@ -135,7 +140,11 @@ If either process crashes, the entrypoint restarts it automatically.
     on the host to generate a token, then saves it to `.env` as `CLAUDE_CODE_OAUTH_TOKEN`.
     Requires Claude CLI installed and authenticated on the host
     (`npm install -g @anthropic-ai/claude-code && claude auth login`).
-- **GitHub CLI** uses `~/.config/gh` mounted read-only from the host.
+- **GitHub CLI** supports two auth methods:
+  - **GH_TOKEN** (recommended for Docker): Run `make docker-gh-auth` to extract the token from
+    the host's `gh` CLI and save it to `.env`. Required on macOS where tokens are in the Keychain.
+  - **Mounted config**: `~/.config/gh` is mounted read-only from the host (works when tokens
+    are stored as plain text, not in the system Keychain).
 - **Git** uses a default identity (`Koan <koan@noreply.github.com>`), overridable
   by mounting `~/.gitconfig`.
 
@@ -197,6 +206,8 @@ make docker-up      # Build and start (detached)
 make docker-down    # Stop the container
 make docker-logs    # Tail container logs
 make docker-test    # Run the test suite inside the container
+make docker-auth    # Extract Claude OAuth token from host CLI → .env
+make docker-gh-auth # Extract GitHub token from host gh CLI → .env
 ```
 
 ### Docker Compose commands
@@ -249,13 +260,22 @@ docker compose up --build
 
 ### `gh` CLI not authenticated
 
-The setup script mounts `~/.config/gh` from the host. Make sure `gh` is
-authenticated on your host first:
+On macOS, `gh` stores tokens in the system Keychain, which isn't accessible
+inside Docker. The fix is to inject the token as an environment variable:
 
 ```bash
-gh auth status   # Should show a logged-in account
-./setup-docker.sh  # Re-run to pick up the mount
+# Extract token from host and save to .env as GH_TOKEN
+make docker-gh-auth
+
+# Restart the container to pick up the new token
+docker compose up --build -d
 ```
+
+The `gh` CLI natively uses `GH_TOKEN` when set — no config file needed.
+
+If you're on Linux (where tokens are stored as plain text in `~/.config/gh`),
+the mounted config directory may work directly. Re-run `./setup-docker.sh` to
+ensure the mount is set up.
 
 ### "projects section required" or no projects found
 

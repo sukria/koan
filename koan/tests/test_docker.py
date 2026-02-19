@@ -200,6 +200,14 @@ class TestEntrypoint:
         """Should check for ~/.config/gh directory."""
         assert ".config/gh" in self.entrypoint
 
+    def test_verify_auth_checks_gh_token(self):
+        """verify_auth should recognize GH_TOKEN env var."""
+        assert "GH_TOKEN" in self.entrypoint
+
+    def test_supports_gh_auth_command(self):
+        """Should support 'gh-auth' command for GitHub auth status."""
+        assert "gh-auth)" in self.entrypoint
+
     def test_traps_signals(self):
         """Must handle SIGINT/SIGTERM for graceful shutdown."""
         assert "trap" in self.entrypoint
@@ -478,11 +486,23 @@ class TestMakefileDockerTargets:
         """docker-auth should use script to capture setup-token output."""
         assert "script -q" in self.makefile
 
+    def test_docker_gh_auth_target(self):
+        assert "docker-gh-auth:" in self.makefile
+
+    def test_docker_gh_auth_extracts_token(self):
+        """docker-gh-auth should use 'gh auth token' to extract the token."""
+        assert "gh auth token" in self.makefile
+
+    def test_docker_gh_auth_saves_to_env(self):
+        """docker-gh-auth should save GH_TOKEN to .env."""
+        assert "GH_TOKEN=" in self.makefile
+
     def test_docker_phony_declarations(self):
         """Docker targets should be declared .PHONY."""
         assert "docker-setup" in self.makefile
         assert "docker-up" in self.makefile
         assert "docker-auth" in self.makefile
+        assert "docker-gh-auth" in self.makefile
 
 
 class TestGitIgnoreDockerEntries:
