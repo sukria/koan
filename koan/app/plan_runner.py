@@ -40,11 +40,16 @@ def run_plan(
     issue_url: Optional[str] = None,
     notify_fn=None,
     skill_dir: Optional[Path] = None,
+    context: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Execute the plan pipeline.
 
     Either generates a new plan (idea mode) or iterates on an existing
     issue (issue_url mode). Exactly one of idea or issue_url must be set.
+
+    Args:
+        context: Optional additional user context (e.g. "Focus on phase 2").
+                 Appended to the issue context or passed to plan generation.
 
     Returns:
         (success, summary) tuple.
@@ -54,9 +59,13 @@ def run_plan(
         notify_fn = send_telegram
 
     if issue_url:
-        return _run_issue_plan(project_path, issue_url, notify_fn, skill_dir)
+        return _run_issue_plan(
+            project_path, issue_url, notify_fn, skill_dir, context=context,
+        )
     elif idea:
-        return _run_new_plan(project_path, idea, notify_fn, skill_dir)
+        return _run_new_plan(
+            project_path, idea, notify_fn, skill_dir, context=context,
+        )
     else:
         return False, "No idea or issue URL provided."
 
@@ -66,6 +75,7 @@ def _run_new_plan(
     idea: str,
     notify_fn,
     skill_dir: Optional[Path],
+    context: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Generate a plan for a new idea, reusing an existing issue if found."""
     notify_fn(f"\U0001f9e0 Planning: {idea[:100]}{'...' if len(idea) > 100 else ''}")
@@ -84,11 +94,13 @@ def _run_new_plan(
                 f"{issue_title[:60]} — iterating"
             )
             return _run_issue_plan(
-                project_path, issue_url, notify_fn, skill_dir
+                project_path, issue_url, notify_fn, skill_dir, context=context,
             )
 
     try:
-        plan = _generate_plan(project_path, idea, skill_dir=skill_dir)
+        plan = _generate_plan(
+            project_path, idea, context=context or "", skill_dir=skill_dir,
+        )
     except Exception as e:
         return False, f"Plan generation failed: {str(e)[:300]}"
 
@@ -128,6 +140,7 @@ def _run_issue_plan(
     issue_url: str,
     notify_fn,
     skill_dir: Optional[Path],
+    context: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Read an existing issue + comments, generate updated plan, post comment."""
     match = _ISSUE_URL_RE.search(issue_url)
@@ -151,6 +164,8 @@ def _run_issue_plan(
         context_parts.append(f"\n\n## Discussion Comments\n\n{comments}")
     else:
         context_parts.append("\n\n*No comments yet on this issue.*")
+    if context:
+        context_parts.append(f"\n\n## User Instructions\n\n{context}")
     issue_context = "\n".join(context_parts)
 
     try:
@@ -464,6 +479,10 @@ def main(argv=None):
         "--issue-url",
         help="GitHub issue URL to iterate on",
     )
+    parser.add_argument(
+        "--context",
+        help="Additional user context (e.g. 'Focus on phase 2')",
+    )
     cli_args = parser.parse_args(argv)
 
     skill_dir = Path(__file__).resolve().parent.parent / "skills" / "core" / "plan"
@@ -473,6 +492,7 @@ def main(argv=None):
         idea=cli_args.idea,
         issue_url=cli_args.issue_url,
         skill_dir=skill_dir,
+        context=cli_args.context,
     )
     print(summary)
     return 0 if success else 1

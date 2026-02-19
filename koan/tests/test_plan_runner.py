@@ -52,6 +52,25 @@ class TestRunPlan:
             assert ok
             mock.assert_called_once()
 
+    def test_passes_context_to_new_plan(self):
+        with patch("app.plan_runner._run_new_plan", return_value=(True, "ok")) as mock:
+            run_plan("/project", idea="Add X", notify_fn=MagicMock(), context="Phase 2")
+            _, kwargs = mock.call_args
+            assert kwargs.get("context") == "Phase 2"
+
+    def test_passes_context_to_issue_plan(self):
+        url = "https://github.com/o/r/issues/1"
+        with patch("app.plan_runner._run_issue_plan", return_value=(True, "ok")) as mock:
+            run_plan("/project", issue_url=url, notify_fn=MagicMock(), context="Focus on API")
+            _, kwargs = mock.call_args
+            assert kwargs.get("context") == "Focus on API"
+
+    def test_context_defaults_to_none(self):
+        with patch("app.plan_runner._run_new_plan", return_value=(True, "ok")) as mock:
+            run_plan("/project", idea="Add X", notify_fn=MagicMock())
+            _, kwargs = mock.call_args
+            assert kwargs.get("context") is None
+
     def test_defaults_notify_fn(self):
         with patch("app.plan_runner._run_new_plan", return_value=(True, "ok")) as mock, \
              patch("app.notify.send_telegram"):
@@ -103,6 +122,24 @@ class TestRunNewPlan:
             ok, msg = _run_new_plan("/project", "idea", notify, None)
             assert not ok
             assert "empty" in msg.lower()
+
+    def test_context_passed_to_generate_plan(self):
+        """User context should be forwarded to _generate_plan."""
+        notify = MagicMock()
+        with patch("app.plan_runner._get_repo_info", return_value=(None, None)), \
+             patch("app.plan_runner._generate_plan", return_value="## Plan") as mock_gen:
+            _run_new_plan("/project", "Add X", notify, None, context="Phase 2 only")
+            _, kwargs = mock_gen.call_args
+            assert kwargs.get("context") == "Phase 2 only"
+
+    def test_no_context_passes_empty_string(self):
+        """Without context, _generate_plan should receive empty string."""
+        notify = MagicMock()
+        with patch("app.plan_runner._get_repo_info", return_value=(None, None)), \
+             patch("app.plan_runner._generate_plan", return_value="## Plan") as mock_gen:
+            _run_new_plan("/project", "Add X", notify, None)
+            _, kwargs = mock_gen.call_args
+            assert kwargs.get("context") == ""
 
     def test_issue_creation_failure_with_label_retries_without(self):
         notify = MagicMock()
@@ -324,6 +361,33 @@ class TestRunIssuePlan:
             _run_issue_plan("/project", url, notify, None)
             context_arg = mock_iter.call_args[0][1]
             assert "No comments" in context_arg
+
+    def test_user_context_appended_to_issue_context(self):
+        """User context should appear in the issue context passed to Claude."""
+        notify = MagicMock()
+        url = "https://github.com/o/r/issues/1"
+        with patch("app.plan_runner._fetch_issue_context",
+                    return_value=("Title", "body", "comments")), \
+             patch("app.plan_runner._generate_iteration_plan",
+                    return_value="## Plan") as mock_iter, \
+             patch("app.plan_runner._comment_on_issue"):
+            _run_issue_plan("/project", url, notify, None, context="Focus on phase 2")
+            context_arg = mock_iter.call_args[0][1]
+            assert "User Instructions" in context_arg
+            assert "Focus on phase 2" in context_arg
+
+    def test_no_user_context_omits_instructions_section(self):
+        """Without user context, no 'User Instructions' section should appear."""
+        notify = MagicMock()
+        url = "https://github.com/o/r/issues/1"
+        with patch("app.plan_runner._fetch_issue_context",
+                    return_value=("Title", "body", "")), \
+             patch("app.plan_runner._generate_iteration_plan",
+                    return_value="## Plan") as mock_iter, \
+             patch("app.plan_runner._comment_on_issue"):
+            _run_issue_plan("/project", url, notify, None)
+            context_arg = mock_iter.call_args[0][1]
+            assert "User Instructions" not in context_arg
 
 
 # ---------------------------------------------------------------------------
@@ -1033,3 +1097,39 @@ class TestPromptFiles:
         assert "#### Phase" in content
         assert "**What**" in content
         assert "**Done when**" in content
+
+
+# ---------------------------------------------------------------------------
+# main() CLI — --context flag
+# ---------------------------------------------------------------------------
+
+class TestMainCLI:
+    def test_context_flag_passed_to_run_plan(self):
+        """--context flag should be forwarded to run_plan."""
+        with patch("app.plan_runner.run_plan", return_value=(True, "ok")) as mock:
+            main([
+                "--project-path", "/project",
+                "--issue-url", "https://github.com/o/r/issues/1",
+                "--context", "Focus on phase 2",
+            ])
+            _, kwargs = mock.call_args
+            assert kwargs["context"] == "Focus on phase 2"
+
+    def test_context_flag_optional(self):
+        """Omitting --context should pass None."""
+        with patch("app.plan_runner.run_plan", return_value=(True, "ok")) as mock:
+            main(["--project-path", "/project", "--idea", "Add feature"])
+            _, kwargs = mock.call_args
+            assert kwargs["context"] is None
+
+    def test_context_with_idea(self):
+        """--context can be used with --idea too."""
+        with patch("app.plan_runner.run_plan", return_value=(True, "ok")) as mock:
+            main([
+                "--project-path", "/project",
+                "--idea", "Add feature",
+                "--context", "Must support dark mode",
+            ])
+            _, kwargs = mock.call_args
+            assert kwargs["idea"] == "Add feature"
+            assert kwargs["context"] == "Must support dark mode"

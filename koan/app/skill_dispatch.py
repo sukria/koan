@@ -237,8 +237,10 @@ def _build_plan_cmd(
     # Detect issue URL vs free-text idea
     url_and_context = _extract_issue_url_and_context(args)
     if url_and_context:
-        issue_url, _ = url_and_context
+        issue_url, context = url_and_context
         cmd.extend(["--issue-url", issue_url])
+        if context:
+            cmd.extend(["--context", context])
     else:
         cmd.extend(["--idea", args])
 

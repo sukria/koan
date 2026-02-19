@@ -157,6 +157,22 @@ class TestBuildSkillCommand:
         assert "--issue-url" in cmd
         assert url in cmd
 
+    def test_plan_with_issue_url_and_context(self):
+        args = "https://github.com/sukria/koan/issues/42 Focus on phase 2"
+        cmd = self._build("plan", args)
+        assert cmd is not None
+        assert "--issue-url" in cmd
+        assert "https://github.com/sukria/koan/issues/42" in cmd
+        assert "--context" in cmd
+        ctx_idx = cmd.index("--context")
+        assert cmd[ctx_idx + 1] == "Focus on phase 2"
+
+    def test_plan_with_issue_url_no_context(self):
+        """Issue URL with no trailing text should not include --context."""
+        url = "https://github.com/sukria/koan/issues/42"
+        cmd = self._build("plan", url)
+        assert "--context" not in cmd
+
     def test_rebase(self):
         url = "https://github.com/sukria/koan/pull/42"
         cmd = self._build("rebase", url)
