@@ -230,6 +230,57 @@ class TestArchivePending:
         assert "test content" in args[0][2]  # content
 
 
+    def test_handles_file_deleted_between_check_and_read(self, tmp_path):
+        """TOCTOU: pending.md disappears between exists() and read_text()."""
+        from app.mission_runner import archive_pending
+
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        pending = journal_dir / "pending.md"
+        pending.write_text("content")
+
+        # Patch read_text to simulate file disappearing after exists() returns True
+        original_read = Path.read_text
+
+        def disappearing_read(self, *args, **kwargs):
+            if self.name == "pending.md":
+                raise FileNotFoundError("No such file")
+            return original_read(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", disappearing_read):
+            result = archive_pending(str(tmp_path), "myproject", 1)
+
+        assert result is False
+
+    def test_handles_file_deleted_between_read_and_unlink(self, tmp_path):
+        """pending.md disappears between read_text() and unlink() — missing_ok."""
+        from app.mission_runner import archive_pending
+
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        pending = journal_dir / "pending.md"
+        pending.write_text("content to archive\n")
+
+        # Patch unlink to simulate file already deleted
+        original_unlink = Path.unlink
+
+        def disappearing_unlink(self, *args, **kwargs):
+            if self.name == "pending.md":
+                # Delete first, then call with missing_ok (should not raise)
+                if self.exists():
+                    original_unlink(self, missing_ok=True)
+                # Simulate the file being gone — call again to test missing_ok
+                original_unlink(self, missing_ok=True)
+                return
+            return original_unlink(self, *args, **kwargs)
+
+        with patch.object(Path, "unlink", disappearing_unlink):
+            result = archive_pending(str(tmp_path), "myproject", 2)
+
+        # Should succeed — content was read before the race
+        assert result is True
+
+
 class TestUpdateUsage:
     """Test update_usage function."""
 
@@ -475,17 +526,18 @@ class TestCommitInstance:
     def test_commits_and_pushes_when_changes(self, mock_git, tmp_path):
         from app.mission_runner import commit_instance
 
-        # run_git calls: add -A, diff --cached --name-only, commit, push
+        # run_git calls: add -A, diff --cached --name-only, commit, rev-parse, push
         mock_git.side_effect = [
             "",                    # git add -A (no output)
             "file1.md\nfile2.md",  # git diff --cached --name-only (has changes)
             "",                    # git commit
-            "",                    # git push
+            "main",                # git rev-parse --abbrev-ref HEAD
+            "",                    # git push origin main
         ]
 
         result = commit_instance(str(tmp_path))
         assert result is True
-        assert mock_git.call_count == 4
+        assert mock_git.call_count == 5
 
     @patch("app.git_sync.run_git")
     def test_returns_false_when_no_changes(self, mock_git, tmp_path):
@@ -499,6 +551,76 @@ class TestCommitInstance:
         result = commit_instance(str(tmp_path))
         assert result is False
         assert mock_git.call_count == 2
+
+
+    @patch("app.git_sync.run_git")
+    def test_pushes_to_current_branch_not_hardcoded_main(self, mock_git, tmp_path):
+        """commit_instance should detect and push to the current branch."""
+        from app.mission_runner import commit_instance
+
+        # run_git calls: add -A, diff, commit, rev-parse, push
+        mock_git.side_effect = [
+            "",                    # git add -A
+            "file1.md",            # git diff --cached --name-only
+            "",                    # git commit
+            "develop",             # git rev-parse --abbrev-ref HEAD
+            "",                    # git push origin develop
+        ]
+
+        result = commit_instance(str(tmp_path))
+        assert result is True
+        assert mock_git.call_count == 5
+        # Verify push uses detected branch, not "main"
+        push_call = mock_git.call_args_list[4]
+        assert push_call[0] == (str(tmp_path), "push", "origin", "develop")
+
+    @patch("app.git_sync.run_git")
+    def test_push_falls_back_to_main_on_empty_branch(self, mock_git, tmp_path):
+        """If rev-parse returns empty, push to 'main' as fallback."""
+        from app.mission_runner import commit_instance
+
+        mock_git.side_effect = [
+            "",          # git add -A
+            "changes",   # git diff --cached --name-only
+            "",          # git commit
+            "",          # git rev-parse --abbrev-ref HEAD (empty)
+            "",          # git push origin main
+        ]
+
+        result = commit_instance(str(tmp_path))
+        assert result is True
+        push_call = mock_git.call_args_list[4]
+        assert push_call[0] == (str(tmp_path), "push", "origin", "main")
+
+    @patch("app.git_sync.run_git")
+    def test_returns_false_on_push_failure(self, mock_git, tmp_path):
+        """If git push raises, commit_instance returns False gracefully."""
+        from app.mission_runner import commit_instance
+
+        mock_git.side_effect = [
+            "",          # git add -A
+            "changes",   # git diff --cached --name-only
+            "",          # git commit
+            "main",      # git rev-parse --abbrev-ref HEAD
+            Exception("network error"),  # git push fails
+        ]
+
+        result = commit_instance(str(tmp_path))
+        assert result is False
+
+    @patch("app.git_sync.run_git")
+    def test_returns_false_on_commit_failure(self, mock_git, tmp_path):
+        """If git commit raises, commit_instance returns False gracefully."""
+        from app.mission_runner import commit_instance
+
+        mock_git.side_effect = [
+            "",          # git add -A
+            "changes",   # git diff --cached --name-only
+            Exception("commit failed"),  # git commit raises
+        ]
+
+        result = commit_instance(str(tmp_path))
+        assert result is False
 
 
 class TestCLIParseOutput:
