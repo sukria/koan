@@ -71,8 +71,8 @@ def _direct_send(text: str) -> bool:
     
     # Use same chunking algorithm as MessagingProvider.chunk_message()
     # to ensure consistent behavior between provider and fallback path
-    max_chunk_size = 4000  # Telegram API limit
-    chunks = [text[i:i + max_chunk_size] for i in range(0, len(text), max_chunk_size)] if text else [text]
+    from app.messaging.base import DEFAULT_MAX_MESSAGE_SIZE
+    chunks = [text[i:i + DEFAULT_MAX_MESSAGE_SIZE] for i in range(0, len(text), DEFAULT_MAX_MESSAGE_SIZE)] if text else [text]
     
     ok = True
     for chunk in chunks:

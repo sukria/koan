@@ -7,6 +7,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+# Shared across all providers — both Telegram and Slack enforce ~4096 char limits.
+# Using 4000 leaves headroom for API overhead and encoding.
+DEFAULT_MAX_MESSAGE_SIZE = 4000
+
 
 @dataclass
 class Message:
@@ -73,7 +77,7 @@ class MessagingProvider(ABC):
         Should print clear error messages to stderr if credentials are missing.
         """
 
-    def chunk_message(self, text: str, max_size: int = 4000) -> List[str]:
+    def chunk_message(self, text: str, max_size: int = DEFAULT_MAX_MESSAGE_SIZE) -> List[str]:
         """Split a message into chunks respecting the provider's size limit.
 
         Note: This is a simple character-based chunking. It does not
