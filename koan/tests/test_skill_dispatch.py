@@ -354,6 +354,141 @@ class TestDispatchSkillMission:
 
 
 # ---------------------------------------------------------------------------
+# translate_cli_skill_mission
+# ---------------------------------------------------------------------------
+
+import textwrap
+from pathlib import Path
+
+
+def _make_cli_skill(tmp_path: Path, scope: str, name: str, cli_skill_value: str) -> Path:
+    """Create a minimal SKILL.md with cli_skill set and return the skills root dir."""
+    skill_dir = tmp_path / "skills" / scope / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(textwrap.dedent(f"""\
+        ---
+        name: {name}
+        scope: {scope}
+        description: Bridge to {cli_skill_value}
+        audience: agent
+        cli_skill: {cli_skill_value}
+        commands:
+          - name: {name}
+            description: Invoke /{cli_skill_value}
+        ---
+    """))
+    return tmp_path / "skills"
+
+
+class TestTranslateCliSkillMission:
+    """Tests for translate_cli_skill_mission()."""
+
+    def _translate(self, mission_text, skills_root=None, instance_dir=None, tmp_path=None):
+        from app.skill_dispatch import translate_cli_skill_mission
+
+        koan_root = tmp_path or Path("/tmp/koan")
+        inst = instance_dir or (tmp_path / "instance" if tmp_path else Path("/tmp/koan/instance"))
+
+        if skills_root:
+            # Patch build_registry to load from our tmp skills dir
+            import app.skills as _skills_mod
+            orig = _skills_mod.get_default_skills_dir
+            _skills_mod.get_default_skills_dir = lambda: skills_root
+            try:
+                return translate_cli_skill_mission(mission_text, koan_root, inst)
+            finally:
+                _skills_mod.get_default_skills_dir = orig
+
+        return translate_cli_skill_mission(mission_text, koan_root, inst)
+
+    def test_translates_scoped_cli_skill(self, tmp_path):
+        """A scoped /group.myskill mission with cli_skill set is translated."""
+        skills_root = _make_cli_skill(tmp_path, "group", "myskill", "my-tool")
+        result = self._translate(
+            "[project:foo] /group.myskill do something",
+            skills_root=skills_root,
+            tmp_path=tmp_path,
+        )
+        assert result == "/my-tool do something"
+
+    def test_translates_no_project_prefix(self, tmp_path):
+        """Works without [project:X] prefix."""
+        skills_root = _make_cli_skill(tmp_path, "ops", "deploy", "deploy-tool")
+        result = self._translate(
+            "/ops.deploy staging",
+            skills_root=skills_root,
+            tmp_path=tmp_path,
+        )
+        assert result == "/deploy-tool staging"
+
+    def test_no_args_still_translates(self, tmp_path):
+        """Skills with no args produce just the slash command."""
+        skills_root = _make_cli_skill(tmp_path, "grp", "check", "run-check")
+        result = self._translate(
+            "/grp.check",
+            skills_root=skills_root,
+            tmp_path=tmp_path,
+        )
+        assert result == "/run-check"
+
+    def test_returns_none_for_regular_mission(self, tmp_path):
+        """A non-slash mission returns None."""
+        result = self._translate("Fix the login bug", tmp_path=tmp_path)
+        assert result is None
+
+    def test_returns_none_for_unscoped_command(self, tmp_path):
+        """Unscoped commands (/plan) are not handled by translate_cli_skill_mission."""
+        result = self._translate("/plan Add dark mode", tmp_path=tmp_path)
+        assert result is None
+
+    def test_returns_none_for_core_scope(self, tmp_path):
+        """Core scope is reserved for _SKILL_RUNNERS — not translated."""
+        skills_root = _make_cli_skill(tmp_path, "core", "plan", "some-tool")
+        result = self._translate(
+            "/core.plan Add dark mode",
+            skills_root=skills_root,
+            tmp_path=tmp_path,
+        )
+        assert result is None
+
+    def test_returns_none_when_skill_not_found(self, tmp_path):
+        """Returns None if the skill doesn't exist in the registry."""
+        result = self._translate("/unknown.skill do something", tmp_path=tmp_path)
+        assert result is None
+
+    def test_returns_none_when_no_cli_skill_field(self, tmp_path):
+        """Returns None if the skill exists but has no cli_skill field."""
+        skill_dir = tmp_path / "skills" / "grp" / "normal"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(textwrap.dedent("""\
+            ---
+            name: normal
+            scope: grp
+            audience: bridge
+            commands:
+              - name: normal
+                description: Normal skill
+            ---
+        """))
+        skills_root = tmp_path / "skills"
+
+        import app.skills as _skills_mod
+        orig = _skills_mod.get_default_skills_dir
+        _skills_mod.get_default_skills_dir = lambda: skills_root
+        try:
+            from app.skill_dispatch import translate_cli_skill_mission
+            result = translate_cli_skill_mission(
+                "/grp.normal do something",
+                tmp_path,
+                tmp_path / "instance",
+            )
+        finally:
+            _skills_mod.get_default_skills_dir = orig
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
 # Handler integration tests — verify handlers produce clean format
 # ---------------------------------------------------------------------------
 
