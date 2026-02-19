@@ -47,8 +47,11 @@ make docker-gh-auth
 # Extracts your host's gh token and saves it to .env as GH_TOKEN.
 # Required because macOS Keychain tokens aren't accessible inside Docker.
 
-# 8. Build and start
-docker compose up --build
+# 8. Build and start (runs setup-docker.sh first, then starts detached)
+make docker-up
+
+# Or start in the foreground to watch logs directly:
+# docker compose up --build
 ```
 
 Verify it's running:
@@ -80,18 +83,22 @@ git clone https://github.com/you/myapp.git workspace/myapp
 When you run `./setup-docker.sh`, it:
 
 1. **Resolves symlinks** — Docker can't follow host symlinks. The script
-   resolves all workspace entries to their real paths, computes their common
-   parent directory, and emits a **single** bind mount covering that parent
-   as `/app/workspace`. This replaces N per-project mounts with one.
+   resolves each `workspace/<name>` entry to its real path and emits a
+   **per-project bind mount**: `<real_path> → /app/workspace/<name>`.
+   Each project gets its own mount in `docker-compose.override.yml`.
 2. **Generates `projects.docker.yaml`** — maps each workspace entry to its
    container path (e.g. `/app/workspace/<name>`). This file is mounted as
    `/app/projects.docker.yaml` and copied to `/app/projects.yaml` at
    container startup so atomic writes work correctly.
-3. **Generates `docker-compose.override.yml`** — adds the resolved volume
-   mounts and host UID/GID.
+   The script uses **smart merge**: if the file already exists, it only
+   adds missing project entries — it never overwrites custom settings you've
+   added manually. Safe to re-run at any time.
+3. **Generates `docker-compose.override.yml`** — adds the per-project
+   workspace mounts, auth directory mounts, and host UID/GID.
 
 To add a new project later, symlink it into `workspace/` and re-run
-`./setup-docker.sh`.
+`./setup-docker.sh` (or `make docker-setup`). Existing project entries in
+`projects.docker.yaml` are preserved.
 
 ### Editing `projects.docker.yaml`
 
@@ -154,11 +161,17 @@ If either process crashes, the entrypoint restarts it automatically.
 |------|-----------|---------|
 | `./instance/` | `/app/instance/` | Runtime state (missions, memory, journal) |
 | `instance/missions.docker.md` | `/app/instance/missions.md` | Isolated mission queue (see below) |
-| `./workspace/` | `/app/workspace/` | Project repositories |
+| *(per-project — see below)* | `/app/workspace/<name>` | Project repositories (one mount per project) |
 | `./logs/` | `/app/logs/` | Log files |
 | `./claude-auth/` | `/home/koan/.claude/` | Claude CLI auth state (interactive login) |
 | `projects.docker.yaml` | `/app/projects.docker.yaml` | Project config template (copied to `projects.yaml` on startup) |
 | `~/.config/gh` | `/home/koan/.config/gh` | GitHub CLI auth (read-only) |
+
+> **Workspace mounts are per-project and dynamic.** The base `docker-compose.yml`
+> contains no workspace mounts. `setup-docker.sh` resolves each `workspace/<name>`
+> symlink to its real host path and writes individual bind mounts into
+> `docker-compose.override.yml` (e.g. `/real/path/to/myapp:/app/workspace/myapp`).
+> Re-run `./setup-docker.sh` after adding or removing projects.
 
 ### Isolated mission queue
 
@@ -277,10 +290,20 @@ If you're on Linux (where tokens are stored as plain text in `~/.config/gh`),
 the mounted config directory may work directly. Re-run `./setup-docker.sh` to
 ensure the mount is set up.
 
-### "projects section required" or no projects found
+### No projects found or workspace entries missing
 
-Re-run `./setup-docker.sh` to regenerate `projects.docker.yaml` from your
-current `workspace/` layout.
+If Kōan starts but doesn't see any projects, the `projects.docker.yaml` file
+may be missing a `projects:` section or workspace entries. Re-run
+`./setup-docker.sh` — it automatically adds the `projects:` section if
+absent, and appends any workspace entries that are not yet listed:
+
+```bash
+./setup-docker.sh
+docker compose up --build -d
+```
+
+Existing entries and custom settings in `projects.docker.yaml` are never
+overwritten.
 
 ### Container keeps restarting
 
