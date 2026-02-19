@@ -34,6 +34,7 @@ from app.github_url_parser import ISSUE_URL_PATTERN, PR_URL_PATTERN
 _SKILL_RUNNERS = {
     "plan": "app.plan_runner",
     "implement": "skills.core.implement.implement_runner",
+    "fix": "skills.core.fix.fix_runner",
     "rebase": "app.rebase_pr",
     "recreate": "app.recreate_pr",
     "ai": "app.ai_runner",
@@ -195,6 +196,7 @@ def build_skill_command(
     _COMMAND_BUILDERS = {
         "plan": lambda: _build_plan_cmd(base_cmd, args, project_path),
         "implement": lambda: _build_implement_cmd(base_cmd, args, project_path),
+        "fix": lambda: _build_implement_cmd(base_cmd, args, project_path),
         "rebase": lambda: _build_pr_url_cmd(base_cmd, args, project_path),
         "recreate": lambda: _build_pr_url_cmd(base_cmd, args, project_path),
         "ai": lambda: _build_ai_cmd(base_cmd, project_name, project_path, instance_dir),
@@ -344,11 +346,11 @@ def validate_skill_args(command: str, args: str) -> Optional[str]:
                 f"/{command} requires a PR URL "
                 f"(e.g. https://github.com/owner/repo/pull/123)"
             )
-    elif command == "implement":
+    elif command in ("implement", "fix"):
         if not _ISSUE_URL_RE.search(args):
             return (
-                "/implement requires an issue URL "
-                "(e.g. https://github.com/owner/repo/issues/42)"
+                f"/{command} requires an issue URL "
+                f"(e.g. https://github.com/owner/repo/issues/42)"
             )
     elif command == "check":
         if not (_PR_URL_RE.search(args) or _ISSUE_URL_RE.search(args)):

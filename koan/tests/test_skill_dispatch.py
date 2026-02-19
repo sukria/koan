@@ -281,6 +281,33 @@ class TestBuildSkillCommand:
         cmd = self._build("implement", url)
         assert "--context" not in cmd
 
+    def test_fix_with_issue_url(self):
+        url = "https://github.com/Anantys/investmindr/issues/42"
+        cmd = self._build("fix", url)
+        assert cmd is not None
+        assert "skills.core.fix.fix_runner" in cmd
+        assert "--issue-url" in cmd
+        assert url in cmd
+        assert "--project-path" in cmd
+
+    def test_fix_with_context(self):
+        url = "https://github.com/Anantys/investmindr/issues/42"
+        cmd = self._build("fix", f"{url} backend only")
+        assert cmd is not None
+        assert "--issue-url" in cmd
+        assert url in cmd
+        assert "--context" in cmd
+        assert "backend only" in cmd
+
+    def test_fix_no_url(self):
+        cmd = self._build("fix", "just fix the login bug")
+        assert cmd is None
+
+    def test_fix_url_only_no_context(self):
+        url = "https://github.com/Anantys/investmindr/issues/99"
+        cmd = self._build("fix", url)
+        assert "--context" not in cmd
+
     def test_python_path(self):
         """Commands should use sys.executable (works in venv and Docker)."""
         import sys
@@ -971,6 +998,25 @@ class TestValidateSkillArgs:
         assert validate_skill_args(
             "implement",
             "https://github.com/sukria/koan/issues/42 Phase 1 to 3",
+        ) is None
+
+    def test_fix_valid_issue_url(self):
+        assert validate_skill_args("fix", "https://github.com/Anantys/investmindr/issues/42") is None
+
+    def test_fix_no_url(self):
+        err = validate_skill_args("fix", "fix the login bug")
+        assert err is not None
+        assert "/fix requires an issue URL" in err
+
+    def test_fix_pr_url_not_issue(self):
+        err = validate_skill_args("fix", "https://github.com/sukria/koan/pull/42")
+        assert err is not None
+        assert "/fix requires an issue URL" in err
+
+    def test_fix_url_with_context(self):
+        assert validate_skill_args(
+            "fix",
+            "https://github.com/Anantys/investmindr/issues/42 backend only",
         ) is None
 
 
