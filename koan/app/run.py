@@ -678,10 +678,14 @@ def _notify_mission_end(
 
 
 def _read_current_project(koan_root: str) -> str:
-    """Read the current project name from .koan-project, with fallback."""
+    """Read the current project name from .koan-project, safely.
+
+    Returns the project name or "unknown" if the file cannot be read
+    (missing, locked, or corrupt).
+    """
     try:
-        return Path(koan_root, ".koan-project").read_text().strip()
-    except (FileNotFoundError, OSError):
+        return Path(koan_root, ".koan-project").read_text().strip() or "unknown"
+    except Exception:
         return "unknown"
 
 
@@ -1244,11 +1248,7 @@ def _run_iteration(
         log("error", f"Pre-iteration GitHub notification check failed: {e}")
 
     # Plan iteration (delegated to iteration_manager)
-    last_project = ""
-    try:
-        last_project = Path(koan_root, ".koan-project").read_text().strip()
-    except Exception as e:
-        log("error", f"Failed to read last project file: {e}")
+    last_project = _read_current_project(koan_root)
     plan = plan_iteration(
         instance_dir=instance,
         koan_root=koan_root,
