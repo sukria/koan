@@ -48,8 +48,8 @@ class TestFetchNotificationsLogging:
         with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
             fetch_unread_notifications()
 
-        assert "not mention" in caplog.text
-        assert "reason=assign" in caplog.text
+        assert "skipped 1 non-mention" in caplog.text
+        assert "assign=1" in caplog.text
 
     @patch("app.github_notifications.api")
     def test_logs_skipped_unknown_repo(self, mock_api, caplog):
@@ -64,7 +64,8 @@ class TestFetchNotificationsLogging:
         with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
             fetch_unread_notifications(known_repos={"o/known"})
 
-        assert "not in known repos" in caplog.text
+        assert "unknown repos" in caplog.text
+        assert "o/unknown" in caplog.text
 
     @patch("app.github_notifications.api")
     def test_logs_mention_count_after_filtering(self, mock_api, caplog):
@@ -108,12 +109,12 @@ class TestFetchAndFilterCommentLogging:
     def test_logs_no_comment(self, mock_stale, mock_comment, caplog):
         from app.github_command_handler import _fetch_and_filter_comment
 
-        notif = {"id": "99"}
+        notif = {"id": "99", "repository": {"full_name": "o/r"}}
         with caplog.at_level(logging.DEBUG, logger="app.github_command_handler"):
             result = _fetch_and_filter_comment(notif, "bot", 24)
 
         assert result is None
-        assert "no comment found" in caplog.text
+        assert "no comment" in caplog.text
 
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.is_self_mention", return_value=True)
@@ -455,7 +456,7 @@ class TestProcessNotificationsDebugLogging:
     @patch("app.loop_manager._get_known_repos_from_projects")
     @patch("app.utils.load_config")
     def test_logs_fetched_count(
-        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path, caplog
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path, capsys
     ):
         from app.loop_manager import process_github_notifications
 
@@ -467,10 +468,10 @@ class TestProcessNotificationsDebugLogging:
         notifs = [
             {"id": "1", "repository": {"full_name": "o/r"}, "subject": {"url": "", "title": "T", "type": "PR"}},
         ]
-        with caplog.at_level(logging.DEBUG, logger="app.loop_manager"), \
-             patch("app.projects_config.load_projects_config", return_value={}), \
+        with patch("app.projects_config.load_projects_config", return_value={}), \
              patch("app.github_notifications.fetch_unread_notifications", return_value=notifs), \
              patch("app.github_command_handler.process_single_notification", return_value=(False, None)):
             process_github_notifications(str(tmp_path), str(tmp_path))
 
-        assert "fetched 1 mention notification(s)" in caplog.text
+        captured = capsys.readouterr()
+        assert "Fetched 1" in captured.out

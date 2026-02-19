@@ -208,21 +208,26 @@ def _fetch_and_filter_comment(notification: dict, bot_username: str, max_age_hou
         The comment dict if notification should be processed, or None to skip.
     """
     thread_id = notification.get("id", "?")
+    repo_name = notification.get("repository", {}).get("full_name", "?")
+
     # Check staleness
     if is_notification_stale(notification, max_age_hours):
-        log.debug("GitHub: skipping notification %s — stale", thread_id)
+        log.debug("GitHub: skipping notification %s from %s — stale (>%dh)", thread_id, repo_name, max_age_hours)
         mark_notification_read(str(notification.get("id", "")))
         return None
 
     # Get comment
     comment = get_comment_from_notification(notification)
     if not comment:
-        log.debug("GitHub: skipping notification %s — no comment found", thread_id)
+        log.debug("GitHub: skipping notification %s from %s — no comment body found", thread_id, repo_name)
         return None
+
+    comment_author = comment.get("user", {}).get("login", "?")
+    log.debug("GitHub: notification %s from %s — comment by @%s", thread_id, repo_name, comment_author)
 
     # Skip self-mentions
     if is_self_mention(comment, bot_username):
-        log.debug("GitHub: skipping notification %s — self-mention", thread_id)
+        log.debug("GitHub: skipping notification %s — self-mention (author=%s)", thread_id, comment_author)
         mark_notification_read(str(notification.get("id", "")))
         return None
 
@@ -340,13 +345,18 @@ def process_single_notification(
     # Check permissions
     allowed_users = get_github_authorized_users(config, project_name, projects_config)
     if not check_user_permission(owner, repo, comment_author, allowed_users):
-        log.debug("GitHub: permission denied for user %s on %s/%s", comment_author, owner, repo)
+        log.debug(
+            "GitHub: permission denied for @%s on %s/%s (allowed: %s)",
+            comment_author, owner, repo,
+            ", ".join(allowed_users) if allowed_users else "none",
+        )
         return False, "Permission denied. Only users with write access can trigger bot commands."
 
     # Build and insert mission BEFORE reacting (so crash doesn't lose command)
     mission_entry = build_mission_from_command(
         skill, command_name, context, notification, project_name,
     )
+    log.info("GitHub: inserting mission from @%s: %s", comment_author, mission_entry)
 
     from app.utils import insert_pending_mission
     from pathlib import Path

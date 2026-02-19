@@ -43,38 +43,57 @@ def fetch_unread_notifications(known_repos: Optional[Set[str]] = None) -> List[d
     """
     try:
         raw = api("notifications", extra_args=["--paginate"])
-    except (RuntimeError, subprocess.TimeoutExpired, OSError):
+    except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
+        log.debug("GitHub API: failed to fetch notifications: %s", e)
         return []
 
     if not raw:
+        log.debug("GitHub API: empty response from notifications endpoint")
         return []
 
     try:
         notifications = json.loads(raw)
     except json.JSONDecodeError:
+        log.debug("GitHub API: invalid JSON in notifications response")
         return []
 
     if not isinstance(notifications, list):
+        log.debug("GitHub API: unexpected response type: %s", type(notifications).__name__)
         return []
 
     log.debug("GitHub API: %d total unread notifications", len(notifications))
 
+    skipped_reasons: Dict[str, int] = {}
+    skipped_repos: List[str] = []
     results = []
     for notif in notifications:
         reason = notif.get("reason", "?")
         repo_name = notif.get("repository", {}).get("full_name", "?")
 
         if reason != "mention":
-            log.debug("GitHub: skipping notification from %s — reason=%s (not mention)", repo_name, reason)
+            skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
             continue
 
-        # Filter by known repos if provided
+        # Filter by known repos if provided — normalize for comparison
         if known_repos:
-            if repo_name not in known_repos:
-                log.debug("GitHub: skipping mention from %s — not in known repos", repo_name)
+            repo_lower = repo_name.lower()
+            if repo_lower not in known_repos:
+                skipped_repos.append(repo_name)
                 continue
 
         results.append(notif)
+
+    if skipped_reasons:
+        log.debug(
+            "GitHub: skipped %d non-mention notifications: %s",
+            sum(skipped_reasons.values()),
+            ", ".join(f"{r}={c}" for r, c in sorted(skipped_reasons.items())),
+        )
+    if skipped_repos:
+        log.debug(
+            "GitHub: skipped %d mentions from unknown repos: %s",
+            len(skipped_repos), ", ".join(skipped_repos),
+        )
 
     log.debug("GitHub: %d mention notification(s) after filtering", len(results))
     return results

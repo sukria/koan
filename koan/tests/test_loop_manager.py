@@ -690,6 +690,343 @@ class TestGitHubNotificationBackoff:
         assert lm._consecutive_empty_checks == 3
 
 
+# --- Test _normalize_github_url ---
+
+
+class TestNormalizeGithubUrl:
+    """Test URL normalization for known_repos matching."""
+
+    def test_owner_repo_passthrough(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("sukria/koan") == "sukria/koan"
+
+    def test_full_https_url(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("https://github.com/sukria/koan") == "sukria/koan"
+
+    def test_full_url_with_trailing_slash(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("https://github.com/sukria/koan/") == "sukria/koan"
+
+    def test_full_url_with_git_suffix(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("https://github.com/sukria/koan.git") == "sukria/koan"
+
+    def test_http_url(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("http://github.com/sukria/koan") == "sukria/koan"
+
+    def test_case_insensitive(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("Sukria/Koan") == "sukria/koan"
+
+    def test_full_url_case_insensitive(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("https://github.com/Sukria/Koan") == "sukria/koan"
+
+    def test_owner_repo_with_git_suffix(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("sukria/koan.git") == "sukria/koan"
+
+    def test_whitespace_trimmed(self):
+        from app.loop_manager import _normalize_github_url
+        assert _normalize_github_url("  sukria/koan  ") == "sukria/koan"
+
+
+# --- Test _get_known_repos_from_projects ---
+
+
+class TestGetKnownReposFromProjects:
+    """Test known_repos extraction with URL normalization."""
+
+    def setup_method(self):
+        from app.loop_manager import reset_github_backoff
+        reset_github_backoff()
+
+    @patch("app.projects_config.load_projects_config")
+    def test_returns_none_when_no_config(self, mock_load):
+        from app.loop_manager import _get_known_repos_from_projects
+        mock_load.return_value = None
+        assert _get_known_repos_from_projects("/tmp") is None
+
+    @patch("app.projects_config.load_projects_config")
+    def test_returns_none_when_no_github_urls(self, mock_load):
+        from app.loop_manager import _get_known_repos_from_projects
+        mock_load.return_value = {"projects": {"myapp": {"path": "/tmp/myapp"}}}
+        assert _get_known_repos_from_projects("/tmp") is None
+
+    @patch("app.projects_config.load_projects_config")
+    def test_normalizes_owner_repo_format(self, mock_load):
+        from app.loop_manager import _get_known_repos_from_projects
+        mock_load.return_value = {
+            "projects": {"koan": {"path": "/tmp/koan", "github_url": "sukria/koan"}}
+        }
+        repos = _get_known_repos_from_projects("/tmp")
+        assert repos == {"sukria/koan"}
+
+    @patch("app.projects_config.load_projects_config")
+    def test_normalizes_full_url_format(self, mock_load):
+        from app.loop_manager import _get_known_repos_from_projects
+        mock_load.return_value = {
+            "projects": {"koan": {"path": "/tmp/koan", "github_url": "https://github.com/sukria/koan"}}
+        }
+        repos = _get_known_repos_from_projects("/tmp")
+        assert repos == {"sukria/koan"}
+
+    @patch("app.projects_config.load_projects_config")
+    def test_normalizes_mixed_formats(self, mock_load):
+        from app.loop_manager import _get_known_repos_from_projects
+        mock_load.return_value = {
+            "projects": {
+                "koan": {"path": "/tmp/koan", "github_url": "https://github.com/sukria/koan"},
+                "myapp": {"path": "/tmp/myapp", "github_url": "alice/myapp"},
+            }
+        }
+        repos = _get_known_repos_from_projects("/tmp")
+        assert repos == {"sukria/koan", "alice/myapp"}
+
+    @patch("app.projects_config.load_projects_config")
+    def test_lowercase_normalization(self, mock_load):
+        from app.loop_manager import _get_known_repos_from_projects
+        mock_load.return_value = {
+            "projects": {"koan": {"path": "/tmp/koan", "github_url": "Sukria/Koan"}}
+        }
+        repos = _get_known_repos_from_projects("/tmp")
+        assert repos == {"sukria/koan"}
+
+
+# --- Test _github_log ---
+
+
+class TestGithubLog:
+    """Test console-visible logging helper."""
+
+    def test_prints_with_github_prefix(self, capsys):
+        from app.loop_manager import _github_log
+        _github_log("test message")
+        captured = capsys.readouterr()
+        assert "[github] test message" in captured.out
+
+    def test_prints_debug_messages(self, capsys):
+        from app.loop_manager import _github_log
+        _github_log("debug msg", "debug")
+        captured = capsys.readouterr()
+        assert "[github] debug msg" in captured.out
+
+    def test_prints_warning_messages(self, capsys):
+        from app.loop_manager import _github_log
+        _github_log("warn msg", "warning")
+        captured = capsys.readouterr()
+        assert "[github] warn msg" in captured.out
+
+
+# --- Test _load_github_config logging ---
+
+
+class TestLoadGithubConfigLogging:
+    """Test that _load_github_config logs configuration state."""
+
+    def setup_method(self):
+        from app.loop_manager import reset_github_backoff
+        reset_github_backoff()
+
+    def test_logs_when_commands_disabled(self, capsys):
+        from app.loop_manager import _load_github_config
+        result = _load_github_config({}, "/tmp", "/tmp/instance")
+        assert result is None
+        captured = capsys.readouterr()
+        assert "[github]" in captured.out
+        assert "disabled" in captured.out.lower() or "not set" in captured.out.lower()
+
+    def test_logs_when_nickname_missing(self, capsys):
+        from app.loop_manager import _load_github_config
+        config = {"github": {"commands_enabled": True}}
+        result = _load_github_config(config, "/tmp", "/tmp/instance")
+        assert result is None
+        captured = capsys.readouterr()
+        assert "[github]" in captured.out
+        assert "nickname" in captured.out.lower()
+
+    def test_logs_monitoring_on_success(self, capsys):
+        from app.loop_manager import _load_github_config
+        config = {"github": {"commands_enabled": True, "nickname": "koan-bot"}}
+        result = _load_github_config(config, "/tmp", "/tmp/instance")
+        assert result is not None
+        assert result["nickname"] == "koan-bot"
+        captured = capsys.readouterr()
+        assert "[github]" in captured.out
+        assert "koan-bot" in captured.out
+
+    def test_logs_only_once(self, capsys):
+        from app.loop_manager import _load_github_config
+        config = {"github": {"commands_enabled": True, "nickname": "koan-bot"}}
+        _load_github_config(config, "/tmp", "/tmp/instance")
+        _load_github_config(config, "/tmp", "/tmp/instance")
+        captured = capsys.readouterr()
+        # Count occurrences of the monitoring message
+        lines = [l for l in captured.out.strip().split("\n") if "[github]" in l]
+        assert len(lines) == 1, f"Expected 1 log line, got {len(lines)}: {lines}"
+
+
+# --- Test process_github_notifications with console output ---
+
+
+class TestProcessNotificationsConsoleOutput:
+    """Test that process_github_notifications produces console-visible output."""
+
+    def setup_method(self):
+        from app.loop_manager import reset_github_backoff
+        reset_github_backoff()
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_logs_fetched_notifications(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path, capsys
+    ):
+        from app.loop_manager import process_github_notifications
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"nickname": "bot", "bot_username": "bot", "max_age": 24}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        fake_notif = {
+            "id": "1",
+            "repository": {"full_name": "sukria/koan"},
+            "subject": {"url": "https://api.github.com/repos/sukria/koan/issues/1",
+                        "title": "Test issue", "type": "Issue"},
+            "updated_at": "2026-02-19T12:00:00Z",
+        }
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_command_handler.process_single_notification", return_value=(True, None)), \
+             patch("app.loop_manager._notify_mission_from_mention"):
+            result = process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "[github]" in captured.out
+        assert "Fetched 1" in captured.out
+        assert "Mission queued" in captured.out
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_logs_error_notifications(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path, capsys
+    ):
+        from app.loop_manager import process_github_notifications
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"nickname": "bot", "bot_username": "bot", "max_age": 24}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        fake_notif = {
+            "id": "2",
+            "repository": {"full_name": "sukria/koan"},
+            "subject": {"url": "https://api.github.com/repos/sukria/koan/issues/2",
+                        "title": "Error issue", "type": "Issue"},
+            "updated_at": "2026-02-19T12:00:00Z",
+        }
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_command_handler.process_single_notification", return_value=(False, "Permission denied")), \
+             patch("app.loop_manager._post_error_for_notification"):
+            result = process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "[github]" in captured.out
+        assert "Permission denied" in captured.out
+
+
+# --- Test fetch_unread_notifications enhanced logging ---
+
+
+class TestFetchNotificationsLogging:
+    """Test improved logging in fetch_unread_notifications."""
+
+    @patch("app.github_notifications.api")
+    def test_logs_skipped_reason_summary(self, mock_api, caplog):
+        import json
+        import logging
+        from app.github_notifications import fetch_unread_notifications
+
+        mock_api.return_value = json.dumps([
+            {"reason": "review_requested", "repository": {"full_name": "a/b"}},
+            {"reason": "review_requested", "repository": {"full_name": "c/d"}},
+            {"reason": "assign", "repository": {"full_name": "e/f"}},
+            {"reason": "mention", "repository": {"full_name": "sukria/koan"}},
+        ])
+
+        with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
+            result = fetch_unread_notifications()
+
+        assert len(result) == 1
+        assert "skipped 3 non-mention" in caplog.text
+        assert "review_requested=2" in caplog.text
+        assert "assign=1" in caplog.text
+
+    @patch("app.github_notifications.api")
+    def test_logs_skipped_unknown_repos(self, mock_api, caplog):
+        import json
+        import logging
+        from app.github_notifications import fetch_unread_notifications
+
+        mock_api.return_value = json.dumps([
+            {"reason": "mention", "repository": {"full_name": "unknown/repo"}},
+        ])
+
+        known = {"sukria/koan"}
+        with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
+            result = fetch_unread_notifications(known)
+
+        assert len(result) == 0
+        assert "skipped 1 mentions from unknown repos" in caplog.text
+        assert "unknown/repo" in caplog.text
+
+    @patch("app.github_notifications.api")
+    def test_known_repos_case_insensitive(self, mock_api):
+        import json
+        from app.github_notifications import fetch_unread_notifications
+
+        mock_api.return_value = json.dumps([
+            {"reason": "mention", "repository": {"full_name": "Sukria/Koan"}},
+        ])
+
+        known = {"sukria/koan"}  # lowercase
+        result = fetch_unread_notifications(known)
+        assert len(result) == 1  # Should match despite case difference
+
+    @patch("app.github_notifications.api")
+    def test_logs_api_error(self, mock_api, caplog):
+        import logging
+        from app.github_notifications import fetch_unread_notifications
+
+        mock_api.side_effect = RuntimeError("connection refused")
+        with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
+            result = fetch_unread_notifications()
+
+        assert result == []
+        assert "failed to fetch" in caplog.text
+
+    @patch("app.github_notifications.api")
+    def test_logs_empty_response(self, mock_api, caplog):
+        import logging
+        from app.github_notifications import fetch_unread_notifications
+
+        mock_api.return_value = ""
+        with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
+            result = fetch_unread_notifications()
+
+        assert result == []
+        assert "empty response" in caplog.text
+
+
 # --- Test CLI interface ---
 
 
