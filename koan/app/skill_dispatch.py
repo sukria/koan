@@ -325,6 +325,38 @@ def _build_claudemd_cmd(
     ]
 
 
+def validate_skill_args(command: str, args: str) -> Optional[str]:
+    """Return a human-readable error if args are invalid for a known command.
+
+    Returns None if the command is unknown (caller should handle that case)
+    or if the args are valid.
+
+    Note: validation mirrors the URL checks in _build_pr_url_cmd,
+    _build_implement_cmd, and _build_check_cmd. Update both when
+    adding new URL-requiring skills.
+    """
+    if command not in _SKILL_RUNNERS:
+        return None
+
+    if command in ("rebase", "recreate"):
+        if not _PR_URL_RE.search(args):
+            return (
+                f"/{command} requires a PR URL "
+                f"(e.g. https://github.com/owner/repo/pull/123)"
+            )
+    elif command == "implement":
+        if not _ISSUE_URL_RE.search(args):
+            return (
+                "/implement requires an issue URL "
+                "(e.g. https://github.com/owner/repo/issues/42)"
+            )
+    elif command == "check":
+        if not (_PR_URL_RE.search(args) or _ISSUE_URL_RE.search(args)):
+            return "/check requires a GitHub URL (PR or issue)"
+
+    return None
+
+
 def translate_cli_skill_mission(
     mission_text: str,
     koan_root: Path,

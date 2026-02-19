@@ -8,6 +8,7 @@ from app.skill_dispatch import (
     parse_skill_mission,
     build_skill_command,
     dispatch_skill_mission,
+    validate_skill_args,
 )
 
 
@@ -890,6 +891,90 @@ class TestIsKnownProject:
 
 
 # ---------------------------------------------------------------------------
+# validate_skill_args
+# ---------------------------------------------------------------------------
+
+class TestValidateSkillArgs:
+    """Tests for validate_skill_args() — argument validation with user-facing messages."""
+
+    def test_rebase_valid_url(self):
+        assert validate_skill_args("rebase", "https://github.com/sukria/koan/pull/42") is None
+
+    def test_rebase_no_url(self):
+        err = validate_skill_args("rebase", "just some text")
+        assert err is not None
+        assert "/rebase requires a PR URL" in err
+
+    def test_rebase_empty_args(self):
+        err = validate_skill_args("rebase", "")
+        assert err is not None
+        assert "/rebase requires a PR URL" in err
+
+    def test_recreate_valid_url(self):
+        assert validate_skill_args("recreate", "https://github.com/sukria/koan/pull/100") is None
+
+    def test_recreate_no_url(self):
+        err = validate_skill_args("recreate", "no url here")
+        assert err is not None
+        assert "/recreate requires a PR URL" in err
+
+    def test_implement_valid_issue_url(self):
+        assert validate_skill_args("implement", "https://github.com/sukria/koan/issues/42") is None
+
+    def test_implement_no_url(self):
+        err = validate_skill_args("implement", "fix the login bug")
+        assert err is not None
+        assert "/implement requires an issue URL" in err
+
+    def test_implement_pr_url_not_issue(self):
+        err = validate_skill_args("implement", "https://github.com/sukria/koan/pull/42")
+        assert err is not None
+        assert "/implement requires an issue URL" in err
+
+    def test_check_valid_pr_url(self):
+        assert validate_skill_args("check", "https://github.com/sukria/koan/pull/42") is None
+
+    def test_check_valid_issue_url(self):
+        assert validate_skill_args("check", "https://github.com/sukria/koan/issues/42") is None
+
+    def test_check_no_url(self):
+        err = validate_skill_args("check", "no url here")
+        assert err is not None
+        assert "/check requires a GitHub URL" in err
+
+    def test_plan_always_valid(self):
+        """Plan accepts free text — no arg validation error."""
+        assert validate_skill_args("plan", "Add dark mode") is None
+        assert validate_skill_args("plan", "") is None
+
+    def test_ai_always_valid(self):
+        """AI has no arg requirements."""
+        assert validate_skill_args("ai", "") is None
+        assert validate_skill_args("ai", "koan") is None
+
+    def test_claudemd_always_valid(self):
+        assert validate_skill_args("claudemd", "koan") is None
+
+    def test_unknown_command_returns_none(self):
+        """Unknown commands return None — caller handles that case."""
+        assert validate_skill_args("nonexistent", "whatever") is None
+
+    def test_rebase_url_with_surrounding_text(self):
+        """URL embedded in text should still validate."""
+        assert validate_skill_args(
+            "rebase",
+            "please rebase https://github.com/sukria/koan/pull/42 thanks",
+        ) is None
+
+    def test_implement_url_with_context(self):
+        """Issue URL with trailing context should validate."""
+        assert validate_skill_args(
+            "implement",
+            "https://github.com/sukria/koan/issues/42 Phase 1 to 3",
+        ) is None
+
+
+# ---------------------------------------------------------------------------
 # Fallthrough guard: skill missions that fail dispatch should not go to Claude
 # ---------------------------------------------------------------------------
 
@@ -933,3 +1018,30 @@ class TestSkillMissionFallthroughGuard:
         assert cmd is None
         # In run.py, this case now fails the mission instead of
         # falling through to Claude agent
+
+    def test_known_command_bad_args_gives_specific_error(self):
+        """A known command with bad args should give a specific error, not 'unknown'."""
+        mission = "/rebase just some text without a URL"
+        assert is_skill_mission(mission) is True
+        cmd = dispatch_skill_mission(
+            mission_text=mission,
+            project_name="koan",
+            project_path="/workspace/koan",
+            koan_root="/koan",
+            instance_dir="/koan/instance",
+        )
+        assert cmd is None
+        # validate_skill_args distinguishes this from unknown commands
+        _, cmd_name, cmd_args = parse_skill_mission(mission)
+        assert cmd_name == "rebase"
+        err = validate_skill_args(cmd_name, cmd_args)
+        assert err is not None
+        assert "PR URL" in err
+
+    def test_unknown_command_no_specific_error(self):
+        """A truly unknown command has no arg-level error."""
+        mission = "/nonexistent do things"
+        _, cmd_name, cmd_args = parse_skill_mission(mission)
+        assert cmd_name == "nonexistent"
+        err = validate_skill_args(cmd_name, cmd_args)
+        assert err is None  # No specific error — it's just unknown

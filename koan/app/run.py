@@ -1069,8 +1069,17 @@ def _handle_skill_dispatch(
             return False, translated
 
         _debug_log(f"[run] skill mission unhandled, failing: {mission_title[:200]}")
-        log("warning", f"Skill mission has no runner, failing: {mission_title[:80]}")
-        _notify(instance, f"⚠️ [{project_name}] Unknown skill command: {mission_title[:80]}")
+
+        # Differentiate "unknown command" from "known command, bad arguments"
+        from app.skill_dispatch import parse_skill_mission, validate_skill_args
+        _, cmd_name, cmd_args = parse_skill_mission(mission_title)
+        arg_error = validate_skill_args(cmd_name, cmd_args) if cmd_name else None
+        if arg_error:
+            log("warning", f"Skill mission invalid args: {arg_error}")
+            _notify(instance, f"⚠️ [{project_name}] {arg_error}")
+        else:
+            log("warning", f"Skill mission has no runner, failing: {mission_title[:80]}")
+            _notify(instance, f"⚠️ [{project_name}] Unknown skill command: {mission_title[:80]}")
         _finalize_mission(instance, mission_title, project_name, exit_code=1)
         _commit_instance(instance)
         return True, mission_title
