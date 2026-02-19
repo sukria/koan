@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: install setup start stop status
+.PHONY: install setup start stop status restart
 .PHONY: clean say migrate test sync-instance
 .PHONY: awake run errand-run errand-awake dashboard
 .PHONY: ollama logs
@@ -45,6 +45,11 @@ migrate: setup
 
 dashboard: setup
 	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/dashboard.py
+
+restart:
+	$(MAKE) stop
+	@sleep 1
+	$(MAKE) start
 
 ifeq ($(USE_SYSTEMD),1)
 
