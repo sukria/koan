@@ -2025,6 +2025,90 @@ class TestRunIterationErrorAction:
 # Test: claude_exit initialization (prevents UnboundLocalError)
 # ---------------------------------------------------------------------------
 
+class TestRunIterationProjectRefresh:
+    """_run_iteration refreshes projects list each iteration."""
+
+    @patch("app.run.plan_iteration")
+    @patch("app.run._notify")
+    def test_refreshed_projects_passed_to_plan(self, mock_notify, mock_plan, koan_root):
+        """When get_known_projects returns updated list, plan_iteration sees it."""
+        from app.run import _run_iteration
+
+        refreshed_projects = [("test", str(koan_root)), ("new-proj", "/tmp/new")]
+
+        mock_plan.return_value = {
+            "action": "error",
+            "error": "test-stop",
+            "project_name": "test",
+            "project_path": str(koan_root),
+            "mission_title": "",
+            "autonomous_mode": "implement",
+            "focus_area": "",
+            "available_pct": 50,
+            "decision_reason": "Default",
+            "display_lines": [],
+            "recurring_injected": [],
+        }
+
+        instance = str(koan_root / "instance")
+
+        with patch("app.utils.get_known_projects", return_value=refreshed_projects):
+            with pytest.raises(RuntimeError):
+                _run_iteration(
+                    koan_root=str(koan_root),
+                    instance=instance,
+                    projects=[("test", str(koan_root))],
+                    count=0,
+                    max_runs=5,
+                    interval=10,
+                    git_sync_interval=5,
+                )
+
+        # plan_iteration should have received the refreshed list
+        call_kwargs = mock_plan.call_args[1]
+        assert call_kwargs["projects"] == refreshed_projects
+
+    @patch("app.run.plan_iteration")
+    @patch("app.run._notify")
+    def test_empty_refresh_keeps_original(self, mock_notify, mock_plan, koan_root):
+        """If get_known_projects returns empty, original list is kept."""
+        from app.run import _run_iteration
+
+        original_projects = [("test", str(koan_root))]
+
+        mock_plan.return_value = {
+            "action": "error",
+            "error": "test-stop",
+            "project_name": "test",
+            "project_path": str(koan_root),
+            "mission_title": "",
+            "autonomous_mode": "implement",
+            "focus_area": "",
+            "available_pct": 50,
+            "decision_reason": "Default",
+            "display_lines": [],
+            "recurring_injected": [],
+        }
+
+        instance = str(koan_root / "instance")
+
+        with patch("app.utils.get_known_projects", return_value=[]):
+            with pytest.raises(RuntimeError):
+                _run_iteration(
+                    koan_root=str(koan_root),
+                    instance=instance,
+                    projects=original_projects,
+                    count=0,
+                    max_runs=5,
+                    interval=10,
+                    git_sync_interval=5,
+                )
+
+        # plan_iteration should keep the original list
+        call_kwargs = mock_plan.call_args[1]
+        assert call_kwargs["projects"] == original_projects
+
+
 class TestClaudeExitInit:
     """claude_exit must be initialized before the try block so that
     build_mission_command failures don't cause UnboundLocalError at the

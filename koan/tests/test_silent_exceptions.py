@@ -63,7 +63,7 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     ("schedule_manager.py", 186),    # schedule check
     ("usage_tracker.py", 282),       # budget file read
     ("usage_tracker.py", 297),       # budget file read
-    ("projects_merged.py", 220),     # github URL cache build
+    ("projects_merged.py", 245),     # github URL cache build
     # --- Setup wizard (interactive, errors shown in UI) ---
     ("setup_wizard.py", 85),         # config loading
     ("setup_wizard.py", 183),        # project path resolution
@@ -73,8 +73,8 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     ("recreate_pr.py", 118),         # local branch delete (may not exist)
     ("recreate_pr.py", 222),         # fetch from origin/upstream fallback
     ("recreate_pr.py", 272),         # git log check fallback
-    ("run.py", 1640),                # get current branch (best-effort)
-    ("run.py", 1808),                # temp file cleanup
+    ("run.py", 1646),                # get current branch (best-effort)
+    ("run.py", 1814),                # temp file cleanup
     # --- Prompt/config loading with hardcoded fallback ---
     ("local_llm_runner.py", 321),    # system prompt file fallback
     ("pid_manager.py", 468),         # provider detection fallback

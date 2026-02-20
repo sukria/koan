@@ -172,8 +172,7 @@ class TestCaching:
         (ws / "proj").mkdir()
 
         result1 = get_all_projects(str(koan_root))
-        # Remove the project — cached result should persist
-        (ws / "proj").rmdir()
+        # Second call without changes — should return cached result
         result2 = get_all_projects(str(koan_root))
         assert result1 == result2
 
@@ -200,6 +199,71 @@ class TestCaching:
 
         result = refresh_projects(str(koan_root))
         assert len(result) == 2
+
+    def test_workspace_change_invalidates_cache(self, koan_root):
+        """Adding a project to workspace/ invalidates cache automatically."""
+        ws = koan_root / "workspace"
+        (ws / "proj1").mkdir()
+
+        result1 = get_all_projects(str(koan_root))
+        assert len(result1) == 1
+
+        # Adding a new directory changes workspace/ mtime
+        (ws / "proj2").mkdir()
+
+        # get_all_projects should detect the mtime change and re-scan
+        result2 = get_all_projects(str(koan_root))
+        assert len(result2) == 2
+        names = [n for n, _ in result2]
+        assert "proj1" in names
+        assert "proj2" in names
+
+    def test_workspace_mtime_no_change_cache_hit(self, koan_root):
+        """When workspace/ mtime unchanged, cache is used."""
+        ws = koan_root / "workspace"
+        (ws / "proj").mkdir()
+
+        result1 = get_all_projects(str(koan_root))
+        # Modify a file inside the workspace project (doesn't change ws/ mtime)
+        (ws / "proj" / "README.md").write_text("hello")
+        result2 = get_all_projects(str(koan_root))
+        assert result1 == result2
+
+    def test_no_workspace_dir_cache_works(self, tmp_path):
+        """Cache works even when workspace/ doesn't exist."""
+        proj_dir = tmp_path / "myapp"
+        proj_dir.mkdir()
+        _write_projects_yaml(tmp_path, f"""
+projects:
+  myapp:
+    path: "{proj_dir}"
+""")
+        result1 = get_all_projects(str(tmp_path))
+        result2 = get_all_projects(str(tmp_path))
+        assert result1 == result2 == [("myapp", str(proj_dir))]
+
+    def test_workspace_created_after_cache_invalidates(self, tmp_path):
+        """Creating workspace/ after initial cache triggers rescan."""
+        proj_dir = tmp_path / "myapp"
+        proj_dir.mkdir()
+        _write_projects_yaml(tmp_path, f"""
+projects:
+  myapp:
+    path: "{proj_dir}"
+""")
+        result1 = get_all_projects(str(tmp_path))
+        assert len(result1) == 1
+
+        # Create workspace/ with a new project
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "ws-proj").mkdir()
+
+        result2 = get_all_projects(str(tmp_path))
+        assert len(result2) == 2
+        names = [n for n, _ in result2]
+        assert "myapp" in names
+        assert "ws-proj" in names
 
 
 class TestGithubUrlCache:

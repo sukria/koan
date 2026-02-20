@@ -1147,6 +1147,12 @@ def _run_iteration(
     print()
     print(bold_cyan(f"=== Run {run_num}/{max_runs} — {time.strftime('%Y-%m-%d %H:%M:%S')} ==="))
 
+    # Refresh project list (picks up workspace changes since startup)
+    from app.utils import get_known_projects
+    refreshed = get_known_projects()
+    if refreshed:
+        projects = refreshed
+
     # Plan iteration (delegated to iteration_manager)
     last_project = ""
     try:

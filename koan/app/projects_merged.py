@@ -22,6 +22,7 @@ _cached_projects: Optional[List[Tuple[str, str]]] = None
 _cached_warnings: List[str] = []
 _cached_root: Optional[str] = None
 _cached_yaml_mtime: Optional[float] = None
+_cached_workspace_mtime: Optional[float] = None
 _github_url_cache: Dict[str, str] = {}
 
 
@@ -37,8 +38,8 @@ def get_all_projects(koan_root: str) -> List[Tuple[str, str]]:
     """
     with _lock:
         if _cached_projects is not None and _cached_root == koan_root:
-            # Invalidate if projects.yaml changed on disk
-            if not _is_yaml_stale(koan_root):
+            # Invalidate if projects.yaml or workspace/ changed on disk
+            if not _is_yaml_stale(koan_root) and not _is_workspace_stale(koan_root):
                 return list(_cached_projects)
 
     return refresh_projects(koan_root)
@@ -58,6 +59,26 @@ def _is_yaml_stale(koan_root: str) -> bool:
     Must be called with _lock held.
     """
     return _get_yaml_mtime(koan_root) != _cached_yaml_mtime
+
+
+def _get_workspace_mtime(koan_root: str) -> Optional[float]:
+    """Get workspace/ directory mtime, or None if missing.
+
+    The directory mtime changes whenever entries are added or removed,
+    which is exactly when workspace project discovery needs to re-scan.
+    """
+    try:
+        return (Path(koan_root) / "workspace").stat().st_mtime
+    except OSError:
+        return None
+
+
+def _is_workspace_stale(koan_root: str) -> bool:
+    """Check if workspace/ directory mtime differs from cached value.
+
+    Must be called with _lock held.
+    """
+    return _get_workspace_mtime(koan_root) != _cached_workspace_mtime
 
 
 def refresh_projects(koan_root: str) -> List[Tuple[str, str]]:
@@ -153,11 +174,13 @@ def _apply_project_limit(
 def _update_cache(koan_root: str, projects: List[Tuple[str, str]], warnings: List[str]) -> None:
     """Update the thread-safe cache with new project list and warnings."""
     with _lock:
-        global _cached_projects, _cached_warnings, _cached_root, _cached_yaml_mtime
+        global _cached_projects, _cached_warnings, _cached_root
+        global _cached_yaml_mtime, _cached_workspace_mtime
         _cached_projects = list(projects)
         _cached_warnings = list(warnings)
         _cached_root = koan_root
         _cached_yaml_mtime = _get_yaml_mtime(koan_root)
+        _cached_workspace_mtime = _get_workspace_mtime(koan_root)
 
 
 def get_warnings() -> List[str]:
@@ -169,11 +192,13 @@ def get_warnings() -> List[str]:
 def invalidate_cache() -> None:
     """Clear the project cache. Next get_all_projects() call will re-scan."""
     with _lock:
-        global _cached_projects, _cached_warnings, _cached_root, _cached_yaml_mtime
+        global _cached_projects, _cached_warnings, _cached_root
+        global _cached_yaml_mtime, _cached_workspace_mtime
         _cached_projects = None
         _cached_warnings = []
         _cached_root = None
         _cached_yaml_mtime = None
+        _cached_workspace_mtime = None
 
 
 def get_github_url_cache() -> Dict[str, str]:
