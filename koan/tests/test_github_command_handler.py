@@ -8,6 +8,7 @@ import pytest
 
 from app.github_command_handler import (
     _error_replies,
+    _try_reply,
     build_mission_from_command,
     extract_issue_number_from_notification,
     format_help_message,
@@ -439,3 +440,215 @@ class TestProcessSingleNotification:
         )
         # Notification should be marked as read for invalid commands
         mock_read.assert_called_with("12345")
+
+
+class TestTryReply:
+    """Tests for the _try_reply helper that generates AI replies."""
+
+    @pytest.fixture
+    def reply_notification(self):
+        return {
+            "id": "77777",
+            "subject": {
+                "url": "https://api.github.com/repos/sukria/koan/issues/42",
+            },
+            "repository": {"full_name": "sukria/koan"},
+        }
+
+    @pytest.fixture
+    def reply_comment(self):
+        return {
+            "id": 55555,
+            "body": "@bot what do you think about this?",
+            "user": {"login": "alice"},
+        }
+
+    @pytest.fixture
+    def reply_config(self):
+        return {
+            "github": {
+                "nickname": "bot",
+                "reply_enabled": True,
+                "authorized_users": ["*"],
+            }
+        }
+
+    def test_disabled_returns_false(self, reply_notification, reply_comment):
+        config = {"github": {"reply_enabled": False}}
+        result = _try_reply(
+            reply_notification, reply_comment, config, None,
+            "bot", "sukria", "koan", "koan", "what?",
+        )
+        assert result is False
+
+    def test_missing_config_returns_false(self, reply_notification, reply_comment):
+        result = _try_reply(
+            reply_notification, reply_comment, {}, None,
+            "bot", "sukria", "koan", "koan", "what?",
+        )
+        assert result is False
+
+    @patch("app.github_command_handler.check_user_permission", return_value=False)
+    def test_unauthorized_user_returns_false(
+        self, mock_perm, reply_notification, reply_comment, reply_config,
+    ):
+        result = _try_reply(
+            reply_notification, reply_comment, reply_config, None,
+            "bot", "sukria", "koan", "koan", "what?",
+        )
+        assert result is False
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.generate_reply", return_value="Here is my reply")
+    @patch("app.github_reply.fetch_thread_context", return_value={
+        "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
+    })
+    @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
+    def test_successful_reply(
+        self, mock_resolve, mock_ctx, mock_gen, mock_post,
+        mock_perm, mock_react, mock_read,
+        reply_notification, reply_comment, reply_config,
+    ):
+        result = _try_reply(
+            reply_notification, reply_comment, reply_config, None,
+            "bot", "sukria", "koan", "koan", "what do you think?",
+        )
+        assert result is True
+        mock_gen.assert_called_once()
+        mock_post.assert_called_once_with("sukria", "koan", "42", "Here is my reply")
+        # Should react with eyes emoji (not thumbs up)
+        mock_react.assert_called_once_with("sukria", "koan", "55555", emoji="eyes")
+
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_reply.generate_reply", return_value=None)
+    @patch("app.github_reply.fetch_thread_context", return_value={
+        "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
+    })
+    @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
+    def test_generation_failure_returns_false(
+        self, mock_resolve, mock_ctx, mock_gen, mock_perm,
+        reply_notification, reply_comment, reply_config,
+    ):
+        result = _try_reply(
+            reply_notification, reply_comment, reply_config, None,
+            "bot", "sukria", "koan", "koan", "question",
+        )
+        assert result is False
+
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_reply.post_reply", return_value=False)
+    @patch("app.github_reply.generate_reply", return_value="reply text")
+    @patch("app.github_reply.fetch_thread_context", return_value={
+        "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
+    })
+    @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
+    def test_post_failure_returns_false(
+        self, mock_resolve, mock_ctx, mock_gen, mock_post, mock_perm,
+        reply_notification, reply_comment, reply_config,
+    ):
+        result = _try_reply(
+            reply_notification, reply_comment, reply_config, None,
+            "bot", "sukria", "koan", "koan", "question",
+        )
+        assert result is False
+
+    def test_no_issue_number_returns_false(self, reply_comment, reply_config):
+        notif = {"id": "1", "subject": {"url": ""}, "repository": {"full_name": "o/r"}}
+        with patch("app.github_command_handler.check_user_permission", return_value=True):
+            result = _try_reply(
+                notif, reply_comment, reply_config, None,
+                "bot", "o", "r", "proj", "q",
+            )
+        assert result is False
+
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.utils.resolve_project_path", return_value=None)
+    def test_no_project_path_returns_false(
+        self, mock_resolve, mock_perm, reply_notification, reply_comment, reply_config,
+    ):
+        result = _try_reply(
+            reply_notification, reply_comment, reply_config, None,
+            "bot", "sukria", "koan", "koan", "q",
+        )
+        assert result is False
+
+
+class TestProcessNotificationWithReply:
+    """Tests for reply integration in process_single_notification."""
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.generate_reply", return_value="AI reply here")
+    @patch("app.github_reply.fetch_thread_context", return_value={
+        "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
+    })
+    @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
+    def test_unknown_command_triggers_reply_when_enabled(
+        self, mock_resolve_path, mock_ctx, mock_gen, mock_post,
+        mock_resolve, mock_comment, mock_stale, mock_self,
+        mock_processed, mock_perm, mock_react, mock_read,
+        registry, sample_notification,
+    ):
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99999, "body": "@testbot what do you think about this PR?",
+            "user": {"login": "alice"},
+        }
+        config = {
+            "github": {
+                "nickname": "testbot",
+                "reply_enabled": True,
+                "authorized_users": ["*"],
+            }
+        }
+
+        success, error = process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+
+        # Reply was posted, no error message
+        assert success is False
+        assert error is None
+        mock_gen.assert_called_once()
+        mock_post.assert_called_once()
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_unknown_command_falls_back_to_help_when_reply_disabled(
+        self, mock_resolve, mock_comment, mock_stale, mock_self,
+        mock_processed, mock_read, registry, sample_notification,
+    ):
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99999, "body": "@testbot what do you think?",
+            "user": {"login": "alice"},
+        }
+        config = {
+            "github": {
+                "nickname": "testbot",
+                "reply_enabled": False,
+            }
+        }
+
+        success, error = process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+
+        # Falls back to help message
+        assert success is False
+        assert error is not None
+        assert "`what`" in error

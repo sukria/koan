@@ -153,3 +153,6 @@ usage:
 #   commands_enabled: false          # Master switch (default: false)
 #   authorized_users: ["*"]          # "*" = all users, or list of GitHub usernames
 #   max_age_hours: 24                # Ignore notifications older than this (default: 24)
+#   reply_enabled: false             # AI replies to non-command @mentions (default: false)
+#                                    # When enabled, the bot replies to questions/requests
+#                                    # from authorized users with contextual AI-generated answers.
