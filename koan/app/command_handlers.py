@@ -23,6 +23,7 @@ from app.skills import Skill, SkillContext, execute_skill
 from app.utils import (
     parse_project as _parse_project,
     detect_project_from_text,
+    get_known_projects,
     insert_pending_mission,
 )
 
@@ -46,6 +47,15 @@ CORE_COMMANDS = frozenset({
     "help", "stop", "sleep", "resume", "skill",
     "pause", "work", "awake", "start", "run",  # aliases for sleep/resume
 })
+
+
+def _is_known_project(name: str) -> bool:
+    """Check if a name matches a known project (case-insensitive)."""
+    try:
+        return name.lower() in {n.lower() for n, _ in get_known_projects()}
+    except Exception as e:
+        log("error", f"Project lookup failed: {e}")
+        return False
 
 
 def handle_command(text: str):
@@ -115,6 +125,14 @@ def handle_command(text: str):
             skill, subcommand, skill_args = resolved
             _dispatch_skill(skill, subcommand, skill_args)
             return
+
+    # Project-name fallback: if the "command" is actually a known project name,
+    # rewrite as "/mission <project> <context>" so the user can write e.g.
+    # "/koan fix the bug" instead of "/mission koan fix the bug".
+    # This is the very last fallback to avoid collision with existing skills.
+    if _is_known_project(command_name) and command_args:
+        handle_mission(f"{command_name} {command_args}")
+        return
 
     # Unknown command — reject immediately instead of wasting LLM credits
     send_telegram(f"❌ Unknown command: /{command_name}\nUse /help to see available commands.")

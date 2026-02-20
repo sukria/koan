@@ -154,6 +154,163 @@ class TestHandleCommandRouting:
 
 
 # ---------------------------------------------------------------------------
+# Test: project-name fallback for unknown commands
+# ---------------------------------------------------------------------------
+
+class TestProjectNameFallback:
+    """Tests for the fallback that rewrites '/project context' as a mission."""
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("koan", "/path/koan"), ("backend", "/path/backend")])
+    @patch("app.command_handlers.handle_mission")
+    def test_project_name_with_args_becomes_mission(
+        self, mock_mission, mock_projects,
+        patch_bridge_state, mock_send, mock_registry
+    ):
+        """'/koan fix the bug' → handle_mission('koan fix the bug')."""
+        from app.command_handlers import handle_command
+        handle_command("/koan fix the bug")
+        mock_mission.assert_called_once_with("koan fix the bug")
+        mock_send.assert_not_called()
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("koan", "/path/koan")])
+    @patch("app.command_handlers.handle_mission")
+    def test_project_name_without_args_stays_unknown(
+        self, mock_mission, mock_projects,
+        patch_bridge_state, mock_send, mock_registry
+    ):
+        """'/koan' alone (no context) should NOT fallback — stays unknown."""
+        from app.command_handlers import handle_command
+        handle_command("/koan")
+        mock_mission.assert_not_called()
+        mock_send.assert_called_once()
+        assert "Unknown command" in mock_send.call_args[0][0]
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("koan", "/path/koan")])
+    @patch("app.command_handlers.handle_mission")
+    def test_unknown_name_not_a_project_stays_unknown(
+        self, mock_mission, mock_projects,
+        patch_bridge_state, mock_send, mock_registry
+    ):
+        """'/foobar do stuff' where foobar is not a project → unknown command."""
+        from app.command_handlers import handle_command
+        handle_command("/foobar do stuff")
+        mock_mission.assert_not_called()
+        mock_send.assert_called_once()
+        assert "Unknown command" in mock_send.call_args[0][0]
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("Backend", "/path/backend")])
+    @patch("app.command_handlers.handle_mission")
+    def test_project_name_case_insensitive(
+        self, mock_mission, mock_projects,
+        patch_bridge_state, mock_send, mock_registry
+    ):
+        """'/BACKEND fix it' should match even with different casing."""
+        from app.command_handlers import handle_command
+        handle_command("/BACKEND fix it")
+        mock_mission.assert_called_once_with("backend fix it")
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("status", "/path/status")])
+    def test_existing_skill_takes_priority_over_project(
+        self, mock_projects,
+        patch_bridge_state, mock_send, mock_registry
+    ):
+        """If 'status' is both a skill and a project, skill wins."""
+        from app.command_handlers import handle_command
+        from app.skills import Skill
+
+        skill = MagicMock(spec=Skill)
+        skill.worker = False
+        mock_registry.find_by_command.return_value = skill
+
+        with patch("app.command_handlers.execute_skill", return_value="ok") as mock_exec, \
+             patch("app.command_handlers.handle_mission") as mock_mission:
+            handle_command("/status check things")
+            mock_exec.assert_called_once()
+            mock_mission.assert_not_called()
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("koan", "/p/koan"), ("tmf", "/p/tmf")])
+    @patch("app.command_handlers.handle_mission")
+    def test_project_fallback_with_multiword_context(
+        self, mock_mission, mock_projects,
+        patch_bridge_state, mock_send, mock_registry
+    ):
+        """'/tmf fix the broken test in auth module' passes full context."""
+        from app.command_handlers import handle_command
+        handle_command("/tmf fix the broken test in auth module")
+        mock_mission.assert_called_once_with("tmf fix the broken test in auth module")
+
+    @patch("app.command_handlers.get_known_projects", return_value=[])
+    @patch("app.command_handlers.handle_mission")
+    def test_no_projects_configured_still_unknown(
+        self, mock_mission, mock_projects,
+        patch_bridge_state, mock_send, mock_registry
+    ):
+        """When no projects are configured, fallback doesn't trigger."""
+        from app.command_handlers import handle_command
+        handle_command("/anything do stuff")
+        mock_mission.assert_not_called()
+        assert "Unknown command" in mock_send.call_args[0][0]
+
+    @patch("app.command_handlers.get_known_projects",
+           side_effect=Exception("config broken"))
+    @patch("app.command_handlers.handle_mission")
+    def test_project_lookup_failure_falls_through(
+        self, mock_mission, mock_projects,
+        patch_bridge_state, mock_send, mock_registry
+    ):
+        """If get_known_projects raises, gracefully fall through to unknown."""
+        from app.command_handlers import handle_command
+        handle_command("/koan fix stuff")
+        mock_mission.assert_not_called()
+        assert "Unknown command" in mock_send.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# Test: _is_known_project helper
+# ---------------------------------------------------------------------------
+
+class TestIsKnownProject:
+    """Tests for the _is_known_project helper function."""
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("koan", "/path"), ("backend", "/path2")])
+    def test_known_project_returns_true(self, mock_projects):
+        from app.command_handlers import _is_known_project
+        assert _is_known_project("koan") is True
+        assert _is_known_project("backend") is True
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("koan", "/path")])
+    def test_unknown_name_returns_false(self, mock_projects):
+        from app.command_handlers import _is_known_project
+        assert _is_known_project("foobar") is False
+
+    @patch("app.command_handlers.get_known_projects",
+           return_value=[("Koan", "/path")])
+    def test_case_insensitive(self, mock_projects):
+        from app.command_handlers import _is_known_project
+        assert _is_known_project("koan") is True
+        assert _is_known_project("KOAN") is True
+
+    @patch("app.command_handlers.get_known_projects", return_value=[])
+    def test_empty_projects(self, mock_projects):
+        from app.command_handlers import _is_known_project
+        assert _is_known_project("anything") is False
+
+    @patch("app.command_handlers.get_known_projects",
+           side_effect=Exception("boom"))
+    def test_exception_returns_false(self, mock_projects):
+        from app.command_handlers import _is_known_project
+        assert _is_known_project("koan") is False
+
+
+# ---------------------------------------------------------------------------
 # Test: handle_resume
 # ---------------------------------------------------------------------------
 
