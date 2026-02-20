@@ -362,6 +362,11 @@ def _try_reply(
         comment_author, owner, repo, issue_number,
     )
 
+    # Notify on Telegram: question received from GitHub
+    _notify_github_question(
+        comment_author, owner, repo, issue_number, question_text,
+    )
+
     from app.github_reply import (
         fetch_thread_context,
         generate_reply,
@@ -392,6 +397,11 @@ def _try_reply(
     # Mark as processed
     add_reaction(owner, repo, comment_id, emoji="eyes")
     mark_notification_read(str(notification.get("id", "")))
+
+    # Notify on Telegram: reply posted to GitHub
+    _notify_github_reply(
+        owner, repo, issue_number, reply_text,
+    )
 
     log.info("GitHub reply: posted reply to @%s on %s/%s#%s", comment_author, owner, repo, issue_number)
     return True
@@ -537,6 +547,37 @@ def post_error_reply(
         return True
     except RuntimeError:
         return False
+
+
+def _notify_github_question(
+    author: str, owner: str, repo: str, issue_number: str, question: str,
+) -> None:
+    """Send ❓ Telegram notification when a question is received from GitHub."""
+    try:
+        from app.notify import send_telegram
+        # Truncate question for Telegram readability
+        short = question[:200] + "…" if len(question) > 200 else question
+        send_telegram(
+            f"❓ GitHub question from @{author}\n"
+            f"{owner}/{repo}#{issue_number}: {short}"
+        )
+    except Exception as e:
+        log.debug("Failed to send GitHub question notification: %s", e)
+
+
+def _notify_github_reply(
+    owner: str, repo: str, issue_number: str, reply_text: str,
+) -> None:
+    """Send 💬 Telegram notification when Kōan posts a reply on GitHub."""
+    try:
+        from app.notify import send_telegram
+        short = reply_text[:200] + "…" if len(reply_text) > 200 else reply_text
+        send_telegram(
+            f"💬 Replied on GitHub\n"
+            f"{owner}/{repo}#{issue_number}: {short}"
+        )
+    except Exception as e:
+        log.debug("Failed to send GitHub reply notification: %s", e)
 
 
 def extract_issue_number_from_notification(notification: dict) -> Optional[str]:

@@ -430,7 +430,7 @@ def _notify_mission_from_mention(notif: dict) -> None:
         subject_title = notif.get("subject", {}).get("title", "?")
         subject_type = notif.get("subject", {}).get("type", "?").lower()
         send_telegram(
-            f"📬 GitHub @mention → mission queued\n"
+            f"❓ GitHub @mention → mission queued\n"
             f"{repo_name} ({subject_type}): {subject_title}"
         )
     except Exception as e:

@@ -8,6 +8,8 @@ import pytest
 
 from app.github_command_handler import (
     _error_replies,
+    _notify_github_question,
+    _notify_github_reply,
     _try_reply,
     build_mission_from_command,
     extract_issue_number_from_notification,
@@ -547,6 +549,8 @@ class TestTryReply:
         )
         assert result is False
 
+    @patch("app.github_command_handler._notify_github_reply")
+    @patch("app.github_command_handler._notify_github_question")
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.add_reaction", return_value=True)
     @patch("app.github_command_handler.check_user_permission", return_value=True)
@@ -559,6 +563,7 @@ class TestTryReply:
     def test_successful_reply(
         self, mock_resolve, mock_ctx, mock_gen, mock_post,
         mock_perm, mock_react, mock_read,
+        mock_notify_q, mock_notify_r,
         reply_notification, reply_comment, reply_config,
     ):
         result = _try_reply(
@@ -570,7 +575,16 @@ class TestTryReply:
         mock_post.assert_called_once_with("sukria", "koan", "42", "Here is my reply")
         # Should react with eyes emoji (not thumbs up)
         mock_react.assert_called_once_with("sukria", "koan", "55555", emoji="eyes")
+        # Should send Telegram notifications
+        mock_notify_q.assert_called_once_with(
+            "alice", "sukria", "koan", "42", "what do you think?",
+        )
+        mock_notify_r.assert_called_once_with(
+            "sukria", "koan", "42", "Here is my reply",
+        )
 
+    @patch("app.github_command_handler._notify_github_reply")
+    @patch("app.github_command_handler._notify_github_question")
     @patch("app.github_command_handler.check_user_permission", return_value=True)
     @patch("app.github_reply.generate_reply", return_value=None)
     @patch("app.github_reply.fetch_thread_context", return_value={
@@ -579,6 +593,7 @@ class TestTryReply:
     @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
     def test_generation_failure_returns_false(
         self, mock_resolve, mock_ctx, mock_gen, mock_perm,
+        mock_notify_q, mock_notify_r,
         reply_notification, reply_comment, reply_config,
     ):
         result = _try_reply(
@@ -586,7 +601,12 @@ class TestTryReply:
             "bot", "sukria", "koan", "koan", "question",
         )
         assert result is False
+        # Question notification is sent, but reply notification is NOT
+        mock_notify_q.assert_called_once()
+        mock_notify_r.assert_not_called()
 
+    @patch("app.github_command_handler._notify_github_reply")
+    @patch("app.github_command_handler._notify_github_question")
     @patch("app.github_command_handler.check_user_permission", return_value=True)
     @patch("app.github_reply.post_reply", return_value=False)
     @patch("app.github_reply.generate_reply", return_value="reply text")
@@ -596,6 +616,7 @@ class TestTryReply:
     @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
     def test_post_failure_returns_false(
         self, mock_resolve, mock_ctx, mock_gen, mock_post, mock_perm,
+        mock_notify_q, mock_notify_r,
         reply_notification, reply_comment, reply_config,
     ):
         result = _try_reply(
@@ -603,6 +624,9 @@ class TestTryReply:
             "bot", "sukria", "koan", "koan", "question",
         )
         assert result is False
+        # Question notification sent, but reply notification NOT (post failed)
+        mock_notify_q.assert_called_once()
+        mock_notify_r.assert_not_called()
 
     def test_no_issue_number_returns_false(self, reply_comment, reply_config):
         notif = {"id": "1", "subject": {"url": ""}, "repository": {"full_name": "o/r"}}
@@ -701,3 +725,54 @@ class TestProcessNotificationWithReply:
         assert success is False
         assert error is not None
         assert "`what`" in error
+
+
+class TestGitHubTelegramNotifications:
+    """Tests for ❓ and 💬 Telegram notifications from GitHub interactions."""
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_question_notification_sends_telegram(self, mock_send):
+        _notify_github_question("alice", "sukria", "koan", "42", "What about this?")
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "❓" in msg
+        assert "@alice" in msg
+        assert "sukria/koan#42" in msg
+        assert "What about this?" in msg
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_question_notification_truncates_long_text(self, mock_send):
+        long_question = "x" * 300
+        _notify_github_question("bob", "owner", "repo", "7", long_question)
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "…" in msg
+        # Should truncate to 200 chars + ellipsis
+        assert len(long_question) > len(msg)
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_reply_notification_sends_telegram(self, mock_send):
+        _notify_github_reply("sukria", "koan", "42", "Here is my analysis.")
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "💬" in msg
+        assert "sukria/koan#42" in msg
+        assert "Here is my analysis." in msg
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_reply_notification_truncates_long_text(self, mock_send):
+        long_reply = "y" * 300
+        _notify_github_reply("owner", "repo", "7", long_reply)
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "…" in msg
+
+    @patch("app.notify.send_telegram", side_effect=Exception("network error"))
+    def test_question_notification_swallows_errors(self, mock_send):
+        # Should not raise — error is caught internally
+        _notify_github_question("alice", "o", "r", "1", "question")
+
+    @patch("app.notify.send_telegram", side_effect=Exception("network error"))
+    def test_reply_notification_swallows_errors(self, mock_send):
+        # Should not raise — error is caught internally
+        _notify_github_reply("o", "r", "1", "reply")
