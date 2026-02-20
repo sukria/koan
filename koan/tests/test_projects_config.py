@@ -13,7 +13,9 @@ from app.projects_config import (
     get_project_exploration,
     get_project_max_open_prs,
     get_project_models,
+    get_project_submit_to_repository,
     get_project_tools,
+    resolve_base_branch,
     validate_project_paths,
     _validate_config,
 )
@@ -1160,3 +1162,225 @@ projects:
         with patch("app.config._load_config", return_value={"models": {"mission": "opus"}}):
             result = get_claude_flags_for_role("mission", project_name="nonexistent")
         assert "opus" in result
+
+
+# ---------------------------------------------------------------------------
+# resolve_base_branch
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBaseBranch:
+    """Tests for resolve_base_branch() — resolves base branch from projects.yaml."""
+
+    def test_returns_main_by_default(self, monkeypatch):
+        """No KOAN_ROOT set — returns 'main'."""
+        monkeypatch.delenv("KOAN_ROOT", raising=False)
+        assert resolve_base_branch("app") == "main"
+
+    def test_returns_main_when_no_projects_yaml(self, tmp_path, monkeypatch):
+        """KOAN_ROOT set but no projects.yaml — returns 'main'."""
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        assert resolve_base_branch("app") == "main"
+
+    def test_returns_configured_base_branch(self, tmp_path, monkeypatch):
+        """projects.yaml has base_branch configured — returns it."""
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "projects.yaml").write_text("""
+projects:
+  backend:
+    path: /tmp/backend
+    git_auto_merge:
+      base_branch: staging
+""")
+        assert resolve_base_branch("backend") == "staging"
+
+    def test_inherits_default_base_branch(self, tmp_path, monkeypatch):
+        """defaults.git_auto_merge.base_branch inherited when project doesn't override."""
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "projects.yaml").write_text("""
+defaults:
+  git_auto_merge:
+    base_branch: develop
+projects:
+  app:
+    path: /tmp/app
+""")
+        assert resolve_base_branch("app") == "develop"
+
+    def test_project_overrides_default_base_branch(self, tmp_path, monkeypatch):
+        """Project-level base_branch overrides defaults."""
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "projects.yaml").write_text("""
+defaults:
+  git_auto_merge:
+    base_branch: develop
+projects:
+  app:
+    path: /tmp/app
+    git_auto_merge:
+      base_branch: release
+""")
+        assert resolve_base_branch("app") == "release"
+
+    def test_unknown_project_returns_default(self, tmp_path, monkeypatch):
+        """Unknown project inherits defaults — returns 'main' if no default set."""
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "projects.yaml").write_text("""
+projects:
+  app:
+    path: /tmp/app
+""")
+        assert resolve_base_branch("nonexistent") == "main"
+
+    def test_unknown_project_inherits_default_branch(self, tmp_path, monkeypatch):
+        """Unknown project inherits defaults.git_auto_merge.base_branch."""
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "projects.yaml").write_text("""
+defaults:
+  git_auto_merge:
+    base_branch: develop
+projects:
+  app:
+    path: /tmp/app
+""")
+        assert resolve_base_branch("nonexistent") == "develop"
+
+    def test_empty_koan_root_returns_main(self, monkeypatch):
+        """KOAN_ROOT set to empty string — returns 'main'."""
+        monkeypatch.setenv("KOAN_ROOT", "")
+        assert resolve_base_branch("app") == "main"
+
+    def test_invalid_yaml_returns_main(self, tmp_path, monkeypatch):
+        """Broken projects.yaml — returns 'main' gracefully."""
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "projects.yaml").write_text("not: [valid yaml")
+        assert resolve_base_branch("app") == "main"
+
+    def test_no_auto_merge_section_returns_main(self, tmp_path, monkeypatch):
+        """Project exists but has no git_auto_merge config."""
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "projects.yaml").write_text("""
+projects:
+  app:
+    path: /tmp/app
+    cli_provider: claude
+""")
+        assert resolve_base_branch("app") == "main"
+
+
+# ---------------------------------------------------------------------------
+# get_project_submit_to_repository (additional tests in test_projects_config)
+# ---------------------------------------------------------------------------
+
+
+class TestGetProjectSubmitToRepository:
+    """Tests for get_project_submit_to_repository() — fork submission config."""
+
+    def test_returns_empty_when_not_configured(self):
+        config = {"projects": {"app": {"path": "/app"}}}
+        assert get_project_submit_to_repository(config, "app") == {}
+
+    def test_returns_repo_and_remote(self):
+        config = {
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "submit_to_repository": {
+                        "repo": "upstream/app",
+                        "remote": "upstream",
+                    },
+                }
+            }
+        }
+        result = get_project_submit_to_repository(config, "app")
+        assert result == {"repo": "upstream/app", "remote": "upstream"}
+
+    def test_returns_repo_only(self):
+        config = {
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "submit_to_repository": {"repo": "upstream/app"},
+                }
+            }
+        }
+        result = get_project_submit_to_repository(config, "app")
+        assert result == {"repo": "upstream/app"}
+
+    def test_returns_remote_only(self):
+        config = {
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "submit_to_repository": {"remote": "upstream"},
+                }
+            }
+        }
+        result = get_project_submit_to_repository(config, "app")
+        assert result == {"remote": "upstream"}
+
+    def test_inherits_from_defaults(self):
+        config = {
+            "defaults": {
+                "submit_to_repository": {"repo": "default/repo", "remote": "upstream"},
+            },
+            "projects": {"app": {"path": "/app"}},
+        }
+        result = get_project_submit_to_repository(config, "app")
+        assert result == {"repo": "default/repo", "remote": "upstream"}
+
+    def test_project_overrides_defaults(self):
+        config = {
+            "defaults": {
+                "submit_to_repository": {"repo": "default/repo", "remote": "upstream"},
+            },
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "submit_to_repository": {"repo": "custom/repo", "remote": "origin"},
+                }
+            },
+        }
+        result = get_project_submit_to_repository(config, "app")
+        assert result == {"repo": "custom/repo", "remote": "origin"}
+
+    def test_invalid_type_returns_empty(self):
+        config = {
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "submit_to_repository": "invalid",
+                }
+            }
+        }
+        assert get_project_submit_to_repository(config, "app") == {}
+
+    def test_unknown_project_returns_default(self):
+        config = {
+            "defaults": {"submit_to_repository": {"repo": "up/stream"}},
+            "projects": {"app": {"path": "/app"}},
+        }
+        result = get_project_submit_to_repository(config, "unknown")
+        assert result == {"repo": "up/stream"}
+
+    def test_empty_values_excluded(self):
+        config = {
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "submit_to_repository": {"repo": "", "remote": "upstream"},
+                }
+            }
+        }
+        result = get_project_submit_to_repository(config, "app")
+        # Empty repo should not appear in result
+        assert "repo" not in result
+        assert result == {"remote": "upstream"}
+
+    def test_none_project_config_returns_default(self):
+        config = {
+            "defaults": {"submit_to_repository": {"repo": "up/stream"}},
+            "projects": {"app": None},
+        }
+        result = get_project_submit_to_repository(config, "app")
+        assert result == {"repo": "up/stream"}
