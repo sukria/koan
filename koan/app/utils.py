@@ -255,11 +255,10 @@ def insert_pending_mission(missions_path: Path, entry: str, *, urgent: bool = Fa
 
     # Thread lock (in-process) + file lock (cross-process) for full protection
     with _MISSIONS_LOCK:
-        if not missions_path.exists():
-            missions_path.write_text(_MISSIONS_DEFAULT)
-
-        with open(missions_path, "r+") as f:
+        # Open with "a+" to create if missing, then lock before any read/write
+        with open(missions_path, "a+") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
+            f.seek(0)
             content = f.read()
             if not content.strip():
                 content = _MISSIONS_DEFAULT
@@ -283,11 +282,10 @@ def modify_missions_file(missions_path: Path, transform):
     Returns the transformed content.
     """
     with _MISSIONS_LOCK:
-        if not missions_path.exists():
-            missions_path.write_text(_MISSIONS_DEFAULT)
-
-        with open(missions_path, "r+") as f:
+        # Open with "a+" to create if missing, then lock before any read/write
+        with open(missions_path, "a+") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
+            f.seek(0)
             content = f.read()
             if not content.strip():
                 content = _MISSIONS_DEFAULT
