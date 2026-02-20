@@ -9,11 +9,13 @@ Two public functions:
 - prepare_project_branch(): Full pre-mission git state preparation.
 """
 
-import sys
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
 from app.git_utils import run_git
+
+logger = logging.getLogger(__name__)
 from app.projects_config import (
     get_project_auto_merge,
     get_project_submit_to_repository,
@@ -51,7 +53,7 @@ def get_upstream_remote(
             if submit_cfg.get("remote"):
                 return submit_cfg["remote"]
     except Exception as e:
-        print(f"[git_prep] config load error for remote: {e}", file=sys.stderr)
+        logger.warning("config load error for remote: %s", e)
 
     # 2. Probe for 'upstream' remote
     rc, _, _ = run_git("remote", "get-url", "upstream", cwd=project_path)
@@ -89,7 +91,7 @@ def prepare_project_branch(
             am = get_project_auto_merge(config, project_name)
             result.base_branch = am.get("base_branch", "main")
     except Exception as e:
-        print(f"[git_prep] config load error for base_branch: {e}", file=sys.stderr)
+        logger.warning("config load error for base_branch: %s", e)
 
     base_branch = result.base_branch
 
@@ -130,7 +132,17 @@ def prepare_project_branch(
         "merge", "--ff-only", f"{remote}/{base_branch}", cwd=project_path
     )
     if rc != 0:
-        # Local diverged — reset to match upstream
+        # Local diverged — log what will be discarded, then reset
+        rc_log, diverged, _ = run_git(
+            "log", f"{remote}/{base_branch}..HEAD", "--oneline",
+            cwd=project_path,
+        )
+        if rc_log == 0 and diverged:
+            logger.warning(
+                "Discarding local commits on %s to match %s/%s:\n%s",
+                base_branch, remote, base_branch, diverged,
+            )
+
         rc, _, stderr = run_git(
             "reset", "--hard", f"{remote}/{base_branch}", cwd=project_path
         )

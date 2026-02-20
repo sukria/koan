@@ -398,7 +398,7 @@ def flush_outbox():
     content = None
     try:
         with open(OUTBOX_FILE, "r+") as f:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_EX)
             try:
                 content = f.read().strip()
                 if content:
@@ -407,8 +407,6 @@ def flush_outbox():
                     f.flush()
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
-    except BlockingIOError:
-        return
     except Exception as e:
         log("error", f"Outbox read error: {e}")
         return
