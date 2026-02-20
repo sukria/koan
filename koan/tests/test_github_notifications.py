@@ -157,6 +157,43 @@ class TestCheckAlreadyProcessed:
         assert check_already_processed("789", "bot", "owner", "repo") is False
 
     @patch("app.github_notifications.api")
+    def test_eyes_reaction_detected(self, mock_api):
+        """AI replies use 'eyes' reaction — should also be detected."""
+        reactions = [{"user": {"login": "bot"}, "content": "eyes"}]
+        mock_api.return_value = json.dumps(reactions)
+
+        assert check_already_processed("500", "bot", "owner", "repo") is True
+        assert "500" in _processed_comments
+
+    @patch("app.github_notifications.api")
+    def test_any_bot_reaction_detected(self, mock_api):
+        """Any reaction from the bot marks the comment as processed."""
+        reactions = [{"user": {"login": "bot"}, "content": "heart"}]
+        mock_api.return_value = json.dumps(reactions)
+
+        assert check_already_processed("501", "bot", "owner", "repo") is True
+
+    @patch("app.github_notifications.api")
+    def test_other_user_eyes_not_detected(self, mock_api):
+        """Reactions from other users should not trigger dedup."""
+        reactions = [{"user": {"login": "someone-else"}, "content": "eyes"}]
+        mock_api.return_value = json.dumps(reactions)
+
+        assert check_already_processed("502", "bot", "owner", "repo") is False
+
+    @patch("app.github_notifications.api")
+    def test_mixed_reactions_bot_detected(self, mock_api):
+        """Bot reaction found among reactions from multiple users."""
+        reactions = [
+            {"user": {"login": "alice"}, "content": "+1"},
+            {"user": {"login": "bot"}, "content": "eyes"},
+            {"user": {"login": "bob"}, "content": "heart"},
+        ]
+        mock_api.return_value = json.dumps(reactions)
+
+        assert check_already_processed("503", "bot", "owner", "repo") is True
+
+    @patch("app.github_notifications.api")
     def test_api_error_returns_false(self, mock_api):
         mock_api.side_effect = RuntimeError("fail")
         assert check_already_processed("999", "bot", "owner", "repo") is False
