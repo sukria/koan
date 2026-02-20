@@ -26,6 +26,8 @@ from app.utils import load_dotenv
 
 load_dotenv()
 
+if "KOAN_ROOT" not in os.environ:
+    raise SystemExit("KOAN_ROOT environment variable is required")
 KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 INSTANCE_DIR = KOAN_ROOT / "instance"
 MISSIONS_FILE = INSTANCE_DIR / "missions.md"

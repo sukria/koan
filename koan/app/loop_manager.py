@@ -280,6 +280,8 @@ def _get_known_repos_from_projects(koan_root: str) -> Optional[set]:
 
     known_repos = set()
     for name, proj in projects_config.get("projects", {}).items():
+        if not isinstance(proj, dict):
+            continue
         gh_url = proj.get("github_url", "")
         if gh_url:
             normalized = _normalize_github_url(gh_url)

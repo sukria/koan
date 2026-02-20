@@ -29,6 +29,21 @@ def _guess_project_name(project_path: str) -> str:
     return Path(project_path).name
 
 
+def _resolve_base_branch(project_name: str) -> str:
+    """Resolve the base branch for a project from config, defaulting to 'main'."""
+    try:
+        from app.projects_config import load_projects_config, get_project_auto_merge
+        koan_root = os.environ.get("KOAN_ROOT", "")
+        if koan_root:
+            config = load_projects_config(koan_root)
+            if config:
+                am = get_project_auto_merge(config, project_name)
+                return am.get("base_branch", "main")
+    except Exception:
+        pass
+    return "main"
+
+
 def run_fix(
     project_path: str,
     issue_url: str,
@@ -331,7 +346,8 @@ def _submit_draft_pr(
     except Exception:
         pass
 
-    commits = _get_commit_subjects(project_path)
+    base_branch = _resolve_base_branch(project_name)
+    commits = _get_commit_subjects(project_path, base_branch=base_branch)
     if not commits:
         logger.info("No commits on branch — skipping PR creation")
         return None
