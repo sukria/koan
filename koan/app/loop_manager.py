@@ -462,7 +462,7 @@ def _post_error_for_notification(notif: dict, error: str) -> None:
         resolve_project_from_notification,
         extract_issue_number_from_notification,
     )
-    from app.github_notifications import get_comment_from_notification, get_comment_type
+    from app.github_notifications import get_comment_from_notification
 
     project_info = resolve_project_from_notification(notif)
     issue_num = extract_issue_number_from_notification(notif)
@@ -471,15 +471,15 @@ def _post_error_for_notification(notif: dict, error: str) -> None:
         return
 
     _, owner, repo = project_info
-    comment_type = get_comment_type(notif)
 
     try:
         comment = get_comment_from_notification(notif)
         if comment:
             comment_id = str(comment.get("id", ""))
+            comment_api_url = comment.get("url", "")
             if comment_id:
                 post_error_reply(owner, repo, issue_num, comment_id, error,
-                                 comment_type=comment_type)
+                                 comment_api_url=comment_api_url)
     except Exception as e:
         print(f"[loop_manager] Error posting reply to GitHub: {e}", file=sys.stderr)
 
