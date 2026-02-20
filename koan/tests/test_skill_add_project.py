@@ -458,7 +458,7 @@ class TestCheckPushAccess:
 class TestCreateForkAndConfigure:
     @patch(f"{P}._get_gh_username", return_value="myuser")
     @patch("app.github.run_gh", return_value="")
-    @patch(f"{P}._run_git")
+    @patch(f"{P}.run_git_strict")
     def test_creates_fork_and_reconfigures(self, mock_git, mock_gh, mock_user):
         result = _mod._create_fork_and_configure(
             "upstream-owner", "repo", "/tmp/project"
@@ -466,16 +466,17 @@ class TestCreateForkAndConfigure:
 
         assert result == "myuser/repo"
         mock_git.assert_any_call(
-            "/tmp/project", "remote", "rename", "origin", "upstream"
+            "remote", "rename", "origin", "upstream", cwd="/tmp/project"
         )
         mock_git.assert_any_call(
-            "/tmp/project", "remote", "add", "origin",
+            "remote", "add", "origin",
             "https://github.com/myuser/repo.git",
+            cwd="/tmp/project",
         )
 
     @patch(f"{P}._get_gh_username", return_value="myuser")
     @patch("app.github.run_gh", side_effect=RuntimeError("already exists"))
-    @patch(f"{P}._run_git")
+    @patch(f"{P}.run_git_strict")
     def test_fork_already_exists_is_ok(self, mock_git, mock_gh, mock_user):
         result = _mod._create_fork_and_configure(
             "upstream-owner", "repo", "/tmp/project"

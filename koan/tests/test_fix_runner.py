@@ -117,11 +117,11 @@ class TestGuessProjectName:
 # ---------------------------------------------------------------------------
 
 class TestGetCurrentBranch:
-    @patch("skills.core.fix.fix_runner._run_git", return_value="koan.atoomic/fix-issue-42\n")
+    @patch("skills.core.fix.fix_runner.run_git_strict", return_value="koan.atoomic/fix-issue-42\n")
     def test_returns_branch(self, mock_git):
         assert _get_current_branch("/path") == "koan.atoomic/fix-issue-42"
 
-    @patch("skills.core.fix.fix_runner._run_git", side_effect=Exception("fail"))
+    @patch("skills.core.fix.fix_runner.run_git_strict", side_effect=Exception("fail"))
     def test_fallback_on_error(self, mock_git):
         assert _get_current_branch("/path") == "main"
 
@@ -131,16 +131,16 @@ class TestGetCurrentBranch:
 # ---------------------------------------------------------------------------
 
 class TestGetCommitSubjects:
-    @patch("skills.core.fix.fix_runner._run_git", return_value="Fix auth bug\nAdd test\n")
+    @patch("skills.core.fix.fix_runner.run_git_strict", return_value="Fix auth bug\nAdd test\n")
     def test_returns_subjects(self, mock_git):
         subjects = _get_commit_subjects("/path")
         assert subjects == ["Fix auth bug", "Add test"]
 
-    @patch("skills.core.fix.fix_runner._run_git", return_value="")
+    @patch("skills.core.fix.fix_runner.run_git_strict", return_value="")
     def test_empty_on_no_commits(self, mock_git):
         assert _get_commit_subjects("/path") == []
 
-    @patch("skills.core.fix.fix_runner._run_git", side_effect=Exception("fail"))
+    @patch("skills.core.fix.fix_runner.run_git_strict", side_effect=Exception("fail"))
     def test_empty_on_error(self, mock_git):
         assert _get_commit_subjects("/path") == []
 
