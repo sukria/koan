@@ -403,6 +403,7 @@ def translate_cli_skill_mission(
         return None
 
     # Look up skill in registry
+    from app.skills import build_registry
     instance_skills_dir = instance_dir / "skills"
     extra = [instance_skills_dir] if instance_skills_dir.is_dir() else []
     registry = build_registry(extra)

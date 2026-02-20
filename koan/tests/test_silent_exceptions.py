@@ -57,7 +57,7 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     ("github.py", 215),              # parent repo detection
     ("github_auth.py", 56),          # token validation
     # --- Git operations (abort after failed rebase) ---
-    ("claude_step.py", 50),          # rebase --abort after failed rebase
+    ("claude_step.py", 51),          # rebase --abort after failed rebase
     # --- Non-critical subsystem fallbacks ---
     ("iteration_manager.py", 318),   # recurring mission injection
     ("schedule_manager.py", 186),    # schedule check
