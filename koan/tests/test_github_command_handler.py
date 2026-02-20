@@ -441,6 +441,55 @@ class TestProcessSingleNotification:
         # Notification should be marked as read for invalid commands
         mock_read.assert_called_with("12345")
 
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.check_user_permission", return_value=False)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_permission_denied_returns_error(
+        self, mock_resolve, mock_comment, mock_stale, mock_self,
+        mock_processed, mock_perm, mock_read, registry, sample_notification,
+    ):
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99999, "body": "@testbot rebase",
+            "user": {"login": "eve"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["alice"]}}
+
+        success, error = process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+        assert success is False
+        assert "Permission denied" in error
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.check_user_permission", return_value=False)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_permission_denied_marks_notification_read(
+        self, mock_resolve, mock_comment, mock_stale, mock_self,
+        mock_processed, mock_perm, mock_read, registry, sample_notification,
+    ):
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99999, "body": "@testbot rebase",
+            "user": {"login": "eve"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["alice"]}}
+
+        process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+        # Permission-denied must mark notification as read to prevent
+        # repeated processing on every poll cycle
+        mock_read.assert_called_with("12345")
+
 
 class TestTryReply:
     """Tests for the _try_reply helper that generates AI replies."""

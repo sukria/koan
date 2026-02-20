@@ -467,6 +467,7 @@ def process_single_notification(
             comment_author, owner, repo,
             ", ".join(allowed_users) if allowed_users else "none",
         )
+        mark_notification_read(str(notification.get("id", "")))
         return False, "Permission denied. Only users with write access can trigger bot commands."
 
     # Build and insert mission BEFORE reacting (so crash doesn't lose command)

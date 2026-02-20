@@ -215,7 +215,7 @@ def generate_reply(
             timeout=120,
         )
         return _clean_reply(reply) if reply else None
-    except (RuntimeError, Exception) as e:
+    except Exception as e:
         log.warning("GitHub reply generation failed: %s", e)
         return None
 
