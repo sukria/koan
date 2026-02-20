@@ -11,8 +11,8 @@ from app.prompt_builder import (
     build_contemplative_prompt,
     _is_auto_merge_enabled,
     _get_merge_policy,
+    _get_audit_section,
     _get_deep_research,
-    _get_staleness_section,
     _get_verbose_section,
 )
 
@@ -90,6 +90,36 @@ class TestGetMergePolicy:
         assert "DO NOT merge yourself" in policy
 
 
+# --- Tests for _get_audit_section ---
+
+
+class TestGetAuditSection:
+    """Tests for conditional audit section injection."""
+
+    def test_audit_mission_includes_section(self):
+        result = _get_audit_section("Security audit of auth module", "/tmp/project")
+        assert "Audit Missions" in result
+        assert "GitHub Issue Follow-up" in result
+        assert "/tmp/project" in result
+
+    def test_non_audit_mission_returns_empty(self):
+        result = _get_audit_section("Fix the login bug", "/tmp/project")
+        assert result == ""
+
+    def test_empty_mission_returns_empty(self):
+        result = _get_audit_section("", "/tmp/project")
+        assert result == ""
+
+    def test_audit_case_insensitive(self):
+        result = _get_audit_section("Code AUDIT for dependencies", "/tmp/project")
+        assert "Audit Missions" in result
+
+    def test_audit_substring_match(self):
+        """'audit' embedded in a word should still match."""
+        result = _get_audit_section("Run a security audit-lite check", "/tmp/project")
+        assert "Audit Missions" in result
+
+
 # --- Tests for _get_deep_research ---
 
 
@@ -133,44 +163,6 @@ class TestGetDeepResearch:
         assert result == ""
 
 
-# --- Tests for _get_staleness_section ---
-
-
-class TestGetStalenessSection:
-    """Tests for staleness warning injection."""
-
-    @patch("app.session_tracker.get_staleness_warning", return_value="")
-    def test_no_warning_when_fresh(self, mock_warning, prompt_env):
-        result = _get_staleness_section(prompt_env["instance"], "testproj")
-        assert result == ""
-
-    @patch("app.session_tracker.get_staleness_warning")
-    def test_warning_when_stale(self, mock_warning, prompt_env):
-        mock_warning.return_value = (
-            "### WARNING: Project Staleness Detected\n\n"
-            "Last 3 sessions found nothing actionable."
-        )
-        result = _get_staleness_section(prompt_env["instance"], "testproj")
-        assert "# Session History Feedback" in result
-        assert "WARNING" in result
-        assert "3 sessions" in result
-
-    @patch("app.session_tracker.get_staleness_warning", side_effect=Exception("boom"))
-    def test_error_returns_empty(self, mock_warning, prompt_env):
-        result = _get_staleness_section(prompt_env["instance"], "testproj")
-        assert result == ""
-
-    @patch("app.session_tracker.get_staleness_warning")
-    def test_critical_warning(self, mock_warning, prompt_env):
-        mock_warning.return_value = (
-            "### CRITICAL: Project Staleness Detected\n\n"
-            "STOP doing verification/housekeeping."
-        )
-        result = _get_staleness_section(prompt_env["instance"], "testproj")
-        assert "CRITICAL" in result
-        assert "STOP" in result
-
-
 # --- Tests for _get_verbose_section ---
 
 
@@ -199,12 +191,14 @@ class TestBuildAgentPrompt:
     """Tests for the main agent prompt builder."""
 
     @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_audit_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\n# Git Merge\nStandard.\n")
     @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt")
     def test_basic_mission_prompt(
-        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_audit, mock_verbose,
+        prompt_env,
     ):
         mock_load.return_value = "Template with {placeholder}"
 
@@ -233,8 +227,8 @@ class TestBuildAgentPrompt:
             AVAILABLE_PCT="42",
             MISSION_INSTRUCTION=(
                 "Your assigned mission is: **Fix the bug** "
-                "Mark it In Progress in missions.md. Execute it thoroughly. "
-                "Take your time — go deep, don't rush."
+                "The mission is already marked In Progress. "
+                "Follow the Mission Execution Workflow below."
             ),
             BRANCH_PREFIX="koan/",
         )
@@ -243,12 +237,14 @@ class TestBuildAgentPrompt:
         assert "Git Merge" in result
 
     @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_audit_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
     @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt")
     def test_autonomous_mode_instruction(
-        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_audit, mock_verbose,
+        prompt_env,
     ):
         mock_load.return_value = "Template"
 
@@ -271,12 +267,14 @@ class TestBuildAgentPrompt:
         assert "[project:testproj]" in instruction
 
     @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_audit_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="\n# Deep\nTopics\n")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
     @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
     def test_deep_mode_includes_research(
-        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_audit, mock_verbose,
+        prompt_env,
     ):
         result = build_agent_prompt(
             instance=prompt_env["instance"],
@@ -294,12 +292,14 @@ class TestBuildAgentPrompt:
         assert "Deep" in result
 
     @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_audit_section", return_value="")
     @patch("app.prompt_builder._get_deep_research")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
     @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
     def test_deep_mode_with_mission_skips_research(
-        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_audit, mock_verbose,
+        prompt_env,
     ):
         """Deep mode with assigned mission should NOT inject deep research."""
         build_agent_prompt(
@@ -317,12 +317,14 @@ class TestBuildAgentPrompt:
         mock_deep.assert_not_called()
 
     @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_audit_section", return_value="")
     @patch("app.prompt_builder._get_deep_research")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
     @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
     def test_implement_mode_skips_research(
-        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_audit, mock_verbose,
+        prompt_env,
     ):
         """Non-deep modes should NOT inject deep research."""
         build_agent_prompt(
@@ -340,12 +342,14 @@ class TestBuildAgentPrompt:
         mock_deep.assert_not_called()
 
     @patch("app.prompt_builder._get_verbose_section", return_value="\n# Verbose\nActive\n")
+    @patch("app.prompt_builder._get_audit_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
     @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
     def test_verbose_mode_appended(
-        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_audit, mock_verbose,
+        prompt_env,
     ):
         result = build_agent_prompt(
             instance=prompt_env["instance"],
@@ -361,14 +365,16 @@ class TestBuildAgentPrompt:
         assert "Verbose" in result
 
     @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_audit_section", return_value="")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
     @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base prompt")
     def test_prompt_assembly_order(
-        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_verbose, prompt_env
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_audit, mock_verbose,
+        prompt_env,
     ):
-        """Sections are appended in correct order: template, merge, deep, verbose."""
+        """Sections are appended in correct order: template, merge, audit, deep, verbose."""
         result = build_agent_prompt(
             instance=prompt_env["instance"],
             project_name="testproj",
@@ -384,119 +390,32 @@ class TestBuildAgentPrompt:
         assert result.index("Merge") > result.index("Base prompt")
 
     @patch("app.prompt_builder._get_verbose_section", return_value="")
-    @patch("app.prompt_builder._get_staleness_section")
+    @patch("app.prompt_builder._get_audit_section", return_value="\n# Audit\nSection\n")
     @patch("app.prompt_builder._get_deep_research", return_value="")
     @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
     @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
     @patch("app.prompts.load_prompt", return_value="Base")
-    def test_staleness_injected_in_implement_mode(
-        self, mock_load, mock_prefix, mock_merge, mock_deep,
-        mock_staleness, mock_verbose, prompt_env
+    def test_audit_section_appended_for_audit_mission(
+        self, mock_load, mock_prefix, mock_merge, mock_deep, mock_audit, mock_verbose,
+        prompt_env,
     ):
-        """Staleness warning should be injected in implement autonomous mode."""
-        mock_staleness.return_value = "\n\n# Session History Feedback\n\nWARNING\n"
-
-        result = build_agent_prompt(
-            instance=prompt_env["instance"],
-            project_name="testproj",
-            project_path=prompt_env["project_path"],
-            run_num=5,
-            max_runs=20,
-            autonomous_mode="implement",
-            focus_area="Medium work",
-            available_pct=35,
-            mission_title="",
-        )
-
-        mock_staleness.assert_called_once_with(prompt_env["instance"], "testproj")
-        assert "Session History Feedback" in result
-
-    @patch("app.prompt_builder._get_verbose_section", return_value="")
-    @patch("app.prompt_builder._get_staleness_section")
-    @patch("app.prompt_builder._get_deep_research", return_value="")
-    @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
-    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
-    @patch("app.prompts.load_prompt", return_value="Base")
-    def test_staleness_injected_in_review_mode(
-        self, mock_load, mock_prefix, mock_merge, mock_deep,
-        mock_staleness, mock_verbose, prompt_env
-    ):
-        """Staleness warning should be injected in review autonomous mode."""
-        mock_staleness.return_value = "\n\n# Session History Feedback\n\nCRITICAL\n"
-
-        result = build_agent_prompt(
-            instance=prompt_env["instance"],
-            project_name="testproj",
-            project_path=prompt_env["project_path"],
-            run_num=3,
-            max_runs=20,
-            autonomous_mode="review",
-            focus_area="Low work",
-            available_pct=10,
-            mission_title="",
-        )
-
-        mock_staleness.assert_called_once()
-        assert "CRITICAL" in result
-
-    @patch("app.prompt_builder._get_verbose_section", return_value="")
-    @patch("app.prompt_builder._get_staleness_section")
-    @patch("app.prompt_builder._get_deep_research", return_value="")
-    @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
-    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
-    @patch("app.prompts.load_prompt", return_value="Base")
-    def test_staleness_skipped_with_mission(
-        self, mock_load, mock_prefix, mock_merge, mock_deep,
-        mock_staleness, mock_verbose, prompt_env
-    ):
-        """Staleness warning should NOT be injected when a mission is assigned."""
-        build_agent_prompt(
-            instance=prompt_env["instance"],
-            project_name="testproj",
-            project_path=prompt_env["project_path"],
-            run_num=5,
-            max_runs=20,
-            autonomous_mode="implement",
-            focus_area="Execute mission",
-            available_pct=35,
-            mission_title="Fix the auth bug",
-        )
-
-        mock_staleness.assert_not_called()
-
-    @patch("app.prompt_builder._get_verbose_section", return_value="")
-    @patch("app.prompt_builder._get_staleness_section")
-    @patch("app.prompt_builder._get_deep_research")
-    @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
-    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
-    @patch("app.prompts.load_prompt", return_value="Base")
-    def test_staleness_before_deep_research_in_deep_mode(
-        self, mock_load, mock_prefix, mock_merge, mock_deep,
-        mock_staleness, mock_verbose, prompt_env
-    ):
-        """In deep mode, staleness should be injected AND deep research too."""
-        mock_staleness.return_value = "\n\n# Staleness\nWarning\n"
-        mock_deep.return_value = "\n\n# Deep\nResearch\n"
-
+        """Audit section should be appended for audit missions."""
         result = build_agent_prompt(
             instance=prompt_env["instance"],
             project_name="testproj",
             project_path=prompt_env["project_path"],
             run_num=1,
             max_runs=20,
-            autonomous_mode="deep",
-            focus_area="Deep work",
-            available_pct=60,
-            mission_title="",
+            autonomous_mode="implement",
+            focus_area="Execute assigned mission",
+            available_pct=50,
+            mission_title="Security audit of auth module",
         )
 
-        mock_staleness.assert_called_once()
-        mock_deep.assert_called_once()
-        # Both should be in the result
-        assert "Staleness" in result
-        assert "Deep" in result
-        # Staleness appears before deep research
-        assert result.index("Staleness") < result.index("Deep")
+        mock_audit.assert_called_once_with(
+            "Security audit of auth module", prompt_env["project_path"]
+        )
+        assert "Audit" in result
 
 
 # --- Tests for build_contemplative_prompt ---
@@ -679,6 +598,21 @@ class TestIntegration:
         # Verify merge policy was appended
         assert "NOT configured" in result
 
+        # Verify new prompt structure
+        assert "Mission Execution Workflow" in result
+        assert "Pull Request Quality" in result
+        assert "Mission Completion Checklist" in result
+
+        # Verify old misleading instruction is gone
+        assert "Mark it In Progress in missions.md" not in result
+        assert "already marked In Progress" in result
+
+        # Verify no hardcoded names in generic prompt
+        assert "Alexis" not in result
+
+        # Verify audit section is NOT included for non-audit mission
+        assert "Audit Missions" not in result
+
     @patch("app.prompt_builder._get_verbose_section", return_value="")
     @patch("app.prompt_builder._is_auto_merge_enabled", return_value=False)
     @patch("app.prompt_builder._get_deep_research", return_value="")
@@ -700,6 +634,50 @@ class TestIntegration:
         assert "No specific mission assigned" in result
         assert "[project:koan]" in result
         assert "deep" in result
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._is_auto_merge_enabled", return_value=False)
+    @patch("app.prompt_builder._get_deep_research", return_value="")
+    def test_audit_mission_includes_audit_section(
+        self, mock_deep, mock_merge, mock_verbose, prompt_env
+    ):
+        """Audit missions should include the audit section via real template."""
+        result = build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=1,
+            max_runs=20,
+            autonomous_mode="implement",
+            focus_area="Execute assigned mission",
+            available_pct=50,
+            mission_title="Security audit of the auth module",
+        )
+
+        assert "Audit Missions" in result
+        assert "GitHub Issue Follow-up" in result
+        assert "gh issue create" in result
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._is_auto_merge_enabled", return_value=False)
+    @patch("app.prompt_builder._get_deep_research", return_value="")
+    def test_non_audit_mission_excludes_audit_section(
+        self, mock_deep, mock_merge, mock_verbose, prompt_env
+    ):
+        """Non-audit missions should NOT include the audit section."""
+        result = build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=1,
+            max_runs=20,
+            autonomous_mode="implement",
+            focus_area="Execute assigned mission",
+            available_pct=50,
+            mission_title="Fix the login page CSS",
+        )
+
+        assert "Audit Missions" not in result
 
     def test_full_contemplative_prompt(self, prompt_env):
         """Build a full contemplative prompt using the real template."""
