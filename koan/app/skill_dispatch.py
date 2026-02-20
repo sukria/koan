@@ -402,8 +402,7 @@ def translate_cli_skill_mission(
     if scope == "core":
         return None
 
-    # Look up skill in registry
-    from app.skills import build_registry
+    # Look up skill in registry (build_registry already imported at line 383)
     instance_skills_dir = instance_dir / "skills"
     extra = [instance_skills_dir] if instance_skills_dir.is_dir() else []
     registry = build_registry(extra)
