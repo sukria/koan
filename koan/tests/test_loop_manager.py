@@ -1164,7 +1164,7 @@ class TestNotifyMissionFromMention:
     """Tests for _notify_mission_from_mention Telegram notification."""
 
     @patch("app.notify.send_telegram", return_value=True)
-    def test_uses_question_mark_emoji(self, mock_send):
+    def test_uses_mailbox_emoji(self, mock_send):
         from app.loop_manager import _notify_mission_from_mention
 
         notif = {
@@ -1174,6 +1174,6 @@ class TestNotifyMissionFromMention:
         _notify_mission_from_mention(notif)
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
-        assert "❓" in msg
+        assert "📬" in msg
         assert "sukria/koan" in msg
         assert "Fix auth bug" in msg
