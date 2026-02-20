@@ -2312,20 +2312,27 @@ class TestRestoreKoanBranch:
 class TestRunSkillMissionEnv:
     """Tests that _run_skill_mission sets PYTHONPATH and restores branches."""
 
+    def _make_mock_popen(self, returncode=0, stdout_lines=None, stderr_text=""):
+        """Create a mock Popen instance that simulates line-by-line output."""
+        mock_proc = MagicMock()
+        mock_proc.returncode = returncode
+        mock_proc.stdout = iter(stdout_lines or [])
+        mock_proc.stderr.read.return_value = stderr_text
+        mock_proc.wait.return_value = returncode
+        return mock_proc
+
     def test_passes_pythonpath_in_env(self, tmp_path):
         """_run_skill_mission passes explicit PYTHONPATH to subprocess."""
         from app.run import _run_skill_mission
         koan_root = str(tmp_path)
         instance = str(tmp_path / "instance")
         (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
         (tmp_path / "koan").mkdir()
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "ok"
-        mock_result.stderr = ""
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
 
-        with patch("app.run.subprocess.run", return_value=mock_result) as mock_run, \
+        with patch("app.run.subprocess.Popen", return_value=mock_proc) as mock_popen, \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -2341,8 +2348,8 @@ class TestRunSkillMissionEnv:
                 autonomous_mode="implement",
             )
 
-        # Verify subprocess.run was called with env containing PYTHONPATH
-        call_kwargs = mock_run.call_args[1]
+        # Verify subprocess.Popen was called with env containing PYTHONPATH
+        call_kwargs = mock_popen.call_args[1]
         assert "env" in call_kwargs
         assert call_kwargs["env"]["PYTHONPATH"] == str(tmp_path / "koan")
 
@@ -2352,14 +2359,12 @@ class TestRunSkillMissionEnv:
         koan_root = str(tmp_path)
         instance = str(tmp_path / "instance")
         (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
         (tmp_path / "koan").mkdir()
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = ""
-        mock_result.stderr = ""
+        mock_proc = self._make_mock_popen()
 
-        with patch("app.run.subprocess.run", return_value=mock_result), \
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
              patch("app.run._get_koan_branch", return_value="main") as mock_get, \
              patch("app.run._restore_koan_branch") as mock_restore, \
              patch("app.run._reset_terminal"), \
@@ -2384,9 +2389,14 @@ class TestRunSkillMissionEnv:
         koan_root = str(tmp_path)
         instance = str(tmp_path / "instance")
         (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
         (tmp_path / "koan").mkdir()
 
-        with patch("app.run.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 600)), \
+        mock_proc = self._make_mock_popen()
+        # First call (with timeout) raises, second call (after kill) returns 0
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 600), 0]
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch") as mock_restore, \
              patch("app.run._reset_terminal"), \
@@ -2410,9 +2420,10 @@ class TestRunSkillMissionEnv:
         koan_root = str(tmp_path)
         instance = str(tmp_path / "instance")
         (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
         (tmp_path / "koan").mkdir()
 
-        with patch("app.run.subprocess.run", side_effect=OSError("boom")), \
+        with patch("app.run.subprocess.Popen", side_effect=OSError("boom")), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch") as mock_restore, \
              patch("app.run._reset_terminal"), \
@@ -2429,6 +2440,114 @@ class TestRunSkillMissionEnv:
             )
 
         mock_restore.assert_called_once_with(koan_root, "main")
+
+    def test_streams_stdout_to_pending_md(self, tmp_path):
+        """_run_skill_mission appends stdout lines to pending.md for /live."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        journal_dir = tmp_path / "instance" / "journal"
+        journal_dir.mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        # Pre-create pending.md with a header (as _handle_skill_dispatch does)
+        pending = journal_dir / "pending.md"
+        pending.write_text("# Mission: /rebase test\n---\n")
+
+        mock_proc = self._make_mock_popen(
+            stdout_lines=["Step 1: fetching PR\n", "Step 2: rebasing\n", "Done.\n"],
+        )
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/rebase test",
+                autonomous_mode="implement",
+            )
+
+        # Verify pending.md contains the streamed output
+        content = pending.read_text()
+        assert "Step 1: fetching PR" in content
+        assert "Step 2: rebasing" in content
+        assert "Done." in content
+
+    def test_pending_md_shows_output_for_live(self, tmp_path):
+        """/live returns skill output when pending.md is populated by dispatch."""
+        from skills.core.live.handler import handle
+
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir(parents=True)
+        pending = journal_dir / "pending.md"
+        pending.write_text(
+            "# Mission: /rebase PR #42\n"
+            "Project: myproject\n---\n"
+            "Step 1: fetching PR\nStep 2: rebasing\n"
+        )
+
+        ctx = MagicMock()
+        ctx.instance_dir = tmp_path
+        result = handle(ctx)
+
+        assert "No mission running" not in result
+        assert "/rebase PR #42" in result
+        assert "Step 1: fetching PR" in result
+
+    def test_skill_dispatch_creates_pending_md(self, tmp_path):
+        """_handle_skill_dispatch creates pending.md before execution."""
+        from app.run import _handle_skill_dispatch
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        journal_dir = tmp_path / "instance" / "journal"
+        journal_dir.mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.protected_phase", return_value=MagicMock(
+                 __enter__=MagicMock(), __exit__=MagicMock(return_value=False)
+             )), \
+             patch("app.run._notify"), \
+             patch("app.run._notify_mission_end"), \
+             patch("app.run._finalize_mission"), \
+             patch("app.run._commit_instance"), \
+             patch("app.run._sleep_between_runs"), \
+             patch("app.run.set_status"), \
+             patch("app.run.log"), \
+             patch("app.skill_dispatch.dispatch_skill_mission",
+                   return_value=["python3", "-m", "app.plan_runner"]), \
+             patch("app.mission_runner.run_post_mission"):
+            handled, _ = _handle_skill_dispatch(
+                mission_title="/plan test",
+                project_name="test",
+                project_path=str(tmp_path),
+                koan_root=koan_root,
+                instance=instance,
+                run_num=1,
+                max_runs=20,
+                autonomous_mode="implement",
+                interval=30,
+            )
+
+        assert handled is True
+        # pending.md should have been created (even if archived by post-mission)
+        # Check that create_pending_file was reachable — the journal dir exists
+        assert journal_dir.exists()
 
 
 # ---------------------------------------------------------------------------

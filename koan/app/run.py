@@ -1042,6 +1042,20 @@ def _handle_skill_dispatch(
         set_status(koan_root, f"Run {run_num}/{max_runs} — skill dispatch on {project_name}")
         _notify(instance, f"🚀 [{project_name}] Run {run_num}/{max_runs} — Skill: {mission_title}")
 
+        # Create pending.md so /live can show progress during skill dispatch
+        from app.loop_manager import create_pending_file
+        try:
+            create_pending_file(
+                instance_dir=instance,
+                project_name=project_name,
+                run_num=run_num,
+                max_runs=max_runs,
+                autonomous_mode=autonomous_mode or "implement",
+                mission_title=mission_title,
+            )
+        except Exception as e:
+            log("error", f"Failed to create pending.md for skill dispatch: {e}")
+
         with protected_phase(f"Skill: {mission_title[:50]}"):
             exit_code = _run_skill_mission(
                 skill_cmd=skill_cmd,
@@ -1667,12 +1681,16 @@ def _run_skill_mission(
 ) -> int:
     """Execute a skill-dispatched mission directly via subprocess.
 
+    Streams stdout/stderr line-by-line to pending.md so /live can show
+    real-time progress during skill dispatch.
+
     Returns the process exit code (0 = success).
     """
     from app.debug import debug_log
 
     mission_start = int(time.time())
     koan_pkg_dir = os.path.join(koan_root, "koan")
+    pending_path = Path(instance) / "journal" / "pending.md"
 
     # Explicitly set PYTHONPATH so the subprocess can always resolve
     # app.* modules even if the working tree changes (e.g. skill does
@@ -1687,22 +1705,40 @@ def _run_skill_mission(
 
     debug_log(f"[run] skill exec: cmd={' '.join(skill_cmd)}")
     debug_log(f"[run] skill exec: cwd={koan_pkg_dir}")
-    skill_stdout = ""
-    skill_stderr = ""
+    stdout_lines = []
+    stderr_lines = []
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             skill_cmd,
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             cwd=koan_pkg_dir,
             env=skill_env,
-            capture_output=True,
             text=True,
-            timeout=600,
             start_new_session=True,
         )
-        exit_code = result.returncode
-        skill_stdout = result.stdout or ""
-        skill_stderr = result.stderr or ""
+        # Stream stdout line-by-line, appending each to pending.md
+        # so /live shows real-time progress.
+        for line in proc.stdout:
+            stripped = line.rstrip("\n")
+            stdout_lines.append(stripped)
+            print(stripped)
+            try:
+                with open(pending_path, "a") as f:
+                    f.write(f"{stripped}\n")
+            except OSError:
+                pass
+        # Read any remaining stderr after stdout is exhausted
+        remaining_stderr = proc.stderr.read() or ""
+        if remaining_stderr:
+            for line in remaining_stderr.splitlines():
+                stderr_lines.append(line)
+            print(remaining_stderr, file=sys.stderr)
+        proc.wait(timeout=600)
+        exit_code = proc.returncode
+        skill_stdout = "\n".join(stdout_lines)
+        skill_stderr = "\n".join(stderr_lines)
         debug_log(
             f"[run] skill exec: exit_code={exit_code} "
             f"stdout_len={len(skill_stdout)} stderr_len={len(skill_stderr)}"
@@ -1712,18 +1748,20 @@ def _run_skill_mission(
                 debug_log(f"[run] skill stdout: {skill_stdout[:2000]}")
             if skill_stderr:
                 debug_log(f"[run] skill stderr: {skill_stderr[:2000]}")
-        if skill_stdout:
-            print(skill_stdout)
-        if skill_stderr:
-            print(skill_stderr, file=sys.stderr)
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
         log("error", "Skill runner timed out (10min)")
         debug_log("[run] skill exec: TIMEOUT (600s)")
         exit_code = 1
+        skill_stdout = "\n".join(stdout_lines)
+        skill_stderr = "\n".join(stderr_lines)
     except Exception as e:
         log("error", f"Skill runner failed: {e}")
         debug_log(f"[run] skill exec: EXCEPTION {e}")
         exit_code = 1
+        skill_stdout = "\n".join(stdout_lines)
+        skill_stderr = "\n".join(stderr_lines)
     finally:
         _reset_terminal()
         # Restore koan repo branch if it was changed by the skill.
