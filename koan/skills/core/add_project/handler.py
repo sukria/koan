@@ -1,6 +1,6 @@
-"""Kōan add-project skill — clone a GitHub repo and register it.
+"""Kōan add_project skill — clone a GitHub repo and register it.
 
-Usage: /add-project <github-url> [name]
+Usage: /add_project <github-url> [name]
 
 Clones the repository into workspace/<name>, detects push access,
 and creates a personal fork if needed so PRs can be submitted.
@@ -13,14 +13,14 @@ from pathlib import Path
 
 
 def handle(ctx):
-    """Handle /add-project command."""
+    """Handle /add_project command."""
     args = ctx.args.strip()
     if not args:
         return (
-            "Usage: /add-project <github-url> [name]\n\n"
+            "Usage: /add_project <github-url> [name]\n\n"
             "Examples:\n"
-            "  /add-project https://github.com/owner/repo\n"
-            "  /add-project owner/repo myname"
+            "  /add_project https://github.com/owner/repo\n"
+            "  /add_project owner/repo myname"
         )
 
     url, project_name = _parse_args(args)
