@@ -17,9 +17,10 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.claude_step import _run_git
+from app.git_utils import run_git_strict
 from app.github import detect_parent_repo, fetch_issue_with_comments, run_gh, pr_create
 from app.github_url_parser import parse_issue_url
+from app.projects_config import resolve_base_branch
 from app.prompts import load_prompt, load_skill_prompt
 
 logger = logging.getLogger(__name__)
@@ -341,34 +342,19 @@ def _execute_implementation(
 def _get_current_branch(project_path: str) -> str:
     """Return the current git branch name, or 'main' on error."""
     try:
-        return _run_git(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        return run_git_strict(
+            "rev-parse", "--abbrev-ref", "HEAD",
             cwd=project_path,
         ).strip()
     except Exception:
         return "main"
 
 
-def _resolve_base_branch(project_name: str) -> str:
-    """Resolve the base branch for a project from config, defaulting to 'main'."""
-    try:
-        from app.projects_config import load_projects_config, get_project_auto_merge
-        koan_root = os.environ.get("KOAN_ROOT", "")
-        if koan_root:
-            config = load_projects_config(koan_root)
-            if config:
-                am = get_project_auto_merge(config, project_name)
-                return am.get("base_branch", "main")
-    except Exception:
-        pass
-    return "main"
-
-
 def _get_commit_subjects(project_path: str, base_branch: str = "main") -> List[str]:
     """Return commit subject lines from base_branch..HEAD."""
     try:
-        output = _run_git(
-            ["git", "log", f"{base_branch}..HEAD", "--format=%s"],
+        output = run_git_strict(
+            "log", f"{base_branch}..HEAD", "--format=%s",
             cwd=project_path,
         )
         return [s for s in output.strip().splitlines() if s.strip()]
@@ -454,7 +440,7 @@ def _submit_draft_pr(
         pass  # No existing PR, continue
 
     # Get commit subjects
-    base_branch = _resolve_base_branch(project_name)
+    base_branch = resolve_base_branch(project_name)
     commits = _get_commit_subjects(project_path, base_branch=base_branch)
     if not commits:
         logger.info("No commits on branch — skipping PR creation")
@@ -462,8 +448,8 @@ def _submit_draft_pr(
 
     # Push branch
     try:
-        _run_git(
-            ["git", "push", "-u", "origin", branch],
+        run_git_strict(
+            "push", "-u", "origin", branch,
             cwd=project_path, timeout=120,
         )
     except Exception as e:

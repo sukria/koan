@@ -64,6 +64,7 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     ("usage_tracker.py", 282),       # budget file read
     ("usage_tracker.py", 297),       # budget file read
     ("projects_merged.py", 245),     # github URL cache build
+    ("projects_config.py", 196),     # base branch resolution fallback (returns "main")
     # --- Setup wizard (interactive, errors shown in UI) ---
     ("setup_wizard.py", 85),         # config loading
     ("setup_wizard.py", 183),        # project path resolution

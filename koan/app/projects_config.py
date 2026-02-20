@@ -178,6 +178,26 @@ def get_project_auto_merge(config: dict, project_name: str) -> dict:
     }
 
 
+def resolve_base_branch(project_name: str) -> str:
+    """Resolve the base branch for a project from config, defaulting to 'main'.
+
+    Loads projects.yaml via KOAN_ROOT and looks up the auto_merge config.
+    Safe to call when KOAN_ROOT is unset or config is missing — returns 'main'.
+    """
+    import os
+
+    try:
+        koan_root = os.environ.get("KOAN_ROOT", "")
+        if koan_root:
+            config = load_projects_config(koan_root)
+            if config:
+                am = get_project_auto_merge(config, project_name)
+                return am.get("base_branch", "main")
+    except Exception:
+        pass
+    return "main"
+
+
 def get_project_cli_provider(config: dict, project_name: str) -> str:
     """Get CLI provider for a project from projects.yaml.
 

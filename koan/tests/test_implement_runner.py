@@ -375,12 +375,12 @@ class TestGuessProjectName:
 
 class TestGetCurrentBranch:
     def test_returns_branch_name(self):
-        with patch("skills.core.implement.implement_runner._run_git",
+        with patch("skills.core.implement.implement_runner.run_git_strict",
                     return_value="koan/implement-42\n"):
             assert _get_current_branch("/project") == "koan/implement-42"
 
     def test_returns_main_on_error(self):
-        with patch("skills.core.implement.implement_runner._run_git",
+        with patch("skills.core.implement.implement_runner.run_git_strict",
                     side_effect=RuntimeError("not a repo")):
             assert _get_current_branch("/project") == "main"
 
@@ -391,18 +391,18 @@ class TestGetCurrentBranch:
 
 class TestGetCommitSubjects:
     def test_returns_subjects(self):
-        with patch("skills.core.implement.implement_runner._run_git",
+        with patch("skills.core.implement.implement_runner.run_git_strict",
                     return_value="feat: add X\nfix: broken Y\n"):
             result = _get_commit_subjects("/project")
             assert result == ["feat: add X", "fix: broken Y"]
 
     def test_returns_empty_on_error(self):
-        with patch("skills.core.implement.implement_runner._run_git",
+        with patch("skills.core.implement.implement_runner.run_git_strict",
                     side_effect=RuntimeError("no commits")):
             assert _get_commit_subjects("/project") == []
 
     def test_returns_empty_for_no_output(self):
-        with patch("skills.core.implement.implement_runner._run_git",
+        with patch("skills.core.implement.implement_runner.run_git_strict",
                     return_value=""):
             assert _get_commit_subjects("/project") == []
 
@@ -568,7 +568,7 @@ class TestSubmitDraftPR:
         with patch(f"{_MODULE}._get_current_branch", return_value="koan/feat"), \
              patch(f"{_MODULE}.run_gh", return_value=""), \
              patch(f"{_MODULE}._get_commit_subjects", return_value=["c1"]), \
-             patch(f"{_MODULE}._run_git", side_effect=RuntimeError("push failed")):
+             patch(f"{_MODULE}.run_git_strict", side_effect=RuntimeError("push failed")):
             result = _submit_draft_pr(
                 "/project", "myapp", "o", "r", "42", "T", "url",
             )
@@ -578,7 +578,7 @@ class TestSubmitDraftPR:
         with patch(f"{_MODULE}._get_current_branch", return_value="koan/impl-42"), \
              patch(f"{_MODULE}.run_gh", side_effect=["", ""]), \
              patch(f"{_MODULE}._get_commit_subjects", return_value=["feat: add X"]), \
-             patch(f"{_MODULE}._run_git"), \
+             patch(f"{_MODULE}.run_git_strict"), \
              patch(f"{_MODULE}._generate_pr_summary", return_value="Summary"), \
              patch(f"{_MODULE}._resolve_submit_target",
                     return_value={"repo": "o/r", "is_fork": False}), \
@@ -597,7 +597,7 @@ class TestSubmitDraftPR:
         with patch(f"{_MODULE}._get_current_branch", return_value="koan/impl-42"), \
              patch(f"{_MODULE}.run_gh", side_effect=["", ""]), \
              patch(f"{_MODULE}._get_commit_subjects", return_value=["c1"]), \
-             patch(f"{_MODULE}._run_git"), \
+             patch(f"{_MODULE}.run_git_strict"), \
              patch(f"{_MODULE}._generate_pr_summary", return_value="Sum"), \
              patch(f"{_MODULE}._resolve_submit_target",
                     return_value={"repo": "upstream/repo", "is_fork": True}), \
@@ -616,7 +616,7 @@ class TestSubmitDraftPR:
         with patch(f"{_MODULE}._get_current_branch", return_value="koan/feat"), \
              patch(f"{_MODULE}.run_gh", side_effect=["", RuntimeError("fail")]), \
              patch(f"{_MODULE}._get_commit_subjects", return_value=["c1"]), \
-             patch(f"{_MODULE}._run_git"), \
+             patch(f"{_MODULE}.run_git_strict"), \
              patch(f"{_MODULE}._generate_pr_summary", return_value="S"), \
              patch(f"{_MODULE}._resolve_submit_target",
                     return_value={"repo": "o/r", "is_fork": False}), \

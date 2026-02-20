@@ -14,13 +14,13 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.git_utils import run_git
-
-logger = logging.getLogger(__name__)
 from app.projects_config import (
     get_project_auto_merge,
     get_project_submit_to_repository,
     load_projects_config,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
