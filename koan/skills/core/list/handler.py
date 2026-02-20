@@ -11,6 +11,12 @@ _CATEGORY_PREFIXES = {
     "recreate": "🔁",
     "ai": "✨",
     "magic": "✨",
+    "review": "🔍",
+    "check": "✅",
+    "refactor": "🛠️",
+    "claudemd": "📝",
+    "claude": "📝",
+    "claude_md": "📝",
 }
 
 _MISSION_PREFIX = "📋"
@@ -22,11 +28,15 @@ _COMMAND_RE = re.compile(
 
 
 def mission_prefix(raw_line):
-    """Return a unicode prefix for a mission line based on its category."""
+    """Return a unicode prefix for a mission line based on its category.
+
+    Known slash commands get their category emoji.
+    Unknown slash commands and free-text missions both get the generic 📋.
+    """
     m = _COMMAND_RE.match(raw_line.strip())
     if m:
         command = m.group(1).lower()
-        return _CATEGORY_PREFIXES.get(command, "")
+        return _CATEGORY_PREFIXES.get(command, _MISSION_PREFIX)
     return _MISSION_PREFIX
 
 

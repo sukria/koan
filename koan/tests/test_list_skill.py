@@ -53,9 +53,35 @@ class TestMissionPrefix:
         from skills.core.list.handler import mission_prefix
         assert mission_prefix("- fix the login bug") == "\U0001f4cb"
 
-    def test_unknown_command_no_prefix(self):
+    def test_review_prefix(self):
         from skills.core.list.handler import mission_prefix
-        assert mission_prefix("- /check https://github.com/pr/42") == ""
+        assert mission_prefix("- /review https://github.com/o/r/pull/42") == "\U0001f50d"
+
+    def test_check_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /check https://github.com/pr/42") == "\u2705"
+
+    def test_refactor_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /refactor https://github.com/o/r/pull/5") == "\U0001f6e0\ufe0f"
+
+    def test_claudemd_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /claudemd koan") == "\U0001f4dd"
+
+    def test_claude_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /claude backend") == "\U0001f4dd"
+
+    def test_claude_md_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        assert mission_prefix("- /claude_md frontend") == "\U0001f4dd"
+
+    def test_unknown_command_gets_generic_prefix(self):
+        from skills.core.list.handler import mission_prefix
+        # Unknown slash commands now get the generic 📋 prefix
+        # instead of no prefix at all
+        assert mission_prefix("- /unknown_skill do thing") == "\U0001f4cb"
 
     def test_project_tag_with_plan(self):
         from skills.core.list.handler import mission_prefix
@@ -73,9 +99,10 @@ class TestMissionPrefix:
         from skills.core.list.handler import mission_prefix
         assert mission_prefix("/plan something") == "\U0001f9e0"
 
-    def test_scoped_command_no_prefix(self):
+    def test_scoped_command_gets_generic_prefix(self):
         from skills.core.list.handler import mission_prefix
-        assert mission_prefix("- /custom.myskill do thing") == ""
+        # Scoped commands without a specific category get the generic prefix
+        assert mission_prefix("- /custom.myskill do thing") == "\U0001f4cb"
 
     def test_empty_string(self):
         from skills.core.list.handler import mission_prefix
@@ -263,6 +290,8 @@ class TestListHandler:
             - [project:koan] /implement https://github.com/issue/1
             - [project:koan] /fix https://github.com/owner/repo/issues/5
             - [project:koan] /rebase https://github.com/pr/42
+            - [project:koan] /review https://github.com/o/r/pull/10
+            - [project:koan] /refactor https://github.com/o/r/pull/11
             - fix some bug
 
             ## In Progress
@@ -275,9 +304,11 @@ class TestListHandler:
         assert "\U0001f528" in result  # implement
         assert "\U0001f41e" in result  # fix
         assert "\U0001f504" in result  # rebase
+        assert "\U0001f50d" in result  # review
+        assert "\U0001f6e0\ufe0f" in result  # refactor
         assert "\U0001f4cb" in result  # regular mission
 
-    def test_unknown_command_no_prefix(self, tmp_path):
+    def test_check_command_gets_check_prefix(self, tmp_path):
         from skills.core.list.handler import handle
 
         missions = textwrap.dedent("""\
@@ -293,14 +324,27 @@ class TestListHandler:
         """)
         ctx = self._make_ctx(tmp_path, missions)
         result = handle(ctx)
-        # Unknown commands get no prefix — just the number
-        lines = result.split("\n")
-        for line in lines:
-            if "/check" in line:
-                # Should have number but no emoji prefix before the text
-                assert line.strip().startswith("1.")
-                assert "\U0001f4cb" not in line
-                assert "\U0001f9e0" not in line
+        # /check now has its own ✅ prefix
+        assert "\u2705" in result
+
+    def test_unknown_command_gets_generic_prefix(self, tmp_path):
+        from skills.core.list.handler import handle
+
+        missions = textwrap.dedent("""\
+            # Missions
+
+            ## Pending
+
+            - /some_unknown_skill do thing
+
+            ## In Progress
+
+            ## Done
+        """)
+        ctx = self._make_ctx(tmp_path, missions)
+        result = handle(ctx)
+        # Unknown slash commands now get the generic 📋 prefix
+        assert "\U0001f4cb" in result
 
     def test_mixed_categories(self, tmp_path):
         from skills.core.list.handler import handle
