@@ -173,6 +173,21 @@ class TestRebaseOntoTarget:
         ]
         assert len(abort_calls) == 2
 
+    @patch("app.cli_exec.subprocess.run")
+    @patch("app.claude_step._run_git")
+    def test_rebase_abort_called_with_timeout(self, mock_git, mock_subprocess):
+        """git rebase --abort must have a timeout to prevent hangs in cleanup."""
+        mock_git.side_effect = RuntimeError("conflict")
+        _rebase_onto_target("main", "/project")
+        abort_calls = [
+            c
+            for c in mock_subprocess.call_args_list
+            if "rebase" in c[0][0] and "--abort" in c[0][0]
+        ]
+        assert len(abort_calls) >= 1
+        for call in abort_calls:
+            assert call[1].get("timeout", 0) > 0
+
 
 # ---------- run_claude ----------
 
@@ -271,6 +286,23 @@ class TestCommitIfChanges:
         mock_run.return_value = MagicMock(stdout="   \n  ", returncode=0)
         result = commit_if_changes("/project", "msg")
         assert result is False
+
+    @patch("app.claude_step._run_git")
+    @patch("app.cli_exec.subprocess.run")
+    def test_git_status_called_with_timeout(self, mock_run, mock_git):
+        """git status must have a timeout to prevent hangs on unresponsive repos."""
+        mock_run.return_value = MagicMock(stdout="", returncode=0)
+        commit_if_changes("/project", "msg")
+        call_kwargs = mock_run.call_args[1]
+        assert "timeout" in call_kwargs
+        assert call_kwargs["timeout"] > 0
+
+    @patch("app.claude_step._run_git")
+    @patch("app.cli_exec.subprocess.run", side_effect=subprocess.TimeoutExpired("git", 30))
+    def test_git_status_timeout_propagates(self, mock_run, mock_git):
+        """TimeoutExpired from git status should propagate (not silently swallowed)."""
+        with pytest.raises(subprocess.TimeoutExpired):
+            commit_if_changes("/project", "msg")
 
 
 # ---------- run_claude_step ----------

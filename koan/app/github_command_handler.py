@@ -482,7 +482,13 @@ def process_single_notification(
 
     koan_root = os.environ.get("KOAN_ROOT", "")
     missions_path = Path(koan_root) / "instance" / "missions.md"
-    insert_pending_mission(missions_path, mission_entry)
+    try:
+        insert_pending_mission(missions_path, mission_entry)
+    except OSError as e:
+        log.warning("GitHub: failed to insert mission: %s", e)
+        # Mark notification as read to prevent infinite re-processing
+        mark_notification_read(str(notification.get("id", "")))
+        return False, f"Failed to queue mission: {e}"
 
     # React AFTER mission is persisted (marks as processed)
     comment_id = str(comment.get("id", ""))
