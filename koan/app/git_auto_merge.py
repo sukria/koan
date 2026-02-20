@@ -118,7 +118,9 @@ class GitAutoMerger:
     def is_branch_pushed(self, branch: str) -> bool:
         """Check if branch exists on remote origin."""
         exit_code, stdout, _ = run_git(self.project_path, "ls-remote", "--heads", "origin", branch)
-        return exit_code == 0 and branch in stdout
+        # Match the full ref name to avoid substring false positives
+        # (e.g. "koan/fix" matching "koan/fix-typo")
+        return exit_code == 0 and f"refs/heads/{branch}" in stdout
 
     def perform_merge(self, branch: str, base_branch: str, strategy: str) -> Tuple[bool, str]:
         """Execute git merge with specified strategy.

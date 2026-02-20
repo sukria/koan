@@ -8,8 +8,9 @@ and creates a personal fork if needed so PRs can be submitted.
 
 import os
 import re
-import subprocess
 from pathlib import Path
+
+from app.git_utils import run_git_strict
 
 
 def handle(ctx):
@@ -164,14 +165,7 @@ def _git_clone(url, target_dir):
 
     Raises RuntimeError on failure.
     """
-    result = subprocess.run(
-        ["git", "clone", url, target_dir],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip()[:300])
+    run_git_strict("clone", url, target_dir, timeout=120)
 
 
 def _check_push_access(owner, repo):
@@ -224,8 +218,8 @@ def _create_fork_and_configure(owner, repo, project_dir):
     original_url = f"https://github.com/{owner}/{repo}.git"
 
     # Reconfigure remotes: origin=fork, upstream=original
-    _run_git(project_dir, "remote", "rename", "origin", "upstream")
-    _run_git(project_dir, "remote", "add", "origin", fork_url)
+    run_git_strict("remote", "rename", "origin", "upstream", cwd=project_dir)
+    run_git_strict("remote", "add", "origin", fork_url, cwd=project_dir)
 
     return f"{gh_user}/{repo}"
 
@@ -240,18 +234,3 @@ def _get_gh_username():
         return None
 
 
-def _run_git(cwd, *args):
-    """Run a git command in the given directory.
-
-    Raises RuntimeError on failure.
-    """
-    result = subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        cwd=cwd,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip()[:300])
-    return result.stdout.strip()
