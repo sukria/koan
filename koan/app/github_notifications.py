@@ -4,7 +4,7 @@ Core module for the notification-driven commands feature. Handles:
 - Fetching unread notifications filtered to @mentions
 - Parsing @mention commands from comment bodies
 - Converting API URLs to web URLs
-- Reaction-based deduplication (👍 = processed)
+- Reaction-based deduplication (any bot reaction = processed)
 - Permission checks for authorized users
 """
 
@@ -197,7 +197,11 @@ def mark_notification_read(thread_id: str) -> bool:
 
 def check_already_processed(comment_id: str, bot_username: str,
                              owner: str, repo: str) -> bool:
-    """Check if a comment has already been processed (has bot's 👍 reaction).
+    """Check if a comment has already been processed (has bot reaction).
+
+    Checks for any reaction from the bot — both 👍 (command acknowledgment)
+    and 👀 (AI reply acknowledgment). This prevents duplicate processing
+    when mark_notification_read fails.
 
     Also checks in-memory set for current session deduplication.
 
@@ -214,14 +218,13 @@ def check_already_processed(comment_id: str, bot_username: str,
     if comment_id in _processed_comments:
         return True
 
-    # Check GitHub reactions
+    # Check GitHub reactions — any reaction from the bot means processed
     try:
         raw = api(f"repos/{owner}/{repo}/issues/comments/{comment_id}/reactions")
         reactions = json.loads(raw) if raw else []
         if isinstance(reactions, list):
             for reaction in reactions:
-                if (reaction.get("user", {}).get("login") == bot_username
-                        and reaction.get("content") == "+1"):
+                if reaction.get("user", {}).get("login") == bot_username:
                     _processed_comments.add(comment_id)
                     return True
     except (RuntimeError, json.JSONDecodeError):
