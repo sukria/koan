@@ -210,6 +210,9 @@ class TestCaching:
 
         # Adding a new directory changes workspace/ mtime
         (ws / "proj2").mkdir()
+        # Ensure mtime differs (filesystem resolution can be 1s on Linux)
+        import os
+        os.utime(str(ws), (ws.stat().st_atime + 1, ws.stat().st_mtime + 1))
 
         # get_all_projects should detect the mtime change and re-scan
         result2 = get_all_projects(str(koan_root))
