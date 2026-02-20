@@ -7,7 +7,13 @@ from unittest.mock import patch
 
 import pytest
 
-from app.systemd_service import build_safe_path, main, render_all_templates, render_service_template
+from app.systemd_service import (
+    _validate_placeholder,
+    build_safe_path,
+    main,
+    render_all_templates,
+    render_service_template,
+)
 
 
 class TestBuildSafePath:
@@ -93,6 +99,21 @@ class TestBuildSafePath:
         assert "/usr/bin" in result.split(":")
 
 
+class TestValidatePlaceholder:
+    """Tests for _validate_placeholder."""
+
+    def test_accepts_normal_values(self):
+        assert _validate_placeholder("test", "/opt/koan") == "/opt/koan"
+
+    def test_rejects_newlines(self):
+        with pytest.raises(ValueError, match="newlines"):
+            _validate_placeholder("test", "/opt/koan\nExecStart=/bin/malicious")
+
+    def test_rejects_carriage_return(self):
+        with pytest.raises(ValueError, match="newlines"):
+            _validate_placeholder("test", "/opt/koan\r\nExecStart=/bin/bad")
+
+
 class TestRenderServiceTemplate:
     """Tests for template rendering."""
 
@@ -117,9 +138,40 @@ class TestRenderServiceTemplate:
         assert "__PYTHON__" not in result
         assert "__PATH__" not in result
 
+    def test_render_replaces_user_and_group(self, tmp_path):
+        template = tmp_path / "koan.service.template"
+        template.write_text("User=__USER__\nGroup=__GROUP__\n")
+
+        result = render_service_template(
+            str(template), "/opt/koan", "/usr/bin/python3", "/usr/bin",
+            user="alice", group="alice",
+        )
+        assert "User=alice" in result
+        assert "Group=alice" in result
+
+    def test_user_defaults_to_root(self, tmp_path):
+        template = tmp_path / "koan.service.template"
+        template.write_text("User=__USER__\nGroup=__GROUP__\n")
+
+        result = render_service_template(
+            str(template), "/opt/koan", "/usr/bin/python3", "/usr/bin",
+        )
+        assert "User=root" in result
+        assert "Group=root" in result
+
+    def test_rejects_newline_injection(self, tmp_path):
+        template = tmp_path / "koan.service.template"
+        template.write_text("WorkingDirectory=__KOAN_ROOT__\n")
+
+        with pytest.raises(ValueError):
+            render_service_template(
+                str(template), "/opt/koan\nExecStart=/bin/bad",
+                "/usr/bin/python3", "/usr/bin",
+            )
+
     def test_render_all_templates(self, tmp_path):
         for name in ["koan.service.template", "koan-awake.service.template"]:
-            (tmp_path / name).write_text("WorkingDirectory=__KOAN_ROOT__\nExecStart=__PYTHON__\nPATH=__PATH__\n")
+            (tmp_path / name).write_text("WorkingDirectory=__KOAN_ROOT__\nExecStart=__PYTHON__\nPATH=__PATH__\nUser=__USER__\nGroup=__GROUP__\n")
         # Non-matching file should be ignored
         (tmp_path / "other.conf").write_text("ignore me")
 
@@ -139,6 +191,16 @@ class TestRenderServiceTemplate:
             str(tmp_path), "/opt/koan", "/usr/bin/python3", "/usr/bin"
         )
         assert result == {}
+
+    def test_render_all_passes_user_group(self, tmp_path):
+        (tmp_path / "koan.service.template").write_text("User=__USER__\nGroup=__GROUP__\n")
+
+        result = render_all_templates(
+            str(tmp_path), "/opt/koan", "/usr/bin/python3", "/usr/bin",
+            user="deploy", group="deploy",
+        )
+        assert "User=deploy" in result["koan.service"]
+        assert "Group=deploy" in result["koan.service"]
 
 
 class TestMain:
@@ -240,13 +302,24 @@ class TestServiceTemplateContent:
         assert "PartOf=koan.service" in content
 
     def test_both_templates_have_required_placeholders(self, template_dir):
-        """Both templates must contain all three placeholders."""
+        """Both templates must contain all required placeholders."""
         for name in ["koan.service.template", "koan-awake.service.template"]:
             path = os.path.join(template_dir, name)
             content = open(path).read()
             assert "__KOAN_ROOT__" in content, f"{name} missing __KOAN_ROOT__"
             assert "__PYTHON__" in content, f"{name} missing __PYTHON__"
             assert "__PATH__" in content, f"{name} missing __PATH__"
+            assert "__USER__" in content, f"{name} missing __USER__"
+            assert "__GROUP__" in content, f"{name} missing __GROUP__"
+
+    def test_both_templates_have_hardening(self, template_dir):
+        """Both templates must have systemd hardening directives."""
+        for name in ["koan.service.template", "koan-awake.service.template"]:
+            path = os.path.join(template_dir, name)
+            content = open(path).read()
+            assert "NoNewPrivileges=true" in content, f"{name} missing NoNewPrivileges"
+            assert "ProtectSystem=" in content, f"{name} missing ProtectSystem"
+            assert "PrivateTmp=true" in content, f"{name} missing PrivateTmp"
 
     def test_both_templates_use_env_file(self, template_dir):
         """Both templates must load .env for secrets."""

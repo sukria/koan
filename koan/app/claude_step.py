@@ -7,6 +7,7 @@ pipeline modules.
 """
 
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -187,9 +188,8 @@ def run_project_tests(project_path: str, test_cmd: str = "make test",
     """
     try:
         result = subprocess.run(
-            test_cmd,
+            shlex.split(test_cmd),
             stdin=subprocess.DEVNULL,
-            shell=True,
             capture_output=True, text=True,
             timeout=timeout, cwd=project_path,
         )

@@ -6,6 +6,8 @@ BindsTo=koan-awake.service
 
 [Service]
 Type=simple
+User=__USER__
+Group=__GROUP__
 WorkingDirectory=__KOAN_ROOT__/koan
 EnvironmentFile=__KOAN_ROOT__/.env
 Environment=KOAN_ROOT=__KOAN_ROOT__
@@ -16,6 +18,14 @@ Restart=on-failure
 RestartSec=10
 StandardOutput=append:__KOAN_ROOT__/logs/run.log
 StandardError=append:__KOAN_ROOT__/logs/run.log
+
+# Hardening
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=__KOAN_ROOT__/instance __KOAN_ROOT__/logs
 
 [Install]
 WantedBy=multi-user.target

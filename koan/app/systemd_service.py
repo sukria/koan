@@ -46,20 +46,46 @@ def build_safe_path(raw_path: str, home_dir: str) -> str:
     return ":".join(result)
 
 
+def _validate_placeholder(name: str, value: str) -> str:
+    """Validate a placeholder value for safe systemd template substitution.
+
+    Rejects values containing characters that could inject systemd directives.
+    """
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"Placeholder {name} must not contain newlines")
+    return value
+
+
 def render_service_template(
-    template_path: str, koan_root: str, python_path: str, safe_path: str
+    template_path: str,
+    koan_root: str,
+    python_path: str,
+    safe_path: str,
+    user: str = "",
+    group: str = "",
 ) -> str:
     """Render a single .service.template file with placeholder substitution."""
+    _validate_placeholder("__KOAN_ROOT__", koan_root)
+    _validate_placeholder("__PYTHON__", python_path)
+    _validate_placeholder("__PATH__", safe_path)
+
     with open(template_path, "r") as f:
         content = f.read()
     content = content.replace("__KOAN_ROOT__", koan_root)
     content = content.replace("__PYTHON__", python_path)
     content = content.replace("__PATH__", safe_path)
+    content = content.replace("__USER__", user or "root")
+    content = content.replace("__GROUP__", group or "root")
     return content
 
 
 def render_all_templates(
-    template_dir: str, koan_root: str, python_path: str, safe_path: str
+    template_dir: str,
+    koan_root: str,
+    python_path: str,
+    safe_path: str,
+    user: str = "",
+    group: str = "",
 ) -> dict:
     """Render all koan*.service.template files in a directory.
 
@@ -70,7 +96,8 @@ def render_all_templates(
     for template_path in sorted(glob.glob(pattern)):
         service_name = os.path.basename(template_path).replace(".template", "")
         results[service_name] = render_service_template(
-            template_path, koan_root, python_path, safe_path
+            template_path, koan_root, python_path, safe_path,
+            user=user, group=group,
         )
     return results
 
@@ -96,15 +123,29 @@ def main():
 
     safe_path = build_safe_path(caller_path, home_dir)
 
+    # Resolve runtime user: SUDO_USER (the human who ran sudo) or current user
+    run_user = sudo_user or os.environ.get("USER", "root")
+    import grp
+    import pwd
+    try:
+        pw = pwd.getpwnam(run_user)
+        run_group = grp.getgrgid(pw.pw_gid).gr_name
+    except KeyError:
+        run_group = run_user
+
     template_dir = os.path.join(os.path.dirname(__file__), "..", "systemd")
-    rendered = render_all_templates(template_dir, koan_root, python_path, safe_path)
+    rendered = render_all_templates(
+        template_dir, koan_root, python_path, safe_path,
+        user=run_user, group=run_group,
+    )
 
     os.makedirs(output_dir, exist_ok=True)
     for service_name, content in rendered.items():
         out_path = os.path.join(output_dir, service_name)
         with open(out_path, "w") as f:
             f.write(content)
-        print(f"→ Generated {service_name}")
+        os.chmod(out_path, 0o644)
+        print(f"→ Generated {service_name} (User={run_user}, Group={run_group})")
 
 
 if __name__ == "__main__":

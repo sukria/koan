@@ -40,7 +40,10 @@ fi
 
 # --- Generate service files via Python (testable PATH sanitization) ---
 
+# Ensure the runtime user owns the logs directory
+RUN_USER="${SUDO_USER:-$(whoami)}"
 mkdir -p "$KOAN_ROOT/logs"
+chown "$RUN_USER" "$KOAN_ROOT/logs"
 
 CALLER_PATH="${CALLER_PATH:-$PATH}"
 OUTPUT_DIR="/etc/systemd/system"

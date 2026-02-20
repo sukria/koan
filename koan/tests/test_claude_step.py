@@ -765,7 +765,7 @@ class TestRunProjectTests:
         )
         run_project_tests("/project", test_cmd="npm test")
         mock_run.assert_called_once()
-        assert mock_run.call_args[0][0] == "npm test"
+        assert mock_run.call_args[0][0] == ["npm", "test"]
 
     @patch("app.claude_step.subprocess.run")
     def test_custom_timeout(self, mock_run):
@@ -806,12 +806,14 @@ class TestRunProjectTests:
         assert len(result["output"]) <= 3000
 
     @patch("app.claude_step.subprocess.run")
-    def test_uses_shell_mode(self, mock_run):
+    def test_uses_shlex_split(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout="ok", stderr=""
         )
         run_project_tests("/project", test_cmd="make test")
-        assert mock_run.call_args[1]["shell"] is True
+        # Should pass a list (shlex.split), not a string with shell=True
+        assert mock_run.call_args[0][0] == ["make", "test"]
+        assert mock_run.call_args[1].get("shell") is not True
 
     @patch("app.claude_step.subprocess.run")
     def test_stdin_devnull(self, mock_run):
