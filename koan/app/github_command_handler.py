@@ -1,13 +1,22 @@
-"""GitHub command handler — bridges notifications to missions.
+"""GitHub command handler — bridges notifications to missions and replies.
 
-Orchestrates the full flow from a GitHub @mention notification to a
-queued mission in missions.md:
+Orchestrates the full flow from a GitHub @mention notification to either:
+- A queued mission in missions.md (for recognized commands)
+- A direct AI-generated reply (for questions/requests from authorized users)
+
+Command flow:
 1. Parse comment → extract command
 2. Validate command → check skill has github_enabled
 3. Check permissions → verify user is authorized
 4. Add reaction → mark as processed (👍)
 5. Build mission → format with project tag
 6. Insert mission → write to missions.md
+
+Reply flow (when reply_enabled=true and command not recognized):
+1. Verify user is authorized
+2. Fetch issue/PR thread context
+3. Generate AI reply via Claude CLI
+4. Post reply as GitHub comment
 """
 
 import logging
@@ -15,7 +24,11 @@ import re
 from typing import List, Optional, Set, Tuple
 
 from app.bounded_set import BoundedSet
-from app.github_config import get_github_authorized_users, get_github_nickname
+from app.github_config import (
+    get_github_authorized_users,
+    get_github_nickname,
+    get_github_reply_enabled,
+)
 from app.github_notifications import (
     add_reaction,
     api_url_to_web_url,
@@ -244,7 +257,7 @@ def _validate_and_parse_command(
     repo: str,
 ) -> Tuple[Optional[object], Optional[str], str]:
     """Validate command and parse from comment.
-    
+
     Args:
         notification: Notification dict
         comment: Comment dict
@@ -253,9 +266,9 @@ def _validate_and_parse_command(
         bot_username: Bot's GitHub username
         owner: Repository owner
         repo: Repository name
-        
+
     Returns:
-        Tuple of (skill, command_name, context). 
+        Tuple of (skill, command_name, context).
         skill is None if command is invalid or already processed.
         command_name is None if already processed/no valid mention.
     """
@@ -285,6 +298,103 @@ def _validate_and_parse_command(
         return None, command_name, context  # Invalid command, but we have the name for error message
 
     return skill, command_name, context
+
+
+def _try_reply(
+    notification: dict,
+    comment: dict,
+    config: dict,
+    projects_config: Optional[dict],
+    bot_username: str,
+    owner: str,
+    repo: str,
+    project_name: str,
+    question_text: str,
+) -> bool:
+    """Attempt to generate and post an AI reply for a non-command @mention.
+
+    Checks reply_enabled config and user permissions before generating.
+
+    Args:
+        notification: Notification dict.
+        comment: Comment dict.
+        config: Global config.
+        projects_config: Projects config.
+        bot_username: Bot's GitHub username.
+        owner: Repository owner.
+        repo: Repository name.
+        project_name: Resolved project name.
+        question_text: The user's question/request text.
+
+    Returns:
+        True if reply was generated and posted successfully.
+    """
+    if not get_github_reply_enabled(config):
+        return False
+
+    comment_author = comment.get("user", {}).get("login", "")
+    comment_id = str(comment.get("id", ""))
+
+    # Check permissions — same authorized_users as commands
+    allowed_users = get_github_authorized_users(config, project_name, projects_config)
+    if not check_user_permission(owner, repo, comment_author, allowed_users):
+        log.debug(
+            "GitHub reply: permission denied for @%s on %s/%s",
+            comment_author, owner, repo,
+        )
+        return False
+
+    # Extract issue number for the thread
+    issue_number = extract_issue_number_from_notification(notification)
+    if not issue_number:
+        log.debug("GitHub reply: could not extract issue number from notification")
+        return False
+
+    # Resolve project path for Claude CLI
+    from app.utils import resolve_project_path
+    project_path = resolve_project_path(repo, owner=owner)
+    if not project_path:
+        log.debug("GitHub reply: could not resolve project path for %s/%s", owner, repo)
+        return False
+
+    log.info(
+        "GitHub reply: generating reply for @%s on %s/%s#%s",
+        comment_author, owner, repo, issue_number,
+    )
+
+    from app.github_reply import (
+        fetch_thread_context,
+        generate_reply,
+        post_reply,
+    )
+
+    # Fetch context and generate reply
+    thread_context = fetch_thread_context(owner, repo, issue_number)
+    reply_text = generate_reply(
+        question=question_text,
+        thread_context=thread_context,
+        owner=owner,
+        repo=repo,
+        issue_number=issue_number,
+        comment_author=comment_author,
+        project_path=project_path,
+    )
+
+    if not reply_text:
+        log.warning("GitHub reply: failed to generate reply for comment %s", comment_id)
+        return False
+
+    # Post reply
+    if not post_reply(owner, repo, issue_number, reply_text):
+        log.warning("GitHub reply: failed to post reply for comment %s", comment_id)
+        return False
+
+    # Mark as processed
+    add_reaction(owner, repo, comment_id, emoji="eyes")
+    mark_notification_read(str(notification.get("id", "")))
+
+    log.info("GitHub reply: posted reply to @%s on %s/%s#%s", comment_author, owner, repo, issue_number)
+    return True
 
 
 def process_single_notification(
@@ -331,13 +441,20 @@ def process_single_notification(
     skill, command_name, context = _validate_and_parse_command(
         notification, comment, config, registry, bot_username, owner, repo
     )
-    
+
     # If command_name is None, already processed or no valid mention
     if command_name is None:
         return False, None
-    
+
     # If skill is None but we have a command_name, it's an invalid command
     if skill is None:
+        # Try AI reply before falling back to error message
+        full_question = f"{command_name} {context}".strip()
+        if _try_reply(
+            notification, comment, config, projects_config,
+            bot_username, owner, repo, project_name, full_question,
+        ):
+            return False, None  # Reply posted instead of error
         mark_notification_read(str(notification.get("id", "")))
         help_msg = format_help_message(command_name, registry, bot_username)
         return False, help_msg

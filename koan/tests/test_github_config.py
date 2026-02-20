@@ -7,6 +7,7 @@ from app.github_config import (
     get_github_commands_enabled,
     get_github_max_age_hours,
     get_github_nickname,
+    get_github_reply_enabled,
     validate_github_config,
 )
 
@@ -80,6 +81,23 @@ class TestGetGithubAuthorizedUsers:
             config, project_name="myapp", projects_config=projects_config
         )
         assert result == ["bob"]
+
+
+class TestGetGithubReplyEnabled:
+    def test_enabled(self):
+        assert get_github_reply_enabled({"github": {"reply_enabled": True}}) is True
+
+    def test_disabled(self):
+        assert get_github_reply_enabled({"github": {"reply_enabled": False}}) is False
+
+    def test_default_disabled(self):
+        assert get_github_reply_enabled({}) is False
+
+    def test_none_section(self):
+        assert get_github_reply_enabled({"github": None}) is False
+
+    def test_missing_key(self):
+        assert get_github_reply_enabled({"github": {}}) is False
 
 
 class TestGetGithubMaxAgeHours:

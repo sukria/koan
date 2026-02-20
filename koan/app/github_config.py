@@ -9,6 +9,7 @@ Config schema in config.yaml:
       commands_enabled: true
       authorized_users: ["*"]
       max_age_hours: 24
+      reply_enabled: false
 
 Per-project override in projects.yaml:
     projects:
@@ -56,6 +57,16 @@ def get_github_authorized_users(config: dict, project_name: Optional[str] = None
     github = config.get("github") or {}
     users = github.get("authorized_users", [])
     return users if isinstance(users, list) else []
+
+
+def get_github_reply_enabled(config: dict) -> bool:
+    """Check if AI-powered replies to non-command @mentions are enabled.
+
+    When enabled, the bot will generate contextual replies to questions
+    from authorized users, rather than only responding to known commands.
+    """
+    github = config.get("github") or {}
+    return bool(github.get("reply_enabled", False))
 
 
 def get_github_max_age_hours(config: dict) -> int:
