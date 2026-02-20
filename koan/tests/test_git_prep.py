@@ -1,0 +1,587 @@
+"""Tests for git_prep.py — pre-mission git preparation."""
+
+import pytest
+from unittest.mock import patch, call
+
+from app.git_prep import get_upstream_remote, prepare_project_branch, PrepResult
+
+
+# --- get_upstream_remote ---
+
+
+class TestGetUpstreamRemote:
+    """Tests for remote resolution logic."""
+
+    def test_explicit_config_wins(self):
+        """submit_to_repository.remote from projects.yaml takes priority."""
+        config = {"projects": {"myproj": {"submit_to_repository": {"remote": "fork-remote"}}}}
+        with patch("app.git_prep.load_projects_config", return_value=config), \
+             patch("app.git_prep.get_project_submit_to_repository", return_value={"remote": "fork-remote"}):
+            result = get_upstream_remote("/path/to/proj", "myproj", "/koan")
+        assert result == "fork-remote"
+
+    def test_upstream_remote_exists(self):
+        """When no config, probe for 'upstream' remote."""
+        with patch("app.git_prep.load_projects_config", return_value={}), \
+             patch("app.git_prep.get_project_submit_to_repository", return_value={}), \
+             patch("app.git_prep.run_git", return_value=(0, "git@github.com:foo/bar.git", "")):
+            result = get_upstream_remote("/path/to/proj", "myproj", "/koan")
+        assert result == "upstream"
+
+    def test_no_upstream_falls_back_to_origin(self):
+        """When no config and no 'upstream' remote, fall back to 'origin'."""
+        with patch("app.git_prep.load_projects_config", return_value={}), \
+             patch("app.git_prep.get_project_submit_to_repository", return_value={}), \
+             patch("app.git_prep.run_git", return_value=(1, "", "fatal: No such remote")):
+            result = get_upstream_remote("/path/to/proj", "myproj", "/koan")
+        assert result == "origin"
+
+    def test_config_loading_failure_falls_back(self):
+        """If projects.yaml can't be loaded, probe remotes."""
+        with patch("app.git_prep.load_projects_config", side_effect=Exception("broken")), \
+             patch("app.git_prep.run_git", return_value=(1, "", "no such remote")):
+            result = get_upstream_remote("/path/to/proj", "myproj", "/koan")
+        assert result == "origin"
+
+    def test_config_returns_none(self):
+        """If load_projects_config returns None, probe remotes."""
+        with patch("app.git_prep.load_projects_config", return_value=None), \
+             patch("app.git_prep.run_git", return_value=(0, "url", "")):
+            result = get_upstream_remote("/path/to/proj", "myproj", "/koan")
+        assert result == "upstream"
+
+    def test_submit_config_no_remote_key(self):
+        """submit_to_repository exists but has no 'remote' key."""
+        config = {"projects": {"myproj": {"submit_to_repository": {"repo": "owner/repo"}}}}
+        with patch("app.git_prep.load_projects_config", return_value=config), \
+             patch("app.git_prep.get_project_submit_to_repository", return_value={"repo": "owner/repo"}), \
+             patch("app.git_prep.run_git", return_value=(0, "url", "")):
+            result = get_upstream_remote("/path/to/proj", "myproj", "/koan")
+        assert result == "upstream"
+
+    def test_empty_remote_in_config_ignored(self):
+        """submit_to_repository.remote is empty string — treated as unset."""
+        with patch("app.git_prep.load_projects_config", return_value={"projects": {}}), \
+             patch("app.git_prep.get_project_submit_to_repository", return_value={"remote": ""}), \
+             patch("app.git_prep.run_git", return_value=(1, "", "no remote")):
+            result = get_upstream_remote("/path/to/proj", "myproj", "/koan")
+        assert result == "origin"
+
+
+# --- PrepResult ---
+
+
+class TestPrepResult:
+    """Tests for the PrepResult dataclass."""
+
+    def test_defaults(self):
+        r = PrepResult()
+        assert r.remote_used == "origin"
+        assert r.base_branch == "main"
+        assert r.stashed is False
+        assert r.previous_branch == ""
+        assert r.success is True
+        assert r.error is None
+
+
+# --- prepare_project_branch ---
+
+
+def _make_run_git_side_effect(overrides=None):
+    """Build a run_git mock that handles standard git commands.
+
+    Returns (returncode, stdout, stderr) based on the first git argument.
+    Overrides is a dict mapping command keys to (rc, stdout, stderr) tuples.
+    """
+    defaults = {
+        "rev-parse": (0, "feature-branch", ""),
+        "remote": (1, "", "no such remote"),  # no 'upstream' remote
+        "fetch": (0, "", ""),
+        "status": (0, "", ""),  # clean working tree
+        "checkout": (0, "", ""),
+        "merge": (0, "", ""),
+        "stash": (0, "", ""),
+        "reset": (0, "", ""),
+    }
+    if overrides:
+        defaults.update(overrides)
+
+    def side_effect(*args, **kwargs):
+        cmd = args[0] if args else ""
+        return defaults.get(cmd, (0, "", ""))
+
+    return side_effect
+
+
+class TestPrepareProjectBranch:
+    """Tests for prepare_project_branch()."""
+
+    def _patch_all(self, run_git_side_effect=None, config=None, auto_merge=None):
+        """Return a context manager that patches all dependencies."""
+        from contextlib import ExitStack
+
+        stack = ExitStack()
+
+        if run_git_side_effect is None:
+            run_git_side_effect = _make_run_git_side_effect()
+
+        patches = {
+            "run_git": stack.enter_context(
+                patch("app.git_prep.run_git", side_effect=run_git_side_effect)
+            ),
+            "load_config": stack.enter_context(
+                patch("app.git_prep.load_projects_config", return_value=config)
+            ),
+            "submit": stack.enter_context(
+                patch("app.git_prep.get_project_submit_to_repository", return_value={})
+            ),
+            "auto_merge": stack.enter_context(
+                patch("app.git_prep.get_project_auto_merge", return_value=auto_merge or {"base_branch": "main"})
+            ),
+        }
+        return stack, patches
+
+    def test_happy_path(self):
+        """Fetch + checkout + merge all succeed."""
+        stack, mocks = self._patch_all()
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.base_branch == "main"
+        assert result.remote_used == "origin"
+        assert result.stashed is False
+        assert result.previous_branch == "feature-branch"
+        assert result.error is None
+
+    def test_dirty_working_tree_stashed(self):
+        """Dirty working tree is stashed."""
+        side_effect = _make_run_git_side_effect({
+            "status": (0, "M  file.py\n?? new.txt", ""),
+        })
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.stashed is True
+
+    def test_fetch_failure(self):
+        """Fetch failure returns success=False."""
+        side_effect = _make_run_git_side_effect({
+            "fetch": (1, "", "Could not resolve host"),
+        })
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is False
+        assert "fetch failed" in result.error
+
+    def test_branch_doesnt_exist_locally(self):
+        """Base branch doesn't exist locally — creates from remote tracking."""
+        calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            calls.append(args)
+            if cmd == "rev-parse":
+                return (0, "HEAD", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "", "")
+            if cmd == "checkout":
+                # First checkout (no -b) fails, second (with -b) succeeds
+                if "-b" not in args:
+                    return (1, "", "error: pathspec 'main' did not match")
+                return (0, "", "")
+            if cmd == "merge":
+                return (0, "", "")
+            return (1, "", "no such remote")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        # Verify checkout -b was called
+        checkout_b_calls = [c for c in calls if len(c) >= 2 and c[0] == "checkout" and "-b" in c]
+        assert len(checkout_b_calls) == 1
+
+    def test_detached_head(self):
+        """Detached HEAD state — checkout still works."""
+        side_effect = _make_run_git_side_effect({
+            "rev-parse": (0, "HEAD", ""),
+        })
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.previous_branch == "HEAD"
+
+    def test_already_on_correct_branch(self):
+        """Already on base branch and up to date — merge is no-op."""
+        side_effect = _make_run_git_side_effect({
+            "rev-parse": (0, "main", ""),
+            "merge": (0, "Already up to date.", ""),
+        })
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.previous_branch == "main"
+
+    def test_ff_merge_fails_resets_to_remote(self):
+        """ff-merge fails (local diverged) — resets to remote ref."""
+        calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            calls.append(args)
+            if cmd == "rev-parse":
+                return (0, "main", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "", "")
+            if cmd == "checkout":
+                return (0, "", "")
+            if cmd == "merge":
+                return (1, "", "fatal: Not possible to fast-forward")
+            if cmd == "reset":
+                return (0, "", "")
+            return (1, "", "no remote")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        # Verify reset --hard was called
+        reset_calls = [c for c in calls if c[0] == "reset"]
+        assert len(reset_calls) == 1
+        assert "--hard" in reset_calls[0]
+
+    def test_ff_merge_and_reset_both_fail(self):
+        """Both ff-merge and reset fail — returns error."""
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "rev-parse":
+                return (0, "main", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "", "")
+            if cmd == "checkout":
+                return (0, "", "")
+            if cmd == "merge":
+                return (1, "", "cannot fast-forward")
+            if cmd == "reset":
+                return (1, "", "reset failed badly")
+            return (1, "", "no remote")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is False
+        assert "reset failed" in result.error
+
+    def test_stash_failure_continues(self):
+        """Stash failure is non-fatal — prep continues."""
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "rev-parse":
+                return (0, "feature", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "M dirty.py", "")
+            if cmd == "stash":
+                return (1, "", "stash failed")
+            if cmd == "checkout":
+                return (0, "", "")
+            if cmd == "merge":
+                return (0, "", "")
+            return (1, "", "no remote")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.stashed is False
+
+    def test_checkout_failure_after_stash(self):
+        """Checkout fails after successful stash — reports error."""
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "rev-parse":
+                return (0, "feature", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "M dirty.py", "")
+            if cmd == "stash":
+                return (0, "", "")
+            if cmd == "checkout":
+                return (1, "", "checkout error")
+            return (1, "", "no remote")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is False
+        assert result.stashed is True
+        assert "checkout failed" in result.error
+
+    def test_custom_base_branch_from_config(self):
+        """Respects base_branch from project auto-merge config."""
+        calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            calls.append(args)
+            if cmd == "rev-parse":
+                return (0, "old-branch", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "", "")
+            if cmd == "checkout":
+                return (0, "", "")
+            if cmd == "merge":
+                return (0, "", "")
+            return (1, "", "no remote")
+
+        stack, _ = self._patch_all(
+            run_git_side_effect=side_effect,
+            config={"projects": {}},
+            auto_merge={"base_branch": "develop"},
+        )
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.base_branch == "develop"
+        # Verify fetch used 'develop'
+        fetch_calls = [c for c in calls if c[0] == "fetch"]
+        assert any("develop" in c for c in fetch_calls)
+
+    def test_upstream_remote_used(self):
+        """When 'upstream' remote exists, it's used for fetch."""
+        calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            calls.append(args)
+            if cmd == "rev-parse":
+                return (0, "feature", "")
+            if cmd == "remote":
+                return (0, "git@github.com:upstream/repo.git", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "", "")
+            if cmd == "checkout":
+                return (0, "", "")
+            if cmd == "merge":
+                return (0, "", "")
+            return (0, "", "")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.remote_used == "upstream"
+
+    def test_rev_parse_failure_continues(self):
+        """rev-parse failure sets empty previous_branch but prep continues."""
+        side_effect = _make_run_git_side_effect({
+            "rev-parse": (1, "", "fatal: not a git repo"),
+        })
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.previous_branch == ""
+
+    def test_config_load_failure_uses_defaults(self):
+        """Config loading failure uses default base_branch='main'."""
+        side_effect = _make_run_git_side_effect()
+        with patch("app.git_prep.run_git", side_effect=side_effect), \
+             patch("app.git_prep.load_projects_config", side_effect=Exception("boom")), \
+             patch("app.git_prep.get_project_submit_to_repository", return_value={}), \
+             patch("app.git_prep.get_project_auto_merge", return_value={"base_branch": "main"}):
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.base_branch == "main"
+        assert result.remote_used == "origin"
+
+    def test_explicit_remote_from_config(self):
+        """submit_to_repository.remote overrides auto-detection."""
+        side_effect = _make_run_git_side_effect()
+        with patch("app.git_prep.run_git", side_effect=side_effect), \
+             patch("app.git_prep.load_projects_config", return_value={"projects": {}}), \
+             patch("app.git_prep.get_project_submit_to_repository", return_value={"remote": "myfork"}), \
+             patch("app.git_prep.get_project_auto_merge", return_value={"base_branch": "main"}):
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.remote_used == "myfork"
+
+    def test_clean_tree_no_stash(self):
+        """Clean working tree — stash is not called."""
+        calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            calls.append(cmd)
+            if cmd == "rev-parse":
+                return (0, "main", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "", "")  # clean
+            if cmd == "checkout":
+                return (0, "", "")
+            if cmd == "merge":
+                return (0, "", "")
+            return (1, "", "no remote")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.stashed is False
+        assert "stash" not in calls
+
+    def test_fetch_with_correct_timeout(self):
+        """Fetch uses timeout=30."""
+        with patch("app.git_prep.run_git", side_effect=_make_run_git_side_effect()) as mock_git, \
+             patch("app.git_prep.load_projects_config", return_value=None), \
+             patch("app.git_prep.get_project_submit_to_repository", return_value={}), \
+             patch("app.git_prep.get_project_auto_merge", return_value={"base_branch": "main"}):
+            prepare_project_branch("/proj", "myproj", "/koan")
+
+        # Find the fetch call
+        fetch_calls = [c for c in mock_git.call_args_list if c[0][0] == "fetch"]
+        assert len(fetch_calls) == 1
+        assert fetch_calls[0][1].get("timeout") == 30
+
+    def test_checkout_creates_branch_from_remote(self):
+        """When checkout fails, creates branch tracking remote."""
+        calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            calls.append(args)
+            if cmd == "rev-parse":
+                return (0, "old", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "", "")
+            if cmd == "checkout":
+                if "-b" in args:
+                    return (0, "", "")
+                return (1, "", "did not match")
+            if cmd == "merge":
+                return (0, "", "")
+            return (1, "", "")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        # Verify checkout -b main origin/main was called
+        checkout_b = [c for c in calls if c[0] == "checkout" and "-b" in c]
+        assert len(checkout_b) == 1
+        assert "main" in checkout_b[0]
+        assert "origin/main" in checkout_b[0]
+
+    def test_both_checkouts_fail(self):
+        """Both checkout attempts fail — returns error."""
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "rev-parse":
+                return (0, "old", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "", "")
+            if cmd == "checkout":
+                return (1, "", "checkout error")
+            return (1, "", "")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is False
+        assert "checkout failed" in result.error
+
+    def test_status_porcelain_failure_skips_stash(self):
+        """If git status --porcelain fails, skip stash."""
+        calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            calls.append(cmd)
+            if cmd == "rev-parse":
+                return (0, "main", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (1, "", "status error")
+            if cmd == "checkout":
+                return (0, "", "")
+            if cmd == "merge":
+                return (0, "", "")
+            return (1, "", "")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is True
+        assert result.stashed is False
+        assert "stash" not in calls
+
+
+# --- Integration: _run_iteration calls git prep ---
+
+
+class TestRunIterationIntegration:
+    """Verify git prep is called from run.py's _run_iteration."""
+
+    def test_git_prep_called_in_run_iteration(self):
+        """prepare_project_branch is imported and called in _run_iteration."""
+        # Verify the import exists in run.py by checking the source
+        import inspect
+        from app import run
+
+        source = inspect.getsource(run)
+        assert "from app.git_prep import prepare_project_branch" in source
+        assert "prepare_project_branch(project_path, project_name, koan_root)" in source
+
+    def test_git_prep_is_non_fatal(self):
+        """Git prep failure is wrapped in try/except — never blocks missions."""
+        import inspect
+        from app import run
+
+        source = inspect.getsource(run)
+        # Find the git prep block — it should be in a try/except
+        idx = source.find("prepare_project_branch(project_path")
+        assert idx > 0
+        # The try block should be nearby (within ~200 chars before)
+        preceding = source[max(0, idx - 300):idx]
+        assert "try:" in preceding

@@ -1250,6 +1250,19 @@ def _run_iteration(
     print(bold_green(f">>> Current project: {project_name}") + f" ({project_path})")
     print()
 
+    # --- Prepare project git state ---
+    from app.git_prep import prepare_project_branch
+    try:
+        prep = prepare_project_branch(project_path, project_name, koan_root)
+        if prep.stashed:
+            log("git", f"Stashed uncommitted changes in {project_name}")
+        if not prep.success:
+            log("error", f"Git prep failed for {project_name}: {prep.error}")
+        else:
+            log("git", f"Ready on {prep.base_branch} from {prep.remote_used}")
+    except Exception as e:
+        log("error", f"Git prep error for {project_name}: {e}")
+
     # --- Mark mission as In Progress ---
     if mission_title:
         _start_mission_in_file(instance, mission_title)
