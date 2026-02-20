@@ -706,9 +706,11 @@ class TestTryReply:
         assert result is True
         mock_gen.assert_called_once()
         mock_post.assert_called_once_with("sukria", "koan", "42", "Here is my reply")
-        # Should react with eyes emoji (not thumbs up), using correct comment type
-        mock_react.assert_called_once_with("sukria", "koan", "55555", emoji="eyes",
-                                           comment_type="issues")
+        # Should react with eyes emoji (not thumbs up), using comment API URL
+        mock_react.assert_called_once_with(
+            "sukria", "koan", "55555", emoji="eyes",
+            comment_api_url="",
+        )
         # Should send Telegram notifications
         mock_notify_q.assert_called_once_with(
             "alice", "sukria", "koan", "42", "what do you think?",
@@ -983,29 +985,8 @@ class TestExtractUrlFromContext:
         assert url == "https://github.com/my-org/my-repo/pull/99"
 
 
-class TestPRReviewCommentType:
-    """Tests for correct API endpoint routing based on comment type.
-
-    PR review comments (inline code review) use pulls/comments/{id},
-    while regular issue/PR conversation comments use issues/comments/{id}.
-    Using the wrong endpoint causes reactions to silently fail.
-    """
-
-    @pytest.fixture
-    def pr_review_notification(self):
-        """Notification from a PR review comment (inline code comment)."""
-        return {
-            "id": "77777",
-            "reason": "mention",
-            "updated_at": "2026-02-21T10:00:00Z",
-            "repository": {"full_name": "sukria/koan"},
-            "subject": {
-                "type": "PullRequest",
-                "url": "https://api.github.com/repos/sukria/koan/pulls/100",
-                "latest_comment_url":
-                    "https://api.github.com/repos/sukria/koan/pulls/comments/55555",
-            },
-        }
+class TestCommentApiUrlThreading:
+    """Tests that comment_api_url is properly threaded through the pipeline."""
 
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.add_reaction", return_value=True)
@@ -1016,57 +997,21 @@ class TestPRReviewCommentType:
     @patch("app.github_command_handler.get_comment_from_notification")
     @patch("app.github_command_handler.resolve_project_from_notification")
     @patch("app.utils.insert_pending_mission")
-    def test_pr_review_comment_passes_pulls_type(
-        self, mock_insert, mock_resolve, mock_get_comment,
-        mock_stale, mock_self, mock_processed, mock_perm,
-        mock_react, mock_read, registry, pr_review_notification, tmp_path,
-    ):
-        """PR review comment @mention passes comment_type='pulls' to reaction calls."""
-        mock_resolve.return_value = ("koan", "sukria", "koan")
-        mock_get_comment.return_value = {
-            "id": 55555,
-            "body": "@testbot rebase",
-            "user": {"login": "alice"},
-        }
-        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
-
-        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
-            success, error = process_single_notification(
-                pr_review_notification, registry, config, None, "testbot",
-            )
-
-        assert success is True
-        assert error is None
-        # Verify check_already_processed was called with comment_type="pulls"
-        mock_processed.assert_called_once_with(
-            "55555", "testbot", "sukria", "koan", comment_type="pulls",
-        )
-        # Verify add_reaction was called with comment_type="pulls"
-        mock_react.assert_called_once_with(
-            "sukria", "koan", "55555", comment_type="pulls",
-        )
-
-    @patch("app.github_command_handler.mark_notification_read")
-    @patch("app.github_command_handler.add_reaction", return_value=True)
-    @patch("app.github_command_handler.check_user_permission", return_value=True)
-    @patch("app.github_command_handler.check_already_processed", return_value=False)
-    @patch("app.github_command_handler.is_self_mention", return_value=False)
-    @patch("app.github_command_handler.is_notification_stale", return_value=False)
-    @patch("app.github_command_handler.get_comment_from_notification")
-    @patch("app.github_command_handler.resolve_project_from_notification")
-    @patch("app.utils.insert_pending_mission")
-    def test_issue_comment_passes_issues_type(
+    def test_pr_review_comment_url_threaded(
         self, mock_insert, mock_resolve, mock_get_comment,
         mock_stale, mock_self, mock_processed, mock_perm,
         mock_react, mock_read, registry, sample_notification, tmp_path,
     ):
-        """Regular issue comment @mention passes comment_type='issues' to reaction calls."""
+        """PR review comment URL is passed to add_reaction for correct endpoint."""
+        pr_comment_url = "https://api.github.com/repos/sukria/koan/pulls/comments/42"
         mock_resolve.return_value = ("koan", "sukria", "koan")
         mock_get_comment.return_value = {
-            "id": 99999,
+            "id": 42,
+            "url": pr_comment_url,
             "body": "@testbot rebase",
             "user": {"login": "alice"},
         }
+
         config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
 
         with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
@@ -1075,7 +1020,45 @@ class TestPRReviewCommentType:
             )
 
         assert success is True
-        # Verify check_already_processed was called with comment_type="issues"
+        # Verify comment_api_url was passed to add_reaction
+        mock_react.assert_called_once_with(
+            "sukria", "koan", "42",
+            comment_api_url=pr_comment_url,
+        )
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_comment_url_passed_to_check_already_processed(
+        self, mock_insert, mock_resolve, mock_get_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification, tmp_path,
+    ):
+        """comment_api_url is passed to check_already_processed."""
+        issue_comment_url = "https://api.github.com/repos/sukria/koan/issues/comments/99"
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 99,
+            "url": issue_comment_url,
+            "body": "@testbot rebase",
+            "user": {"login": "alice"},
+        }
+
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+
+        # check_already_processed should receive the URL
         mock_processed.assert_called_once_with(
-            "99999", "testbot", "sukria", "koan", comment_type="issues",
+            "99", "testbot", "sukria", "koan",
+            comment_api_url=issue_comment_url,
         )
