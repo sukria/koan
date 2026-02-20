@@ -17,8 +17,9 @@ commands:
   - name: recurring
     description: List all recurring missions
     usage: /recurring
-  - name: cancel-recurring
+  - name: cancel_recurring
     description: Cancel a recurring mission
-    usage: /cancel-recurring <n>, /cancel-recurring <keyword>
+    usage: /cancel_recurring <n>, /cancel_recurring <keyword>
+    aliases: [cancel-recurring]
 handler: handler.py
 ---

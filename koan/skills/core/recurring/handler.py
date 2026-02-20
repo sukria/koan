@@ -2,13 +2,13 @@
 
 
 def handle(ctx):
-    """Handle /daily, /hourly, /weekly, /recurring, /cancel-recurring commands.
+    """Handle /daily, /hourly, /weekly, /recurring, /cancel_recurring commands.
 
     /daily <text>           — add a daily recurring mission
     /hourly <text>          — add an hourly recurring mission
     /weekly <text>          — add a weekly recurring mission
     /recurring              — list all recurring missions
-    /cancel-recurring [n]   — cancel a recurring mission by number or keyword
+    /cancel_recurring [n]   — cancel a recurring mission by number or keyword
     """
     command = ctx.command_name
 
@@ -16,7 +16,7 @@ def handle(ctx):
         return _handle_add(ctx, command)
     elif command == "recurring":
         return _handle_list(ctx)
-    elif command == "cancel-recurring":
+    elif command == "cancel_recurring":
         return _handle_cancel(ctx)
 
     return None
@@ -65,7 +65,7 @@ def _handle_cancel(ctx):
         missions = list_recurring(recurring_path)
         if missions:
             msg = format_recurring_list(missions)
-            msg += "\n\nUsage: /cancel-recurring <number or keyword>"
+            msg += "\n\nUsage: /cancel_recurring <number or keyword>"
             return msg
         return "No recurring missions to cancel."
 

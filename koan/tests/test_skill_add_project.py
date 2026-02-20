@@ -1,4 +1,4 @@
-"""Tests for the /add-project skill handler."""
+"""Tests for the /add_project skill handler."""
 
 import importlib.util
 import sys
@@ -11,7 +11,7 @@ import pytest
 # Load handler via spec since directory name has a hyphen
 _handler_path = (
     Path(__file__).resolve().parent.parent
-    / "skills" / "core" / "add-project" / "handler.py"
+    / "skills" / "core" / "add_project" / "handler.py"
 )
 _spec = importlib.util.spec_from_file_location("add_project_handler", str(_handler_path))
 _mod = importlib.util.module_from_spec(_spec)
@@ -56,7 +56,7 @@ def _make_ctx(koan_root, instance_dir, args=""):
     return SimpleNamespace(
         koan_root=koan_root,
         instance_dir=instance_dir,
-        command_name="add-project",
+        command_name="add_project",
         args=args,
         send_message=lambda msg: messages.append(msg),
         handle_chat=None,
@@ -584,3 +584,24 @@ class TestHandleCloneUrl:
             handle(ctx)
 
         assert clone_urls == ["https://github.com/owner/repo.git"]
+
+
+# ---------------------------------------------------------------------------
+# Registry — command and backward-compat alias
+# ---------------------------------------------------------------------------
+
+class TestRegistryDiscovery:
+    def test_registry_discovers_add_project(self):
+        from app.skills import build_registry
+        registry = build_registry()
+        skill = registry.find_by_command("add_project")
+        assert skill is not None, "Command '/add_project' not found in registry"
+        assert skill.name == "add_project"
+
+    def test_backward_compat_alias(self):
+        """The old hyphenated name still resolves via alias."""
+        from app.skills import build_registry
+        registry = build_registry()
+        skill = registry.find_by_command("add-project")
+        assert skill is not None, "Backward-compat alias 'add-project' not found"
+        assert skill.name == "add_project"
