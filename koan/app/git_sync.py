@@ -126,6 +126,55 @@ class GitSync:
         merged = set(self.get_merged_branches())
         return sorted(all_koan - merged)
 
+    def _get_current_branch(self) -> str:
+        """Return the current branch name, or empty string on failure."""
+        return run_git(self.project_path, "rev-parse", "--abbrev-ref", "HEAD")
+
+    def _get_local_branches(self, prefix: str) -> List[str]:
+        """List local-only branches matching prefix (excludes remotes)."""
+        output = run_git(self.project_path, "branch", "--list", f"{prefix}*")
+        branches = []
+        for line in output.splitlines():
+            name = line.strip().lstrip("* ")
+            if name.startswith(prefix):
+                branches.append(name)
+        return branches
+
+    def cleanup_merged_branches(self, merged: List[str]) -> List[str]:
+        """Delete local branches that are confirmed merged.
+
+        Only deletes branches matching the agent prefix. Never deletes
+        the current branch. Uses ``git branch -d`` (safe delete — refuses
+        if not fully merged).
+
+        Args:
+            merged: List of merged branch names from get_merged_branches().
+
+        Returns:
+            List of successfully deleted branch names.
+        """
+        if not merged:
+            return []
+
+        current = self._get_current_branch()
+        prefix = _get_prefix()
+        local_branches = set(self._get_local_branches(prefix))
+
+        deleted = []
+        for branch in merged:
+            # Skip if not a local branch (remote-only ref)
+            if branch not in local_branches:
+                continue
+            # Never delete the current branch
+            if branch == current:
+                continue
+            # Safe delete — git branch -d refuses if not fully merged
+            result = run_git(self.project_path, "branch", "-d", branch)
+            if result:  # non-empty stdout means success
+                deleted.append(branch)
+
+        return deleted
+
     def build_sync_report(self) -> str:
         """Build a human-readable git sync report."""
         run_git(self.project_path, "fetch", "--prune")
@@ -133,6 +182,9 @@ class GitSync:
         merged = self.get_merged_branches()
         unmerged = self.get_unmerged_branches()
         recent = self.get_recent_main_commits(since_hours=12)
+
+        # Auto-cleanup merged local branches
+        cleaned = self.cleanup_merged_branches(merged)
 
         parts = []
         now = datetime.now().strftime("%H:%M")
@@ -144,7 +196,11 @@ class GitSync:
         if merged:
             parts.append(f"\nMerged {label} branches ({len(merged)}):")
             for b in merged:
-                parts.append(f"  ✓ {b}")
+                suffix = " (cleaned up)" if b in cleaned else ""
+                parts.append(f"  ✓ {b}{suffix}")
+
+        if cleaned:
+            parts.append(f"\nCleaned up {len(cleaned)} merged local branch(es).")
 
         if unmerged:
             parts.append(f"\nUnmerged {label} branches ({len(unmerged)}):")
