@@ -5,21 +5,21 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).parent.parent / "system-prompts"
 
 
-def test_agent_prompt_has_audit_github_issue_instructions():
-    """Audit missions should be instructed to create GitHub issues when appropriate."""
-    agent_prompt = (PROMPTS_DIR / "agent.md").read_text()
+def test_audit_mission_prompt_has_github_issue_instructions():
+    """Audit mission template should instruct to create GitHub issues when appropriate."""
+    audit_prompt = (PROMPTS_DIR / "audit-mission.md").read_text()
 
     # Must have the audit section header
-    assert "# Audit Missions" in agent_prompt
+    assert "# Audit Missions" in audit_prompt
 
     # Must mention gh issue create
-    assert "gh issue create" in agent_prompt
+    assert "gh issue create" in audit_prompt
 
     # Must have skip conditions (don't create issues for trivial findings)
-    assert "Skip issue creation when" in agent_prompt
+    assert "Skip issue creation when" in audit_prompt
 
     # Must check for GitHub remote first
-    assert "gh repo view" in agent_prompt
+    assert "gh repo view" in audit_prompt
 
 
 def test_agent_prompt_has_all_required_placeholders():
@@ -47,9 +47,9 @@ def test_agent_prompt_has_branch_pr_notification_instructions():
     agent_prompt = (PROMPTS_DIR / "agent.md").read_text()
 
     # Must mention branch notification in conclusion section
-    assert "pushed a branch" in agent_prompt
+    assert "branch name" in agent_prompt
     # Must mention PR link
-    assert "draft PR" in agent_prompt
+    assert "PR link" in agent_prompt
 
 
 def test_agent_prompt_conclusion_has_project_prefix():
