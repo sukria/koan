@@ -20,7 +20,7 @@ from app.git_utils import run_git_strict
 from app.github import detect_parent_repo, fetch_issue_with_comments, run_gh, pr_create
 from app.github_url_parser import parse_issue_url
 from app.projects_config import resolve_base_branch
-from app.prompts import load_skill_prompt
+from app.prompts import load_prompt, load_skill_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +232,6 @@ def _build_prompt(
     if skill_dir is not None:
         return load_skill_prompt(skill_dir, "fix", **template_vars)
 
-    from app.prompts import load_prompt
     return load_prompt("fix", **template_vars)
 
 

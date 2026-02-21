@@ -30,6 +30,7 @@ CLI_RUNNER_MODULES = [
     "app.claudemd_refresh",
     "app.pr_review",
     "skills.core.implement.implement_runner",
+    "skills.core.fix.fix_runner",
 ]
 
 
