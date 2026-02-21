@@ -10,6 +10,7 @@ Config schema in config.yaml:
       authorized_users: ["*"]
       max_age_hours: 24
       reply_enabled: false
+      check_interval_seconds: 60
 
 Per-project override in projects.yaml:
     projects:
@@ -80,6 +81,20 @@ def get_github_max_age_hours(config: dict) -> int:
         return int(github.get("max_age_hours", 24))
     except (ValueError, TypeError):
         return 24
+
+
+def get_github_check_interval(config: dict) -> int:
+    """Get the minimum interval in seconds between notification checks.
+
+    Controls throttling of GitHub API calls for notification polling.
+    Default: 60 seconds.
+    """
+    github = config.get("github") or {}
+    try:
+        val = int(github.get("check_interval_seconds", 60))
+        return max(10, val)  # Floor at 10s to prevent API abuse
+    except (ValueError, TypeError):
+        return 60
 
 
 def validate_github_config(config: dict) -> Optional[str]:

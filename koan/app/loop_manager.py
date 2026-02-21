@@ -161,7 +161,8 @@ Mode: {mode}
 
 # --- GitHub notification processing ---
 
-# Throttle: minimum seconds between GitHub notification checks
+# Throttle: minimum seconds between GitHub notification checks.
+# This default is overridden at runtime by github.check_interval_seconds from config.yaml.
 _GITHUB_CHECK_INTERVAL = 60
 # Maximum backoff interval (5 minutes) when notifications are consistently empty
 _GITHUB_MAX_CHECK_INTERVAL = 300
@@ -169,6 +170,8 @@ _last_github_check: float = 0
 _consecutive_empty_checks: int = 0
 # Track whether we've logged the first config status (avoids repeating every check)
 _github_config_logged: bool = False
+# Track whether we've loaded the configured interval from config.yaml
+_github_interval_loaded: bool = False
 
 log = logging.getLogger(__name__)
 
@@ -305,10 +308,11 @@ def _get_effective_check_interval() -> int:
 
 def reset_github_backoff() -> None:
     """Reset backoff state. Useful for tests and when external events suggest activity."""
-    global _last_github_check, _consecutive_empty_checks, _github_config_logged
+    global _last_github_check, _consecutive_empty_checks, _github_config_logged, _github_interval_loaded
     _last_github_check = 0
     _consecutive_empty_checks = 0
     _github_config_logged = False
+    _github_interval_loaded = False
 
 
 def process_github_notifications(
@@ -317,8 +321,9 @@ def process_github_notifications(
 ) -> int:
     """Check GitHub notifications and create missions from @mentions.
 
-    Respects throttling with exponential backoff: starts at 60s between checks,
-    doubles on each empty result (up to 300s), resets on finding notifications.
+    Respects throttling with exponential backoff: starts at the configured
+    check_interval_seconds (default 60s), doubles on each empty result
+    (up to 300s), resets on finding notifications.
 
     Args:
         koan_root: Path to koan root directory.
@@ -327,7 +332,18 @@ def process_github_notifications(
     Returns:
         Number of missions created.
     """
-    global _last_github_check, _consecutive_empty_checks
+    global _last_github_check, _consecutive_empty_checks, _GITHUB_CHECK_INTERVAL, _github_interval_loaded
+
+    # Load configured interval on first call (lazy, avoids import-time config reads)
+    if not _github_interval_loaded:
+        try:
+            from app.utils import load_config
+            from app.github_config import get_github_check_interval
+            cfg = load_config()
+            _GITHUB_CHECK_INTERVAL = get_github_check_interval(cfg)
+            _github_interval_loaded = True
+        except Exception as e:
+            log.debug("Could not load github check interval from config: %s", e)
 
     now = time.time()
     effective_interval = _get_effective_check_interval()

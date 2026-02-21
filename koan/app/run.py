@@ -108,6 +108,7 @@ _CATEGORY_COLORS = {
     "init": "blue",
     "health": "yellow",
     "git": "magenta",
+    "github": "bold+magenta",
     "mission": "green",
     "quota": "bold+yellow",
     "pause": "dim+blue",
@@ -1152,6 +1153,16 @@ def _run_iteration(
     refreshed = get_known_projects()
     if refreshed:
         projects = refreshed
+
+    # Check GitHub notifications before planning (converts @mentions to missions
+    # so plan_iteration() sees them immediately instead of waiting for sleep)
+    from app.loop_manager import process_github_notifications
+    try:
+        gh_missions = process_github_notifications(koan_root, instance)
+        if gh_missions > 0:
+            log("github", f"Pre-iteration: {gh_missions} mission(s) created from GitHub notifications")
+    except Exception as e:
+        log("error", f"Pre-iteration GitHub notification check failed: {e}")
 
     # Plan iteration (delegated to iteration_manager)
     last_project = ""

@@ -2025,6 +2025,89 @@ class TestRunIterationErrorAction:
 # Test: claude_exit initialization (prevents UnboundLocalError)
 # ---------------------------------------------------------------------------
 
+class TestRunIterationGitHubPreCheck:
+    """_run_iteration checks GitHub notifications before planning."""
+
+    @patch("app.run.plan_iteration")
+    @patch("app.run._notify")
+    @patch("app.loop_manager.process_github_notifications")
+    def test_github_notifications_checked_before_planning(
+        self, mock_gh_notif, mock_notify, mock_plan, koan_root
+    ):
+        """process_github_notifications is called before plan_iteration."""
+        from app.run import _run_iteration
+
+        mock_gh_notif.return_value = 0
+        mock_plan.return_value = {
+            "action": "error",
+            "error": "test-stop",
+            "project_name": "test",
+            "project_path": str(koan_root),
+            "mission_title": "",
+            "autonomous_mode": "implement",
+            "focus_area": "",
+            "available_pct": 50,
+            "decision_reason": "Default",
+            "display_lines": [],
+            "recurring_injected": [],
+        }
+
+        instance = str(koan_root / "instance")
+
+        with patch("app.utils.get_known_projects", return_value=[("test", str(koan_root))]):
+            with pytest.raises(RuntimeError):
+                _run_iteration(
+                    koan_root=str(koan_root),
+                    instance=instance,
+                    projects=[("test", str(koan_root))],
+                    count=0,
+                    max_runs=5,
+                    interval=10,
+                    git_sync_interval=5,
+                )
+
+        mock_gh_notif.assert_called_once_with(str(koan_root), instance)
+
+    @patch("app.run.plan_iteration")
+    @patch("app.run._notify")
+    @patch("app.loop_manager.process_github_notifications")
+    def test_github_check_error_does_not_block_iteration(
+        self, mock_gh_notif, mock_notify, mock_plan, koan_root
+    ):
+        """An exception in process_github_notifications is caught, not propagated."""
+        from app.run import _run_iteration
+
+        mock_gh_notif.side_effect = RuntimeError("GitHub API error")
+        mock_plan.return_value = {
+            "action": "error",
+            "error": "test-stop",
+            "project_name": "test",
+            "project_path": str(koan_root),
+            "mission_title": "",
+            "autonomous_mode": "implement",
+            "focus_area": "",
+            "available_pct": 50,
+            "decision_reason": "Default",
+            "display_lines": [],
+            "recurring_injected": [],
+        }
+
+        instance = str(koan_root / "instance")
+
+        with patch("app.utils.get_known_projects", return_value=[("test", str(koan_root))]):
+            # Should raise RuntimeError from plan_iteration error action, NOT from GitHub check
+            with pytest.raises(RuntimeError, match="test-stop"):
+                _run_iteration(
+                    koan_root=str(koan_root),
+                    instance=instance,
+                    projects=[("test", str(koan_root))],
+                    count=0,
+                    max_runs=5,
+                    interval=10,
+                    git_sync_interval=5,
+                )
+
+
 class TestRunIterationProjectRefresh:
     """_run_iteration refreshes projects list each iteration."""
 
@@ -2052,7 +2135,8 @@ class TestRunIterationProjectRefresh:
 
         instance = str(koan_root / "instance")
 
-        with patch("app.utils.get_known_projects", return_value=refreshed_projects):
+        with patch("app.utils.get_known_projects", return_value=refreshed_projects), \
+             patch("app.loop_manager.process_github_notifications", return_value=0):
             with pytest.raises(RuntimeError):
                 _run_iteration(
                     koan_root=str(koan_root),
@@ -2092,7 +2176,8 @@ class TestRunIterationProjectRefresh:
 
         instance = str(koan_root / "instance")
 
-        with patch("app.utils.get_known_projects", return_value=[]):
+        with patch("app.utils.get_known_projects", return_value=[]), \
+             patch("app.loop_manager.process_github_notifications", return_value=0):
             with pytest.raises(RuntimeError):
                 _run_iteration(
                     koan_root=str(koan_root),
