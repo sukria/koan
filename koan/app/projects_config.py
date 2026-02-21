@@ -343,7 +343,7 @@ def ensure_github_urls(koan_root: str) -> List[str]:
     if not projects:
         return []
 
-    from app.utils import get_github_remote
+    from app.utils import get_all_github_remotes, get_github_remote
 
     messages = []
     modified = False
@@ -351,17 +351,23 @@ def ensure_github_urls(koan_root: str) -> List[str]:
     for name, project in projects.items():
         if not isinstance(project, dict):
             continue
-        if project.get("github_url"):
-            continue
 
         path = project.get("path", "")
         if not path or not Path(path).is_dir():
             continue
 
-        github_url = get_github_remote(path)
-        if github_url:
-            project["github_url"] = github_url
-            messages.append(f"Discovered github_url for '{name}': {github_url}")
+        # Populate primary github_url if missing
+        if not project.get("github_url"):
+            github_url = get_github_remote(path)
+            if github_url:
+                project["github_url"] = github_url
+                messages.append(f"Discovered github_url for '{name}': {github_url}")
+                modified = True
+
+        # Always refresh github_urls (all remotes) for cross-owner resolution
+        all_urls = get_all_github_remotes(path)
+        if all_urls and set(all_urls) != set(project.get("github_urls", [])):
+            project["github_urls"] = all_urls
             modified = True
 
     if modified:

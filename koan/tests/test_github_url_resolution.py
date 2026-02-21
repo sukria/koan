@@ -873,6 +873,223 @@ class TestStartupEnsureGithubUrls:
 # ─────────────────────────────────────────────────────
 
 
+class TestEnsureGithubUrlsList:
+    """Tests for github_urls (plural) population in ensure_github_urls()."""
+
+    def test_populates_github_urls_list(self, tmp_path):
+        """ensure_github_urls stores all remotes in github_urls list."""
+        from app.projects_config import ensure_github_urls
+
+        koan_dir = tmp_path / "koan"
+        koan_dir.mkdir()
+        config = {
+            "projects": {
+                "koan": {"path": str(koan_dir)}
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        with patch("app.utils.get_github_remote", return_value="atoomic/koan"), \
+             patch("app.utils.get_all_github_remotes",
+                   return_value=["atoomic/koan", "sukria/koan"]):
+            ensure_github_urls(str(tmp_path))
+
+        saved = yaml.safe_load((tmp_path / "projects.yaml").read_text())
+        assert saved["projects"]["koan"]["github_url"] == "atoomic/koan"
+        assert "atoomic/koan" in saved["projects"]["koan"]["github_urls"]
+        assert "sukria/koan" in saved["projects"]["koan"]["github_urls"]
+
+    def test_refreshes_github_urls_when_changed(self, tmp_path):
+        """github_urls is refreshed when remotes change."""
+        from app.projects_config import ensure_github_urls
+
+        koan_dir = tmp_path / "koan"
+        koan_dir.mkdir()
+        config = {
+            "projects": {
+                "koan": {
+                    "path": str(koan_dir),
+                    "github_url": "atoomic/koan",
+                    "github_urls": ["atoomic/koan"],
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        # A new upstream remote was added
+        with patch("app.utils.get_all_github_remotes",
+                   return_value=["atoomic/koan", "sukria/koan"]):
+            ensure_github_urls(str(tmp_path))
+
+        saved = yaml.safe_load((tmp_path / "projects.yaml").read_text())
+        assert len(saved["projects"]["koan"]["github_urls"]) == 2
+        assert "sukria/koan" in saved["projects"]["koan"]["github_urls"]
+
+    def test_skips_github_urls_when_unchanged(self, tmp_path):
+        """github_urls is NOT re-saved when already correct."""
+        from app.projects_config import ensure_github_urls
+
+        koan_dir = tmp_path / "koan"
+        koan_dir.mkdir()
+        config = {
+            "projects": {
+                "koan": {
+                    "path": str(koan_dir),
+                    "github_url": "atoomic/koan",
+                    "github_urls": ["atoomic/koan", "sukria/koan"],
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        with patch("app.utils.get_all_github_remotes",
+                   return_value=["atoomic/koan", "sukria/koan"]), \
+             patch("app.projects_config.save_projects_config") as mock_save:
+            ensure_github_urls(str(tmp_path))
+
+        mock_save.assert_not_called()
+
+    def test_empty_all_remotes_skips_github_urls(self, tmp_path):
+        """github_urls is NOT set when get_all_github_remotes returns empty."""
+        from app.projects_config import ensure_github_urls
+
+        koan_dir = tmp_path / "koan"
+        koan_dir.mkdir()
+        config = {
+            "projects": {
+                "koan": {"path": str(koan_dir), "github_url": "atoomic/koan"}
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        with patch("app.utils.get_all_github_remotes", return_value=[]):
+            ensure_github_urls(str(tmp_path))
+
+        saved = yaml.safe_load((tmp_path / "projects.yaml").read_text())
+        assert "github_urls" not in saved["projects"]["koan"]
+
+
+class TestResolveViaGithubUrlsList:
+    """Tests for resolve_project_path using github_urls (plural) in step 1."""
+
+    def test_cross_owner_match_via_github_urls(self, tmp_path, monkeypatch):
+        """Step 1 matches cross-owner PR via github_urls list.
+
+        This is the core improvement: when github_url is "atoomic/koan" (fork)
+        but github_urls includes "sukria/koan" (upstream), step 1 resolves
+        without falling through to the expensive step 4 subprocess calls.
+        """
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+
+        config = {
+            "projects": {
+                "my-fork": {
+                    "path": "/home/my-fork",
+                    "github_url": "atoomic/koan",
+                    "github_urls": ["atoomic/koan", "sukria/koan"],
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        from app.utils import resolve_project_path
+        # target is "sukria/koan" — doesn't match github_url but IS in github_urls
+        assert resolve_project_path("koan", owner="sukria") == "/home/my-fork"
+
+    def test_github_urls_case_insensitive(self, tmp_path, monkeypatch):
+        """github_urls matching is case-insensitive."""
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+
+        config = {
+            "projects": {
+                "myapp": {
+                    "path": "/home/myapp",
+                    "github_url": "Atoomic/Koan",
+                    "github_urls": ["Atoomic/Koan", "Sukria/Koan"],
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        from app.utils import resolve_project_path
+        assert resolve_project_path("koan", owner="sukria") == "/home/myapp"
+
+    def test_github_urls_not_present_falls_through(self, tmp_path, monkeypatch):
+        """When github_urls is absent, step 1 only checks github_url."""
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+
+        config = {
+            "projects": {
+                "my-fork": {
+                    "path": "/home/my-fork",
+                    "github_url": "atoomic/koan",
+                    # No github_urls field
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        with patch("app.utils.get_all_github_remotes", return_value=[]):
+            from app.utils import resolve_project_path
+            # No name/dir match for "koan" vs "my-fork", no github_urls
+            path = resolve_project_path("koan", owner="sukria")
+
+        assert path is None
+
+    def test_step4_persists_github_urls(self, tmp_path, monkeypatch):
+        """Step 4 auto-discovery also persists github_urls list."""
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+
+        project_dir = tmp_path / "my-fork"
+        project_dir.mkdir()
+        config = {
+            "projects": {
+                "my-fork": {
+                    "path": str(project_dir),
+                    "github_url": "atoomic/koan",
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        with patch("app.utils.get_all_github_remotes",
+                   return_value=["atoomic/koan", "sukria/koan"]), \
+             patch("app.utils.get_github_remote", return_value="atoomic/koan"):
+            from app.utils import resolve_project_path
+            path = resolve_project_path("koan", owner="sukria")
+
+        assert path == str(project_dir)
+
+        # Verify github_urls was persisted
+        saved = yaml.safe_load((tmp_path / "projects.yaml").read_text())
+        assert "github_urls" in saved["projects"]["my-fork"]
+        assert "sukria/koan" in saved["projects"]["my-fork"]["github_urls"]
+
+    def test_primary_github_url_still_fast(self, tmp_path, monkeypatch):
+        """Primary github_url match (step 1 first check) still works."""
+        from app import utils
+        monkeypatch.setattr(utils, "KOAN_ROOT", tmp_path)
+
+        config = {
+            "projects": {
+                "myapp": {
+                    "path": "/home/myapp",
+                    "github_url": "sukria/koan",
+                    "github_urls": ["sukria/koan", "atoomic/koan"],
+                }
+            }
+        }
+        (tmp_path / "projects.yaml").write_text(yaml.dump(config))
+
+        from app.utils import resolve_project_path
+        # Matches on primary github_url — fastest path
+        assert resolve_project_path("koan", owner="sukria") == "/home/myapp"
+
+
 class TestGithubUrlEdgeCases:
     """Edge cases for the full resolution pipeline."""
 
