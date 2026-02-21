@@ -296,15 +296,18 @@ def _cached_count_open_prs(github_url: str, author: str) -> int:
 def _select_random_exploration_project(
     projects: List[Tuple[str, str]],
     last_project: str = "",
+    instance_dir: str = "",
 ) -> Tuple[str, str]:
     """Randomly select a project for autonomous exploration.
 
-    Avoids repeating the last explored project when multiple options
-    are available, ensuring fair rotation across projects.
+    Uses session outcome history to weight selection: fresh projects
+    (recently productive) are preferred over stale ones (consecutive
+    empty sessions).  Also avoids repeating the last explored project.
 
     Args:
         projects: List of eligible (name, path) tuples (must be non-empty).
         last_project: Name of the project used in the previous iteration.
+        instance_dir: Path to instance directory (for freshness lookup).
 
     Returns:
         (name, path) tuple of the selected project.
@@ -312,13 +315,38 @@ def _select_random_exploration_project(
     if len(projects) == 1:
         return projects[0]
 
-    # Avoid repeating the last project when possible
-    if last_project:
-        candidates = [(n, p) for n, p in projects if n != last_project]
-        if candidates:
-            return random.choice(candidates)
+    # Get freshness weights from session outcome history
+    weights = None
+    if instance_dir:
+        try:
+            from app.session_tracker import get_project_freshness
+            weights = get_project_freshness(instance_dir, projects)
+        except Exception as e:
+            _log_iteration("error", f"Freshness lookup failed: {e}")
 
-    return random.choice(projects)
+    # Filter out last project when possible
+    candidates = projects
+    if last_project and len(projects) > 1:
+        filtered = [(n, p) for n, p in projects if n != last_project]
+        if filtered:
+            candidates = filtered
+
+    # Weighted random selection if we have weights
+    if weights and len(candidates) > 1:
+        candidate_weights = [weights.get(n, 10) for n, _ in candidates]
+        total = sum(candidate_weights)
+        if total > 0:
+            selected = random.choices(candidates, weights=candidate_weights, k=1)[0]
+            stale_info = ""
+            score = 10 - weights.get(selected[0], 10)
+            if score > 0:
+                stale_info = f" (staleness={score})"
+            _log_iteration("koan",
+                f"Weighted selection: '{selected[0]}'{stale_info} "
+                f"from {len(candidates)} candidate(s)")
+            return selected
+
+    return random.choice(candidates)
 
 
 FilterResult = namedtuple("FilterResult", ["projects", "pr_limited"])
@@ -592,9 +620,10 @@ def plan_iteration(
 
         project_name, project_path = _select_random_exploration_project(
             exploration_projects, last_project,
+            instance_dir=instance_dir,
         )
         _log_iteration("koan",
-            f"Exploration: randomly selected '{project_name}' "
+            f"Exploration: selected '{project_name}' "
             f"from {len(exploration_projects)} eligible project(s)"
             f"{' (avoiding last: ' + last_project + ')' if last_project and last_project != project_name else ''}")
 

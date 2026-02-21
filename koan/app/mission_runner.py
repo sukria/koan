@@ -125,6 +125,38 @@ def parse_claude_output(raw_text: str) -> str:
         return raw_text.strip()
 
 
+def _read_pending_content(instance_dir: str) -> str:
+    """Read pending.md content before archival for session classification."""
+    pending_path = Path(instance_dir) / "journal" / "pending.md"
+    try:
+        if pending_path.exists():
+            return pending_path.read_text()
+    except (OSError, FileNotFoundError):
+        pass
+    return ""
+
+
+def _record_session_outcome(
+    instance_dir: str,
+    project_name: str,
+    autonomous_mode: str,
+    duration_minutes: int,
+    journal_content: str,
+) -> None:
+    """Record session outcome for staleness tracking (fire-and-forget)."""
+    try:
+        from app.session_tracker import record_outcome
+        record_outcome(
+            instance_dir=instance_dir,
+            project=project_name,
+            mode=autonomous_mode or "unknown",
+            duration_minutes=duration_minutes,
+            journal_content=journal_content,
+        )
+    except Exception as e:
+        print(f"[mission_runner] Session outcome recording failed: {e}", file=sys.stderr)
+
+
 def archive_pending(instance_dir: str, project_name: str, run_num: int) -> bool:
     """Archive pending.md to daily journal if agent didn't clean it up.
 
@@ -327,16 +359,19 @@ def run_post_mission(
         return result  # Early return — no further processing on quota exhaustion
 
     # 3. Archive pending.md if agent didn't clean up
+    # Read pending content before archival for session outcome tracking
+    pending_content = _read_pending_content(instance_dir)
     result["pending_archived"] = archive_pending(instance_dir, project_name, run_num)
 
-    # 4. Post-mission processing (only on success)
+    # 4. Compute duration (needed for reflection and outcome tracking)
+    if start_time > 0:
+        duration_minutes = (int(datetime.now().timestamp()) - start_time) // 60
+    else:
+        duration_minutes = 0
+
+    # 5. Post-mission processing (only on success)
     if exit_code == 0:
         # Reflection
-        if start_time > 0:
-            duration_minutes = (int(datetime.now().timestamp()) - start_time) // 60
-        else:
-            duration_minutes = 0
-
         mission_text = mission_title if mission_title else f"Autonomous {autonomous_mode} on {project_name}"
         result["reflection_written"] = trigger_reflection(
             instance_dir, mission_text, duration_minutes,
@@ -347,6 +382,12 @@ def run_post_mission(
         result["auto_merge_branch"] = check_auto_merge(
             instance_dir, project_name, project_path
         )
+
+    # 6. Record session outcome for staleness tracking
+    _record_session_outcome(
+        instance_dir, project_name, autonomous_mode,
+        duration_minutes, pending_content,
+    )
 
     return result
 

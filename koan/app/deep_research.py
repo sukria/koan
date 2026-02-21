@@ -221,6 +221,19 @@ class DeepResearch:
         priorities = self.get_priorities()
         return priorities.get("do_not_touch", [])
 
+    def get_staleness_warning(self) -> str:
+        """Check session outcome history for staleness patterns.
+
+        Returns a warning string if recent sessions were non-productive,
+        empty string otherwise.
+        """
+        try:
+            from app.session_tracker import get_staleness_warning
+            return get_staleness_warning(str(self.instance), self.project_name)
+        except Exception as e:
+            print(f"[deep_research] Staleness check failed: {e}", file=sys.stderr)
+            return ""
+
     def format_for_agent(self) -> str:
         """
         Format suggestions as markdown for injection into agent prompt.
@@ -228,11 +241,17 @@ class DeepResearch:
         suggestions = self.suggest_topics()
         do_not_touch = self.get_do_not_touch()
         priorities = self.get_priorities()
+        staleness = self.get_staleness_warning()
 
-        if not suggestions and not do_not_touch:
+        if not suggestions and not do_not_touch and not staleness:
             return ""
 
         lines = ["## Deep Research Suggestions", ""]
+
+        # Staleness warning (highest priority — shown first)
+        if staleness:
+            lines.append(staleness)
+            lines.append("")
 
         if priorities.get("notes"):
             lines.append(f"**Context**: {priorities['notes']}")
