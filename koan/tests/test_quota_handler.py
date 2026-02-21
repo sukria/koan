@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -158,7 +159,7 @@ class TestWriteQuotaJournal:
         journal_file = os.path.join(journal_dir, "koan.md")
         assert os.path.isfile(journal_file)
 
-        content = open(journal_file).read()
+        content = Path(journal_file).read_text()
         assert "Quota Exhausted" in content
         assert "5 runs" in content
         assert "koan" in content
@@ -179,7 +180,7 @@ class TestWriteQuotaJournal:
 
         write_quota_journal(instance, "koan", 3, "resets 5pm", "Auto-resume later")
 
-        content = open(journal_file).read()
+        content = Path(journal_file).read_text()
         assert "Previous entry" in content
         assert "Quota Exhausted" in content
 
@@ -318,7 +319,7 @@ class TestHandleQuotaExhaustion:
         journal_dir = os.path.join(instance, "journal", date.today().strftime("%Y-%m-%d"))
         journal_file = os.path.join(journal_dir, "myproject.md")
         assert os.path.isfile(journal_file)
-        content = open(journal_file).read()
+        content = Path(journal_file).read_text()
         assert "7 runs" in content
 
     def test_handles_missing_stdout_file(self, tmp_path):
