@@ -195,8 +195,32 @@ def mark_notification_read(thread_id: str) -> bool:
         return False
 
 
+def get_comment_type(notification: dict) -> str:
+    """Determine comment type from a notification's latest_comment_url.
+
+    GitHub uses different API endpoints for issue/PR conversation comments
+    vs PR review comments:
+    - ``issues/comments/{id}`` — issue comments and PR conversation comments
+    - ``pulls/comments/{id}`` — PR inline review comments
+
+    Reactions must be added/checked via the correct endpoint type,
+    otherwise the API call silently fails or checks the wrong comment.
+
+    Args:
+        notification: A notification dict from the GitHub API.
+
+    Returns:
+        ``"pulls"`` for PR review comments, ``"issues"`` for everything else.
+    """
+    url = notification.get("subject", {}).get("latest_comment_url", "")
+    if "/pulls/comments/" in url:
+        return "pulls"
+    return "issues"
+
+
 def check_already_processed(comment_id: str, bot_username: str,
-                             owner: str, repo: str) -> bool:
+                             owner: str, repo: str,
+                             comment_type: str = "issues") -> bool:
     """Check if a comment has already been processed (has bot reaction).
 
     Checks for any reaction from the bot — both 👍 (command acknowledgment)
@@ -210,6 +234,8 @@ def check_already_processed(comment_id: str, bot_username: str,
         bot_username: The bot's GitHub username.
         owner: Repository owner.
         repo: Repository name.
+        comment_type: ``"issues"`` for issue/PR comments,
+            ``"pulls"`` for PR review comments.
 
     Returns:
         True if already processed.
@@ -220,7 +246,7 @@ def check_already_processed(comment_id: str, bot_username: str,
 
     # Check GitHub reactions — any reaction from the bot means processed
     try:
-        raw = api(f"repos/{owner}/{repo}/issues/comments/{comment_id}/reactions")
+        raw = api(f"repos/{owner}/{repo}/{comment_type}/comments/{comment_id}/reactions")
         reactions = json.loads(raw) if raw else []
         if isinstance(reactions, list):
             for reaction in reactions:
@@ -233,7 +259,8 @@ def check_already_processed(comment_id: str, bot_username: str,
     return False
 
 
-def add_reaction(owner: str, repo: str, comment_id: str, emoji: str = "+1") -> bool:
+def add_reaction(owner: str, repo: str, comment_id: str,
+                 emoji: str = "+1", comment_type: str = "issues") -> bool:
     """Add a reaction to a comment.
 
     Args:
@@ -241,13 +268,15 @@ def add_reaction(owner: str, repo: str, comment_id: str, emoji: str = "+1") -> b
         repo: Repository name.
         comment_id: The comment ID.
         emoji: Reaction content (default: "+1" for 👍).
+        comment_type: ``"issues"`` for issue/PR comments,
+            ``"pulls"`` for PR review comments.
 
     Returns:
         True if successful.
     """
     try:
         api(
-            f"repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
+            f"repos/{owner}/{repo}/{comment_type}/comments/{comment_id}/reactions",
             method="POST",
             extra_args=["-f", f"content={emoji}"],
         )

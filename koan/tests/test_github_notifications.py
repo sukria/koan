@@ -14,6 +14,7 @@ from app.github_notifications import (
     check_user_permission,
     extract_comment_metadata,
     fetch_unread_notifications,
+    get_comment_type,
     is_notification_stale,
     is_self_mention,
     parse_mention_command,
@@ -302,3 +303,123 @@ class TestExtractCommentMetadata:
 
     def test_empty_string(self):
         assert extract_comment_metadata("") is None
+
+
+class TestGetCommentType:
+    """Tests for get_comment_type — determines API path from notification URL."""
+
+    def test_issue_comment(self):
+        """Issue comments use 'issues' endpoint."""
+        notif = {
+            "subject": {
+                "latest_comment_url":
+                    "https://api.github.com/repos/o/r/issues/comments/123"
+            }
+        }
+        assert get_comment_type(notif) == "issues"
+
+    def test_pr_conversation_comment(self):
+        """PR conversation comments also use 'issues' endpoint."""
+        notif = {
+            "subject": {
+                "latest_comment_url":
+                    "https://api.github.com/repos/o/r/issues/comments/456"
+            }
+        }
+        assert get_comment_type(notif) == "issues"
+
+    def test_pr_review_comment(self):
+        """PR review (inline) comments use 'pulls' endpoint."""
+        notif = {
+            "subject": {
+                "latest_comment_url":
+                    "https://api.github.com/repos/o/r/pulls/comments/789"
+            }
+        }
+        assert get_comment_type(notif) == "pulls"
+
+    def test_missing_url(self):
+        """Missing latest_comment_url defaults to 'issues'."""
+        assert get_comment_type({}) == "issues"
+        assert get_comment_type({"subject": {}}) == "issues"
+
+    def test_empty_url(self):
+        """Empty URL defaults to 'issues'."""
+        notif = {"subject": {"latest_comment_url": ""}}
+        assert get_comment_type(notif) == "issues"
+
+
+class TestCheckAlreadyProcessedCommentType:
+    """Tests for comment_type parameter in check_already_processed."""
+
+    def setup_method(self):
+        _processed_comments.clear()
+
+    @patch("app.github_notifications.api")
+    def test_issues_comment_uses_issues_endpoint(self, mock_api):
+        """Default comment_type='issues' queries issues/comments endpoint."""
+        mock_api.return_value = "[]"
+        check_already_processed("100", "bot", "owner", "repo")
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/issues/comments/100/reactions"
+        )
+
+    @patch("app.github_notifications.api")
+    def test_pulls_comment_uses_pulls_endpoint(self, mock_api):
+        """comment_type='pulls' queries pulls/comments endpoint."""
+        mock_api.return_value = "[]"
+        check_already_processed("200", "bot", "owner", "repo",
+                                comment_type="pulls")
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/pulls/comments/200/reactions"
+        )
+
+    @patch("app.github_notifications.api")
+    def test_pulls_comment_detects_bot_reaction(self, mock_api):
+        """Bot reaction on a PR review comment is properly detected."""
+        reactions = [{"user": {"login": "bot"}, "content": "+1"}]
+        mock_api.return_value = json.dumps(reactions)
+        assert check_already_processed("300", "bot", "o", "r",
+                                       comment_type="pulls") is True
+        assert "300" in _processed_comments
+
+
+class TestAddReactionCommentType:
+    """Tests for comment_type parameter in add_reaction."""
+
+    def setup_method(self):
+        _processed_comments.clear()
+
+    @patch("app.github_notifications.api")
+    def test_issues_comment_default(self, mock_api):
+        """Default comment_type uses issues/comments endpoint."""
+        mock_api.return_value = ""
+        add_reaction("owner", "repo", "100")
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/issues/comments/100/reactions",
+            method="POST",
+            extra_args=["-f", "content=+1"],
+        )
+
+    @patch("app.github_notifications.api")
+    def test_pulls_comment_type(self, mock_api):
+        """comment_type='pulls' uses pulls/comments endpoint."""
+        mock_api.return_value = ""
+        add_reaction("owner", "repo", "200", comment_type="pulls")
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/pulls/comments/200/reactions",
+            method="POST",
+            extra_args=["-f", "content=+1"],
+        )
+
+    @patch("app.github_notifications.api")
+    def test_pulls_comment_with_eyes_emoji(self, mock_api):
+        """AI reply reaction on PR review comment uses correct endpoint."""
+        mock_api.return_value = ""
+        add_reaction("owner", "repo", "300", emoji="eyes",
+                     comment_type="pulls")
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/pulls/comments/300/reactions",
+            method="POST",
+            extra_args=["-f", "content=eyes"],
+        )

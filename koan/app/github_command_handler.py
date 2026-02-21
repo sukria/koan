@@ -36,6 +36,7 @@ from app.github_notifications import (
     check_user_permission,
     extract_comment_metadata,
     get_comment_from_notification,
+    get_comment_type,
     is_notification_stale,
     is_self_mention,
     mark_notification_read,
@@ -255,6 +256,7 @@ def _validate_and_parse_command(
     bot_username: str,
     owner: str,
     repo: str,
+    comment_type: str = "issues",
 ) -> Tuple[Optional[object], Optional[str], str]:
     """Validate command and parse from comment.
 
@@ -266,6 +268,7 @@ def _validate_and_parse_command(
         bot_username: Bot's GitHub username
         owner: Repository owner
         repo: Repository name
+        comment_type: ``"issues"`` or ``"pulls"`` (for correct reaction endpoint)
 
     Returns:
         Tuple of (skill, command_name, context).
@@ -274,8 +277,9 @@ def _validate_and_parse_command(
     """
     comment_id = str(comment.get("id", ""))
 
-    # Check if already processed
-    if check_already_processed(comment_id, bot_username, owner, repo):
+    # Check if already processed — use correct endpoint for comment type
+    if check_already_processed(comment_id, bot_username, owner, repo,
+                               comment_type=comment_type):
         log.debug("GitHub: comment %s already processed", comment_id)
         mark_notification_read(str(notification.get("id", "")))
         return None, None, ""
@@ -310,6 +314,7 @@ def _try_reply(
     repo: str,
     project_name: str,
     question_text: str,
+    comment_type: str = "issues",
 ) -> bool:
     """Attempt to generate and post an AI reply for a non-command @mention.
 
@@ -325,6 +330,7 @@ def _try_reply(
         repo: Repository name.
         project_name: Resolved project name.
         question_text: The user's question/request text.
+        comment_type: ``"issues"`` or ``"pulls"`` (for correct reaction endpoint).
 
     Returns:
         True if reply was generated and posted successfully.
@@ -394,8 +400,9 @@ def _try_reply(
         log.warning("GitHub reply: failed to post reply for comment %s", comment_id)
         return False
 
-    # Mark as processed
-    add_reaction(owner, repo, comment_id, emoji="eyes")
+    # Mark as processed — use correct endpoint for comment type
+    add_reaction(owner, repo, comment_id, emoji="eyes",
+                 comment_type=comment_type)
     mark_notification_read(str(notification.get("id", "")))
 
     # Notify on Telegram: reply posted to GitHub
@@ -437,6 +444,11 @@ def process_single_notification(
 
     comment_author = comment.get("user", {}).get("login", "")
 
+    # Determine comment type for correct reaction API endpoint.
+    # PR review comments use pulls/comments/{id}, regular comments use
+    # issues/comments/{id}. Using the wrong endpoint silently fails.
+    comment_type = get_comment_type(notification)
+
     # Resolve project
     project_info = resolve_project_from_notification(notification)
     if not project_info:
@@ -449,7 +461,8 @@ def process_single_notification(
 
     # Validate and parse command
     skill, command_name, context = _validate_and_parse_command(
-        notification, comment, config, registry, bot_username, owner, repo
+        notification, comment, config, registry, bot_username, owner, repo,
+        comment_type=comment_type,
     )
 
     # If command_name is None, already processed or no valid mention
@@ -463,6 +476,7 @@ def process_single_notification(
         if _try_reply(
             notification, comment, config, projects_config,
             bot_username, owner, repo, project_name, full_question,
+            comment_type=comment_type,
         ):
             return False, None  # Reply posted instead of error
         mark_notification_read(str(notification.get("id", "")))
@@ -502,7 +516,7 @@ def process_single_notification(
 
     # React AFTER mission is persisted (marks as processed)
     comment_id = str(comment.get("id", ""))
-    add_reaction(owner, repo, comment_id)
+    add_reaction(owner, repo, comment_id, comment_type=comment_type)
 
     # Mark notification as read
     mark_notification_read(str(notification.get("id", "")))
@@ -517,6 +531,7 @@ def post_error_reply(
     issue_number: str,
     comment_id: str,
     error_message: str,
+    comment_type: str = "issues",
 ) -> bool:
     """Post an error reply to a GitHub comment.
 
@@ -528,6 +543,7 @@ def post_error_reply(
         issue_number: Issue or PR number.
         comment_id: The triggering comment ID.
         error_message: The error message to post.
+        comment_type: ``"issues"`` or ``"pulls"`` (for correct reaction endpoint).
 
     Returns:
         True if posted successfully.
@@ -549,7 +565,7 @@ def post_error_reply(
         _error_replies.add(error_key)
 
         # Also add reaction to mark as processed
-        add_reaction(owner, repo, comment_id)
+        add_reaction(owner, repo, comment_id, comment_type=comment_type)
         return True
     except RuntimeError:
         return False
