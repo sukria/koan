@@ -104,6 +104,109 @@ class TestGetRecentMainCommits:
             assert _sync().get_recent_main_commits() == []
 
 
+class TestCleanupMergedBranches:
+    """Tests for automatic cleanup of merged local branches."""
+
+    def test_deletes_merged_local_branches(self):
+        """Merged local branches are deleted via git branch -d."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"  # current branch
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/merged-one\n  koan/merged-two\n"
+            if args[0] == "branch" and args[1] == "-d":
+                return f"Deleted branch {args[2]}"
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(
+                ["koan/merged-one", "koan/merged-two"]
+            )
+        assert deleted == ["koan/merged-one", "koan/merged-two"]
+
+    def test_skips_current_branch(self):
+        """Never deletes the branch we're currently on."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "koan/merged-one"  # we ARE on this branch
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/merged-one\n"
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(["koan/merged-one"])
+        assert deleted == []
+
+    def test_skips_remote_only_branches(self):
+        """Branches that only exist on remote are not deleted locally."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return ""  # no local branches
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(["koan/remote-only"])
+        assert deleted == []
+
+    def test_empty_merged_list(self):
+        """No-op when there are no merged branches."""
+        deleted = _sync().cleanup_merged_branches([])
+        assert deleted == []
+
+    def test_handles_delete_failure(self):
+        """Branch not added to deleted list if git branch -d fails."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/stuck\n"
+            if args[0] == "branch" and args[1] == "-d":
+                return ""  # empty = failure
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(["koan/stuck"])
+        assert deleted == []
+
+    def test_custom_prefix(self):
+        """Works with custom branch prefix like koan.atoomic/."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan.atoomic/done-feature\n"
+            if args[0] == "branch" and args[1] == "-d":
+                return f"Deleted branch {args[2]}"
+            return ""
+
+        with patch("app.git_sync._get_prefix", return_value="koan.atoomic/"):
+            with patch("app.git_sync.run_git", side_effect=side_effect):
+                deleted = _sync().cleanup_merged_branches(
+                    ["koan.atoomic/done-feature"]
+                )
+        assert deleted == ["koan.atoomic/done-feature"]
+
+    def test_mixed_local_and_remote(self):
+        """Only deletes branches that exist locally."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/local-merged\n"  # only one local
+            if args[0] == "branch" and args[1] == "-d":
+                return f"Deleted branch {args[2]}"
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(
+                ["koan/local-merged", "koan/remote-only-merged"]
+            )
+        assert deleted == ["koan/local-merged"]
+        assert "koan/remote-only-merged" not in deleted
+
+
 class TestBuildSyncReport:
     def test_report_includes_merged_and_unmerged(self):
         with patch("app.git_sync.run_git") as mock_git:
@@ -111,10 +214,14 @@ class TestBuildSyncReport:
                 args_str = " ".join(args)
                 if "fetch" in args_str:
                     return ""
+                if args[0] == "rev-parse" and args[1] == "--abbrev-ref":
+                    return "main"  # current branch for cleanup
                 if "rev-parse" in args_str:
                     return "abc123"  # branch exists
                 if "--merged" in args_str:
                     return "  remotes/origin/koan/merged-one\n"
+                if args[0] == "branch" and args[1] == "-d":
+                    return ""  # no local branches to delete
                 if "branch" in args_str and "--list" in args_str:
                     # get_koan_branches: return all branches
                     return "  remotes/origin/koan/merged-one\n  remotes/origin/koan/pending-one\n"
@@ -134,6 +241,36 @@ class TestBuildSyncReport:
         with patch("app.git_sync.run_git", return_value=""):
             report = _sync().build_sync_report()
         assert "No notable changes" in report
+
+    def test_report_shows_cleanup(self):
+        """Report includes cleanup summary when branches are deleted."""
+        with patch("app.git_sync.run_git") as mock_git:
+            def side_effect(cwd, *args):
+                args_str = " ".join(args)
+                if "fetch" in args_str:
+                    return ""
+                if args[0] == "rev-parse" and args[1] == "--abbrev-ref":
+                    return "main"
+                if "rev-parse" in args_str:
+                    return "abc123"
+                if "--merged" in args_str:
+                    return "  koan/old-feature\n"
+                if args[0] == "branch" and args[1] == "--list":
+                    if "koan/*" in args_str or "*koan/*" in args_str:
+                        return "  koan/old-feature\n"
+                    # _get_local_branches for cleanup
+                    return "  koan/old-feature\n"
+                if args[0] == "branch" and args[1] == "-d":
+                    return "Deleted branch koan/old-feature"
+                if "log" in args_str:
+                    return ""
+                return ""
+
+            mock_git.side_effect = side_effect
+            report = _sync().build_sync_report()
+
+        assert "cleaned up" in report.lower()
+        assert "koan/old-feature" in report
 
 
 class TestWriteSyncToJournal:
