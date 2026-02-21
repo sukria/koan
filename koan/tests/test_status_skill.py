@@ -551,7 +551,8 @@ class TestHandlePingOllama:
             return {"run": 1234, "awake": 5678, "ollama": 9999}.get(name)
 
         with patch("app.pid_manager.check_pidfile", side_effect=mock_check), \
-             patch("app.provider.get_provider_name", return_value="local"):
+             patch("app.provider.get_provider_name", return_value="local"), \
+             patch("skills.core.status.handler._ollama_summary", return_value=""):
             result = _handle_ping(ctx)
 
         assert "Ollama: alive (PID 9999)" in result
@@ -640,7 +641,8 @@ class TestHandleStatusOllama:
         ctx = _make_ctx("status", instance, tmp_path)
 
         with patch("app.provider.get_provider_name", return_value="local"), \
-             patch("app.pid_manager.check_pidfile", return_value=4242):
+             patch("app.pid_manager.check_pidfile", return_value=4242), \
+             patch("skills.core.status.handler._ollama_summary", return_value=""):
             result = _handle_status(ctx)
 
         assert "Ollama: running (PID 4242)" in result
@@ -679,7 +681,8 @@ class TestHandleStatusOllama:
         ctx = _make_ctx("status", instance, tmp_path)
 
         with patch("app.provider.get_provider_name", return_value="ollama"), \
-             patch("app.pid_manager.check_pidfile", return_value=7777):
+             patch("app.pid_manager.check_pidfile", return_value=7777), \
+             patch("skills.core.status.handler._ollama_summary", return_value=""):
             result = _handle_status(ctx)
 
         assert "Ollama: running (PID 7777)" in result

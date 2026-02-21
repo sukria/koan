@@ -41,3 +41,33 @@ services:
     # Uncomment to expose dashboard:
     # ports:
     #   - "5001:5001"
+
+  # --------------------------------------------------------------------------
+  # Optional: Ollama service for local/ollama/ollama-claude providers.
+  # Uncomment the section below to run Ollama inside Docker Compose.
+  # For GPU passthrough, add a deploy.resources section (see Ollama docs).
+  #
+  # Usage:
+  #   docker compose --profile ollama up --build
+  #
+  # Set in .env:
+  #   KOAN_CLI_PROVIDER=ollama
+  #   KOAN_LOCAL_LLM_BASE_URL=http://ollama:11434/v1
+  # --------------------------------------------------------------------------
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: koan-ollama
+  #   profiles: ["ollama"]
+  #   volumes:
+  #     - ollama-models:/root/.ollama
+  #   ports:
+  #     - "11434:11434"
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+# volumes:
+#   ollama-models:

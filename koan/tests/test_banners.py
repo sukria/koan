@@ -178,6 +178,12 @@ class TestFormatInfoLines:
         assert "Provider" in lines[0]
         assert "claude" in lines[0]
 
+    def test_includes_ollama_when_present(self):
+        info = {"provider": "local", "ollama": "v0.16.0, 3 models", "projects": "1"}
+        lines = _format_info_lines(info)
+        assert any("Ollama" in l for l in lines)
+        assert any("v0.16.0" in l for l in lines)
+
     def test_skips_unknown_keys(self):
         info = {"provider": "claude", "extra_unknown": "value"}
         lines = _format_info_lines(info)

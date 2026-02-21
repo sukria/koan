@@ -73,7 +73,9 @@ tools:
     - Shell: Bash (run git, gh, make, and other commands)
 
 # CLI provider — which AI CLI to use as the backend
-# Options: "claude" (default), "copilot" (GitHub Copilot CLI), "local" (local LLM)
+# Options: "claude" (default), "copilot" (GitHub Copilot CLI),
+#          "local" (local LLM via Python runner), "ollama" (alias for local),
+#          "ollama-claude" (Claude CLI routed through Ollama proxy)
 # Can also be set via KOAN_CLI_PROVIDER env var (overrides this)
 cli_provider: "claude"
 
@@ -88,6 +90,21 @@ cli_provider: "claude"
 #   base_url: "http://localhost:11434/v1"
 #   model: "glm4"
 #   api_key: ""   # Usually empty for local servers
+#   auto_pull: false  # Auto-pull missing models on startup (default: false)
+
+# Ollama-Claude configuration (used when cli_provider: "ollama-claude")
+# Routes the real Claude CLI through a local Ollama backend via an
+# Anthropic-compatible proxy (LiteLLM, ollama-cloud-proxy, etc.).
+# Full Claude CLI features (MCP, tools, extended thinking) with local inference.
+# Can also be set via KOAN_OLLAMA_CLAUDE_* env vars (override config values)
+# ollama_claude:
+#   base_url: "http://localhost:11434"   # Proxy endpoint (NOT /v1 — Claude CLI appends path)
+#   api_key: "ollama"                     # Dummy key (most proxies accept anything)
+#   auth_token: ""                        # Optional Bearer token
+#   model: "llama3.3"                     # Default model (required)
+#   sonnet_model: ""                      # Override ANTHROPIC_DEFAULT_SONNET_MODEL
+#   haiku_model: ""                       # Override ANTHROPIC_DEFAULT_HAIKU_MODEL
+#   auto_pull: false                      # Auto-pull missing models on startup (default: false)
 
 # Claude model configuration
 # Controls which models are used for different types of Claude calls
@@ -138,7 +155,7 @@ usage:
 # Per-project overrides are now configured in projects.yaml.
 # Supported per-project settings:
 #   - git_auto_merge: per-project merge rules
-#   - cli_provider: override AI provider ("claude", "copilot", "local")
+#   - cli_provider: override AI provider ("claude", "copilot", "local", "ollama-claude")
 #   - models: override model selection (mission, chat, lightweight, etc.)
 #   - tools: restrict available tools (mission, chat tool lists)
 #   - github: override authorized_users for GitHub @mention commands

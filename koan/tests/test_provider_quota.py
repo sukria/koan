@@ -155,14 +155,24 @@ class TestClaudeProviderQuota:
 
 
 class TestLocalProviderQuota:
-    """Local/Ollama providers have no quota concept."""
+    """Local/Ollama providers check server readiness instead of quota."""
 
-    def test_local_always_available(self):
-        """LocalLLMProvider inherits base (True, '')."""
+    def test_local_available_when_server_and_model_ok(self):
+        """LocalLLMProvider checks Ollama server + model availability."""
         provider = LocalLLMProvider()
-        ok, detail = provider.check_quota_available("/tmp")
-        assert ok is True
-        assert detail == ""
+        with patch("app.ollama_client.check_server_and_model", return_value=(True, "")):
+            ok, detail = provider.check_quota_available("/tmp")
+            assert ok is True
+            assert detail == ""
+
+    def test_local_unavailable_when_server_down(self):
+        """LocalLLMProvider reports server connectivity issues."""
+        provider = LocalLLMProvider()
+        with patch("app.ollama_client.check_server_and_model",
+                   return_value=(False, "Ollama server not responding")):
+            ok, detail = provider.check_quota_available("/tmp")
+            assert ok is False
+            assert "not responding" in detail
 
 
 class TestCopilotProviderQuota:

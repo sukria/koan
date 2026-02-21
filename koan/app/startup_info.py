@@ -51,6 +51,10 @@ def gather_startup_info(koan_root: Path) -> dict:
     # Messaging
     info["messaging"] = _get_messaging_provider()
 
+    # Ollama (only when provider needs it)
+    if info["provider"] in ("local", "ollama", "ollama-claude"):
+        info["ollama"] = _get_ollama_summary()
+
     return info
 
 
@@ -111,6 +115,54 @@ def _get_file_size(path: Path) -> str:
         return f"{size} chars"
     except Exception:
         return "unavailable"
+
+
+def _get_ollama_summary() -> str:
+    """Get Ollama server status summary for startup banner.
+
+    Includes version, model count, and configured model readiness.
+    """
+    try:
+        from app.ollama_client import get_version, is_model_available, is_server_ready, list_models
+        if not is_server_ready(timeout=2.0):
+            return "not responding"
+        parts = []
+        version = get_version(timeout=2.0)
+        if version:
+            parts.append(f"v{version}")
+        models = list_models(timeout=2.0)
+        count = len(models)
+        parts.append(f"{count} model{'s' if count != 1 else ''}")
+
+        # Show configured model readiness
+        configured = _get_configured_model()
+        if configured:
+            ready = is_model_available(configured, timeout=2.0)
+            status = "ready" if ready else "not pulled"
+            parts.append(f"{configured} ({status})")
+
+        return ", ".join(parts)
+    except Exception:
+        return "unavailable"
+
+
+def _get_configured_model() -> str:
+    """Get the configured model name for the current Ollama provider."""
+    try:
+        from app.utils import get_cli_provider_env
+        provider = get_cli_provider_env()
+        if not provider:
+            provider = _get_config_value("cli_provider", "claude")
+
+        if provider == "ollama-claude":
+            from app.provider.ollama_claude import OllamaClaudeProvider
+            return OllamaClaudeProvider()._get_model()
+        elif provider in ("local", "ollama"):
+            from app.provider.local import LocalLLMProvider
+            return LocalLLMProvider()._get_default_model()
+    except Exception:
+        pass
+    return ""
 
 
 def _get_messaging_provider() -> str:

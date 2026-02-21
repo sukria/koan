@@ -77,6 +77,20 @@ verify_binaries() {
                 success "ollama $(ollama --version 2>/dev/null | head -1 || echo '(unknown version)')"
             fi
             ;;
+        ollama-claude)
+            # ollama-claude routes Claude CLI through Ollama via ANTHROPIC_BASE_URL.
+            # Needs both claude CLI and ollama.
+            if ! command -v claude &>/dev/null; then
+                missing+=("claude (Claude Code CLI) — npm install may have failed")
+            else
+                success "claude $(claude --version 2>/dev/null | head -1 || echo '(unknown version)')"
+            fi
+            if ! command -v ollama &>/dev/null; then
+                missing+=("ollama")
+            else
+                success "ollama $(ollama --version 2>/dev/null | head -1 || echo '(unknown version)')"
+            fi
+            ;;
     esac
 
     if [ ${#missing[@]} -gt 0 ]; then

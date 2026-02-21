@@ -300,11 +300,23 @@ def start_ollama(koan_root: Path, verify_timeout: float = OLLAMA_VERIFY_TIMEOUT)
     Checks that ollama binary is available, not already running,
     then launches it in the background with a tracked PID file.
 
+    Detects system-wide Ollama instances (brew services, manual start,
+    Docker) by probing the HTTP endpoint before spawning a new process.
+
     Returns (success: bool, message: str).
     """
     pid = check_pidfile(koan_root, "ollama")
     if pid:
         return False, f"ollama already running (PID {pid})"
+
+    # Detect system-wide Ollama instance before spawning a new one.
+    # The server may be running via brew services, Docker, or manual start.
+    try:
+        from app.ollama_client import is_server_ready
+        if is_server_ready(timeout=2.0):
+            return True, "ollama already running (system-wide) — adopted"
+    except Exception:
+        pass
 
     ollama_bin = shutil.which("ollama")
     if not ollama_bin:
@@ -327,13 +339,23 @@ def start_ollama(koan_root: Path, verify_timeout: float = OLLAMA_VERIFY_TIMEOUT)
     # Write PID file — ollama serve is an external binary (no flock)
     acquire_pid(koan_root, "ollama", proc.pid)
 
-    # Wait briefly for ollama to start listening
+    # Wait for ollama to start listening (verify both process and HTTP)
     deadline = time.monotonic() + verify_timeout
     while time.monotonic() < deadline:
-        if _is_process_alive(proc.pid):
-            return True, f"ollama serve started (PID {proc.pid})"
+        if not _is_process_alive(proc.pid):
+            return False, "ollama launched but exited immediately — check ollama logs"
+        # Check if the HTTP server is actually accepting connections
+        try:
+            from app.ollama_client import is_server_ready
+            if is_server_ready(timeout=1.0):
+                return True, f"ollama serve started (PID {proc.pid})"
+        except Exception:
+            pass
         time.sleep(0.3)
 
+    # Process alive but not responding to HTTP — still useful
+    if _is_process_alive(proc.pid):
+        return True, f"ollama serve started (PID {proc.pid}) — still warming up"
     return False, "ollama launched but exited immediately — check ollama logs"
 
 
@@ -459,7 +481,7 @@ def _detect_provider(koan_root: Path) -> str:
     """Detect the configured CLI provider.
 
     Uses the provider package resolution (env var > config.yaml > default).
-    Returns provider name: "claude", "copilot", "local", or "ollama".
+    Returns provider name: "claude", "copilot", "local", "ollama", or "ollama-claude".
     """
     try:
         # Lazy import to avoid circular deps and keep pid_manager lightweight
@@ -471,7 +493,7 @@ def _detect_provider(koan_root: Path) -> str:
 
 def _needs_ollama(provider: str) -> bool:
     """Return True if the provider requires ollama serve."""
-    return provider in ("local", "ollama")
+    return provider in ("local", "ollama", "ollama-claude")
 
 
 def _show_startup_banner(koan_root: Path, provider: str) -> None:

@@ -79,12 +79,32 @@ def _cleanup_prompt_file(path: Optional[str]) -> None:
             pass
 
 
+def _inject_provider_env(kwargs: dict) -> dict:
+    """Merge provider environment overrides into subprocess kwargs.
+
+    When the active provider defines extra env vars (e.g., ollama-claude
+    sets ANTHROPIC_BASE_URL), inject them into the subprocess environment.
+    Only acts when no explicit ``env=`` was passed by the caller.
+    """
+    if "env" in kwargs:
+        return kwargs
+    try:
+        from app.provider import get_provider
+        provider_env = get_provider().get_env()
+        if provider_env:
+            kwargs["env"] = {**os.environ, **provider_env}
+    except Exception:
+        pass
+    return kwargs
+
+
 def run_cli(cmd, **kwargs) -> subprocess.CompletedProcess:
     """Run a CLI command with the prompt passed via temp-file stdin.
 
     Drop-in replacement for ``subprocess.run(cmd, stdin=DEVNULL, ...)``.
     """
     cmd, prompt_path = prepare_prompt_file(cmd)
+    kwargs = _inject_provider_env(kwargs)
     if prompt_path:
         try:
             with open(prompt_path) as f:
@@ -107,6 +127,7 @@ def popen_cli(
     the process exits to close the file handle and delete the temp file.
     """
     cmd, prompt_path = prepare_prompt_file(cmd)
+    kwargs = _inject_provider_env(kwargs)
     if prompt_path:
         stdin_file = open(prompt_path)  # noqa: SIM115
         kwargs.pop("stdin", None)

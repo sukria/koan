@@ -9,6 +9,7 @@ import pytest
 from app.cli_exec import (
     STDIN_PLACEHOLDER,
     _uses_stdin_passing,
+    _inject_provider_env,
     prepare_prompt_file,
     run_cli,
     popen_cli,
@@ -290,3 +291,111 @@ class TestPopenCli:
         assert actual_cmd == ["copilot", "-p", "my prompt"]
         assert mock_popen.call_args[1]["stdin"] == subprocess.DEVNULL
         cleanup()
+
+
+# ---------------------------------------------------------------------------
+# _inject_provider_env
+# ---------------------------------------------------------------------------
+
+class TestInjectProviderEnv:
+    """Tests for provider environment variable injection."""
+
+    def test_no_env_when_provider_returns_empty(self):
+        """Providers with empty get_env() should not set env= in kwargs."""
+        mock_provider = MagicMock()
+        mock_provider.get_env.return_value = {}
+        with patch("app.provider.get_provider", return_value=mock_provider):
+            kwargs = {}
+            result = _inject_provider_env(kwargs)
+            assert "env" not in result
+
+    def test_env_injected_when_provider_has_env(self):
+        """Providers with non-empty get_env() inject into kwargs."""
+        mock_provider = MagicMock()
+        mock_provider.get_env.return_value = {
+            "ANTHROPIC_BASE_URL": "http://test:8080",
+            "ANTHROPIC_API_KEY": "test-key",
+        }
+        with patch("app.provider.get_provider", return_value=mock_provider):
+            kwargs = {}
+            result = _inject_provider_env(kwargs)
+            assert "env" in result
+            assert result["env"]["ANTHROPIC_BASE_URL"] == "http://test:8080"
+            assert result["env"]["ANTHROPIC_API_KEY"] == "test-key"
+
+    def test_existing_env_preserved(self):
+        """Caller's explicit env= is never overridden."""
+        mock_provider = MagicMock()
+        mock_provider.get_env.return_value = {"X": "should-not-appear"}
+        caller_env = {"MY_VAR": "my-value"}
+        with patch("app.provider.get_provider", return_value=mock_provider):
+            kwargs = {"env": caller_env}
+            result = _inject_provider_env(kwargs)
+            assert result["env"] is caller_env
+            assert "X" not in result["env"]
+
+    def test_import_error_silently_ignored(self):
+        """If provider import fails, kwargs are untouched."""
+        with patch("app.provider.get_provider", side_effect=ImportError):
+            kwargs = {}
+            result = _inject_provider_env(kwargs)
+            assert "env" not in result
+
+    def test_provider_exception_silently_ignored(self):
+        """If provider raises, kwargs are untouched."""
+        with patch("app.provider.get_provider", side_effect=RuntimeError("broken")):
+            kwargs = {}
+            result = _inject_provider_env(kwargs)
+            assert "env" not in result
+
+    def test_injected_env_includes_os_environ(self):
+        """Provider env is merged ON TOP of os.environ."""
+        mock_provider = MagicMock()
+        mock_provider.get_env.return_value = {"ANTHROPIC_BASE_URL": "http://x"}
+        with patch("app.provider.get_provider", return_value=mock_provider):
+            kwargs = {}
+            result = _inject_provider_env(kwargs)
+            # Should contain both provider env and some os.environ keys
+            assert result["env"]["ANTHROPIC_BASE_URL"] == "http://x"
+            assert "PATH" in result["env"]  # from os.environ
+
+
+class TestRunCliEnvInjection:
+    """Verify run_cli() injects provider env."""
+
+    @patch("app.cli_exec.subprocess.run")
+    @patch("app.provider.get_provider_name", return_value="claude")
+    def test_run_cli_no_env_for_claude(self, _name, mock_run):
+        """Claude provider has empty get_env() — no env= set."""
+        mock_run.return_value = MagicMock(returncode=0)
+        run_cli(["git", "status"])
+        call_kwargs = mock_run.call_args[1]
+        assert "env" not in call_kwargs
+
+    @patch("app.cli_exec.subprocess.run")
+    def test_run_cli_injects_env_for_ollama_claude(self, mock_run):
+        """ollama-claude provider env vars appear in subprocess."""
+        mock_run.return_value = MagicMock(returncode=0)
+        mock_provider = MagicMock()
+        mock_provider.get_env.return_value = {
+            "ANTHROPIC_BASE_URL": "http://proxy:8080",
+        }
+        with patch("app.provider.get_provider", return_value=mock_provider):
+            run_cli(["git", "status"])
+            call_kwargs = mock_run.call_args[1]
+            assert call_kwargs["env"]["ANTHROPIC_BASE_URL"] == "http://proxy:8080"
+
+    @patch("app.cli_exec.subprocess.Popen")
+    def test_popen_cli_injects_env_for_ollama_claude(self, mock_popen):
+        """ollama-claude provider env vars appear in Popen."""
+        mock_popen.return_value = MagicMock()
+        mock_provider = MagicMock()
+        mock_provider.get_env.return_value = {
+            "ANTHROPIC_BASE_URL": "http://proxy:8080",
+        }
+        with patch("app.provider.get_provider", return_value=mock_provider), \
+             patch("app.provider.get_provider_name", return_value="ollama-claude"):
+            proc, cleanup = popen_cli(["git", "status"])
+            call_kwargs = mock_popen.call_args[1]
+            assert call_kwargs["env"]["ANTHROPIC_BASE_URL"] == "http://proxy:8080"
+            cleanup()

@@ -129,6 +129,7 @@ def _format_info_lines(system_info: dict) -> list:
     """
     label_map = [
         ("provider", "Provider"),
+        ("ollama", "Ollama"),
         ("projects", "Projects"),
         ("skills", "Skills"),
         ("soul", "Soul"),

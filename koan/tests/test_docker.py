@@ -171,6 +171,25 @@ class TestEntrypoint:
     def test_supports_ollama_provider(self):
         assert "ollama" in self.entrypoint
 
+    def test_supports_ollama_claude_provider(self):
+        """ollama-claude needs both claude and ollama binaries."""
+        assert "ollama-claude)" in self.entrypoint
+
+    def test_ollama_claude_checks_claude_binary(self):
+        """ollama-claude section checks for claude CLI."""
+        # Find the ollama-claude case block
+        idx = self.entrypoint.find("ollama-claude)")
+        assert idx > 0
+        block = self.entrypoint[idx:idx + 500]
+        assert "claude" in block
+
+    def test_ollama_claude_checks_ollama_binary(self):
+        """ollama-claude section checks for ollama binary."""
+        idx = self.entrypoint.find("ollama-claude)")
+        assert idx > 0
+        block = self.entrypoint[idx:idx + 500]
+        assert "ollama" in block
+
     def test_supports_api_key_auth(self):
         """Should support ANTHROPIC_API_KEY as one auth method."""
         assert "ANTHROPIC_API_KEY" in self.entrypoint
@@ -237,6 +256,12 @@ class TestEntrypoint:
         conf = (REPO_ROOT / "koan" / "docker" / "supervisord.conf").read_text()
         assert "[program:heartbeat]" in conf
         assert "koan-heartbeat" in conf
+
+    def test_supervisord_conf_documents_ollama(self):
+        """supervisord.conf should document optional Ollama program."""
+        conf = (REPO_ROOT / "koan" / "docker" / "supervisord.conf").read_text()
+        assert "ollama" in conf.lower()
+        assert "ollama serve" in conf
 
     def test_supervised_run_wrapper_has_restart_delay(self):
         """supervised-run.sh wrapper should delay restarts after crash."""
@@ -460,14 +485,24 @@ class TestDockerCompose:
     def test_no_named_volumes(self):
         """Bind mounts preferred over named volumes for transparency."""
         # Named volumes use a volumes: section at the root level
+        # (commented-out lines for optional services don't count)
         lines = self.compose.splitlines()
         root_volumes = False
         for line in lines:
+            stripped = line.strip()
+            # Skip commented lines
+            if stripped.startswith("#"):
+                continue
             # Root-level "volumes:" (not indented) indicates named volumes
             if re.match(r'^volumes:', line):
                 root_volumes = True
                 break
         assert not root_volumes, "Prefer bind mounts over named Docker volumes"
+
+    def test_ollama_service_documented(self):
+        """Docker compose should document optional Ollama service."""
+        assert "ollama" in self.compose.lower()
+        assert "ollama/ollama" in self.compose
 
 
 class TestMakefileDockerTargets:

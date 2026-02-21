@@ -446,6 +446,66 @@ class TestProviderResolution:
         os.environ.pop("CLI_PROVIDER", None)
         assert get_provider_name() == "claude"
 
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "ollama"})
+    def test_env_var_ollama(self):
+        """'ollama' is a recognized provider alias for LocalLLMProvider."""
+        assert get_provider_name() == "ollama"
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "ollama"})
+    def test_get_provider_returns_local_for_ollama(self):
+        """'ollama' provider resolves to LocalLLMProvider instance."""
+        provider = get_provider()
+        assert isinstance(provider, LocalLLMProvider)
+
+    @patch.dict("os.environ", {}, clear=False)
+    @patch("app.utils.load_config", return_value={"cli_provider": "ollama"})
+    def test_config_yaml_ollama(self, mock_config):
+        """'ollama' in config.yaml is recognized."""
+        import os
+        os.environ.pop("KOAN_CLI_PROVIDER", None)
+        assert get_provider_name() == "ollama"
+
+
+# ---------------------------------------------------------------------------
+# Ollama provider alias
+# ---------------------------------------------------------------------------
+
+class TestOllamaProviderAlias:
+    """Tests for 'ollama' as an alias for LocalLLMProvider."""
+
+    def setup_method(self):
+        reset_provider()
+
+    def teardown_method(self):
+        reset_provider()
+
+    def test_ollama_in_registry(self):
+        """'ollama' should be a registered provider name."""
+        from app.provider import _PROVIDERS
+        assert "ollama" in _PROVIDERS
+        assert _PROVIDERS["ollama"] is LocalLLMProvider
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "ollama"})
+    def test_ollama_builds_local_commands(self):
+        """Provider 'ollama' builds same commands as 'local'."""
+        from app.provider import _PROVIDERS
+        local = _PROVIDERS["local"]()
+        ollama = _PROVIDERS["ollama"]()
+        # Both use sys.executable as binary
+        assert local.binary() == ollama.binary()
+
+    @patch.dict("os.environ", {
+        "KOAN_CLI_PROVIDER": "ollama",
+        "KOAN_LOCAL_LLM_MODEL": "qwen2.5",
+        "KOAN_LOCAL_LLM_BASE_URL": "http://localhost:11434/v1",
+    })
+    def test_ollama_build_full_command(self):
+        """build_full_command works correctly with 'ollama' provider."""
+        cmd = build_full_command(prompt="test prompt", max_turns=5)
+        assert "-p" in cmd
+        assert "test prompt" in cmd
+        assert "--base-url" in cmd
+
 
 # ---------------------------------------------------------------------------
 # Module-level convenience functions
@@ -671,8 +731,14 @@ class TestLocalLLMProvider:
         assert self.provider._get_default_model() == "cfg-model"
 
     @patch.dict("os.environ", {"KOAN_LOCAL_LLM_MODEL": "some-model"})
-    def test_is_available_with_model(self):
+    @patch("app.ollama_client.is_server_ready", return_value=True)
+    def test_is_available_with_model_and_server(self, mock_ready):
         assert self.provider.is_available()
+
+    @patch.dict("os.environ", {"KOAN_LOCAL_LLM_MODEL": "some-model"})
+    @patch("app.ollama_client.is_server_ready", return_value=False)
+    def test_not_available_when_server_down(self, mock_ready):
+        assert not self.provider.is_available()
 
     @patch.dict("os.environ", {}, clear=False)
     @patch("app.utils.load_config", return_value={})
@@ -701,6 +767,32 @@ class TestLocalLLMProvider:
         assert "--model" in result
         assert "glm4" in result
         assert "--disallowed-tools" in result
+
+    @patch("app.utils.load_config", return_value={"local_llm": {"auto_pull": True}})
+    def test_auto_pull_enabled_from_config(self, mock_config):
+        assert self.provider._get_auto_pull() is True
+
+    @patch("app.utils.load_config", return_value={"local_llm": {}})
+    def test_auto_pull_disabled_by_default(self, mock_config):
+        assert self.provider._get_auto_pull() is False
+
+    @patch("app.utils.load_config", return_value={})
+    def test_auto_pull_disabled_when_no_config(self, mock_config):
+        assert self.provider._get_auto_pull() is False
+
+    @patch("app.utils.load_config", return_value={"local_llm": {"model": "glm4", "auto_pull": True}})
+    @patch("app.ollama_client.check_server_and_model", return_value=(True, ""))
+    def test_quota_check_passes_auto_pull(self, mock_check, mock_config):
+        self.provider.check_quota_available("/tmp/project")
+        _, kwargs = mock_check.call_args
+        assert kwargs["auto_pull"] is True
+
+    @patch("app.utils.load_config", return_value={"local_llm": {"model": "glm4"}})
+    @patch("app.ollama_client.check_server_and_model", return_value=(True, ""))
+    def test_quota_check_auto_pull_off_by_default(self, mock_check, mock_config):
+        self.provider.check_quota_available("/tmp/project")
+        _, kwargs = mock_check.call_args
+        assert kwargs["auto_pull"] is False
 
 
 # ---------------------------------------------------------------------------

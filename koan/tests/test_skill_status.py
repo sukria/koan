@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from skills.core.status.handler import (
     _needs_ollama,
+    _ollama_summary,
     _truncate,
     _format_mission_display,
     handle,
@@ -81,6 +82,49 @@ class TestNeedsOllama:
     @patch("app.provider.get_provider_name", side_effect=ImportError)
     def test_returns_false_on_import_error(self, _mock):
         assert _needs_ollama() is False
+
+    @patch("app.provider.get_provider_name", return_value="ollama-claude")
+    def test_returns_true_for_ollama_claude_provider(self, _mock):
+        assert _needs_ollama() is True
+
+
+# ---------------------------------------------------------------------------
+# _ollama_summary
+# ---------------------------------------------------------------------------
+
+class TestOllamaSummary:
+    @patch("app.ollama_client.get_version", return_value="0.16.0")
+    @patch("app.ollama_client.list_models", return_value=[
+        {"name": "a:latest"}, {"name": "b:latest"}, {"name": "c:latest"},
+    ])
+    def test_returns_version_and_count(self, *_):
+        result = _ollama_summary()
+        assert "v0.16.0" in result
+        assert "3 models" in result
+
+    @patch("app.ollama_client.get_version", return_value="0.15.0")
+    @patch("app.ollama_client.list_models", return_value=[{"name": "a:latest"}])
+    def test_singular_model(self, *_):
+        result = _ollama_summary()
+        assert "1 model" in result
+        assert "models" not in result
+
+    @patch("app.ollama_client.get_version", return_value=None)
+    @patch("app.ollama_client.list_models", return_value=[{"name": "a:latest"}])
+    def test_no_version(self, *_):
+        result = _ollama_summary()
+        assert "v" not in result
+        assert "1 model" in result
+
+    @patch("app.ollama_client.get_version", return_value="0.16.0")
+    @patch("app.ollama_client.list_models", return_value=[])
+    def test_no_models(self, *_):
+        result = _ollama_summary()
+        assert "v0.16.0" in result
+
+    @patch("app.ollama_client.get_version", side_effect=Exception("fail"))
+    def test_returns_empty_on_error(self, _):
+        assert _ollama_summary() == ""
 
 
 # ---------------------------------------------------------------------------
@@ -287,9 +331,19 @@ class TestHandleStatus:
     @patch("app.pid_manager.check_pidfile", return_value=12345)
     def test_shows_ollama_running(self, mock_pid, koan_root, instance_dir):
         ctx = _make_ctx(koan_root, instance_dir)
-        with patch("skills.core.status.handler._needs_ollama", return_value=True):
+        with patch("skills.core.status.handler._needs_ollama", return_value=True), \
+             patch("skills.core.status.handler._ollama_summary", return_value=""):
             result = _handle_status(ctx)
         assert "🦙 Ollama: running" in result
+        assert "12345" in result
+
+    @patch("app.pid_manager.check_pidfile", return_value=12345)
+    def test_shows_ollama_with_details(self, mock_pid, koan_root, instance_dir):
+        ctx = _make_ctx(koan_root, instance_dir)
+        with patch("skills.core.status.handler._needs_ollama", return_value=True), \
+             patch("skills.core.status.handler._ollama_summary", return_value="v0.16.0, 3 models"):
+            result = _handle_status(ctx)
+        assert "🦙 Ollama: v0.16.0, 3 models" in result
         assert "12345" in result
 
     @patch("app.pid_manager.check_pidfile", return_value=None)
@@ -383,10 +437,20 @@ class TestHandlePing:
     def test_ollama_shown_when_needed(self, mock_pid, koan_root, instance_dir):
         mock_pid.side_effect = lambda root, name: {"run": 100, "awake": 200, "ollama": 300}.get(name)
         ctx = _make_ctx(koan_root, instance_dir, "ping")
-        with patch("skills.core.status.handler._needs_ollama", return_value=True):
+        with patch("skills.core.status.handler._needs_ollama", return_value=True), \
+             patch("skills.core.status.handler._ollama_summary", return_value=""):
             result = _handle_ping(ctx)
         assert "✅ Ollama" in result
         assert "300" in result
+
+    @patch("app.pid_manager.check_pidfile")
+    def test_ollama_ping_with_details(self, mock_pid, koan_root, instance_dir):
+        mock_pid.side_effect = lambda root, name: {"run": 100, "awake": 200, "ollama": 300}.get(name)
+        ctx = _make_ctx(koan_root, instance_dir, "ping")
+        with patch("skills.core.status.handler._needs_ollama", return_value=True), \
+             patch("skills.core.status.handler._ollama_summary", return_value="v0.16.0, 2 models"):
+            result = _handle_ping(ctx)
+        assert "✅ Ollama: v0.16.0, 2 models" in result
 
     @patch("app.pid_manager.check_pidfile")
     def test_ollama_hidden_when_not_needed(self, mock_pid, koan_root, instance_dir):

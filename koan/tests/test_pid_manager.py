@@ -935,7 +935,8 @@ class TestStartOllama:
         assert "already running" in msg
 
     def test_returns_error_when_binary_not_found(self, tmp_path):
-        with patch("app.pid_manager.shutil.which", return_value=None):
+        with patch("app.ollama_client.is_server_ready", return_value=False), \
+             patch("app.pid_manager.shutil.which", return_value=None):
             ok, msg = start_ollama(tmp_path)
 
         assert ok is False
@@ -945,7 +946,8 @@ class TestStartOllama:
         mock_proc = MagicMock()
         mock_proc.pid = 54321
 
-        with patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+        with patch("app.ollama_client.is_server_ready", side_effect=[False, True]), \
+             patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
              patch("app.pid_manager.subprocess.Popen", return_value=mock_proc) as mock_popen, \
              patch("app.pid_manager._is_process_alive", return_value=True):
             ok, msg = start_ollama(tmp_path, verify_timeout=0.5)
@@ -961,7 +963,8 @@ class TestStartOllama:
         mock_proc = MagicMock()
         mock_proc.pid = 54321
 
-        with patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+        with patch("app.ollama_client.is_server_ready", side_effect=[False, True]), \
+             patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
              patch("app.pid_manager.subprocess.Popen", return_value=mock_proc), \
              patch("app.pid_manager._is_process_alive", return_value=True):
             start_ollama(tmp_path, verify_timeout=0.5)
@@ -971,7 +974,8 @@ class TestStartOllama:
         assert pidfile.read_text() == "54321"
 
     def test_returns_failure_on_popen_exception(self, tmp_path):
-        with patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+        with patch("app.ollama_client.is_server_ready", return_value=False), \
+             patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
              patch("app.pid_manager.subprocess.Popen", side_effect=OSError("Permission denied")):
             ok, msg = start_ollama(tmp_path)
 
@@ -982,13 +986,69 @@ class TestStartOllama:
         mock_proc = MagicMock()
         mock_proc.pid = 54321
 
-        with patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+        with patch("app.ollama_client.is_server_ready", return_value=False), \
+             patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
              patch("app.pid_manager.subprocess.Popen", return_value=mock_proc), \
              patch("app.pid_manager._is_process_alive", return_value=False):
             ok, msg = start_ollama(tmp_path, verify_timeout=0.5)
 
         assert ok is False
         assert "exited immediately" in msg
+
+    def test_adopts_system_wide_ollama(self, tmp_path):
+        """When Ollama is already running system-wide, adopt it."""
+        with patch("app.ollama_client.is_server_ready", return_value=True):
+            ok, msg = start_ollama(tmp_path)
+        assert ok is True
+        assert "system-wide" in msg
+        assert "adopted" in msg
+
+    def test_system_wide_check_before_binary_check(self, tmp_path):
+        """System-wide detection happens before binary check."""
+        # If system-wide Ollama is found, we never check for the binary
+        with patch("app.ollama_client.is_server_ready", return_value=True), \
+             patch("app.pid_manager.shutil.which") as mock_which:
+            ok, msg = start_ollama(tmp_path)
+        assert ok is True
+        mock_which.assert_not_called()
+
+    def test_system_wide_check_skipped_when_pid_exists(self, tmp_path):
+        """PID file check takes priority over system-wide detection."""
+        pidfile = tmp_path / ".koan-pid-ollama"
+        pidfile.write_text(str(os.getpid()))
+
+        with patch("app.ollama_client.is_server_ready") as mock_ready:
+            ok, msg = start_ollama(tmp_path)
+        assert ok is False
+        assert "already running" in msg
+        # System-wide check should not be called if PID file exists
+        mock_ready.assert_not_called()
+
+    def test_falls_through_when_no_system_ollama(self, tmp_path):
+        """When no system-wide Ollama, proceed to launch new instance."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 54321
+
+        with patch("app.ollama_client.is_server_ready", side_effect=[False, True]), \
+             patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+             patch("app.pid_manager.subprocess.Popen", return_value=mock_proc), \
+             patch("app.pid_manager._is_process_alive", return_value=True):
+            ok, msg = start_ollama(tmp_path, verify_timeout=0.5)
+        assert ok is True
+        assert "54321" in msg
+
+    def test_system_wide_check_handles_import_error(self, tmp_path):
+        """Gracefully handles import failure for ollama_client."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 54321
+
+        with patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+             patch("app.pid_manager.subprocess.Popen", return_value=mock_proc), \
+             patch("app.pid_manager._is_process_alive", return_value=True), \
+             patch.dict("sys.modules", {"app.ollama_client": None}):
+            ok, msg = start_ollama(tmp_path, verify_timeout=0.5)
+        # Should fall through to normal launch
+        assert ok is True
 
 
 # ---------------------------------------------------------------------------
@@ -1090,6 +1150,9 @@ class TestNeedsOllama:
 
     def test_copilot_does_not_need_ollama(self):
         assert _needs_ollama("copilot") is False
+
+    def test_ollama_claude_needs_ollama(self):
+        assert _needs_ollama("ollama-claude") is True
 
 
 # ---------------------------------------------------------------------------
@@ -1452,7 +1515,8 @@ class TestStarterLogFiles:
         mock_proc = MagicMock()
         mock_proc.pid = 54321
 
-        with patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+        with patch("app.ollama_client.is_server_ready", side_effect=[False, True]), \
+             patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
              patch("app.pid_manager.subprocess.Popen", return_value=mock_proc) as mock_popen, \
              patch("app.pid_manager._is_process_alive", return_value=True):
             start_ollama(tmp_path, verify_timeout=0.5)

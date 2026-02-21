@@ -1,7 +1,7 @@
 """Base class and constants for CLI provider abstraction."""
 
 import shutil
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +100,17 @@ class CLIProvider:
             CLI flags list. Base implementation returns empty (not supported).
         """
         return []
+
+    def get_env(self) -> Dict[str, str]:
+        """Return extra environment variables for subprocess invocation.
+
+        Providers that need to inject env vars (e.g., ANTHROPIC_BASE_URL
+        for proxy routing) override this. The returned dict is merged into
+        the subprocess environment by cli_exec.py.
+
+        Default: empty dict (no env modification).
+        """
+        return {}
 
     def build_command(
         self,

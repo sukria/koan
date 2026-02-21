@@ -5,9 +5,28 @@ def _needs_ollama() -> bool:
     """Return True if the configured provider requires ollama serve."""
     try:
         from app.provider import get_provider_name
-        return get_provider_name() in ("local", "ollama")
+        return get_provider_name() in ("local", "ollama", "ollama-claude")
     except Exception:
         return False
+
+
+def _ollama_summary() -> str:
+    """Build a compact Ollama summary: version + model count.
+
+    Returns a string like "v0.16.0, 3 models" or empty string on failure.
+    """
+    try:
+        from app.ollama_client import get_version, list_models
+        parts = []
+        version = get_version(timeout=2.0)
+        if version:
+            parts.append(f"v{version}")
+        models = list_models(timeout=2.0)
+        if models:
+            parts.append(f"{len(models)} model{'s' if len(models) != 1 else ''}")
+        return ", ".join(parts)
+    except Exception:
+        return ""
 
 
 def _truncate(text: str, max_len: int = 60) -> str:
@@ -101,9 +120,13 @@ def _handle_status(ctx) -> str:
         from app.pid_manager import check_pidfile
         ollama_pid = check_pidfile(koan_root, "ollama")
         if ollama_pid:
-            parts.append(f"  🦙 Ollama: running (PID {ollama_pid})")
+            detail = _ollama_summary()
+            if detail:
+                parts.append(f"  🦙 Ollama: {detail} (PID {ollama_pid})")
+            else:
+                parts.append(f"  🦙 Ollama: running (PID {ollama_pid})")
         else:
-            parts.append(f"  🦙 Ollama: not running")
+            parts.append("  🦙 Ollama: not running")
 
     status_file = koan_root / ".koan-status"
     if status_file.exists():
@@ -179,7 +202,11 @@ def _handle_ping(ctx) -> str:
     if _needs_ollama():
         ollama_pid = check_pidfile(koan_root, "ollama")
         if ollama_pid:
-            lines.append(f"✅ Ollama: alive (PID {ollama_pid})")
+            detail = _ollama_summary()
+            if detail:
+                lines.append(f"✅ Ollama: {detail} (PID {ollama_pid})")
+            else:
+                lines.append(f"✅ Ollama: alive (PID {ollama_pid})")
         else:
             lines.append("❌ Ollama: not running")
             lines.append("  ollama serve &")

@@ -2,7 +2,7 @@
 
 import os
 import sys
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from app.provider.base import CLIProvider
 
@@ -62,8 +62,28 @@ class LocalLLMProvider(CLIProvider):
         return f"{self.binary()} -m app.local_llm_runner"
 
     def is_available(self) -> bool:
-        """Check if local LLM is configured (model name set)."""
-        return bool(self._get_default_model())
+        """Check if local LLM is configured and the server is reachable.
+
+        Returns True only if:
+        1. A model name is configured
+        2. The Ollama server is responding
+        """
+        import logging
+        model = self._get_default_model()
+        if not model:
+            logging.getLogger("koan.provider").debug(
+                "local provider unavailable: no model configured "
+                "(set KOAN_LOCAL_LLM_MODEL or local_llm.model in config.yaml)"
+            )
+            return False
+        from app.ollama_client import is_server_ready
+        base_url = self._get_base_url()
+        ready = is_server_ready(base_url=base_url, timeout=2.0)
+        if not ready:
+            logging.getLogger("koan.provider").debug(
+                "local provider unavailable: Ollama server not responding at %s", base_url
+            )
+        return ready
 
     def build_prompt_args(self, prompt: str) -> List[str]:
         return ["-m", "app.local_llm_runner", "-p", prompt]
@@ -101,6 +121,30 @@ class LocalLLMProvider(CLIProvider):
     def build_mcp_args(self, configs: Optional[List[str]] = None) -> List[str]:
         # MCP not supported by local LLM runner — tools are built-in
         return []
+
+    def _get_auto_pull(self) -> bool:
+        """Check if auto_pull is enabled in config.yaml.
+
+        When enabled, models are automatically pulled on first use
+        if not already available locally.
+        """
+        return bool(self._get_config().get("auto_pull", False))
+
+    def check_quota_available(self, project_path: str, timeout: int = 15) -> Tuple[bool, str]:
+        """Check that Ollama server is running and the model is available.
+
+        Local LLMs have no quota, but the server must be reachable and
+        the configured model must be pulled locally. When auto_pull is
+        enabled, missing models are pulled automatically.
+        """
+        from app.ollama_client import check_server_and_model
+        model = self._get_default_model()
+        return check_server_and_model(
+            model_name=model,
+            base_url=self._get_base_url(),
+            timeout=float(timeout),
+            auto_pull=self._get_auto_pull(),
+        )
 
     def build_command(self, prompt: str, **kwargs) -> List[str]:
         """Build a complete command to run the local LLM agent."""
