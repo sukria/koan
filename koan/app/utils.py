@@ -357,12 +357,13 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
     """Find local project path matching a repository name.
 
     Tries in order:
-    1. GitHub URL match (if owner provided): check github_url in projects.yaml
+    1. GitHub URL match (if owner provided): check github_url and github_urls
+       in projects.yaml — github_urls includes ALL remotes (origin, upstream, etc.)
+       so cross-owner matches work on the fast path
     2. Exact match on project name (case-insensitive)
     3. Match on directory basename (case-insensitive)
-    4. Auto-discover from ALL git remotes (if owner provided): checks origin,
-       upstream, and any other remote — catches cross-owner matches (e.g.
-       URL points to upstream owner but local origin is a fork)
+    4. Auto-discover from ALL git remotes (if owner provided): subprocess
+       fallback for projects not yet populated by ensure_github_urls()
     5. Fallback to single project if only one configured
     """
     projects = get_known_projects()
@@ -376,8 +377,15 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
             if config:
                 for name, project in config.get("projects", {}).items():
                     if isinstance(project, dict):
+                        # Check primary github_url
                         gh_url = project.get("github_url", "")
                         if gh_url and gh_url.lower() == target:
+                            path = project.get("path")
+                            if path:
+                                return path
+                        # Check all remotes (cross-owner: fork origin + upstream)
+                        gh_urls = project.get("github_urls", [])
+                        if target in (u.lower() for u in gh_urls):
                             path = project.get("path")
                             if path:
                                 return path
@@ -412,19 +420,20 @@ def resolve_project_path(repo_name: str, owner: Optional[str] = None) -> Optiona
             all_remotes = get_all_github_remotes(path)
             if target in all_remotes:
                 # Persist discovery to projects.yaml for yaml projects
-                # (use the primary remote for the github_url field)
                 primary = get_github_remote(path)
-                if primary:
-                    try:
-                        from app.projects_config import load_projects_config, save_projects_config
-                        config = load_projects_config(str(KOAN_ROOT))
-                        if config and name in config.get("projects", {}):
-                            proj = config["projects"][name]
-                            if isinstance(proj, dict) and proj.get("path"):
+                try:
+                    from app.projects_config import load_projects_config, save_projects_config
+                    config = load_projects_config(str(KOAN_ROOT))
+                    if config and name in config.get("projects", {}):
+                        proj = config["projects"][name]
+                        if isinstance(proj, dict) and proj.get("path"):
+                            if primary and not proj.get("github_url"):
                                 proj["github_url"] = primary
-                                save_projects_config(str(KOAN_ROOT), config)
-                    except Exception as e:
-                        print(f"[utils] Failed to persist github_url for {name}: {e}", file=sys.stderr)
+                            proj["github_urls"] = all_remotes
+                            save_projects_config(str(KOAN_ROOT), config)
+                except Exception as e:
+                    print(f"[utils] Failed to persist github_urls for {name}: {e}", file=sys.stderr)
+                if primary:
                     # Also cache in memory (works for workspace projects)
                     try:
                         from app.projects_merged import set_github_url
