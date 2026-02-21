@@ -476,8 +476,10 @@ def _post_error_for_notification(notif: dict, error: str) -> None:
         comment = get_comment_from_notification(notif)
         if comment:
             comment_id = str(comment.get("id", ""))
+            comment_api_url = comment.get("url", "")
             if comment_id:
-                post_error_reply(owner, repo, issue_num, comment_id, error)
+                post_error_reply(owner, repo, issue_num, comment_id, error,
+                                 comment_api_url=comment_api_url)
     except Exception as e:
         print(f"[loop_manager] Error posting reply to GitHub: {e}", file=sys.stderr)
 

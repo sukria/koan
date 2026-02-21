@@ -641,7 +641,9 @@ class TestTryReply:
         mock_gen.assert_called_once()
         mock_post.assert_called_once_with("sukria", "koan", "42", "Here is my reply")
         # Should react with eyes emoji (not thumbs up)
-        mock_react.assert_called_once_with("sukria", "koan", "55555", emoji="eyes")
+        mock_react.assert_called_once_with(
+            "sukria", "koan", "55555", emoji="eyes",
+            comment_api_url="",
         # Should send Telegram notifications
         mock_notify_q.assert_called_once_with(
             "alice", "sukria", "koan", "42", "what do you think?",
@@ -793,6 +795,84 @@ class TestProcessNotificationWithReply:
         assert error is not None
         assert "`what`" in error
 
+
+class TestCommentApiUrlThreading:
+    """Tests that comment_api_url is properly threaded through the pipeline."""
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_pr_review_comment_url_threaded(
+        self, mock_insert, mock_resolve, mock_get_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification, tmp_path,
+    ):
+        """PR review comment URL is passed to add_reaction for correct endpoint."""
+        pr_comment_url = "https://api.github.com/repos/sukria/koan/pulls/comments/42"
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 42,
+            "url": pr_comment_url,
+            "body": "@testbot rebase",
+            "user": {"login": "alice"},
+        }
+
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            success, error = process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+
+        assert success is True
+        # Verify comment_api_url was passed to add_reaction
+        mock_react.assert_called_once_with(
+            "sukria", "koan", "42",
+            comment_api_url=pr_comment_url,
+        )
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_comment_url_passed_to_check_already_processed(
+        self, mock_insert, mock_resolve, mock_get_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification, tmp_path,
+    ):
+        """comment_api_url is passed to check_already_processed."""
+        issue_comment_url = "https://api.github.com/repos/sukria/koan/issues/comments/99"
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 99,
+            "url": issue_comment_url,
+            "body": "@testbot rebase",
+            "user": {"login": "alice"},
+        }
+
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+
+        # check_already_processed should receive the URL
+        mock_processed.assert_called_once_with(
+            "99", "testbot", "sukria", "koan",
+            comment_api_url=issue_comment_url,
+        )
 
 class TestGitHubTelegramNotifications:
     """Tests for ❓ and 💬 Telegram notifications from GitHub interactions."""

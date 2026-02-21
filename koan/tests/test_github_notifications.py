@@ -8,6 +8,7 @@ import pytest
 
 from app.github_notifications import (
     _processed_comments,
+    _reactions_endpoint,
     add_reaction,
     api_url_to_web_url,
     check_already_processed,
@@ -302,3 +303,131 @@ class TestExtractCommentMetadata:
 
     def test_empty_string(self):
         assert extract_comment_metadata("") is None
+
+
+class TestReactionsEndpoint:
+    """Tests for _reactions_endpoint helper — correct endpoint for all comment types."""
+
+    def test_issue_comment_url(self):
+        url = "https://api.github.com/repos/owner/repo/issues/comments/123"
+        result = _reactions_endpoint(comment_api_url=url)
+        assert result == "repos/owner/repo/issues/comments/123/reactions"
+
+    def test_pr_review_comment_url(self):
+        url = "https://api.github.com/repos/owner/repo/pulls/comments/456"
+        result = _reactions_endpoint(comment_api_url=url)
+        assert result == "repos/owner/repo/pulls/comments/456/reactions"
+
+    def test_commit_comment_url(self):
+        url = "https://api.github.com/repos/owner/repo/comments/789"
+        result = _reactions_endpoint(comment_api_url=url)
+        assert result == "repos/owner/repo/comments/789/reactions"
+
+    def test_fallback_without_url(self):
+        result = _reactions_endpoint(owner="owner", repo="repo", comment_id="42")
+        assert result == "repos/owner/repo/issues/comments/42/reactions"
+
+    def test_fallback_with_empty_url(self):
+        result = _reactions_endpoint(
+            comment_api_url="", owner="o", repo="r", comment_id="1"
+        )
+        assert result == "repos/o/r/issues/comments/1/reactions"
+
+    def test_non_github_url_falls_back(self):
+        """Non-GitHub API URLs should trigger fallback."""
+        result = _reactions_endpoint(
+            comment_api_url="https://example.com/comments/5",
+            owner="o", repo="r", comment_id="5",
+        )
+        assert result == "repos/o/r/issues/comments/5/reactions"
+
+
+class TestCheckAlreadyProcessedWithUrl:
+    """Tests for check_already_processed with comment_api_url parameter."""
+
+    def setup_method(self):
+        _processed_comments.clear()
+
+    @patch("app.github_notifications.api")
+    def test_pr_review_comment_uses_correct_endpoint(self, mock_api):
+        """PR review comments should use pulls/comments endpoint."""
+        reactions = [{"user": {"login": "bot"}, "content": "+1"}]
+        mock_api.return_value = json.dumps(reactions)
+
+        url = "https://api.github.com/repos/owner/repo/pulls/comments/42"
+        result = check_already_processed("42", "bot", "owner", "repo",
+                                          comment_api_url=url)
+        assert result is True
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/pulls/comments/42/reactions"
+        )
+
+    @patch("app.github_notifications.api")
+    def test_issue_comment_uses_correct_endpoint(self, mock_api):
+        """Issue comments should use issues/comments endpoint."""
+        reactions = [{"user": {"login": "bot"}, "content": "eyes"}]
+        mock_api.return_value = json.dumps(reactions)
+
+        url = "https://api.github.com/repos/owner/repo/issues/comments/99"
+        result = check_already_processed("99", "bot", "owner", "repo",
+                                          comment_api_url=url)
+        assert result is True
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/issues/comments/99/reactions"
+        )
+
+    @patch("app.github_notifications.api")
+    def test_fallback_without_url(self, mock_api):
+        """Without comment_api_url, falls back to issues/comments."""
+        mock_api.return_value = json.dumps([])
+
+        check_already_processed("50", "bot", "owner", "repo")
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/issues/comments/50/reactions"
+        )
+
+
+class TestAddReactionWithUrl:
+    """Tests for add_reaction with comment_api_url parameter."""
+
+    def setup_method(self):
+        _processed_comments.clear()
+
+    @patch("app.github_notifications.api")
+    def test_pr_review_comment_reaction(self, mock_api):
+        """Reaction on PR review comment uses pulls/comments endpoint."""
+        mock_api.return_value = ""
+        url = "https://api.github.com/repos/owner/repo/pulls/comments/77"
+        result = add_reaction("owner", "repo", "77",
+                              comment_api_url=url)
+        assert result is True
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/pulls/comments/77/reactions",
+            method="POST",
+            extra_args=["-f", "content=+1"],
+        )
+
+    @patch("app.github_notifications.api")
+    def test_issue_comment_reaction_with_url(self, mock_api):
+        """Issue comment reaction via URL uses correct endpoint."""
+        mock_api.return_value = ""
+        url = "https://api.github.com/repos/o/r/issues/comments/88"
+        result = add_reaction("o", "r", "88", emoji="eyes",
+                              comment_api_url=url)
+        assert result is True
+        mock_api.assert_called_once_with(
+            "repos/o/r/issues/comments/88/reactions",
+            method="POST",
+            extra_args=["-f", "content=eyes"],
+        )
+
+    @patch("app.github_notifications.api")
+    def test_fallback_without_url(self, mock_api):
+        """Without URL, falls back to issues/comments endpoint."""
+        mock_api.return_value = ""
+        add_reaction("owner", "repo", "33")
+        mock_api.assert_called_once_with(
+            "repos/owner/repo/issues/comments/33/reactions",
+            method="POST",
+            extra_args=["-f", "content=+1"],
+        )

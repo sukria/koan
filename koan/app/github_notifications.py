@@ -195,8 +195,37 @@ def mark_notification_read(thread_id: str) -> bool:
         return False
 
 
+def _reactions_endpoint(
+    comment_api_url: str = "",
+    owner: str = "",
+    repo: str = "",
+    comment_id: str = "",
+) -> str:
+    """Build the reactions API endpoint for a comment.
+
+    Uses comment_api_url when available (handles all comment types:
+    issue comments, PR review comments, commit comments).
+    Falls back to the issues/comments endpoint for backward compatibility.
+
+    Args:
+        comment_api_url: The comment's canonical API URL (from comment["url"]).
+        owner: Repository owner (fallback).
+        repo: Repository name (fallback).
+        comment_id: Comment ID (fallback).
+
+    Returns:
+        The reactions API endpoint path.
+    """
+    if comment_api_url:
+        api_prefix = "https://api.github.com/"
+        if comment_api_url.startswith(api_prefix):
+            return comment_api_url[len(api_prefix):] + "/reactions"
+    return f"repos/{owner}/{repo}/issues/comments/{comment_id}/reactions"
+
+
 def check_already_processed(comment_id: str, bot_username: str,
-                             owner: str, repo: str) -> bool:
+                             owner: str, repo: str,
+                             comment_api_url: str = "") -> bool:
     """Check if a comment has already been processed (has bot reaction).
 
     Checks for any reaction from the bot — both 👍 (command acknowledgment)
@@ -210,6 +239,10 @@ def check_already_processed(comment_id: str, bot_username: str,
         bot_username: The bot's GitHub username.
         owner: Repository owner.
         repo: Repository name.
+        comment_api_url: The comment's canonical API URL. When provided,
+            derives the correct reactions endpoint (handles PR review
+            comments, commit comments, etc.). Falls back to
+            issues/comments endpoint.
 
     Returns:
         True if already processed.
@@ -219,8 +252,9 @@ def check_already_processed(comment_id: str, bot_username: str,
         return True
 
     # Check GitHub reactions — any reaction from the bot means processed
+    endpoint = _reactions_endpoint(comment_api_url, owner, repo, comment_id)
     try:
-        raw = api(f"repos/{owner}/{repo}/issues/comments/{comment_id}/reactions")
+        raw = api(endpoint)
         reactions = json.loads(raw) if raw else []
         if isinstance(reactions, list):
             for reaction in reactions:
@@ -233,7 +267,8 @@ def check_already_processed(comment_id: str, bot_username: str,
     return False
 
 
-def add_reaction(owner: str, repo: str, comment_id: str, emoji: str = "+1") -> bool:
+def add_reaction(owner: str, repo: str, comment_id: str,
+                 emoji: str = "+1", comment_api_url: str = "") -> bool:
     """Add a reaction to a comment.
 
     Args:
@@ -241,13 +276,17 @@ def add_reaction(owner: str, repo: str, comment_id: str, emoji: str = "+1") -> b
         repo: Repository name.
         comment_id: The comment ID.
         emoji: Reaction content (default: "+1" for 👍).
+        comment_api_url: The comment's canonical API URL. When provided,
+            derives the correct reactions endpoint (handles PR review
+            comments, commit comments, etc.).
 
     Returns:
         True if successful.
     """
+    endpoint = _reactions_endpoint(comment_api_url, owner, repo, comment_id)
     try:
         api(
-            f"repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
+            endpoint,
             method="POST",
             extra_args=["-f", f"content={emoji}"],
         )

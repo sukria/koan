@@ -273,9 +273,11 @@ def _validate_and_parse_command(
         command_name is None if already processed/no valid mention.
     """
     comment_id = str(comment.get("id", ""))
+    comment_api_url = comment.get("url", "")
 
     # Check if already processed
-    if check_already_processed(comment_id, bot_username, owner, repo):
+    if check_already_processed(comment_id, bot_username, owner, repo,
+                                comment_api_url=comment_api_url):
         log.debug("GitHub: comment %s already processed", comment_id)
         mark_notification_read(str(notification.get("id", "")))
         return None, None, ""
@@ -395,7 +397,9 @@ def _try_reply(
         return False
 
     # Mark as processed
-    add_reaction(owner, repo, comment_id, emoji="eyes")
+    comment_api_url = comment.get("url", "")
+    add_reaction(owner, repo, comment_id, emoji="eyes",
+                 comment_api_url=comment_api_url)
     mark_notification_read(str(notification.get("id", "")))
 
     # Notify on Telegram: reply posted to GitHub
@@ -502,7 +506,8 @@ def process_single_notification(
 
     # React AFTER mission is persisted (marks as processed)
     comment_id = str(comment.get("id", ""))
-    add_reaction(owner, repo, comment_id)
+    comment_api_url = comment.get("url", "")
+    add_reaction(owner, repo, comment_id, comment_api_url=comment_api_url)
 
     # Mark notification as read
     mark_notification_read(str(notification.get("id", "")))
@@ -517,6 +522,7 @@ def post_error_reply(
     issue_number: str,
     comment_id: str,
     error_message: str,
+    comment_api_url: str = "",
 ) -> bool:
     """Post an error reply to a GitHub comment.
 
@@ -528,6 +534,8 @@ def post_error_reply(
         issue_number: Issue or PR number.
         comment_id: The triggering comment ID.
         error_message: The error message to post.
+        comment_api_url: The comment's canonical API URL for correct
+            reactions endpoint (handles PR review comments, etc.).
 
     Returns:
         True if posted successfully.
@@ -549,7 +557,8 @@ def post_error_reply(
         _error_replies.add(error_key)
 
         # Also add reaction to mark as processed
-        add_reaction(owner, repo, comment_id)
+        add_reaction(owner, repo, comment_id,
+                     comment_api_url=comment_api_url)
         return True
     except RuntimeError:
         return False
