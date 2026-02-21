@@ -98,6 +98,19 @@ def _get_focus_section(instance: str) -> str:
     return load_prompt("focus-mode", REMAINING=remaining)
 
 
+def _get_audit_section(mission_title: str, project_path: str) -> str:
+    """Return the audit mission section if the mission is an audit."""
+    if not mission_title:
+        return ""
+    title_lower = mission_title.lower()
+    if "audit" not in title_lower:
+        return ""
+
+    from app.prompts import load_prompt
+
+    return load_prompt("audit-mission", PROJECT_PATH=project_path)
+
+
 def _get_verbose_section(instance: str) -> str:
     """Build the verbose mode section if .koan-verbose exists."""
     koan_root = str(Path(instance).parent)
@@ -142,8 +155,8 @@ def build_agent_prompt(
     if mission_title:
         mission_instruction = (
             f"Your assigned mission is: **{mission_title}** "
-            "Mark it In Progress in missions.md. Execute it thoroughly. "
-            "Take your time — go deep, don't rush."
+            "The mission is already marked In Progress. "
+            "Follow the Mission Execution Workflow below."
         )
     else:
         mission_instruction = (
@@ -171,6 +184,9 @@ def build_agent_prompt(
 
     # Append merge policy
     prompt += _get_merge_policy(project_name)
+
+    # Append audit section if mission is an audit
+    prompt += _get_audit_section(mission_title, project_path)
 
     # Append deep research suggestions (DEEP mode, autonomous only)
     if autonomous_mode == "deep" and not mission_title:
