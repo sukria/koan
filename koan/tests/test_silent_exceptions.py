@@ -74,8 +74,8 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     ("recreate_pr.py", 118),         # local branch delete (may not exist)
     ("recreate_pr.py", 222),         # fetch from origin/upstream fallback
     ("recreate_pr.py", 272),         # git log check fallback
-    ("run.py", 1646),                # get current branch (best-effort)
-    ("run.py", 1814),                # temp file cleanup
+    ("run.py", 1657),                # get current branch (best-effort)
+    ("run.py", 1825),                # temp file cleanup
     # --- Prompt/config loading with hardcoded fallback ---
     ("local_llm_runner.py", 321),    # system prompt file fallback
     ("pid_manager.py", 468),         # provider detection fallback

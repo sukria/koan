@@ -1177,3 +1177,83 @@ class TestNotifyMissionFromMention:
         assert "📬" in msg
         assert "sukria/koan" in msg
         assert "Fix auth bug" in msg
+
+
+# --- Test configurable check interval ---
+
+
+class TestConfigurableCheckInterval:
+    """Test that process_github_notifications uses github.check_interval_seconds from config."""
+
+    def setup_method(self):
+        from app.loop_manager import reset_github_backoff
+        reset_github_backoff()
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_loads_interval_from_config(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        """On first call, loads check_interval_seconds from config."""
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        config_with_interval = {"github": {"check_interval_seconds": 90}}
+        mock_config.return_value = config_with_interval
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 24}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+            process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert lm._GITHUB_CHECK_INTERVAL == 90
+        assert lm._github_interval_loaded is True
+
+    def test_interval_floor_enforced(self):
+        """The check interval has a floor of 10 seconds."""
+        from app.github_config import get_github_check_interval
+        assert get_github_check_interval({"github": {"check_interval_seconds": 3}}) == 10
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    def test_interval_only_loaded_once(
+        self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        """The interval is loaded from config only on the first call."""
+        import app.loop_manager as lm
+        from app.loop_manager import process_github_notifications
+
+        mock_config.return_value = {"github": {"check_interval_seconds": 120}}
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 24}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+            process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert lm._GITHUB_CHECK_INTERVAL == 120
+
+        # Change config — second call should NOT reload
+        mock_config.return_value = {"github": {"check_interval_seconds": 30}}
+        lm._last_github_check = 0  # force past throttle
+
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+            process_github_notifications(str(tmp_path), str(tmp_path))
+
+        # Still 120, not 30
+        assert lm._GITHUB_CHECK_INTERVAL == 120
+
+    def test_reset_clears_interval_loaded_flag(self):
+        """reset_github_backoff clears the interval loaded flag."""
+        import app.loop_manager as lm
+        lm._github_interval_loaded = True
+        lm.reset_github_backoff()
+        assert lm._github_interval_loaded is False

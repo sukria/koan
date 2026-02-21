@@ -4,6 +4,7 @@ import pytest
 
 from app.github_config import (
     get_github_authorized_users,
+    get_github_check_interval,
     get_github_commands_enabled,
     get_github_max_age_hours,
     get_github_nickname,
@@ -109,6 +110,32 @@ class TestGetGithubMaxAgeHours:
 
     def test_invalid_value(self):
         assert get_github_max_age_hours({"github": {"max_age_hours": "bad"}}) == 24
+
+
+class TestGetGithubCheckInterval:
+    def test_default(self):
+        assert get_github_check_interval({}) == 60
+
+    def test_custom(self):
+        assert get_github_check_interval({"github": {"check_interval_seconds": 120}}) == 120
+
+    def test_none_section(self):
+        assert get_github_check_interval({"github": None}) == 60
+
+    def test_invalid_value(self):
+        assert get_github_check_interval({"github": {"check_interval_seconds": "bad"}}) == 60
+
+    def test_floor_at_10(self):
+        assert get_github_check_interval({"github": {"check_interval_seconds": 5}}) == 10
+
+    def test_zero_floored(self):
+        assert get_github_check_interval({"github": {"check_interval_seconds": 0}}) == 10
+
+    def test_negative_floored(self):
+        assert get_github_check_interval({"github": {"check_interval_seconds": -1}}) == 10
+
+    def test_large_value(self):
+        assert get_github_check_interval({"github": {"check_interval_seconds": 600}}) == 600
 
 
 class TestValidateGithubConfig:
