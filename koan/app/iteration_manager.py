@@ -23,6 +23,7 @@ Output: JSON on stdout with iteration plan.
 
 import argparse
 import json
+import random
 import re
 import sys
 import time
@@ -290,6 +291,34 @@ def _cached_count_open_prs(github_url: str, author: str) -> int:
     # Fail-open: -1 means project stays included until cache expires.
     _pr_count_cache[key] = (result, now)
     return result
+
+
+def _select_random_exploration_project(
+    projects: List[Tuple[str, str]],
+    last_project: str = "",
+) -> Tuple[str, str]:
+    """Randomly select a project for autonomous exploration.
+
+    Avoids repeating the last explored project when multiple options
+    are available, ensuring fair rotation across projects.
+
+    Args:
+        projects: List of eligible (name, path) tuples (must be non-empty).
+        last_project: Name of the project used in the previous iteration.
+
+    Returns:
+        (name, path) tuple of the selected project.
+    """
+    if len(projects) == 1:
+        return projects[0]
+
+    # Avoid repeating the last project when possible
+    if last_project:
+        candidates = [(n, p) for n, p in projects if n != last_project]
+        if candidates:
+            return random.choice(candidates)
+
+    return random.choice(projects)
 
 
 FilterResult = namedtuple("FilterResult", ["projects", "pr_limited"])
@@ -561,8 +590,13 @@ def plan_iteration(
                 schedule_mode=schedule_state.mode if schedule_state else "normal",
             )
 
-        filtered_idx = recommended_idx % len(exploration_projects)
-        project_name, project_path = _get_project_by_index(exploration_projects, filtered_idx)
+        project_name, project_path = _select_random_exploration_project(
+            exploration_projects, last_project,
+        )
+        _log_iteration("koan",
+            f"Exploration: randomly selected '{project_name}' "
+            f"from {len(exploration_projects)} eligible project(s)"
+            f"{' (avoiding last: ' + last_project + ')' if last_project and last_project != project_name else ''}")
 
     # Step 6: Determine action for autonomous mode
     action = "mission" if mission_title else "autonomous"

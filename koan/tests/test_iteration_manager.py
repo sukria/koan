@@ -25,6 +25,7 @@ from app.iteration_manager import (
     _pick_mission,
     _refresh_usage,
     _resolve_project_path,
+    _select_random_exploration_project,
     _should_contemplate,
     plan_iteration,
 )
@@ -1717,3 +1718,136 @@ class TestCLI:
         assert data["action"] == "mission"
         assert data["project_name"] == "koan"
         assert "Fix the test CLI" in data["mission_title"]
+
+
+# === Tests: _select_random_exploration_project ===
+
+
+class TestSelectRandomExplorationProject:
+
+    def test_single_project_always_returned(self):
+        """With one project, it's always selected regardless of last_project."""
+        projects = [("koan", "/path/to/koan")]
+        for _ in range(10):
+            name, path = _select_random_exploration_project(projects, "koan")
+            assert name == "koan"
+            assert path == "/path/to/koan"
+
+    def test_avoids_last_project(self):
+        """With multiple projects, avoids repeating the last one."""
+        projects = [("koan", "/path/to/koan"), ("backend", "/path/to/backend")]
+        for _ in range(20):
+            name, _ = _select_random_exploration_project(projects, "koan")
+            assert name == "backend"
+
+    def test_no_last_project_selects_any(self):
+        """Without a last_project, any project can be selected."""
+        projects = [("koan", "/path/koan"), ("backend", "/path/backend"), ("webapp", "/path/webapp")]
+        seen = set()
+        # Run enough times that random should hit all 3
+        for _ in range(100):
+            name, _ = _select_random_exploration_project(projects, "")
+            seen.add(name)
+        assert len(seen) == 3, f"Expected all 3 projects, got: {seen}"
+
+    def test_last_project_not_in_list(self):
+        """If last_project isn't in the list, any project can be selected."""
+        projects = [("koan", "/path/koan"), ("backend", "/path/backend")]
+        seen = set()
+        for _ in range(50):
+            name, _ = _select_random_exploration_project(projects, "unknown")
+            seen.add(name)
+        assert len(seen) == 2
+
+    def test_multiple_projects_distributes_fairly(self):
+        """With 3+ projects and a last_project, should pick from the remaining ones."""
+        projects = [("a", "/a"), ("b", "/b"), ("c", "/c"), ("d", "/d")]
+        seen = set()
+        for _ in range(100):
+            name, _ = _select_random_exploration_project(projects, "a")
+            seen.add(name)
+            assert name != "a"
+        assert seen == {"b", "c", "d"}
+
+    def test_returns_tuple(self):
+        """Return value is a (name, path) tuple."""
+        projects = [("koan", "/path/to/koan")]
+        result = _select_random_exploration_project(projects, "")
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+
+# === Tests: plan_iteration random project selection ===
+
+
+class TestPlanIterationRandomSelection:
+
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._filter_exploration_projects")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("random.randint", return_value=99)  # no contemplation
+    def test_autonomous_uses_random_selection(
+        self, mock_rand, mock_focus, mock_filter, mock_refresh, mock_pick,
+        instance_dir, koan_root, usage_state,
+    ):
+        """Autonomous mode should use random selection, not deterministic index."""
+        mock_filter.return_value = FilterResult(
+            projects=[("a", "/a"), ("b", "/b"), ("c", "/c")],
+            pr_limited=[],
+        )
+
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text(
+            "Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n"
+        )
+
+        seen = set()
+        for run_num in range(1, 30):
+            result = plan_iteration(
+                instance_dir=str(instance_dir),
+                koan_root=str(koan_root),
+                run_num=run_num,
+                count=0,
+                projects=PROJECTS_LIST,
+                last_project="",
+                usage_state_path=str(usage_state),
+            )
+            assert result["action"] == "autonomous"
+            seen.add(result["project_name"])
+
+        # Over 29 iterations, random selection should cover multiple projects
+        assert len(seen) >= 2, f"Expected multiple projects, got only: {seen}"
+
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._filter_exploration_projects")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("random.randint", return_value=99)  # no contemplation
+    def test_autonomous_avoids_last_project(
+        self, mock_rand, mock_focus, mock_filter, mock_refresh, mock_pick,
+        instance_dir, koan_root, usage_state,
+    ):
+        """Autonomous mode should avoid the last project when multiple are available."""
+        mock_filter.return_value = FilterResult(
+            projects=[("koan", "/koan"), ("backend", "/backend")],
+            pr_limited=[],
+        )
+
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text(
+            "Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n"
+        )
+
+        for _ in range(10):
+            result = plan_iteration(
+                instance_dir=str(instance_dir),
+                koan_root=str(koan_root),
+                run_num=1,
+                count=0,
+                projects=PROJECTS_LIST,
+                last_project="koan",
+                usage_state_path=str(usage_state),
+            )
+            assert result["action"] == "autonomous"
+            assert result["project_name"] == "backend"
