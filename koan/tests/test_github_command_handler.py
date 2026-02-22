@@ -8,6 +8,7 @@ import pytest
 
 from app.github_command_handler import (
     _error_replies,
+    _extract_url_from_context,
     _notify_github_question,
     _notify_github_reply,
     _try_reply,
@@ -843,3 +844,74 @@ class TestGitHubTelegramNotifications:
     def test_reply_notification_swallows_errors(self, mock_send):
         # Should not raise — error is caught internally
         _notify_github_reply("o", "r", "1", "reply")
+
+
+# ---------------------------------------------------------------------------
+# _extract_url_from_context — URL regex precision
+# ---------------------------------------------------------------------------
+
+
+class TestExtractUrlFromContext:
+    """Tests for URL extraction regex that shouldn't capture trailing punctuation."""
+
+    def test_clean_pr_url(self):
+        result = _extract_url_from_context(
+            "rebase https://github.com/owner/repo/pull/42"
+        )
+        assert result is not None
+        url, remaining = result
+        assert url == "https://github.com/owner/repo/pull/42"
+        assert remaining == "rebase"
+
+    def test_clean_issue_url(self):
+        result = _extract_url_from_context(
+            "fix https://github.com/owner/repo/issues/10"
+        )
+        assert result is not None
+        url, _ = result
+        assert url == "https://github.com/owner/repo/issues/10"
+
+    def test_url_with_trailing_paren(self):
+        """Trailing ')' should NOT be captured."""
+        result = _extract_url_from_context(
+            "see (https://github.com/owner/repo/pull/5)"
+        )
+        assert result is not None
+        url, _ = result
+        assert not url.endswith(")")
+
+    def test_url_with_trailing_bracket(self):
+        """Trailing ']' should NOT be captured."""
+        result = _extract_url_from_context(
+            "[https://github.com/owner/repo/pull/5]"
+        )
+        assert result is not None
+        url, _ = result
+        assert not url.endswith("]")
+
+    def test_repo_url_without_path(self):
+        """Repo root URL should be extracted."""
+        result = _extract_url_from_context("check https://github.com/owner/repo")
+        assert result is not None
+        url, _ = result
+        assert url == "https://github.com/owner/repo"
+
+    def test_no_url_returns_none(self):
+        result = _extract_url_from_context("just some text without urls")
+        assert result is None
+
+    def test_url_with_dots_in_repo_name(self):
+        result = _extract_url_from_context(
+            "fix https://github.com/perl-actions/perl-versions/issues/31"
+        )
+        assert result is not None
+        url, _ = result
+        assert url == "https://github.com/perl-actions/perl-versions/issues/31"
+
+    def test_url_with_hyphens_in_owner(self):
+        result = _extract_url_from_context(
+            "rebase https://github.com/my-org/my-repo/pull/99"
+        )
+        assert result is not None
+        url, _ = result
+        assert url == "https://github.com/my-org/my-repo/pull/99"

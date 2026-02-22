@@ -133,7 +133,10 @@ def _extract_url_from_context(context: str) -> Optional[Tuple[str, str]]:
     Returns:
         Tuple of (url, remaining_context) or None if no URL found
     """
-    url_match = re.search(r'https?://github\.com/\S+', context)
+    url_match = re.search(
+        r'https?://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:/[a-z]+/\d+)?',
+        context,
+    )
     if not url_match:
         return None
     

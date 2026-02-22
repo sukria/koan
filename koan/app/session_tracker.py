@@ -45,23 +45,21 @@ _EMPTY_KEYWORDS = [
     "no changes needed",
 ]
 
-# Keywords that signal a productive session
-_PRODUCTIVE_KEYWORDS = [
+# Strong productive signals — multi-word phrases that are unambiguous
+_STRONG_PRODUCTIVE = [
     "branch pushed",
     "branch `koan/",
+    "branch koan",
     "pr #",
     "pr created",
+    "draft pr",
     "tests pass",
-    "implemented",
-    "fixed",
-    "added",
-    "created",
-    "refactored",
-    "cleaned",
-    "migrated",
-    "wrote",
-    "built",
 ]
+
+# Weaker productive signals — single words that need context
+_WEAK_PRODUCTIVE_RE = re.compile(
+    r"\b(?:implemented|refactored|migrated)\b", re.IGNORECASE
+)
 
 
 def classify_session(journal_content: str) -> str:
@@ -69,6 +67,11 @@ def classify_session(journal_content: str) -> str:
 
     Uses keyword matching on the journal/pending content to determine
     whether the session produced actionable output.
+
+    Strategy: strong signals win immediately, weak signals are counted.
+    Empty phrases are multi-word (specific), so they're reliable.
+    Single-word productive signals ("added", "fixed") are too ambiguous
+    and were removed in favor of strong multi-word patterns.
 
     Args:
         journal_content: The session's journal entry or pending.md content.
@@ -81,25 +84,37 @@ def classify_session(journal_content: str) -> str:
 
     lower = journal_content.lower()
 
-    # Check for empty/blocked signals first (more specific)
-    empty_score = sum(1 for kw in _EMPTY_KEYWORDS if kw in lower)
-    productive_score = sum(1 for kw in _PRODUCTIVE_KEYWORDS if kw in lower)
+    # Strong productive signals — any one is conclusive
+    if any(kw in lower for kw in _STRONG_PRODUCTIVE):
+        return "productive"
 
-    # Strong empty signals override productive keywords
+    # Count empty signals (multi-word phrases, low false positive rate)
+    empty_score = sum(1 for kw in _EMPTY_KEYWORDS if kw in lower)
+
+    # Strong empty overrides everything (including blocked keywords)
     if empty_score >= 3:
         return "empty"
 
-    # Check for blocked-on-merges pattern specifically
-    if "blocked on merge" in lower or "merge queue" in lower:
-        if productive_score < 2:
-            return "blocked"
+    # Blocked keywords with insufficient productive evidence → blocked
+    has_blocked = (
+        "blocked on merge" in lower
+        or "merge queue" in lower
+        or "all work blocked" in lower
+    )
+    weak_productive = len(_WEAK_PRODUCTIVE_RE.findall(lower))
+    if has_blocked and weak_productive < 1:
+        return "blocked"
 
-    # Productive wins if it has clear signals
-    if productive_score >= 2:
+    # Moderate empty signals → empty
+    if empty_score >= 2:
+        return "empty"
+
+    # Weak productive signals → productive
+    if weak_productive >= 1:
         return "productive"
 
-    # Weak signals — use ratio
-    if empty_score > productive_score:
+    # Single empty signal → empty
+    if empty_score >= 1:
         return "empty"
 
     # Default: benefit of the doubt
@@ -186,7 +201,14 @@ def _load_outcomes(outcomes_path: Path) -> list:
     if not outcomes_path.exists():
         return []
     try:
-        return json.loads(outcomes_path.read_text())
+        data = json.loads(outcomes_path.read_text())
+        if not isinstance(data, list):
+            print(
+                f"[session_tracker] Unexpected JSON type: {type(data).__name__}",
+                file=sys.stderr,
+            )
+            return []
+        return data
     except (json.JSONDecodeError, OSError) as e:
         print(f"[session_tracker] Failed to read outcomes: {e}", file=sys.stderr)
         return []

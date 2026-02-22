@@ -74,7 +74,11 @@ class TestClassifySession:
 
     def test_french_no_code(self):
         content = "Pas de code — mission analytique. Issue #105 created."
-        assert classify_session(content) == "productive"  # issue created = productive
+        assert classify_session(content) == "empty"  # "pas de code" = no code produced
+
+    def test_analytical_with_branch_is_productive(self):
+        content = "Mission analytique. Branch pushed with analysis report."
+        assert classify_session(content) == "productive"
 
     def test_strong_empty_overrides_weak_productive(self):
         """Many empty signals should override a few productive ones."""
@@ -407,3 +411,85 @@ class TestDeepResearchStaleness:
 
         assert "CRITICAL" in output
         assert "STOP" in output
+
+
+# --- Classification edge cases (improved classifier) ---
+
+class TestClassifySessionEdgeCases:
+    """Regression tests for the improved session classifier."""
+
+    def test_generic_words_dont_override_empty(self):
+        """Words like 'added', 'created', 'fixed' should NOT count as productive
+        signals that override empty keywords."""
+        content = "No code changes. Created a note. Added nothing useful. Fixed nothing."
+        assert classify_session(content) == "empty"
+
+    def test_strong_productive_overrides_empty(self):
+        """A clear productive signal wins even with empty keywords present."""
+        content = "No code changes in most areas, but branch pushed with fix."
+        assert classify_session(content) == "productive"
+
+    def test_many_empty_overrides_blocked(self):
+        """When overwhelmingly empty, don't classify as blocked."""
+        content = (
+            "Verification session. No code changes. Same state. "
+            "Legitimate waiting state. Merge queue full."
+        )
+        assert classify_session(content) == "empty"
+
+    def test_blocked_with_single_signal(self):
+        """A single blocked keyword with no productive work → blocked."""
+        content = "All branches pending. Blocked on merge reviews."
+        assert classify_session(content) == "blocked"
+
+    def test_blocked_with_weak_productive(self):
+        """Blocked + weak productive signal → productive (implemented beats blocked)."""
+        content = "Blocked on merge for old PRs, but implemented a new module."
+        assert classify_session(content) == "productive"
+
+    def test_refactored_is_productive(self):
+        content = "Refactored the config module. Cleaner interfaces."
+        assert classify_session(content) == "productive"
+
+    def test_migrated_is_productive(self):
+        content = "Migrated from env vars to YAML config."
+        assert classify_session(content) == "productive"
+
+    def test_draft_pr_is_productive(self):
+        content = "Draft PR submitted for review."
+        assert classify_session(content) == "productive"
+
+    def test_tests_pass_is_productive(self):
+        content = "All tests pass after cleanup."
+        assert classify_session(content) == "productive"
+
+    def test_two_empty_signals_is_empty(self):
+        content = "No code. Identical session to before."
+        assert classify_session(content) == "empty"
+
+    def test_single_empty_signal_is_empty(self):
+        content = "No code today but thinking about next steps."
+        assert classify_session(content) == "empty"
+
+
+# --- _load_outcomes type validation ---
+
+class TestLoadOutcomesValidation:
+    """Tests for _load_outcomes type safety."""
+
+    def test_dict_json_returns_empty(self, tmp_path):
+        """A JSON object (not array) should be treated as corrupt."""
+        outcomes_path = tmp_path / "session_outcomes.json"
+        outcomes_path.write_text('{"not": "a list"}')
+        assert _load_outcomes(outcomes_path) == []
+
+    def test_string_json_returns_empty(self, tmp_path):
+        outcomes_path = tmp_path / "session_outcomes.json"
+        outcomes_path.write_text('"just a string"')
+        assert _load_outcomes(outcomes_path) == []
+
+    def test_valid_list_works(self, tmp_path):
+        outcomes_path = tmp_path / "session_outcomes.json"
+        outcomes_path.write_text('[{"a": 1}]')
+        result = _load_outcomes(outcomes_path)
+        assert len(result) == 1
