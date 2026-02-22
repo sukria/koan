@@ -78,7 +78,7 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     ("run.py", 1825),                # temp file cleanup
     # --- Prompt/config loading with hardcoded fallback ---
     ("local_llm_runner.py", 321),    # system prompt file fallback
-    ("pid_manager.py", 468),         # provider detection fallback
+    ("pid_manager.py", 469),         # provider detection fallback
     # --- Retry without optional parameter ---
     ("plan_runner.py", 123),         # issue label retry (inner catch has e2)
 }
