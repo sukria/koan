@@ -11,11 +11,12 @@ Configuration:
     env var:      KOAN_CLI_PROVIDER=copilot (overrides config.yaml)
 
 Package structure:
-    provider/base.py    — CLIProvider base class + tool constants
-    provider/claude.py  — ClaudeProvider implementation
-    provider/copilot.py — CopilotProvider implementation
-    provider/local.py   — LocalLLMProvider implementation
-    provider/__init__.py — Registry, resolution, convenience functions
+    provider/base.py         — CLIProvider base class + tool constants
+    provider/claude.py       — ClaudeProvider implementation
+    provider/copilot.py      — CopilotProvider implementation
+    provider/local.py        — LocalLLMProvider implementation
+    provider/ollama_launch.py — OllamaLaunchProvider (ollama launch claude)
+    provider/__init__.py     — Registry, resolution, convenience functions
 """
 
 import os
@@ -34,6 +35,7 @@ from app.provider.base import (  # noqa: F401
 from app.provider.claude import ClaudeProvider  # noqa: F401
 from app.provider.copilot import CopilotProvider  # noqa: F401
 from app.provider.local import LocalLLMProvider  # noqa: F401
+from app.provider.ollama_launch import OllamaLaunchProvider  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +46,7 @@ _PROVIDERS = {
     "claude": ClaudeProvider,
     "copilot": CopilotProvider,
     "local": LocalLLMProvider,
+    "ollama-launch": OllamaLaunchProvider,
 }
 
 # Cached provider instance (reset with reset_provider() in tests)

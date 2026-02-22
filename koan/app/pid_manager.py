@@ -459,7 +459,8 @@ def _detect_provider(koan_root: Path) -> str:
     """Detect the configured CLI provider.
 
     Uses the provider package resolution (env var > config.yaml > default).
-    Returns provider name: "claude", "copilot", "local", or "ollama".
+    Returns provider name: "claude", "copilot", "local", "ollama",
+    or "ollama-launch".
     """
     try:
         # Lazy import to avoid circular deps and keep pid_manager lightweight
@@ -495,8 +496,11 @@ def start_all(koan_root: Path, provider: str = None) -> dict:
     """Start the full Kōan stack for the configured provider.
 
     Auto-detects the provider if not specified.
-    - claude/copilot: starts awake + run (2 processes)
+    - claude/copilot/ollama-launch: starts awake + run (2 processes)
     - local/ollama: starts ollama + awake + run (3 processes)
+
+    Note: ollama-launch does not need a separate ollama serve process
+    because ``ollama launch claude`` handles server lifecycle internally.
 
     Returns dict mapping component name to (success, message).
     """
