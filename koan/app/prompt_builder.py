@@ -98,6 +98,23 @@ def _get_focus_section(instance: str) -> str:
     return load_prompt("focus-mode", REMAINING=remaining)
 
 
+def _get_staleness_section(instance: str, project_name: str) -> str:
+    """Get staleness warning for the current project.
+
+    Checks session outcome history and returns a warning if recent sessions
+    for this project were non-productive. Cheap operation (local JSON read),
+    so it's safe to call in every autonomous mode.
+    """
+    try:
+        from app.session_tracker import get_staleness_warning
+        warning = get_staleness_warning(instance, project_name)
+        if warning:
+            return f"\n\n# Session History Feedback\n\n{warning}\n"
+    except Exception as e:
+        print(f"[prompt_builder] Staleness check failed: {e}", file=sys.stderr)
+    return ""
+
+
 def _get_verbose_section(instance: str) -> str:
     """Build the verbose mode section if .koan-verbose exists."""
     koan_root = str(Path(instance).parent)
@@ -171,6 +188,10 @@ def build_agent_prompt(
 
     # Append merge policy
     prompt += _get_merge_policy(project_name)
+
+    # Append staleness warning (all autonomous modes — cheap local read)
+    if not mission_title:
+        prompt += _get_staleness_section(instance, project_name)
 
     # Append deep research suggestions (DEEP mode, autonomous only)
     if autonomous_mode == "deep" and not mission_title:

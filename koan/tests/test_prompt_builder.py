@@ -12,6 +12,7 @@ from app.prompt_builder import (
     _is_auto_merge_enabled,
     _get_merge_policy,
     _get_deep_research,
+    _get_staleness_section,
     _get_verbose_section,
 )
 
@@ -130,6 +131,44 @@ class TestGetDeepResearch:
             prompt_env["project_path"],
         )
         assert result == ""
+
+
+# --- Tests for _get_staleness_section ---
+
+
+class TestGetStalenessSection:
+    """Tests for staleness warning injection."""
+
+    @patch("app.session_tracker.get_staleness_warning", return_value="")
+    def test_no_warning_when_fresh(self, mock_warning, prompt_env):
+        result = _get_staleness_section(prompt_env["instance"], "testproj")
+        assert result == ""
+
+    @patch("app.session_tracker.get_staleness_warning")
+    def test_warning_when_stale(self, mock_warning, prompt_env):
+        mock_warning.return_value = (
+            "### WARNING: Project Staleness Detected\n\n"
+            "Last 3 sessions found nothing actionable."
+        )
+        result = _get_staleness_section(prompt_env["instance"], "testproj")
+        assert "# Session History Feedback" in result
+        assert "WARNING" in result
+        assert "3 sessions" in result
+
+    @patch("app.session_tracker.get_staleness_warning", side_effect=Exception("boom"))
+    def test_error_returns_empty(self, mock_warning, prompt_env):
+        result = _get_staleness_section(prompt_env["instance"], "testproj")
+        assert result == ""
+
+    @patch("app.session_tracker.get_staleness_warning")
+    def test_critical_warning(self, mock_warning, prompt_env):
+        mock_warning.return_value = (
+            "### CRITICAL: Project Staleness Detected\n\n"
+            "STOP doing verification/housekeeping."
+        )
+        result = _get_staleness_section(prompt_env["instance"], "testproj")
+        assert "CRITICAL" in result
+        assert "STOP" in result
 
 
 # --- Tests for _get_verbose_section ---
@@ -343,6 +382,121 @@ class TestBuildAgentPrompt:
 
         assert result.startswith("Base prompt")
         assert result.index("Merge") > result.index("Base prompt")
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_staleness_section")
+    @patch("app.prompt_builder._get_deep_research", return_value="")
+    @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
+    @patch("app.prompts.load_prompt", return_value="Base")
+    def test_staleness_injected_in_implement_mode(
+        self, mock_load, mock_prefix, mock_merge, mock_deep,
+        mock_staleness, mock_verbose, prompt_env
+    ):
+        """Staleness warning should be injected in implement autonomous mode."""
+        mock_staleness.return_value = "\n\n# Session History Feedback\n\nWARNING\n"
+
+        result = build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=5,
+            max_runs=20,
+            autonomous_mode="implement",
+            focus_area="Medium work",
+            available_pct=35,
+            mission_title="",
+        )
+
+        mock_staleness.assert_called_once_with(prompt_env["instance"], "testproj")
+        assert "Session History Feedback" in result
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_staleness_section")
+    @patch("app.prompt_builder._get_deep_research", return_value="")
+    @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
+    @patch("app.prompts.load_prompt", return_value="Base")
+    def test_staleness_injected_in_review_mode(
+        self, mock_load, mock_prefix, mock_merge, mock_deep,
+        mock_staleness, mock_verbose, prompt_env
+    ):
+        """Staleness warning should be injected in review autonomous mode."""
+        mock_staleness.return_value = "\n\n# Session History Feedback\n\nCRITICAL\n"
+
+        result = build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=3,
+            max_runs=20,
+            autonomous_mode="review",
+            focus_area="Low work",
+            available_pct=10,
+            mission_title="",
+        )
+
+        mock_staleness.assert_called_once()
+        assert "CRITICAL" in result
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_staleness_section")
+    @patch("app.prompt_builder._get_deep_research", return_value="")
+    @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
+    @patch("app.prompts.load_prompt", return_value="Base")
+    def test_staleness_skipped_with_mission(
+        self, mock_load, mock_prefix, mock_merge, mock_deep,
+        mock_staleness, mock_verbose, prompt_env
+    ):
+        """Staleness warning should NOT be injected when a mission is assigned."""
+        build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=5,
+            max_runs=20,
+            autonomous_mode="implement",
+            focus_area="Execute mission",
+            available_pct=35,
+            mission_title="Fix the auth bug",
+        )
+
+        mock_staleness.assert_not_called()
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_staleness_section")
+    @patch("app.prompt_builder._get_deep_research")
+    @patch("app.prompt_builder._get_merge_policy", return_value="\nMerge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
+    @patch("app.prompts.load_prompt", return_value="Base")
+    def test_staleness_before_deep_research_in_deep_mode(
+        self, mock_load, mock_prefix, mock_merge, mock_deep,
+        mock_staleness, mock_verbose, prompt_env
+    ):
+        """In deep mode, staleness should be injected AND deep research too."""
+        mock_staleness.return_value = "\n\n# Staleness\nWarning\n"
+        mock_deep.return_value = "\n\n# Deep\nResearch\n"
+
+        result = build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=1,
+            max_runs=20,
+            autonomous_mode="deep",
+            focus_area="Deep work",
+            available_pct=60,
+            mission_title="",
+        )
+
+        mock_staleness.assert_called_once()
+        mock_deep.assert_called_once()
+        # Both should be in the result
+        assert "Staleness" in result
+        assert "Deep" in result
+        # Staleness appears before deep research
+        assert result.index("Staleness") < result.index("Deep")
 
 
 # --- Tests for build_contemplative_prompt ---
