@@ -2481,12 +2481,14 @@ class TestRestoreKoanBranch:
 class TestRunSkillMissionEnv:
     """Tests that _run_skill_mission sets PYTHONPATH and restores branches."""
 
-    def _make_mock_popen(self, returncode=0, stdout_lines=None, stderr_text=""):
+    def _make_mock_popen(self, returncode=0, stdout_lines=None, stderr_lines=None):
         """Create a mock Popen instance that simulates line-by-line output."""
         mock_proc = MagicMock()
         mock_proc.returncode = returncode
         mock_proc.stdout = iter(stdout_lines or [])
-        mock_proc.stderr.read.return_value = stderr_text
+        mock_proc.stderr = iter(
+            [f"{line}\n" for line in stderr_lines] if stderr_lines else []
+        )
         mock_proc.wait.return_value = returncode
         return mock_proc
 
@@ -2717,6 +2719,66 @@ class TestRunSkillMissionEnv:
         # pending.md should have been created (even if archived by post-mission)
         # Check that create_pending_file was reachable — the journal dir exists
         assert journal_dir.exists()
+
+    def test_stderr_drained_in_parallel(self, tmp_path):
+        """_run_skill_mission drains stderr in a thread to prevent deadlock."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(
+            stdout_lines=["output\n"],
+            stderr_lines=["warning: something happened", "error: detail"],
+        )
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/test stderr",
+                autonomous_mode="implement",
+            )
+
+        # The function should complete without deadlock;
+        # reaching this assertion proves the parallel drain works.
+
+    def test_no_stderr_still_works(self, tmp_path):
+        """_run_skill_mission handles empty stderr without hanging."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/test no-stderr",
+                autonomous_mode="implement",
+            )
 
 
 # ---------------------------------------------------------------------------

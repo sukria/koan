@@ -186,7 +186,15 @@ def _load_outcomes(outcomes_path: Path) -> list:
     if not outcomes_path.exists():
         return []
     try:
-        return json.loads(outcomes_path.read_text())
+        data = json.loads(outcomes_path.read_text())
+        if not isinstance(data, list):
+            print(
+                f"[session_tracker] Unexpected JSON type {type(data).__name__}, "
+                "expected list — resetting",
+                file=sys.stderr,
+            )
+            return []
+        return data
     except (json.JSONDecodeError, OSError) as e:
         print(f"[session_tracker] Failed to read outcomes: {e}", file=sys.stderr)
         return []

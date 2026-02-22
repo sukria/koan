@@ -33,7 +33,9 @@ APP_DIR = Path(__file__).parent.parent / "app"
 # When adding: include a short justification comment.
 ALLOWLIST: Set[Tuple[str, int]] = {
     # --- Shutdown / terminal cleanup (terminal may be gone) ---
-    ("run.py", 78),                  # ANSI reset on shutdown
+    ("run.py", 79),                  # ANSI reset on shutdown
+    ("run.py", 1658),                # _get_koan_branch: git rev-parse fallback
+    ("run.py", 1834),                # _cleanup_temp_files: unlink best-effort
     # --- Best-effort display / info gathering ---
     ("ai_runner.py", 127),           # dir listing for prompt context
     ("startup_info.py", 25),         # config value fallback

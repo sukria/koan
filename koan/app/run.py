@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -1735,6 +1736,16 @@ def _run_skill_mission(
             text=True,
             start_new_session=True,
         )
+        # Drain stderr in a background thread to prevent deadlock.
+        # If the child fills the stderr pipe buffer (~64KB) while we
+        # block reading stdout, both processes stall indefinitely.
+        def _drain_stderr():
+            for line in proc.stderr:
+                stderr_lines.append(line.rstrip("\n"))
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
         # Stream stdout line-by-line, appending each to pending.md
         # so /live shows real-time progress.
         for line in proc.stdout:
@@ -1746,12 +1757,10 @@ def _run_skill_mission(
                     f.write(f"{stripped}\n")
             except OSError:
                 pass
-        # Read any remaining stderr after stdout is exhausted
-        remaining_stderr = proc.stderr.read() or ""
-        if remaining_stderr:
-            for line in remaining_stderr.splitlines():
-                stderr_lines.append(line)
-            print(remaining_stderr, file=sys.stderr)
+        # Wait for stderr thread to finish after stdout is exhausted
+        stderr_thread.join(timeout=10)
+        if stderr_lines:
+            print("\n".join(stderr_lines), file=sys.stderr)
         proc.wait(timeout=600)
         exit_code = proc.returncode
         skill_stdout = "\n".join(stdout_lines)
