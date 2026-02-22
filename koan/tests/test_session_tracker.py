@@ -379,6 +379,55 @@ class TestGetProjectFreshness:
         assert weights["koan"] == 6  # staleness 2 → weight 6
 
 
+# --- _load_outcomes type validation ---
+
+class TestLoadOutcomesTypeValidation:
+
+    def test_dict_json_returns_empty_list(self, tracker_env):
+        """A corrupted file containing a JSON object should not crash callers."""
+        outcomes_path = Path(tracker_env) / "session_outcomes.json"
+        outcomes_path.write_text("{}")
+        result = get_recent_outcomes(tracker_env, "koan")
+        assert result == []
+
+    def test_string_json_returns_empty_list(self, tracker_env):
+        """A JSON string should not be iterated as a list."""
+        outcomes_path = Path(tracker_env) / "session_outcomes.json"
+        outcomes_path.write_text('"hello"')
+        result = get_recent_outcomes(tracker_env, "koan")
+        assert result == []
+
+    def test_int_json_returns_empty_list(self, tracker_env):
+        """A JSON number should not crash the system."""
+        outcomes_path = Path(tracker_env) / "session_outcomes.json"
+        outcomes_path.write_text("42")
+        result = get_recent_outcomes(tracker_env, "koan")
+        assert result == []
+
+    def test_record_outcome_with_corrupt_dict_file(self, tracker_env, monkeypatch):
+        """record_outcome should overwrite corrupt data and succeed."""
+        monkeypatch.setattr("app.utils.atomic_write", _mock_atomic_write)
+
+        outcomes_path = Path(tracker_env) / "session_outcomes.json"
+        outcomes_path.write_text('{"not": "a list"}')
+
+        entry = record_outcome(
+            tracker_env, "koan", "implement", 5,
+            "Fixed bug. Branch pushed.",
+        )
+        assert entry["outcome"] == "productive"
+
+        data = json.loads(outcomes_path.read_text())
+        assert isinstance(data, list)
+        assert len(data) == 1
+
+    def test_staleness_with_dict_file(self, tracker_env):
+        """get_staleness_score should not crash on corrupted JSON object."""
+        outcomes_path = Path(tracker_env) / "session_outcomes.json"
+        outcomes_path.write_text('{"corrupt": true}')
+        assert get_staleness_score(tracker_env, "koan") == 0
+
+
 # --- Integration with deep_research ---
 
 class TestDeepResearchStaleness:

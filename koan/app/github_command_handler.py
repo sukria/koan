@@ -491,6 +491,10 @@ def process_single_notification(
     import os
 
     koan_root = os.environ.get("KOAN_ROOT", "")
+    if not koan_root:
+        log.error("GitHub: KOAN_ROOT not set — cannot insert mission")
+        mark_notification_read(str(notification.get("id", "")))
+        return False, "KOAN_ROOT not configured"
     missions_path = Path(koan_root) / "instance" / "missions.md"
     try:
         insert_pending_mission(missions_path, mission_entry)
