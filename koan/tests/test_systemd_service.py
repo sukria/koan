@@ -270,22 +270,25 @@ class TestServiceTemplateContent:
         """Path to the real systemd template directory."""
         return os.path.join(os.path.dirname(__file__), "..", "systemd")
 
+    def _read_template(self, template_dir, name):
+        """Read a template file with proper resource management."""
+        path = os.path.join(template_dir, name)
+        with open(path) as f:
+            return f.read()
+
     def test_koan_service_requires_awake(self, template_dir):
         """koan.service must Require koan-awake so 'systemctl start koan' starts both."""
-        path = os.path.join(template_dir, "koan.service.template")
-        content = open(path).read()
+        content = self._read_template(template_dir, "koan.service.template")
         assert "Requires=koan-awake.service" in content
 
     def test_koan_service_binds_to_awake(self, template_dir):
         """koan.service must BindTo koan-awake so it stops when awake stops."""
-        path = os.path.join(template_dir, "koan.service.template")
-        content = open(path).read()
+        content = self._read_template(template_dir, "koan.service.template")
         assert "BindsTo=koan-awake.service" in content
 
     def test_koan_service_starts_after_awake(self, template_dir):
         """koan.service must start After koan-awake for correct ordering."""
-        path = os.path.join(template_dir, "koan.service.template")
-        content = open(path).read()
+        content = self._read_template(template_dir, "koan.service.template")
         assert "koan-awake.service" in content
         # After directive should reference koan-awake
         for line in content.splitlines():
@@ -297,15 +300,13 @@ class TestServiceTemplateContent:
 
     def test_awake_service_part_of_koan(self, template_dir):
         """koan-awake.service must be PartOf koan.service for bidirectional lifecycle."""
-        path = os.path.join(template_dir, "koan-awake.service.template")
-        content = open(path).read()
+        content = self._read_template(template_dir, "koan-awake.service.template")
         assert "PartOf=koan.service" in content
 
     def test_both_templates_have_required_placeholders(self, template_dir):
         """Both templates must contain all required placeholders."""
         for name in ["koan.service.template", "koan-awake.service.template"]:
-            path = os.path.join(template_dir, name)
-            content = open(path).read()
+            content = self._read_template(template_dir, name)
             assert "__KOAN_ROOT__" in content, f"{name} missing __KOAN_ROOT__"
             assert "__PYTHON__" in content, f"{name} missing __PYTHON__"
             assert "__PATH__" in content, f"{name} missing __PATH__"
@@ -315,8 +316,7 @@ class TestServiceTemplateContent:
     def test_both_templates_have_hardening(self, template_dir):
         """Both templates must have systemd hardening directives."""
         for name in ["koan.service.template", "koan-awake.service.template"]:
-            path = os.path.join(template_dir, name)
-            content = open(path).read()
+            content = self._read_template(template_dir, name)
             assert "NoNewPrivileges=true" in content, f"{name} missing NoNewPrivileges"
             assert "ProtectSystem=" in content, f"{name} missing ProtectSystem"
             assert "PrivateTmp=true" in content, f"{name} missing PrivateTmp"
@@ -324,15 +324,13 @@ class TestServiceTemplateContent:
     def test_both_templates_use_env_file(self, template_dir):
         """Both templates must load .env for secrets."""
         for name in ["koan.service.template", "koan-awake.service.template"]:
-            path = os.path.join(template_dir, name)
-            content = open(path).read()
+            content = self._read_template(template_dir, name)
             assert "EnvironmentFile=__KOAN_ROOT__/.env" in content, \
                 f"{name} missing EnvironmentFile"
 
     def test_both_templates_restart_on_failure(self, template_dir):
         """Both services should restart on failure."""
         for name in ["koan.service.template", "koan-awake.service.template"]:
-            path = os.path.join(template_dir, name)
-            content = open(path).read()
+            content = self._read_template(template_dir, name)
             assert "Restart=on-failure" in content, \
                 f"{name} missing Restart=on-failure"

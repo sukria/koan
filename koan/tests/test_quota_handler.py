@@ -158,7 +158,8 @@ class TestWriteQuotaJournal:
         journal_file = os.path.join(journal_dir, "koan.md")
         assert os.path.isfile(journal_file)
 
-        content = open(journal_file).read()
+        with open(journal_file) as f:
+            content = f.read()
         assert "Quota Exhausted" in content
         assert "5 runs" in content
         assert "koan" in content
@@ -179,7 +180,8 @@ class TestWriteQuotaJournal:
 
         write_quota_journal(instance, "koan", 3, "resets 5pm", "Auto-resume later")
 
-        content = open(journal_file).read()
+        with open(journal_file) as f:
+            content = f.read()
         assert "Previous entry" in content
         assert "Quota Exhausted" in content
 
@@ -318,7 +320,8 @@ class TestHandleQuotaExhaustion:
         journal_dir = os.path.join(instance, "journal", date.today().strftime("%Y-%m-%d"))
         journal_file = os.path.join(journal_dir, "myproject.md")
         assert os.path.isfile(journal_file)
-        content = open(journal_file).read()
+        with open(journal_file) as f:
+            content = f.read()
         assert "7 runs" in content
 
     def test_handles_missing_stdout_file(self, tmp_path):
