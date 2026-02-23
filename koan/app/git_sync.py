@@ -14,12 +14,16 @@ Usage:
     python3 git_sync.py <instance_dir> <project_name> <project_path>
 """
 
+import json
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from app.git_utils import run_git as _run_git_core
+
+log = logging.getLogger(__name__)
 
 # Branches updated within this many days are shown in detail;
 # older branches are collapsed into a summary line.
@@ -227,38 +231,100 @@ class GitSync:
                 recent.append(branch)
         return recent, stale
 
-    def cleanup_merged_branches(self, merged: List[str]) -> List[str]:
+    def get_github_merged_branches(self) -> List[str]:
+        """Find agent branches whose GitHub PRs have been merged.
+
+        Uses ``gh pr list --state merged`` to batch-detect branches that
+        were squash-merged or rebase-merged — invisible to
+        ``git branch --merged`` since commit SHAs change.
+
+        Returns:
+            Sorted list of branch names whose PRs are merged on GitHub.
+            Returns empty list on error (no gh CLI, not a GitHub repo, etc.).
+        """
+        prefix = _get_prefix()
+        try:
+            from app.github import run_gh
+            raw = run_gh(
+                "pr", "list",
+                "--state", "merged",
+                "--limit", "200",
+                "--json", "headRefName",
+                cwd=self.project_path,
+                timeout=30,
+            )
+        except (RuntimeError, OSError) as e:
+            log.debug("GitHub API: failed to list merged PRs: %s", e)
+            return []
+
+        try:
+            prs = json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            return []
+
+        if not isinstance(prs, list):
+            return []
+
+        return sorted({
+            pr["headRefName"]
+            for pr in prs
+            if isinstance(pr, dict) and pr.get("headRefName", "").startswith(prefix)
+        })
+
+    def cleanup_merged_branches(
+        self,
+        merged: List[str],
+        github_merged: Optional[List[str]] = None,
+    ) -> List[str]:
         """Delete local branches that are confirmed merged.
 
         Only deletes branches matching the agent prefix. Never deletes
-        the current branch. Uses ``git branch -d`` (safe delete — refuses
-        if not fully merged).
+        the current branch.
+
+        For git-detected merges (``merged``), uses ``git branch -d``
+        (safe delete — refuses if not fully merged).
+
+        For GitHub-detected merges (``github_merged``), uses
+        ``git branch -D`` (force delete — git doesn't recognize
+        squash/rebase merges as ancestors, but GitHub confirms the PR
+        was merged).
 
         Args:
-            merged: List of merged branch names from get_merged_branches().
+            merged: Branch names from get_merged_branches() (git ancestry).
+            github_merged: Branch names from get_github_merged_branches()
+                (GitHub API). Branches already in *merged* are skipped
+                (already handled by safe delete).
 
         Returns:
             List of successfully deleted branch names.
         """
-        if not merged:
-            return []
-
         current = self._get_current_branch()
         prefix = _get_prefix()
         local_branches = set(self._get_local_branches(prefix))
 
         deleted = []
-        for branch in merged:
-            # Skip if not a local branch (remote-only ref)
-            if branch not in local_branches:
+
+        # Phase 1: safe delete for git-detected merges
+        for branch in merged or []:
+            if branch not in local_branches or branch == current:
                 continue
-            # Never delete the current branch
-            if branch == current:
-                continue
-            # Safe delete — git branch -d refuses if not fully merged
             result = run_git(self.project_path, "branch", "-d", branch)
-            if result:  # non-empty stdout means success
+            if result:
                 deleted.append(branch)
+
+        # Phase 2: force delete for GitHub-detected merges (squash/rebase)
+        git_merged_set = set(merged or [])
+        for branch in github_merged or []:
+            if branch in git_merged_set:
+                continue  # Already handled in phase 1
+            if branch not in local_branches or branch == current:
+                continue
+            if branch in deleted:
+                continue  # Already deleted
+            result = run_git(self.project_path, "branch", "-D", branch)
+            if result:
+                deleted.append(branch)
+                log.debug("Cleaned up squash-merged branch: %s", branch)
 
         return deleted
 
@@ -267,11 +333,18 @@ class GitSync:
         run_git(self.project_path, "fetch", "--prune")
 
         merged = self.get_merged_branches()
+        github_merged = self.get_github_merged_branches()
         unmerged = self.get_unmerged_branches()
         recent = self.get_recent_main_commits(since_hours=12)
 
-        # Auto-cleanup merged local branches
-        cleaned = self.cleanup_merged_branches(merged)
+        # Auto-cleanup merged local branches (git + GitHub-detected)
+        cleaned = self.cleanup_merged_branches(merged, github_merged)
+
+        # Branches cleaned via GitHub detection should be removed from
+        # the unmerged list (they were unmerged per git but merged per GitHub)
+        if cleaned:
+            cleaned_set = set(cleaned)
+            unmerged = [b for b in unmerged if b not in cleaned_set]
 
         parts = []
         now = datetime.now().strftime("%H:%M")
@@ -280,10 +353,15 @@ class GitSync:
         prefix = _get_prefix()
         label = f"{prefix}*"
 
-        if merged:
-            parts.append(f"\nMerged {label} branches ({len(merged)}):")
-            for b in merged:
-                suffix = " (cleaned up)" if b in cleaned else ""
+        # Combine all confirmed-merged branches for the report
+        git_merged_set = set(merged)
+        github_only = [b for b in (github_merged or []) if b not in git_merged_set]
+        all_merged = merged + github_only
+
+        if all_merged:
+            parts.append(f"\nMerged {label} branches ({len(all_merged)}):")
+            for b in all_merged:
+                suffix = " (cleaned up)" if b in (cleaned or []) else ""
                 parts.append(f"  ✓ {b}{suffix}")
 
         if cleaned:
@@ -305,7 +383,7 @@ class GitSync:
             for c in recent[:10]:
                 parts.append(f"  {c}")
 
-        if not merged and not unmerged and not recent:
+        if not all_merged and not unmerged and not recent:
             parts.append("\nNo notable changes since last sync.")
 
         return "\n".join(parts)
