@@ -560,6 +560,71 @@ class TestProcessSingleNotification:
         assert "read-only" in error
         mock_read.assert_called_with("12345")
 
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_empty_koan_root_rejects_mission(
+        self, mock_insert, mock_resolve, mock_get_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification,
+    ):
+        """Empty KOAN_ROOT should fail early, not write to relative path."""
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 99999,
+            "body": "@testbot rebase",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": ""}):
+            success, error = process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+
+        assert success is False
+        assert "KOAN_ROOT" in error
+        mock_insert.assert_not_called()
+        mock_read.assert_called_with("12345")
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_missing_koan_root_rejects_mission(
+        self, mock_insert, mock_resolve, mock_get_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification, monkeypatch,
+    ):
+        """Unset KOAN_ROOT should fail early, not write to relative path."""
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 99999,
+            "body": "@testbot rebase",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        monkeypatch.delenv("KOAN_ROOT", raising=False)
+        success, error = process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+
+        assert success is False
+        assert "KOAN_ROOT" in error
+        mock_insert.assert_not_called()
+
 
 class TestTryReply:
     """Tests for the _try_reply helper that generates AI replies."""
