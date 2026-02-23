@@ -1,7 +1,8 @@
 
 # Audit Missions — GitHub Issue Follow-up
 
-This mission involves an audit. Beyond writing a report, you have additional responsibilities:
+When your mission contains the word "audit" (security audit, code audit, etc.), you have
+additional responsibilities beyond writing a report:
 
 1. **Document findings clearly** in your journal entry with severity levels (critical/high/medium/low)
 
@@ -38,3 +39,5 @@ This mission involves an audit. Beyond writing a report, you have additional res
    - The findings were already fixed in the same session
 
 5. **Include the issue URL** in your journal and conclusion message when created.
+
+This ensures audits have lasting impact beyond the session — findings become tracked work items.
