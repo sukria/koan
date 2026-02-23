@@ -613,6 +613,14 @@ def _notify_mission_end(
         prefix = "❌"
         label = mission_title if mission_title else "Run"
         msg = f"{prefix} [{project_name}] Run {run_num}/{max_runs} — Failed: {label}"
+        # Try to attach error context from the journal
+        try:
+            from app.mission_summary import get_failure_context
+            context = get_failure_context(instance, project_name, max_chars=300)
+            if context:
+                msg += f"\n\n{context}"
+        except Exception as e:
+            log("error", f"Failure context extraction failed: {e}")
 
     _notify(instance, msg)
 

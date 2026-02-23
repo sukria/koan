@@ -2354,6 +2354,35 @@ class TestNotifyMissionEnd:
             _notify_mission_end("/tmp/inst", "proj", 2, 10, 1, "Fix auth")
             mock_summary.assert_not_called()
 
+    @patch("app.mission_summary.get_failure_context", return_value="fatal: bad ref\nError: build failed")
+    @patch("app.run._notify")
+    def test_failure_includes_error_context(self, mock_notify, mock_ctx):
+        from app.run import _notify_mission_end
+        _notify_mission_end("/tmp/inst", "proj", 2, 10, 1, "Fix auth")
+        msg = mock_notify.call_args[0][1]
+        assert "❌" in msg
+        assert "fatal: bad ref" in msg
+        assert "build failed" in msg
+        mock_ctx.assert_called_once_with("/tmp/inst", "proj", max_chars=300)
+
+    @patch("app.mission_summary.get_failure_context", return_value="")
+    @patch("app.run._notify")
+    def test_failure_no_context_when_empty(self, mock_notify, mock_ctx):
+        from app.run import _notify_mission_end
+        _notify_mission_end("/tmp/inst", "proj", 2, 10, 1, "Fix auth")
+        msg = mock_notify.call_args[0][1]
+        assert "❌" in msg
+        assert "\n\n" not in msg
+
+    @patch("app.mission_summary.get_failure_context", side_effect=Exception("broken"))
+    @patch("app.run._notify")
+    def test_failure_survives_context_error(self, mock_notify, mock_ctx):
+        from app.run import _notify_mission_end
+        _notify_mission_end("/tmp/inst", "proj", 2, 10, 1, "Fix auth")
+        mock_notify.assert_called_once()
+        msg = mock_notify.call_args[0][1]
+        assert msg.startswith("❌")
+
     @patch("app.run._notify")
     def test_nonzero_exit_codes_are_failure(self, mock_notify):
         from app.run import _notify_mission_end
