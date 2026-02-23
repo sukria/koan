@@ -1,13 +1,13 @@
 """Tests for git_sync.py — git awareness module."""
 
 import subprocess
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.git_sync import run_git, GitSync
+from app.git_sync import run_git, GitSync, RECENT_BRANCH_DAYS
 
 
 class TestRunGit:
@@ -207,6 +207,122 @@ class TestCleanupMergedBranches:
         assert "koan/remote-only-merged" not in deleted
 
 
+class TestGetBranchAges:
+    """Tests for GitSync.get_branch_ages()."""
+
+    def test_returns_empty_for_no_branches(self):
+        assert _sync().get_branch_ages([]) == {}
+
+    def test_parses_local_and_remote_refs(self):
+        """Parses for-each-ref output and normalizes remote refs."""
+        now = datetime.now().timestamp()
+        two_days_ago = int(now - 2 * 86400)
+        ten_days_ago = int(now - 10 * 86400)
+
+        output = (
+            f"{two_days_ago} koan/recent-branch\n"
+            f"{ten_days_ago} origin/koan/old-branch\n"
+        )
+        with patch("app.git_sync.run_git", return_value=output):
+            ages = _sync().get_branch_ages(["koan/recent-branch", "koan/old-branch"])
+
+        assert ages["koan/recent-branch"] == 2
+        assert ages["koan/old-branch"] == 10
+
+    def test_keeps_most_recent_timestamp(self):
+        """When a branch has both local and remote refs, use the newest."""
+        now = datetime.now().timestamp()
+        old_ts = int(now - 15 * 86400)
+        new_ts = int(now - 1 * 86400)
+
+        output = (
+            f"{old_ts} koan/feature\n"
+            f"{new_ts} origin/koan/feature\n"
+        )
+        with patch("app.git_sync.run_git", return_value=output):
+            ages = _sync().get_branch_ages(["koan/feature"])
+
+        assert ages["koan/feature"] == 1
+
+    def test_omits_branches_not_found(self):
+        """Branches not in for-each-ref output are omitted."""
+        with patch("app.git_sync.run_git", return_value=""):
+            ages = _sync().get_branch_ages(["koan/missing"])
+        assert "koan/missing" not in ages
+
+    def test_handles_malformed_lines(self):
+        """Malformed for-each-ref lines are silently skipped."""
+        now = datetime.now().timestamp()
+        valid_ts = int(now - 3 * 86400)
+        output = (
+            f"{valid_ts} koan/good\n"
+            "not-a-timestamp koan/bad\n"
+            "single-field-only\n"
+            "\n"
+        )
+        with patch("app.git_sync.run_git", return_value=output):
+            ages = _sync().get_branch_ages(["koan/good", "koan/bad"])
+        assert ages["koan/good"] == 3
+        assert "koan/bad" not in ages
+
+
+class TestSplitBranchesByRecency:
+    """Tests for GitSync._split_branches_by_recency()."""
+
+    def test_all_recent(self):
+        """All branches within threshold are recent."""
+        ages = {"koan/a": 1, "koan/b": 3}
+        with patch.object(GitSync, "get_branch_ages", return_value=ages):
+            recent, stale = _sync()._split_branches_by_recency(["koan/a", "koan/b"])
+        assert recent == ["koan/a", "koan/b"]
+        assert stale == []
+
+    def test_all_stale(self):
+        """All branches beyond threshold are stale."""
+        ages = {"koan/old1": 30, "koan/old2": 60}
+        with patch.object(GitSync, "get_branch_ages", return_value=ages):
+            recent, stale = _sync()._split_branches_by_recency(["koan/old1", "koan/old2"])
+        assert recent == []
+        assert stale == ["koan/old1", "koan/old2"]
+
+    def test_mixed_recent_and_stale(self):
+        """Branches are correctly split by the threshold."""
+        ages = {"koan/new": 2, "koan/old": 20}
+        with patch.object(GitSync, "get_branch_ages", return_value=ages):
+            recent, stale = _sync()._split_branches_by_recency(["koan/new", "koan/old"])
+        assert recent == ["koan/new"]
+        assert stale == ["koan/old"]
+
+    def test_unknown_age_treated_as_recent(self):
+        """Branches with unknown age are shown (conservative: don't hide)."""
+        ages = {"koan/known": 2}  # koan/mystery not in ages
+        with patch.object(GitSync, "get_branch_ages", return_value=ages):
+            recent, stale = _sync()._split_branches_by_recency(
+                ["koan/known", "koan/mystery"]
+            )
+        assert "koan/mystery" in recent
+        assert "koan/known" in recent
+        assert stale == []
+
+    def test_custom_threshold(self):
+        """Custom max_age_days is respected."""
+        ages = {"koan/a": 2, "koan/b": 4}
+        with patch.object(GitSync, "get_branch_ages", return_value=ages):
+            recent, stale = _sync()._split_branches_by_recency(
+                ["koan/a", "koan/b"], max_age_days=3
+            )
+        assert recent == ["koan/a"]
+        assert stale == ["koan/b"]
+
+    def test_boundary_age_is_recent(self):
+        """Branch exactly at the threshold is still recent."""
+        ages = {"koan/edge": RECENT_BRANCH_DAYS}
+        with patch.object(GitSync, "get_branch_ages", return_value=ages):
+            recent, stale = _sync()._split_branches_by_recency(["koan/edge"])
+        assert recent == ["koan/edge"]
+        assert stale == []
+
+
 class TestBuildSyncReport:
     def test_report_includes_merged_and_unmerged(self):
         with patch("app.git_sync.run_git") as mock_git:
@@ -225,6 +341,8 @@ class TestBuildSyncReport:
                 if "branch" in args_str and "--list" in args_str:
                     # get_koan_branches: return all branches
                     return "  remotes/origin/koan/merged-one\n  remotes/origin/koan/pending-one\n"
+                if "for-each-ref" in args_str:
+                    return ""  # no age info → all treated as recent
                 if "log" in args_str:
                     return "abc123 some commit\n"
                 return ""
@@ -271,6 +389,65 @@ class TestBuildSyncReport:
 
         assert "cleaned up" in report.lower()
         assert "koan/old-feature" in report
+
+    def test_report_collapses_stale_branches(self):
+        """Stale branches are collapsed into a summary line."""
+        sync = _sync()
+        with patch.object(
+            GitSync, "get_merged_branches", return_value=[]
+        ), patch.object(
+            GitSync, "get_unmerged_branches",
+            return_value=["koan/new", "koan/old1", "koan/old2", "koan/old3"],
+        ), patch.object(
+            GitSync, "_split_branches_by_recency",
+            return_value=(["koan/new"], ["koan/old1", "koan/old2", "koan/old3"]),
+        ), patch.object(
+            GitSync, "get_recent_main_commits", return_value=[],
+        ), patch("app.git_sync.run_git", return_value=""):
+            report = sync.build_sync_report()
+
+        assert "koan/new" in report
+        assert "koan/old1" not in report
+        assert "3 older branch(es)" in report
+        assert f">{RECENT_BRANCH_DAYS}d" in report
+
+    def test_report_shows_all_when_no_stale(self):
+        """When all branches are recent, no summary line is added."""
+        sync = _sync()
+        with patch.object(
+            GitSync, "get_merged_branches", return_value=[]
+        ), patch.object(
+            GitSync, "get_unmerged_branches",
+            return_value=["koan/a", "koan/b"],
+        ), patch.object(
+            GitSync, "_split_branches_by_recency",
+            return_value=(["koan/a", "koan/b"], []),
+        ), patch.object(
+            GitSync, "get_recent_main_commits", return_value=[],
+        ), patch("app.git_sync.run_git", return_value=""):
+            report = sync.build_sync_report()
+
+        assert "koan/a" in report
+        assert "koan/b" in report
+        assert "older branch" not in report
+
+    def test_report_total_count_includes_stale(self):
+        """The header count includes all branches (recent + stale)."""
+        sync = _sync()
+        with patch.object(
+            GitSync, "get_merged_branches", return_value=[]
+        ), patch.object(
+            GitSync, "get_unmerged_branches",
+            return_value=["koan/a", "koan/b", "koan/c"],
+        ), patch.object(
+            GitSync, "_split_branches_by_recency",
+            return_value=(["koan/a"], ["koan/b", "koan/c"]),
+        ), patch.object(
+            GitSync, "get_recent_main_commits", return_value=[],
+        ), patch("app.git_sync.run_git", return_value=""):
+            report = sync.build_sync_report()
+
+        assert "(3)" in report  # total count in header
 
 
 class TestWriteSyncToJournal:
