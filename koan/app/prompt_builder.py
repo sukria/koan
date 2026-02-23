@@ -111,6 +111,23 @@ def _get_audit_section(mission_title: str, project_path: str) -> str:
     return load_prompt("audit-mission", PROJECT_PATH=project_path)
 
 
+def _get_staleness_section(instance: str, project_name: str) -> str:
+    """Get staleness warning for the current project.
+
+    Checks session outcome history and returns a warning if recent sessions
+    for this project were non-productive. Cheap operation (local JSON read),
+    so it's safe to call in every autonomous mode.
+    """
+    try:
+        from app.session_tracker import get_staleness_warning
+        warning = get_staleness_warning(instance, project_name)
+        if warning:
+            return f"\n\n# Session History Feedback\n\n{warning}\n"
+    except Exception as e:
+        print(f"[prompt_builder] Staleness check failed: {e}", file=sys.stderr)
+    return ""
+
+
 def _get_verbose_section(instance: str) -> str:
     """Build the verbose mode section if .koan-verbose exists."""
     koan_root = str(Path(instance).parent)
@@ -187,6 +204,10 @@ def build_agent_prompt(
 
     # Append audit section if mission is an audit
     prompt += _get_audit_section(mission_title, project_path)
+
+    # Append staleness warning (all autonomous modes — cheap local read)
+    if not mission_title:
+        prompt += _get_staleness_section(instance, project_name)
 
     # Append deep research suggestions (DEEP mode, autonomous only)
     if autonomous_mode == "deep" and not mission_title:
