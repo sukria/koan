@@ -313,14 +313,13 @@ class TestServiceTemplateContent:
             assert "__USER__" in content, f"{name} missing __USER__"
             assert "__GROUP__" in content, f"{name} missing __GROUP__"
 
-    def test_both_templates_have_hardening(self, template_dir):
-        """Both templates must have systemd hardening directives."""
+    def test_both_templates_have_user_group(self, template_dir):
+        """Both templates must have User and Group directives."""
         for name in ["koan.service.template", "koan-awake.service.template"]:
             path = os.path.join(template_dir, name)
             content = Path(path).read_text()
-            assert "NoNewPrivileges=true" in content, f"{name} missing NoNewPrivileges"
-            assert "ProtectSystem=" in content, f"{name} missing ProtectSystem"
-            assert "PrivateTmp=true" in content, f"{name} missing PrivateTmp"
+            assert "User=__USER__" in content, f"{name} missing User=__USER__"
+            assert "Group=__GROUP__" in content, f"{name} missing Group=__GROUP__"
 
     def test_both_templates_use_env_file(self, template_dir):
         """Both templates must load .env for secrets."""

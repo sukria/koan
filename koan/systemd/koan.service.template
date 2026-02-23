@@ -19,13 +19,5 @@ RestartSec=10
 StandardOutput=append:__KOAN_ROOT__/logs/run.log
 StandardError=append:__KOAN_ROOT__/logs/run.log
 
-# Hardening
-ProtectSystem=full
-PrivateTmp=true
-NoNewPrivileges=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-ReadWritePaths=__KOAN_ROOT__/instance __KOAN_ROOT__/logs
-
 [Install]
 WantedBy=multi-user.target
