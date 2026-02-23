@@ -98,17 +98,11 @@ def _get_focus_section(instance: str) -> str:
     return load_prompt("focus-mode", REMAINING=remaining)
 
 
-def _get_audit_section(mission_title: str, project_path: str) -> str:
-    """Return the audit mission section if the mission is an audit."""
-    if not mission_title:
-        return ""
-    title_lower = mission_title.lower()
-    if "audit" not in title_lower:
-        return ""
-
+def _get_submit_pr_section(project_path: str) -> str:
+    """Return the submit-pull-request section (always included)."""
     from app.prompts import load_prompt
 
-    return load_prompt("audit-mission", PROJECT_PATH=project_path)
+    return load_prompt("submit-pull-request", PROJECT_PATH=project_path)
 
 
 def _get_staleness_section(instance: str, project_name: str) -> str:
@@ -202,8 +196,8 @@ def build_agent_prompt(
     # Append merge policy
     prompt += _get_merge_policy(project_name)
 
-    # Append audit section if mission is an audit
-    prompt += _get_audit_section(mission_title, project_path)
+    # Append submit-pull-request section
+    prompt += _get_submit_pr_section(project_path)
 
     # Append staleness warning (all autonomous modes — cheap local read)
     if not mission_title:
