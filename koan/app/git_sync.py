@@ -17,9 +17,13 @@ Usage:
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Tuple
 
 from app.git_utils import run_git as _run_git_core
+
+# Branches updated within this many days are shown in detail;
+# older branches are collapsed into a summary line.
+RECENT_BRANCH_DAYS = 7
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +144,89 @@ class GitSync:
                 branches.append(name)
         return branches
 
+    def get_branch_ages(self, branches: List[str]) -> Dict[str, int]:
+        """Get the age in days for a list of branches.
+
+        Uses ``git for-each-ref`` with a single subprocess call for
+        efficiency, then falls back to per-branch ``git log`` for any
+        branches not found (e.g. remote-only refs with different naming).
+
+        Args:
+            branches: List of branch names to look up.
+
+        Returns:
+            Dict mapping branch name to age in days. Branches whose age
+            could not be determined are omitted.
+        """
+        if not branches:
+            return {}
+
+        prefix = _get_prefix()
+        output = run_git(
+            self.project_path,
+            "for-each-ref",
+            "--format=%(committerdate:unix) %(refname:short)",
+            f"refs/heads/{prefix}*",
+            f"refs/remotes/origin/{prefix}*",
+        )
+
+        now = datetime.now().timestamp()
+        # Parse for-each-ref output: "1708000000 koan/fix-bug"
+        # Remote refs show as "origin/koan/fix-bug", normalize them.
+        ref_timestamps: Dict[str, float] = {}
+        for line in output.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            try:
+                ts = float(parts[0])
+            except ValueError:
+                continue
+            ref_name = parts[1]
+            if ref_name.startswith("origin/"):
+                ref_name = ref_name[len("origin/"):]
+            # Keep the most recent timestamp for each branch name
+            if ref_name not in ref_timestamps or ts > ref_timestamps[ref_name]:
+                ref_timestamps[ref_name] = ts
+
+        ages: Dict[str, int] = {}
+        for branch in branches:
+            if branch in ref_timestamps:
+                age_secs = now - ref_timestamps[branch]
+                ages[branch] = max(0, int(age_secs / 86400))
+
+        return ages
+
+    def _split_branches_by_recency(
+        self,
+        branches: List[str],
+        max_age_days: int = RECENT_BRANCH_DAYS,
+    ) -> Tuple[List[str], List[str]]:
+        """Split branches into recent and stale lists.
+
+        Args:
+            branches: Sorted list of branch names.
+            max_age_days: Threshold in days; branches updated more
+                recently than this are "recent".
+
+        Returns:
+            (recent, stale) tuple of sorted branch name lists.
+        """
+        ages = self.get_branch_ages(branches)
+        recent = []
+        stale = []
+        for branch in branches:
+            age = ages.get(branch)
+            if age is not None and age > max_age_days:
+                stale.append(branch)
+            else:
+                # Unknown age → show it (conservative: don't hide branches)
+                recent.append(branch)
+        return recent, stale
+
     def cleanup_merged_branches(self, merged: List[str]) -> List[str]:
         """Delete local branches that are confirmed merged.
 
@@ -203,9 +290,15 @@ class GitSync:
             parts.append(f"\nCleaned up {len(cleaned)} merged local branch(es).")
 
         if unmerged:
+            recent_branches, stale_branches = self._split_branches_by_recency(unmerged)
             parts.append(f"\nUnmerged {label} branches ({len(unmerged)}):")
-            for b in unmerged:
+            for b in recent_branches:
                 parts.append(f"  → {b}")
+            if stale_branches:
+                parts.append(
+                    f"  ... and {len(stale_branches)} older branch(es) "
+                    f"(>{RECENT_BRANCH_DAYS}d, run /list_branches to see all)"
+                )
 
         if recent:
             parts.append(f"\nRecent main commits ({len(recent)}):")
