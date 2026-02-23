@@ -9,6 +9,9 @@ import pytest
 
 from app.git_sync import run_git, GitSync, RECENT_BRANCH_DAYS
 
+# Patch path for the lazy import of run_gh inside get_github_merged_branches.
+_RUN_GH_PATH = "app.github.run_gh"
+
 
 class TestRunGit:
     def test_returns_stdout(self, tmp_path):
@@ -323,6 +326,191 @@ class TestSplitBranchesByRecency:
         assert stale == []
 
 
+class TestGetGithubMergedBranches:
+    """Tests for GitHub-based merged branch detection."""
+
+    def test_returns_matching_branches(self):
+        """Returns branches matching the agent prefix from merged PRs."""
+        pr_json = '[{"headRefName": "koan/done-feature"}, {"headRefName": "koan/old-fix"}]'
+        with patch(_RUN_GH_PATH, return_value=pr_json) as mock_gh:
+            branches = _sync().get_github_merged_branches()
+        assert branches == ["koan/done-feature", "koan/old-fix"]
+        mock_gh.assert_called_once()
+
+    def test_filters_non_agent_branches(self):
+        """Only returns branches with the agent prefix."""
+        pr_json = '[{"headRefName": "koan/my-pr"}, {"headRefName": "feature/other"}]'
+        with patch(_RUN_GH_PATH, return_value=pr_json):
+            branches = _sync().get_github_merged_branches()
+        assert branches == ["koan/my-pr"]
+        assert "feature/other" not in branches
+
+    def test_returns_empty_on_error(self):
+        """Returns empty list when gh CLI fails."""
+        with patch(_RUN_GH_PATH, side_effect=RuntimeError("gh failed")):
+            assert _sync().get_github_merged_branches() == []
+
+    def test_returns_empty_on_invalid_json(self):
+        """Returns empty list on malformed JSON."""
+        with patch(_RUN_GH_PATH, return_value="not json"):
+            assert _sync().get_github_merged_branches() == []
+
+    def test_returns_empty_on_empty_response(self):
+        """Returns empty list when gh returns empty string."""
+        with patch(_RUN_GH_PATH, return_value=""):
+            assert _sync().get_github_merged_branches() == []
+
+    def test_returns_empty_on_non_list_response(self):
+        """Returns empty list when response is not a JSON array."""
+        with patch(_RUN_GH_PATH, return_value='{"error": "bad"}'):
+            assert _sync().get_github_merged_branches() == []
+
+    def test_handles_malformed_pr_entries(self):
+        """Skips PR entries that aren't dicts or lack headRefName."""
+        pr_json = '[{"headRefName": "koan/good"}, "bad", {"no_ref": true}, null]'
+        with patch(_RUN_GH_PATH, return_value=pr_json):
+            branches = _sync().get_github_merged_branches()
+        assert branches == ["koan/good"]
+
+    def test_deduplicates_branches(self):
+        """Multiple PRs for the same branch are deduplicated."""
+        pr_json = '[{"headRefName": "koan/x"}, {"headRefName": "koan/x"}]'
+        with patch(_RUN_GH_PATH, return_value=pr_json):
+            branches = _sync().get_github_merged_branches()
+        assert branches == ["koan/x"]
+
+    def test_custom_prefix(self):
+        """Respects custom branch prefix."""
+        pr_json = '[{"headRefName": "koan.atoomic/my-pr"}, {"headRefName": "koan/other"}]'
+        with patch("app.git_sync._get_prefix", return_value="koan.atoomic/"):
+            with patch(_RUN_GH_PATH, return_value=pr_json):
+                branches = _sync().get_github_merged_branches()
+        assert branches == ["koan.atoomic/my-pr"]
+
+    def test_returns_empty_on_os_error(self):
+        """Returns empty list when gh binary not found."""
+        with patch(_RUN_GH_PATH, side_effect=OSError("not found")):
+            assert _sync().get_github_merged_branches() == []
+
+
+class TestCleanupWithGithubMerged:
+    """Tests for cleanup_merged_branches with github_merged parameter."""
+
+    def test_force_deletes_github_merged_branches(self):
+        """GitHub-detected merges use git branch -D (force delete)."""
+        delete_calls = []
+
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/squash-merged\n"
+            if args[0] == "branch" and args[1] == "-D":
+                delete_calls.append(args[2])
+                return f"Deleted branch {args[2]}"
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(
+                merged=[],
+                github_merged=["koan/squash-merged"],
+            )
+        assert deleted == ["koan/squash-merged"]
+        assert "koan/squash-merged" in delete_calls
+
+    def test_skips_branches_already_in_git_merged(self):
+        """Branches in both git-merged and github-merged only delete once."""
+        calls = []
+
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/both\n"
+            if args[0] == "branch" and (args[1] == "-d" or args[1] == "-D"):
+                calls.append((args[1], args[2]))
+                return f"Deleted branch {args[2]}"
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(
+                merged=["koan/both"],
+                github_merged=["koan/both"],
+            )
+        assert deleted == ["koan/both"]
+        # Should use safe delete (-d), not force (-D)
+        assert calls == [("-d", "koan/both")]
+
+    def test_mixed_git_and_github_merges(self):
+        """Both git-detected and GitHub-detected branches are cleaned up."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/git-merged\n  koan/squash-merged\n"
+            if args[0] == "branch" and (args[1] == "-d" or args[1] == "-D"):
+                return f"Deleted branch {args[2]}"
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(
+                merged=["koan/git-merged"],
+                github_merged=["koan/squash-merged"],
+            )
+        assert "koan/git-merged" in deleted
+        assert "koan/squash-merged" in deleted
+
+    def test_github_merged_skips_current_branch(self):
+        """Never force-delete the current branch, even if GitHub says merged."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "koan/squash-merged"  # we ARE on this branch
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/squash-merged\n"
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(
+                merged=[],
+                github_merged=["koan/squash-merged"],
+            )
+        assert deleted == []
+
+    def test_github_merged_skips_remote_only(self):
+        """GitHub-merged branches with no local copy are skipped."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return ""  # no local branches
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(
+                merged=[],
+                github_merged=["koan/remote-only"],
+            )
+        assert deleted == []
+
+    def test_none_github_merged(self):
+        """None github_merged is treated as empty list."""
+        def side_effect(cwd, *args):
+            if args[0] == "rev-parse":
+                return "main"
+            if args[0] == "branch" and args[1] == "--list":
+                return "  koan/local\n"
+            if args[0] == "branch" and args[1] == "-d":
+                return f"Deleted branch {args[2]}"
+            return ""
+
+        with patch("app.git_sync.run_git", side_effect=side_effect):
+            deleted = _sync().cleanup_merged_branches(
+                merged=["koan/local"],
+                github_merged=None,
+            )
+        assert deleted == ["koan/local"]
+
+
 class TestBuildSyncReport:
     def test_report_includes_merged_and_unmerged(self):
         with patch("app.git_sync.run_git") as mock_git:
@@ -348,7 +536,8 @@ class TestBuildSyncReport:
                 return ""
 
             mock_git.side_effect = side_effect
-            report = _sync().build_sync_report()
+            with patch.object(GitSync, "get_github_merged_branches", return_value=[]):
+                report = _sync().build_sync_report()
 
         assert "koan/merged-one" in report
         assert "koan/pending-one" in report
@@ -357,7 +546,8 @@ class TestBuildSyncReport:
 
     def test_report_no_changes(self):
         with patch("app.git_sync.run_git", return_value=""):
-            report = _sync().build_sync_report()
+            with patch.object(GitSync, "get_github_merged_branches", return_value=[]):
+                report = _sync().build_sync_report()
         assert "No notable changes" in report
 
     def test_report_shows_cleanup(self):
@@ -385,7 +575,8 @@ class TestBuildSyncReport:
                 return ""
 
             mock_git.side_effect = side_effect
-            report = _sync().build_sync_report()
+            with patch.object(GitSync, "get_github_merged_branches", return_value=[]):
+                report = _sync().build_sync_report()
 
         assert "cleaned up" in report.lower()
         assert "koan/old-feature" in report
@@ -395,6 +586,8 @@ class TestBuildSyncReport:
         sync = _sync()
         with patch.object(
             GitSync, "get_merged_branches", return_value=[]
+        ), patch.object(
+            GitSync, "get_github_merged_branches", return_value=[],
         ), patch.object(
             GitSync, "get_unmerged_branches",
             return_value=["koan/new", "koan/old1", "koan/old2", "koan/old3"],
@@ -417,6 +610,8 @@ class TestBuildSyncReport:
         with patch.object(
             GitSync, "get_merged_branches", return_value=[]
         ), patch.object(
+            GitSync, "get_github_merged_branches", return_value=[],
+        ), patch.object(
             GitSync, "get_unmerged_branches",
             return_value=["koan/a", "koan/b"],
         ), patch.object(
@@ -437,6 +632,8 @@ class TestBuildSyncReport:
         with patch.object(
             GitSync, "get_merged_branches", return_value=[]
         ), patch.object(
+            GitSync, "get_github_merged_branches", return_value=[],
+        ), patch.object(
             GitSync, "get_unmerged_branches",
             return_value=["koan/a", "koan/b", "koan/c"],
         ), patch.object(
@@ -448,6 +645,65 @@ class TestBuildSyncReport:
             report = sync.build_sync_report()
 
         assert "(3)" in report  # total count in header
+
+    def test_report_includes_github_merged_branches(self):
+        """GitHub-detected merges appear in the report."""
+        sync = _sync()
+        with patch.object(
+            GitSync, "get_merged_branches", return_value=["koan/git-merged"],
+        ), patch.object(
+            GitSync, "get_github_merged_branches",
+            return_value=["koan/git-merged", "koan/squash-merged"],
+        ), patch.object(
+            GitSync, "get_unmerged_branches",
+            return_value=["koan/squash-merged", "koan/wip"],
+        ), patch.object(
+            GitSync, "_split_branches_by_recency",
+            return_value=(["koan/wip"], []),
+        ), patch.object(
+            GitSync, "get_recent_main_commits", return_value=[],
+        ), patch.object(
+            GitSync, "cleanup_merged_branches",
+            return_value=["koan/git-merged", "koan/squash-merged"],
+        ), patch("app.git_sync.run_git", return_value=""):
+            report = sync.build_sync_report()
+
+        # Both git-merged and squash-merged should show as merged
+        assert "koan/git-merged" in report
+        assert "koan/squash-merged" in report
+        # Cleaned squash-merged should not appear in unmerged
+        assert "koan/wip" in report
+
+    def test_report_removes_cleaned_from_unmerged(self):
+        """Branches cleaned via GitHub detection are removed from unmerged list."""
+        sync = _sync()
+        with patch.object(
+            GitSync, "get_merged_branches", return_value=[],
+        ), patch.object(
+            GitSync, "get_github_merged_branches",
+            return_value=["koan/was-squash-merged"],
+        ), patch.object(
+            GitSync, "get_unmerged_branches",
+            return_value=["koan/was-squash-merged", "koan/truly-wip"],
+        ), patch.object(
+            GitSync, "_split_branches_by_recency",
+            return_value=(["koan/truly-wip"], []),
+        ), patch.object(
+            GitSync, "get_recent_main_commits", return_value=[],
+        ), patch.object(
+            GitSync, "cleanup_merged_branches",
+            return_value=["koan/was-squash-merged"],
+        ), patch("app.git_sync.run_git", return_value=""):
+            report = sync.build_sync_report()
+
+        # was-squash-merged should show in merged section, not unmerged
+        lines = report.split("\n")
+        unmerged_section = False
+        for line in lines:
+            if "Unmerged" in line:
+                unmerged_section = True
+            if unmerged_section and "was-squash-merged" in line:
+                pytest.fail("Cleaned branch should not appear in unmerged section")
 
 
 class TestWriteSyncToJournal:
