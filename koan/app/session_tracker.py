@@ -204,7 +204,8 @@ def _load_outcomes(outcomes_path: Path) -> list:
         data = json.loads(outcomes_path.read_text())
         if not isinstance(data, list):
             print(
-                f"[session_tracker] Unexpected JSON type: {type(data).__name__}",
+                f"[session_tracker] Unexpected JSON type {type(data).__name__}, "
+                "expected list — resetting",
                 file=sys.stderr,
             )
             return []
