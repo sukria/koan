@@ -86,22 +86,26 @@ def queue_github_mission(ctx, command: str, url: str, project_name: str, context
     insert_pending_mission(missions_path, mission_entry)
 
 
-def format_project_not_found_error(repo: str) -> str:
+def format_project_not_found_error(repo: str, owner: Optional[str] = None) -> str:
     """Format a consistent error message when project cannot be resolved.
 
     Args:
         repo: Repository name that couldn't be matched
+        owner: Optional repository owner for more precise diagnostics
 
     Returns:
-        Formatted error message
+        Formatted error message with actionable suggestions
     """
     from app.utils import get_known_projects
 
+    target = f"{owner}/{repo}" if owner else repo
     known = ", ".join(n for n, _ in get_known_projects()) or "none"
-    return (
-        f"\u274c Could not find local project matching repo '{repo}'.\n"
-        f"Known projects: {known}"
-    )
+    lines = [
+        f"\u274c Could not find local project for '{target}'.",
+        f"Known projects: {known}",
+        f"Tip: /add_project https://github.com/{target} to register it.",
+    ]
+    return "\n".join(lines)
 
 
 def format_success_message(url_type: str, number: str, owner: str, repo: str, context: Optional[str] = None) -> str:
@@ -178,7 +182,7 @@ def handle_github_skill(
     # Resolve project
     project_path, project_name = resolve_project_for_repo(repo, owner=owner)
     if not project_path:
-        return format_project_not_found_error(repo)
+        return format_project_not_found_error(repo, owner=owner)
     
     # Queue mission
     queue_github_mission(ctx, command, url, project_name, context)
