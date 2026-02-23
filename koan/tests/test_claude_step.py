@@ -1,6 +1,6 @@
 """Tests for claude_step.py — shared CI/CD pipeline helpers.
 
-Tests _run_git, _truncate, _rebase_onto_target, run_claude,
+Tests _run_git, truncate_text, _rebase_onto_target, run_claude,
 commit_if_changes, and run_claude_step.
 """
 
@@ -12,7 +12,6 @@ import pytest
 from app.claude_step import (
     _rebase_onto_target,
     _run_git,
-    _truncate,
     commit_if_changes,
     run_claude,
     run_claude_step,
@@ -64,25 +63,29 @@ class TestRunGit:
         assert len(str(exc_info.value)) < 300
 
 
-# ---------- _truncate ----------
+# ---------- truncate_text (now in utils.py) ----------
 
 
-class TestTruncate:
-    """Tests for _truncate helper."""
+class TestTruncateText:
+    """Tests for truncate_text shared utility."""
 
     def test_short_text_unchanged(self):
-        assert _truncate("hello", 10) == "hello"
+        from app.utils import truncate_text
+        assert truncate_text("hello", 10) == "hello"
 
     def test_exact_limit_unchanged(self):
-        assert _truncate("12345", 5) == "12345"
+        from app.utils import truncate_text
+        assert truncate_text("12345", 5) == "12345"
 
     def test_over_limit_truncated(self):
-        result = _truncate("1234567890", 5)
+        from app.utils import truncate_text
+        result = truncate_text("1234567890", 5)
         assert result.startswith("12345")
         assert "truncated" in result
 
     def test_empty_string(self):
-        assert _truncate("", 10) == ""
+        from app.utils import truncate_text
+        assert truncate_text("", 10) == ""
 
 
 # ---------- strip_cli_noise ----------

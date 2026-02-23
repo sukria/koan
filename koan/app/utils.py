@@ -241,6 +241,13 @@ def atomic_write(path: Path, content: str):
         raise
 
 
+def truncate_text(text: str, max_chars: int) -> str:
+    """Truncate text with indicator."""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n...(truncated)"
+
+
 def insert_pending_mission(missions_path: Path, entry: str, *, urgent: bool = False):
     """Insert a mission entry into the pending section of missions.md.
 
@@ -340,6 +347,15 @@ def get_known_projects() -> list:
         return sorted(result, key=lambda x: x[0].lower())
 
     return []
+
+
+def is_known_project(name: str) -> bool:
+    """Check if a name matches a known project (case-insensitive)."""
+    try:
+        return name.lower() in {n.lower() for n, _ in get_known_projects()}
+    except Exception as e:
+        print(f"[utils] is_known_project error: {e}", file=sys.stderr)
+        return False
 
 
 def project_name_for_path(project_path: str) -> str:

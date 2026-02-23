@@ -362,16 +362,17 @@ def is_self_mention(comment: dict, bot_username: str) -> bool:
 def extract_comment_metadata(comment_url: str) -> Optional[Tuple[str, str, str]]:
     """Extract owner, repo, and comment ID from a comment URL.
 
-    Handles both web URLs and API URLs:
+    Handles web URLs and API URLs for all GitHub comment types:
         https://github.com/owner/repo/issues/123#issuecomment-456
         https://api.github.com/repos/owner/repo/issues/comments/456
+        https://api.github.com/repos/owner/repo/pulls/comments/456
 
     Returns:
         Tuple of (owner, repo, comment_id) or None.
     """
-    # Try API URL format first
+    # Try API URL format (handles issues/comments and pulls/comments)
     match = re.match(
-        r'https?://api\.github\.com/repos/([^/]+)/([^/]+)/issues/comments/(\d+)',
+        r'https?://api\.github\.com/repos/([^/]+)/([^/]+)/(?:issues|pulls)/comments/(\d+)',
         comment_url,
     )
     if match:

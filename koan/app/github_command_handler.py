@@ -34,7 +34,6 @@ from app.github_notifications import (
     api_url_to_web_url,
     check_already_processed,
     check_user_permission,
-    extract_comment_metadata,
     get_comment_from_notification,
     is_notification_stale,
     is_self_mention,

@@ -10,7 +10,6 @@ import pytest
 
 from app.claude_step import (
     _run_git,
-    _truncate,
     run_claude as _run_claude,
     commit_if_changes as _commit_if_changes,
     run_claude_step as _run_claude_step,
@@ -80,23 +79,27 @@ class TestParsePrUrl:
 
 
 # ---------------------------------------------------------------------------
-# _truncate
+# truncate_text (now in utils.py)
 # ---------------------------------------------------------------------------
 
-class TestTruncate:
+class TestTruncateText:
     def test_short_text_unchanged(self):
-        assert _truncate("hello", 100) == "hello"
+        from app.utils import truncate_text
+        assert truncate_text("hello", 100) == "hello"
 
     def test_exact_length_unchanged(self):
-        assert _truncate("12345", 5) == "12345"
+        from app.utils import truncate_text
+        assert truncate_text("12345", 5) == "12345"
 
     def test_long_text_truncated(self):
-        result = _truncate("a" * 20, 10)
+        from app.utils import truncate_text
+        result = truncate_text("a" * 20, 10)
         assert len(result) < 30
         assert "truncated" in result
 
     def test_empty_string(self):
-        assert _truncate("", 100) == ""
+        from app.utils import truncate_text
+        assert truncate_text("", 100) == ""
 
 
 # ---------------------------------------------------------------------------
