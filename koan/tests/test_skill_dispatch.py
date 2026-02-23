@@ -869,52 +869,52 @@ class TestDispatchSkillMissionWithPrefix:
 
 
 # ---------------------------------------------------------------------------
-# _is_known_project
+# is_known_project (now in utils.py)
 # ---------------------------------------------------------------------------
 
 class TestIsKnownProject:
     def test_known_project(self, monkeypatch):
-        from app.skill_dispatch import _is_known_project
+        from app.utils import is_known_project
         monkeypatch.setattr(
             "app.utils.get_known_projects",
             lambda: [("koan", "/workspace/koan"), ("Clone", "/workspace/Clone")],
         )
-        assert _is_known_project("koan") is True
-        assert _is_known_project("Clone") is True
+        assert is_known_project("koan") is True
+        assert is_known_project("Clone") is True
 
     def test_case_insensitive(self, monkeypatch):
-        from app.skill_dispatch import _is_known_project
+        from app.utils import is_known_project
         monkeypatch.setattr(
             "app.utils.get_known_projects",
             lambda: [("Clone", "/workspace/Clone")],
         )
-        assert _is_known_project("clone") is True
-        assert _is_known_project("CLONE") is True
+        assert is_known_project("clone") is True
+        assert is_known_project("CLONE") is True
 
     def test_unknown_project(self, monkeypatch):
-        from app.skill_dispatch import _is_known_project
+        from app.utils import is_known_project
         monkeypatch.setattr(
             "app.utils.get_known_projects",
             lambda: [("koan", "/workspace/koan")],
         )
-        assert _is_known_project("unknown") is False
+        assert is_known_project("unknown") is False
 
     def test_common_english_words_rejected(self, monkeypatch):
-        from app.skill_dispatch import _is_known_project
+        from app.utils import is_known_project
         monkeypatch.setattr(
             "app.utils.get_known_projects",
             lambda: [("koan", "/workspace/koan")],
         )
         for word in ("the", "fix", "add", "when", "let", "we"):
-            assert _is_known_project(word) is False
+            assert is_known_project(word) is False
 
     def test_error_returns_false(self, monkeypatch):
-        from app.skill_dispatch import _is_known_project
+        from app.utils import is_known_project
         monkeypatch.setattr(
             "app.utils.get_known_projects",
             lambda: (_ for _ in ()).throw(RuntimeError("config error")),
         )
-        assert _is_known_project("koan") is False
+        assert is_known_project("koan") is False
 
 
 # ---------------------------------------------------------------------------

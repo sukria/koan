@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from app.github_url_parser import ISSUE_URL_PATTERN, PR_URL_PATTERN
+from app.utils import is_known_project
 
 
 # Mapping of skill command names to their CLI runner modules.
@@ -51,18 +52,6 @@ _PROJECT_WORD_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 # Compiled patterns for URL matching
 _PR_URL_RE = re.compile(PR_URL_PATTERN)
 _ISSUE_URL_RE = re.compile(ISSUE_URL_PATTERN)
-
-
-def _is_known_project(name: str) -> bool:
-    """Check if a name matches a known project (case-insensitive)."""
-    try:
-        from app.utils import get_known_projects
-        lower = name.lower()
-        return any(n.lower() == lower for n, _ in get_known_projects())
-    except Exception as e:
-        from app.debug import debug_log
-        debug_log(f"[skill_dispatch] _is_known_project: error loading projects: {e}")
-        return False
 
 
 def _strip_project_prefix(text: str) -> Tuple[str, str]:
@@ -91,7 +80,7 @@ def _strip_project_prefix(text: str) -> Tuple[str, str]:
             and parts[1].startswith("/")
             and _PROJECT_WORD_RE.match(parts[0])):
         candidate = parts[0]
-        if _is_known_project(candidate):
+        if is_known_project(candidate):
             return candidate, parts[1]
 
     # 3. No prefix

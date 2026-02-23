@@ -20,6 +20,7 @@ from typing import List, Optional, Tuple
 from app.cli_provider import run_command
 from app.github import api
 from app.prompts import load_prompt
+from app.utils import truncate_text
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def fetch_thread_context(
         )
         data = json.loads(raw) if raw else {}
         context["title"] = data.get("title", "")
-        context["body"] = _truncate(data.get("body", "") or "", _MAX_CONTEXT_CHARS)
+        context["body"] = truncate_text(data.get("body", "") or "", _MAX_CONTEXT_CHARS)
         context["is_pr"] = data.get("pull_request") is not None
     except (RuntimeError, json.JSONDecodeError):
         pass
@@ -101,7 +102,7 @@ def fetch_thread_context(
         comments = json.loads(raw) if raw else []
         if isinstance(comments, list):
             context["comments"] = [
-                {"author": c.get("author", "?"), "body": _truncate(c.get("body", ""), 500)}
+                {"author": c.get("author", "?"), "body": truncate_text(c.get("body", ""), 500)}
                 for c in comments
             ]
     except (RuntimeError, json.JSONDecodeError):
@@ -247,13 +248,6 @@ def post_reply(
     except RuntimeError as e:
         log.warning("Failed to post GitHub reply: %s", e)
         return False
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    """Truncate text with indicator."""
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "\n...(truncated)"
 
 
 def _clean_reply(text: str) -> str:

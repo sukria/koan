@@ -1,5 +1,6 @@
 """Tests for BoundedSet — FIFO eviction set."""
 
+import threading
 from app.bounded_set import BoundedSet
 import pytest
 
@@ -113,3 +114,66 @@ class TestBoundedSetEviction:
             assert f"item-{i}" not in s
         for i in range(400, 500):
             assert f"item-{i}" in s
+
+
+class TestBoundedSetThreadSafety:
+    """Thread safety of concurrent operations."""
+
+    def test_concurrent_adds_no_crash(self):
+        """Multiple threads adding concurrently should not corrupt state."""
+        s = BoundedSet(maxlen=100)
+        errors = []
+
+        def add_items(start, count):
+            try:
+                for i in range(start, start + count):
+                    s.add(f"item-{i}")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=add_items, args=(i * 200, 200))
+            for i in range(5)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        assert len(s) <= 100
+
+    def test_concurrent_add_and_contains(self):
+        """Reads and writes from different threads should not crash."""
+        s = BoundedSet(maxlen=50)
+        errors = []
+
+        def writer():
+            try:
+                for i in range(500):
+                    s.add(f"w-{i}")
+            except Exception as e:
+                errors.append(e)
+
+        def reader():
+            try:
+                for i in range(500):
+                    _ = f"w-{i}" in s
+                    _ = len(s)
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=writer)
+        t2 = threading.Thread(target=reader)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert not errors
+
+    def test_has_lock_attribute(self):
+        """Verify the lock is present."""
+        s = BoundedSet(maxlen=10)
+        assert hasattr(s, '_lock')
+        assert isinstance(s._lock, type(threading.Lock()))

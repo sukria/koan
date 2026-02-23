@@ -7,7 +7,6 @@ import pytest
 
 from app.github_reply import (
     _clean_reply,
-    _truncate,
     build_reply_prompt,
     extract_mention_text,
     fetch_thread_context,
@@ -283,11 +282,13 @@ class TestCleanReply:
         assert _clean_reply(text) == text
 
 
-class TestTruncate:
+class TestTruncateText:
     def test_short_text_unchanged(self):
-        assert _truncate("hello", 100) == "hello"
+        from app.utils import truncate_text
+        assert truncate_text("hello", 100) == "hello"
 
     def test_long_text_truncated(self):
-        result = _truncate("x" * 200, 100)
+        from app.utils import truncate_text
+        result = truncate_text("x" * 200, 100)
         assert len(result) < 200
         assert "(truncated)" in result

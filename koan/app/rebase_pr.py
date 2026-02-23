@@ -26,10 +26,10 @@ from app.claude_step import (
     _rebase_onto_target,
     _run_git,
     _safe_checkout,
-    _truncate,
 )
 from app.github import run_gh
 from app.prompts import load_prompt, load_skill_prompt  # noqa: F401 — safety import
+from app.utils import truncate_text
 
 
 def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
@@ -95,10 +95,10 @@ def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
         "state": metadata.get("state", ""),
         "author": metadata.get("author", {}).get("login", ""),
         "url": metadata.get("url", ""),
-        "diff": _truncate(diff, 8000),
-        "review_comments": _truncate(comments_json, 4000),
-        "reviews": _truncate(reviews_json, 3000),
-        "issue_comments": _truncate(issue_comments, 3000),
+        "diff": truncate_text(diff, 8000),
+        "review_comments": truncate_text(comments_json, 4000),
+        "reviews": truncate_text(reviews_json, 3000),
+        "issue_comments": truncate_text(issue_comments, 3000),
     }
 
 

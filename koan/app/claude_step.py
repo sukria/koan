@@ -18,6 +18,7 @@ from app.config import get_model_config
 from app.git_utils import run_git_strict
 from app.github import pr_create, run_gh
 from app.prompts import load_prompt, load_skill_prompt
+from app.utils import truncate_text
 
 # Backward-compatible alias — callers should import from app.cli_provider
 run_claude_command = run_command
@@ -71,13 +72,6 @@ def strip_cli_noise(text: str) -> str:
     lines = text.splitlines()
     lines = [l for l in lines if not re.match(r"^Error:.*max turns", l, re.IGNORECASE)]
     return "\n".join(lines).strip()
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    """Truncate text with indicator."""
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "\n...(truncated)"
 
 
 def run_claude(cmd: list, cwd: str, timeout: int = 600) -> dict:

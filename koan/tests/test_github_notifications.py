@@ -298,6 +298,13 @@ class TestExtractCommentMetadata:
         )
         assert result == ("owner", "repo", "999")
 
+    def test_api_url_pulls_comments(self):
+        """PR review comment API URLs use pulls/comments, not issues/comments."""
+        result = extract_comment_metadata(
+            "https://api.github.com/repos/sukria/koan/pulls/comments/456789"
+        )
+        assert result == ("sukria", "koan", "456789")
+
     def test_invalid_url(self):
         assert extract_comment_metadata("https://example.com/foo") is None
 

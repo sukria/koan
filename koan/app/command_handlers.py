@@ -25,6 +25,7 @@ from app.utils import (
     detect_project_from_text,
     get_known_projects,
     insert_pending_mission,
+    is_known_project,
 )
 
 # Callbacks injected by awake.py at startup to avoid circular imports
@@ -48,14 +49,6 @@ CORE_COMMANDS = frozenset({
     "pause", "work", "awake", "start", "run",  # aliases for sleep/resume
 })
 
-
-def _is_known_project(name: str) -> bool:
-    """Check if a name matches a known project (case-insensitive)."""
-    try:
-        return name.lower() in {n.lower() for n, _ in get_known_projects()}
-    except Exception as e:
-        log("error", f"Project lookup failed: {e}")
-        return False
 
 
 def handle_command(text: str):
@@ -130,7 +123,7 @@ def handle_command(text: str):
     # rewrite as "/mission <project> <context>" so the user can write e.g.
     # "/koan fix the bug" instead of "/mission koan fix the bug".
     # This is the very last fallback to avoid collision with existing skills.
-    if _is_known_project(command_name) and command_args:
+    if is_known_project(command_name) and command_args:
         handle_mission(f"{command_name} {command_args}")
         return
 

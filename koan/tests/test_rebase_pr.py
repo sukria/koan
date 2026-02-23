@@ -7,7 +7,8 @@ from unittest.mock import patch, MagicMock, call
 
 import pytest
 
-from app.claude_step import _rebase_onto_target, _run_git, _truncate
+from app.claude_step import _rebase_onto_target, _run_git
+from app.utils import truncate_text
 from app.pr_review import parse_pr_url
 from app.rebase_pr import (
     fetch_pr_context,
@@ -66,23 +67,23 @@ class TestParsePrUrl:
 
 
 # ---------------------------------------------------------------------------
-# _truncate (local helper)
+# truncate_text (shared utility)
 # ---------------------------------------------------------------------------
 
-class TestTruncate:
+class TestTruncateText:
     def test_short_text_unchanged(self):
-        assert _truncate("hello", 100) == "hello"
+        assert truncate_text("hello", 100) == "hello"
 
     def test_exact_length_unchanged(self):
-        assert _truncate("12345", 5) == "12345"
+        assert truncate_text("12345", 5) == "12345"
 
     def test_long_text_truncated(self):
-        result = _truncate("a" * 20, 10)
+        result = truncate_text("a" * 20, 10)
         assert len(result) < 30
         assert "truncated" in result
 
     def test_empty_string(self):
-        assert _truncate("", 100) == ""
+        assert truncate_text("", 100) == ""
 
 
 # ---------------------------------------------------------------------------

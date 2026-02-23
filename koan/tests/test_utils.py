@@ -703,6 +703,65 @@ class TestGetKnownProjects:
         assert len(result) == 2
 
 
+class TestTruncateText:
+    """Tests for truncate_text() shared utility."""
+
+    def test_short_text_unchanged(self):
+        from app.utils import truncate_text
+        assert truncate_text("hello", 100) == "hello"
+
+    def test_exact_length_unchanged(self):
+        from app.utils import truncate_text
+        assert truncate_text("12345", 5) == "12345"
+
+    def test_long_text_truncated(self):
+        from app.utils import truncate_text
+        result = truncate_text("a" * 20, 10)
+        assert result.startswith("a" * 10)
+        assert "truncated" in result
+
+    def test_empty_string(self):
+        from app.utils import truncate_text
+        assert truncate_text("", 100) == ""
+
+
+class TestIsKnownProject:
+    """Tests for is_known_project() shared utility."""
+
+    def test_known_project(self, monkeypatch):
+        from app.utils import is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/path"), ("backend", "/path2")],
+        )
+        assert is_known_project("koan") is True
+
+    def test_unknown_project(self, monkeypatch):
+        from app.utils import is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("koan", "/path")],
+        )
+        assert is_known_project("foobar") is False
+
+    def test_case_insensitive(self, monkeypatch):
+        from app.utils import is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: [("Koan", "/path")],
+        )
+        assert is_known_project("koan") is True
+        assert is_known_project("KOAN") is True
+
+    def test_exception_returns_false(self, monkeypatch):
+        from app.utils import is_known_project
+        monkeypatch.setattr(
+            "app.utils.get_known_projects",
+            lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        assert is_known_project("koan") is False
+
+
 class TestGetFastReplyModel:
     def test_returns_lightweight_model_when_enabled(self, tmp_path, monkeypatch):
         from app import utils
