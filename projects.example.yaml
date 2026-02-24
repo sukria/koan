@@ -51,14 +51,34 @@ defaults:
   #   mission: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
   #   chat: ["Read", "Glob", "Grep"]
 
-  # Exploration — whether the agent autonomously explores this project.
-  # When false, the agent only works on explicit missions for the project.
+  # Exploration — controls autonomous work on this project.
+  #
+  # When enabled, the agent may autonomously:
+  #   - Pick this project for free-form exploration (code audits, improvements)
+  #   - Run contemplative/reflective sessions on the project
+  #   - Create branches and PRs proactively (within max_open_prs limit)
+  #
+  # When disabled (false), the agent ONLY works on this project when an
+  # explicit mission is queued (via /mission, /fix, /rebase, etc.).
+  # Explicit missions always execute regardless of this flag.
+  #
+  # Set at defaults level to control the global policy, then override
+  # per-project. Common patterns:
+  #   - defaults: true + vendor-lib: false → explore everything except vendor
+  #   - defaults: false + myapp: true → only explore opted-in projects
+  #
+  # Also affected by:
+  #   - max_open_prs: exploration pauses when the PR limit is reached
+  #   - schedule.work_hours (in config.yaml): suppresses all exploration
+  #     during work hours, similar to /focus mode
+  #
   # Default: true
   # exploration: true
 
   # Max open PRs — limit how many open PRs the agent can have per repo
-  # before autonomous exploration is paused. Explicit missions are never
-  # affected. Uses GITHUB_USER or `gh` login to identify the agent's PRs.
+  # before autonomous exploration is paused for this project.
+  # Explicit missions are never affected by this limit.
+  # Uses GITHUB_USER or `gh` login to identify the agent's PRs.
   # Set to 0 or omit for unlimited.
   # Default: 0 (unlimited)
   max_open_prs: 10
@@ -104,6 +124,13 @@ projects:
   #   exploration: false                   # Only work on explicit missions
   #   tools:
   #     mission: ["Read", "Glob", "Grep"]  # Read-only — no modifications
+
+  # Example: opt-in exploration (when defaults.exploration is false)
+  # Use this pattern when you want tight control: disable globally,
+  # then explicitly enable exploration on trusted projects.
+  # my-main-app:
+  #   path: "/Users/yourname/workspace/my-main-app"
+  #   exploration: true                    # Override global false default
 
   # Example: a project with a lower PR limit (overrides default of 10)
   # oss-lib:
