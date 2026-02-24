@@ -192,6 +192,18 @@ detect_dir "~/.copilot" "/home/koan/.copilot" "rw" "Copilot auth" || \
 detect_dir "~/.config/gh" "/home/koan/.config/gh" "ro" "GitHub CLI auth" || \
     warn "~/.config/gh not found — gh CLI won't be authenticated"
 
+# SSH agent socket forwarding (for git push/fetch over SSH)
+if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+    success "Found SSH agent socket: $SSH_AUTH_SOCK"
+    VOLUME_MOUNTS+=("      - ${SSH_AUTH_SOCK}:/run/ssh-agent.sock:ro")
+else
+    log "No SSH agent socket — see docs/ssh-setup.md for options"
+fi
+
+# SSH keys (fallback when agent is unavailable)
+detect_dir "~/.ssh" "/home/koan/.ssh" "ro" "SSH keys" || \
+    log "~/.ssh not found (SSH key fallback not available)"
+
 detect_dir "~/.gitconfig" "/home/koan/.gitconfig" "ro" "Git config" || true
 
 # 2. Workspace symlink resolution + projects.yaml

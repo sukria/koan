@@ -149,7 +149,30 @@ verify_auth() {
 }
 
 # -------------------------------------------------------------------------
-# 3. Instance Directory
+# 3. SSH Agent Setup
+# -------------------------------------------------------------------------
+setup_ssh() {
+    # Option 1: Mounted SSH agent socket from host
+    if [ -S "/run/ssh-agent.sock" ]; then
+        export SSH_AUTH_SOCK="/run/ssh-agent.sock"
+        success "SSH auth: forwarded agent socket"
+        return 0
+    fi
+
+    # Option 2: SSH keys mounted — start a local agent and load them
+    if [ -d "$HOME/.ssh" ] && ls "$HOME/.ssh/id_"* >/dev/null 2>&1; then
+        eval "$(ssh-agent -s)" > /dev/null
+        ssh-add "$HOME/.ssh/id_"* 2>/dev/null || true
+        success "SSH auth: local agent with mounted keys"
+        return 0
+    fi
+
+    # Option 3: No SSH — git will use GH_TOKEN / HTTPS if configured
+    log "No SSH agent or keys — git will use HTTPS/GH_TOKEN if available"
+}
+
+# -------------------------------------------------------------------------
+# 4. Instance Directory
 # -------------------------------------------------------------------------
 setup_instance() {
     if [ ! -f "$INSTANCE/missions.md" ]; then
@@ -163,7 +186,7 @@ setup_instance() {
 }
 
 # -------------------------------------------------------------------------
-# 4. Workspace Setup
+# 5. Workspace Setup
 # -------------------------------------------------------------------------
 setup_workspace() {
     local workspace="$KOAN_ROOT/workspace"
@@ -206,6 +229,7 @@ case "$COMMAND" in
         verify_binaries || exit 1
         check_claude_auth || exit 1
         verify_auth
+        setup_ssh
         setup_instance
         setup_workspace
 
@@ -221,6 +245,7 @@ case "$COMMAND" in
         verify_binaries || exit 1
         check_claude_auth || exit 1
         verify_auth
+        setup_ssh
         setup_instance
         setup_workspace
 

@@ -336,3 +336,11 @@ class TestServiceTemplateContent:
             content = Path(path).read_text()
             assert "Restart=on-failure" in content, \
                 f"{name} missing Restart=on-failure"
+
+    def test_both_templates_have_ssh_auth_sock(self, template_dir):
+        """Both templates must set SSH_AUTH_SOCK for git SSH operations."""
+        for name in ["koan.service.template", "koan-awake.service.template"]:
+            path = os.path.join(template_dir, name)
+            content = Path(path).read_text()
+            assert "SSH_AUTH_SOCK=__KOAN_ROOT__/.ssh-agent-sock" in content, \
+                f"{name} missing SSH_AUTH_SOCK environment variable"
