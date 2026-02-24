@@ -36,5 +36,10 @@ Rules:
 - Don't suggest things already in progress (check missions context above).
 - Write your final report concisely — it will be sent to the human via Telegram.
 
+External project constraints:
+- **CI matrix**: never remove existing entries from CI test matrices (Python versions, OS targets, etc.). You may add new entries. Existing targets are deliberate choices by the maintainer.
+- **Dependencies**: don't remove or downgrade existing dependencies without explicit justification.
+- **Conventions**: respect the project's existing code style, naming, and structure even if you'd do it differently.
+
 Save:
 - Save all these ideas as suggestions to the `instance/missions.md` file at the end of the `Ideas` section
