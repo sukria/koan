@@ -475,3 +475,68 @@ class TestProcessNotificationsDebugLogging:
 
         captured = capsys.readouterr()
         assert "Fetched 1" in captured.out
+
+
+class TestGetKnownReposFromProjects:
+    """Unit tests for _get_known_repos_from_projects."""
+
+    @patch("app.projects_config.load_projects_config")
+    def test_includes_github_url_singular(self, mock_config, tmp_path):
+        from app.loop_manager import _get_known_repos_from_projects
+
+        mock_config.return_value = {
+            "projects": {
+                "myproj": {"github_url": "https://github.com/owner/repo"},
+            },
+        }
+        repos = _get_known_repos_from_projects(str(tmp_path))
+        assert "owner/repo" in repos
+
+    @patch("app.projects_config.load_projects_config")
+    def test_includes_github_urls_plural(self, mock_config, tmp_path):
+        """github_urls (all remotes) must be included for fork workflows."""
+        from app.loop_manager import _get_known_repos_from_projects
+
+        mock_config.return_value = {
+            "projects": {
+                "myproj": {
+                    "github_url": "https://github.com/fork-owner/repo",
+                    "github_urls": [
+                        "https://github.com/fork-owner/repo",
+                        "https://github.com/upstream-owner/repo",
+                    ],
+                },
+            },
+        }
+        repos = _get_known_repos_from_projects(str(tmp_path))
+        assert "fork-owner/repo" in repos
+        assert "upstream-owner/repo" in repos
+
+    @patch("app.projects_config.load_projects_config")
+    def test_handles_empty_github_urls(self, mock_config, tmp_path):
+        from app.loop_manager import _get_known_repos_from_projects
+
+        mock_config.return_value = {
+            "projects": {
+                "myproj": {
+                    "github_url": "https://github.com/owner/repo",
+                    "github_urls": [],
+                },
+            },
+        }
+        repos = _get_known_repos_from_projects(str(tmp_path))
+        assert "owner/repo" in repos
+
+    @patch("app.projects_config.load_projects_config")
+    def test_handles_missing_github_urls_key(self, mock_config, tmp_path):
+        from app.loop_manager import _get_known_repos_from_projects
+
+        mock_config.return_value = {
+            "projects": {
+                "myproj": {"github_url": "https://github.com/owner/repo"},
+            },
+        }
+        repos = _get_known_repos_from_projects(str(tmp_path))
+        # Should not crash, just use github_url
+        assert repos is not None
+        assert "owner/repo" in repos

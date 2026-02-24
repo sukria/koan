@@ -319,6 +319,26 @@ class TestPostErrorReply:
         post_error_reply("owner", "repo", "42", "123", "Error B")
         assert mock_api.call_count == 2
 
+    @patch("app.github_command_handler.add_reaction", side_effect=RuntimeError("reaction failed"))
+    @patch("app.github.api")
+    def test_reaction_failure_allows_retry(self, mock_api, mock_react):
+        """If add_reaction fails, the error should NOT be marked as sent."""
+        mock_api.return_value = ""
+        result = post_error_reply("owner", "repo", "42", "123", "Test error")
+        # The whole try block catches RuntimeError, so returns False
+        assert result is False
+        # The error key should NOT be in dedup cache, allowing retry
+        assert "123:Test error" not in _error_replies
+
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github.api")
+    def test_successful_post_marked_as_sent(self, mock_api, mock_react):
+        """After both comment and reaction succeed, error is marked as sent."""
+        mock_api.return_value = ""
+        result = post_error_reply("owner", "repo", "42", "123", "Test error")
+        assert result is True
+        assert "123:Test error" in _error_replies
+
 
 class TestProcessSingleNotification:
     """Integration-style tests for the full notification processing pipeline."""
@@ -394,6 +414,8 @@ class TestProcessSingleNotification:
         )
         assert success is False
         assert "Unknown repository" in error
+        # Notification must be marked as read to prevent re-processing loop
+        mock_read.assert_called_once_with("12345")
 
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.check_already_processed", return_value=False)

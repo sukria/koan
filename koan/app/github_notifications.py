@@ -175,7 +175,7 @@ def get_comment_from_notification(notification: dict) -> Optional[dict]:
     try:
         raw = api(endpoint)
         return json.loads(raw) if raw else None
-    except (RuntimeError, json.JSONDecodeError):
+    except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
         return None
 
 
