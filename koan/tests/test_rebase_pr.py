@@ -20,10 +20,10 @@ from app.rebase_pr import (
     _checkout_pr_branch,
     _get_current_branch,
     _is_conflict_failure,
-    _is_permission_error,
     _push_with_fallback,
     _safe_checkout,
 )
+from app.claude_step import _is_permission_error
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +134,8 @@ class TestGetCurrentBranch:
 # ---------------------------------------------------------------------------
 
 class TestCheckoutPrBranch:
-    def test_checkout_existing_branch(self):
-        """Should fetch, checkout, and hard reset to origin."""
+    def test_checkout_uses_dash_B_flag(self):
+        """Should fetch and use -B to create/reset the local branch."""
         calls = []
         def mock_run(cmd, **kwargs):
             calls.append(cmd)
@@ -146,22 +146,27 @@ class TestCheckoutPrBranch:
 
         cmds = [c[:3] for c in calls]
         assert ["git", "fetch", "origin"] in cmds
-        assert ["git", "checkout", "koan/fix"] in cmds
-        assert ["git", "reset", "--hard"] in cmds
+        # Must use -B, not -b or plain checkout
+        checkout_cmds = [c for c in calls if "checkout" in c]
+        assert len(checkout_cmds) == 1
+        assert "-B" in checkout_cmds[0]
+        assert "origin/koan/fix" in checkout_cmds[0]
 
-    def test_creates_tracking_branch_if_not_exists(self):
-        """If checkout fails, creates a tracking branch."""
+    def test_resets_existing_local_branch(self):
+        """A stale local branch with the same name must not block checkout."""
+        # -B handles this — create or reset. Verify no "branch already exists" error.
+        calls = []
         def mock_run(cmd, **kwargs):
-            result = MagicMock(returncode=0, stdout="", stderr="")
-            # Fail on the first 'git checkout' (branch doesn't exist locally)
-            if cmd[:2] == ["git", "checkout"] and len(cmd) == 3 and cmd[2] == "koan/fix":
-                result.returncode = 1
-                result.stderr = "error: pathspec 'koan/fix' did not match"
-                raise RuntimeError("checkout failed")
-            return result
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("app.claude_step.subprocess.run", side_effect=mock_run):
             _checkout_pr_branch("koan/fix", "/project")
+
+        checkout_cmds = [c for c in calls if "checkout" in c]
+        # Only ONE checkout call expected — -B handles both cases
+        assert len(checkout_cmds) == 1
+        assert "-B" in checkout_cmds[0]
 
     def test_falls_back_to_upstream(self):
         """If origin fetch fails, tries upstream."""
@@ -181,10 +186,10 @@ class TestCheckoutPrBranch:
         assert ["git", "fetch", "origin", "feat/upstream-only"] in fetch_cmds
         assert ["git", "fetch", "upstream", "feat/upstream-only"] in fetch_cmds
 
-        # Reset should use upstream, not origin
-        reset_cmds = [c for c in calls if c[:2] == ["git", "reset"]]
-        assert len(reset_cmds) == 1
-        assert "upstream/feat/upstream-only" in reset_cmds[0][-1]
+        # Checkout should use upstream, not origin
+        checkout_cmds = [c for c in calls if "checkout" in c]
+        assert len(checkout_cmds) == 1
+        assert "upstream/feat/upstream-only" in checkout_cmds[0]
 
     def test_raises_if_both_remotes_fail(self):
         """If both origin and upstream fail, raises RuntimeError."""
@@ -440,7 +445,8 @@ class TestFetchPrContext:
 # ---------------------------------------------------------------------------
 
 class TestPushWithFallback:
-    def test_successful_push(self):
+    def test_successful_force_with_lease(self):
+        """Happy path: force-with-lease on origin succeeds."""
         mock_result = MagicMock(returncode=0, stdout="", stderr="")
         with patch("app.claude_step.subprocess.run", return_value=mock_result):
             result = _push_with_fallback(
@@ -449,30 +455,48 @@ class TestPushWithFallback:
             )
             assert result["success"] is True
             assert any("Force-pushed" in a for a in result["actions"])
+            assert any("origin" in a for a in result["actions"])
 
-    def test_permission_denied_creates_new_pr(self):
+    def test_falls_back_to_plain_force_on_origin(self):
+        """If force-with-lease fails on origin, tries plain --force on origin."""
+        calls = []
         def mock_run(cmd, **kwargs):
-            result = MagicMock(returncode=0, stdout="", stderr="")
-            if cmd[:2] == ["git", "push"] and "force-with-lease" in " ".join(cmd):
-                raise RuntimeError("git failed: git push — permission denied")
-            if cmd[:2] == ["gh", "pr"] and "create" in cmd:
-                result.stdout = "https://github.com/sukria/koan/pull/100\n"
-            return result
+            calls.append(cmd)
+            if "--force-with-lease" in cmd:
+                raise RuntimeError("stale tracking ref")
+            return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("app.claude_step.subprocess.run", side_effect=mock_run), \
-             patch("app.github.subprocess.run", side_effect=mock_run):
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
             result = _push_with_fallback(
                 "koan/fix", "main", "sukria/koan", "42",
                 {"title": "Fix", "url": "https://..."}, "/project"
             )
             assert result["success"] is True
-            assert any("new branch" in a.lower() for a in result["actions"])
-            assert any("draft PR" in a for a in result["actions"])
+            push_cmds = [c for c in calls if c[:2] == ["git", "push"]]
+            assert any("--force" in c and "--force-with-lease" not in c for c in push_cmds)
 
-    def test_non_permission_error_fails(self):
+    def test_falls_back_to_upstream(self):
+        """If both origin push strategies fail, tries upstream."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["git", "push"] and "origin" in cmd:
+                raise RuntimeError("permission denied")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _push_with_fallback(
+                "koan/fix", "main", "sukria/koan", "42",
+                {"title": "Fix", "url": "https://..."}, "/project"
+            )
+            assert result["success"] is True
+            assert any("upstream" in a for a in result["actions"])
+
+    def test_never_creates_new_pr(self):
+        """When all pushes fail, should fail — NOT create a new branch/PR."""
         def mock_run(cmd, **kwargs):
             if cmd[:2] == ["git", "push"]:
-                raise RuntimeError("git failed: git push — fatal: remote ref does not exist")
+                raise RuntimeError("permission denied on all remotes")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("app.claude_step.subprocess.run", side_effect=mock_run):
@@ -481,7 +505,27 @@ class TestPushWithFallback:
                 {"title": "Fix", "url": ""}, "/project"
             )
             assert result["success"] is False
-            assert "remote ref" in result["error"]
+            assert "all remotes rejected" in result["error"]
+            # Must NOT contain any "new branch" or "draft PR" actions
+            assert not any("new branch" in a.lower() for a in result["actions"])
+            assert not any("draft PR" in a for a in result["actions"])
+
+    def test_all_remotes_fail_returns_error(self):
+        """Comprehensive failure: all 4 push attempts (2 remotes x 2 strategies) fail."""
+        push_count = [0]
+        def mock_run(cmd, **kwargs):
+            if cmd[:2] == ["git", "push"]:
+                push_count[0] += 1
+                raise RuntimeError("rejected")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _push_with_fallback(
+                "koan/fix", "main", "sukria/koan", "42",
+                {"title": "Fix", "url": ""}, "/project"
+            )
+            assert result["success"] is False
+            assert push_count[0] == 4  # 2 remotes x 2 strategies
 
 
 # ---------------------------------------------------------------------------
@@ -651,29 +695,27 @@ class TestRunRebase:
 # _push_with_fallback — cross-linking
 # ---------------------------------------------------------------------------
 
-class TestPushCrossLink:
-    def test_cross_links_original_pr(self):
-        """When creating a new PR, the original PR gets a cross-link comment."""
+class TestPushBranchRecycling:
+    def test_reuses_same_branch_name(self):
+        """Push must always target the original branch name, never create a new one."""
         calls = []
         def mock_run(cmd, **kwargs):
             calls.append(cmd)
-            result = MagicMock(returncode=0, stdout="", stderr="")
-            if cmd[:2] == ["git", "push"] and "--force-with-lease" in cmd:
-                raise RuntimeError("git failed: git push — permission denied")
-            if cmd[:2] == ["gh", "pr"] and "create" in cmd:
-                result.stdout = "https://github.com/sukria/koan/pull/100\n"
-            return result
+            return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("app.claude_step.subprocess.run", side_effect=mock_run), \
-             patch("app.github.subprocess.run", side_effect=mock_run):
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
             result = _push_with_fallback(
                 "koan/fix", "main", "sukria/koan", "42",
                 {"title": "Fix", "url": "https://..."}, "/project"
             )
             assert result["success"] is True
-            comment_calls = [c for c in calls if c[:3] == ["gh", "pr", "comment"]]
-            assert len(comment_calls) >= 1
-            assert "42" in comment_calls[0]
+            push_cmds = [c for c in calls if c[:2] == ["git", "push"]]
+            # All push commands must target the original branch name
+            for push_cmd in push_cmds:
+                assert "koan/fix" in push_cmd
+                # Must NOT create a new branch with a different name
+                assert "-b" not in push_cmd
+                assert "-u" not in push_cmd
 
 
 # ---------------------------------------------------------------------------
