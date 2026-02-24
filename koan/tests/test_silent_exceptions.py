@@ -55,8 +55,8 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     ("prompt_builder.py", 55),       # shared-journal.md loading
     ("awake.py", 173),               # pending.md read for chat context
     # --- GitHub API best-effort (None/empty is safe) ---
-    ("github.py", 182),              # gh username cache miss
-    ("github.py", 215),              # parent repo detection
+    ("github.py", 183),              # gh username cache miss
+    ("github.py", 216),              # parent repo detection
     ("github_auth.py", 56),          # token validation
     # --- Git operations (abort after failed rebase) ---
     ("claude_step.py", 52),          # rebase --abort after failed rebase

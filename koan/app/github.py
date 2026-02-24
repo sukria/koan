@@ -7,7 +7,8 @@ which sets ``GH_TOKEN`` — this module has no auth logic.
 
 import json
 import subprocess
-from typing import Optional
+import time
+from typing import Dict, Optional
 
 # Cached GitHub username (from gh api user fallback).
 # None = not yet queried, "" = query failed.
@@ -214,6 +215,33 @@ def detect_parent_repo(project_path: str) -> Optional[str]:
         return None
     except Exception:
         return None
+
+
+# TTL cache for count_open_prs results (avoids repeated gh CLI calls)
+_pr_count_cache: Dict[str, tuple] = {}  # key -> (count, timestamp)
+_PR_COUNT_TTL = 300  # 5 minutes
+
+
+def cached_count_open_prs(github_url: str, author: str) -> int:
+    """count_open_prs with a 5-minute TTL cache.
+
+    Args:
+        github_url: Repository in ``owner/repo`` format.
+        author: GitHub username to filter by.
+
+    Returns:
+        Number of open PRs, or ``-1`` on error.
+        Errors are cached too to avoid hammering gh on repeated failures.
+    """
+    key = f"{github_url}:{author}"
+    now = time.monotonic()
+    cached = _pr_count_cache.get(key)
+    if cached and (now - cached[1]) < _PR_COUNT_TTL:
+        return cached[0]
+
+    result = count_open_prs(github_url, author)
+    _pr_count_cache[key] = (result, now)
+    return result
 
 
 def count_open_prs(repo: str, author: str, cwd: str = None) -> int:
