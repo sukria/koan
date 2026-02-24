@@ -99,6 +99,22 @@ class TestBuildPrompt:
         assert "{ISSUE_BODY}" not in prompt
         assert "{CONTEXT}" not in prompt
 
+    def test_prompt_includes_pr_creation_phase(self):
+        """fix.md must instruct Claude to push the branch and create a draft PR."""
+        skill_dir = Path(__file__).resolve().parent.parent / "skills" / "core" / "fix"
+        prompt = _build_prompt(
+            issue_url="https://github.com/o/r/issues/42",
+            issue_title="Test",
+            issue_body="Body",
+            context="ctx",
+            skill_dir=skill_dir,
+            issue_number="42",
+        )
+        assert "Submit Pull Request" in prompt
+        assert "gh pr create --draft" in prompt
+        assert "git push" in prompt
+        assert "Fixes https://github.com/o/r/issues/42" in prompt
+
 
 # ---------------------------------------------------------------------------
 # _guess_project_name
