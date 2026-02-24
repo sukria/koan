@@ -34,8 +34,8 @@ APP_DIR = Path(__file__).parent.parent / "app"
 ALLOWLIST: Set[Tuple[str, int]] = {
     # --- Shutdown / terminal cleanup (terminal may be gone) ---
     ("run.py", 79),                  # ANSI reset on shutdown
-    ("run.py", 1672),                # _get_koan_branch: git rev-parse fallback
-    ("run.py", 1848),                # _cleanup_temp_files: unlink best-effort
+    ("run.py", 1679),                # _get_koan_branch: git rev-parse fallback
+    ("run.py", 1855),                # _cleanup_temp_files: unlink best-effort
     # --- Best-effort display / info gathering ---
     ("ai_runner.py", 127),           # dir listing for prompt context
     ("startup_info.py", 25),         # config value fallback

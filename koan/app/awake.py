@@ -603,7 +603,14 @@ def main():
                 chat_id = str(msg.get("chat", {}).get("id", ""))
                 if chat_id == CHAT_ID and text:
                     log("chat", f"Received: {text[:60]}")
-                    handle_message(text)
+                    try:
+                        handle_message(text)
+                    except Exception as e:
+                        log("error", f"Message handling failed: {e}")
+                        try:
+                            send_telegram(f"⚠️ Error processing message: {type(e).__name__}: {e}")
+                        except Exception as notify_err:
+                            print(f"[bridge] error notification also failed: {notify_err}", file=sys.stderr)
 
             # After the first poll cycle, clear any stale signal files
             # left from a previous incarnation.  During the first poll

@@ -287,9 +287,9 @@ def start_runner(koan_root: Path, verify_timeout: float = DEFAULT_VERIFY_TIMEOUT
 
     Returns (success: bool, message: str).
     """
-    # Clear stop signal so run.py doesn't exit immediately
-    stop_file = koan_root / ".koan-stop"
-    stop_file.unlink(missing_ok=True)
+    # Clear stop and pause signals so run.py starts fresh
+    for signal_file in (".koan-stop", ".koan-pause", ".koan-pause-reason"):
+        (koan_root / signal_file).unlink(missing_ok=True)
 
     return _launch_python_process(koan_root, "app/run.py", "run", verify_timeout)
 

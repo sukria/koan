@@ -2557,3 +2557,62 @@ class TestBuildChatPromptMissionsReadProtection:
         # Prompt should still be built (missions context will be empty)
         assert isinstance(prompt, str)
         assert len(prompt) > 0
+
+
+class TestBridgeExceptionResilience:
+    """Bug fix: unhandled exceptions in handle_message must not crash the bridge."""
+
+    TEST_CHAT_ID = "123456789"
+
+    @pytest.fixture(autouse=True)
+    def mock_pid_manager(self):
+        with patch("app.pid_manager.acquire_pidfile") as mock_acquire, \
+             patch("app.pid_manager.release_pidfile"):
+            mock_acquire.return_value = MagicMock()
+            yield
+
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.send_telegram")
+    @patch("app.awake.handle_message", side_effect=RuntimeError("unexpected bug"))
+    @patch("app.awake.get_updates")
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    @patch("app.awake.time.sleep", side_effect=StopIteration)
+    def test_exception_in_handle_message_does_not_crash_bridge(
+        self, mock_sleep, mock_config, mock_updates, mock_handle,
+        mock_send, mock_flush, mock_heartbeat
+    ):
+        """If handle_message raises, the bridge logs and continues."""
+        from app.awake import main
+        mock_updates.return_value = [
+            {"update_id": 100, "message": {"text": "/bad", "chat": {"id": int(self.TEST_CHAT_ID)}}}
+        ]
+        # Should stop at StopIteration (time.sleep), NOT at RuntimeError
+        with pytest.raises(StopIteration):
+            main()
+        mock_handle.assert_called_once_with("/bad")
+        # Error notification sent to user
+        mock_send.assert_called_once()
+        assert "RuntimeError" in mock_send.call_args[0][0]
+
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.send_telegram", side_effect=Exception("telegram down"))
+    @patch("app.awake.handle_message", side_effect=RuntimeError("bug"))
+    @patch("app.awake.get_updates")
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    @patch("app.awake.time.sleep", side_effect=StopIteration)
+    def test_exception_in_error_notification_also_swallowed(
+        self, mock_sleep, mock_config, mock_updates, mock_handle,
+        mock_send, mock_flush, mock_heartbeat
+    ):
+        """If both handle_message AND the error notification fail, bridge still survives."""
+        from app.awake import main
+        mock_updates.return_value = [
+            {"update_id": 100, "message": {"text": "/bad", "chat": {"id": int(self.TEST_CHAT_ID)}}}
+        ]
+        with pytest.raises(StopIteration):
+            main()
+        # Bridge survived both exceptions
