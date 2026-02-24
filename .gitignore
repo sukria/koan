@@ -15,6 +15,7 @@ venv/
 .koan-stop
 .koan-project
 .koan-quota-reset
+.ssh-agent-sock
 
 # Environment & secrets
 .env

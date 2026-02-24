@@ -4,7 +4,7 @@ export
 .PHONY: install setup start stop status restart
 .PHONY: clean say migrate test sync-instance
 .PHONY: awake run errand-run errand-awake dashboard
-.PHONY: ollama logs
+.PHONY: ollama logs ssh-forward
 .PHONY: install-systemctl-service uninstall-systemctl-service
 .PHONY: docker-setup docker-up docker-down docker-logs docker-test docker-auth docker-gh-auth
 
@@ -54,6 +54,10 @@ restart:
 ifeq ($(USE_SYSTEMD),1)
 
 start: setup
+	@if [ -n "$$SSH_AUTH_SOCK" ]; then \
+		ln -sf "$$SSH_AUTH_SOCK" "$(PWD)/.ssh-agent-sock"; \
+		echo "✓ SSH agent socket forwarded"; \
+	fi
 	@if [ -z "$(SERVICE_INSTALLED)" ]; then \
 		echo "→ systemd detected — installing Kōan service (one-time setup)..."; \
 		sudo CALLER_PATH="$$PATH" bash koan/systemd/install-service.sh "$(PWD)" "$(PWD)/$(PYTHON)"; \
@@ -78,6 +82,14 @@ status: setup
 	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager status-all $(PWD)
 
 endif
+
+ssh-forward:
+	@if [ -n "$$SSH_AUTH_SOCK" ]; then \
+		ln -sf "$$SSH_AUTH_SOCK" "$(PWD)/.ssh-agent-sock"; \
+		echo "✓ SSH agent socket forwarded to .ssh-agent-sock"; \
+	else \
+		echo "⚠ No SSH agent detected (SSH_AUTH_SOCK not set)"; \
+	fi
 
 errand-run: setup
 	caffeinate -i $(MAKE) run

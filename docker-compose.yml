@@ -29,6 +29,7 @@ services:
     environment:
       - KOAN_ROOT=/app
       - PYTHONPATH=/app/koan
+      - SSH_AUTH_SOCK=/run/ssh-agent.sock
     volumes:
       # Instance state — persisted across restarts
       - ./instance:/app/instance
