@@ -1119,7 +1119,7 @@ class TestFilterExplorationProjectsPrLimit:
 
     def setup_method(self):
         """Clear the PR count cache between tests."""
-        from app.iteration_manager import _pr_count_cache
+        from app.github import _pr_count_cache
         _pr_count_cache.clear()
 
     @patch("app.github.get_gh_username", return_value="koan-bot")

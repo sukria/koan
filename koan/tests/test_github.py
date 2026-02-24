@@ -8,7 +8,7 @@ import pytest
 
 from app.github import (
     run_gh, pr_create, issue_create, api,
-    get_gh_username, count_open_prs,
+    get_gh_username, count_open_prs, cached_count_open_prs,
     fetch_issue_with_comments, detect_parent_repo,
 )
 import app.github as github_module
@@ -532,3 +532,64 @@ class TestPrCreateExtended:
         cmd = mock_run.call_args[0][0]
         assert "--repo" not in cmd
         assert "--head" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# cached_count_open_prs
+# ---------------------------------------------------------------------------
+
+
+class TestCachedCountOpenPrs:
+
+    def setup_method(self):
+        """Clear the PR count cache between tests."""
+        github_module._pr_count_cache.clear()
+
+    @patch("app.github.count_open_prs", return_value=5)
+    def test_returns_count(self, mock_count):
+        assert cached_count_open_prs("owner/repo", "koan-bot") == 5
+        mock_count.assert_called_once_with("owner/repo", "koan-bot")
+
+    @patch("app.github.count_open_prs", return_value=3)
+    def test_caches_result(self, mock_count):
+        assert cached_count_open_prs("owner/repo", "koan-bot") == 3
+        assert cached_count_open_prs("owner/repo", "koan-bot") == 3
+        # Only one call despite two invocations
+        mock_count.assert_called_once()
+
+    @patch("app.github.count_open_prs", return_value=-1)
+    def test_caches_errors(self, mock_count):
+        """Errors (-1) are cached too to avoid hammering gh."""
+        assert cached_count_open_prs("owner/repo", "koan-bot") == -1
+        assert cached_count_open_prs("owner/repo", "koan-bot") == -1
+        mock_count.assert_called_once()
+
+    @patch("app.github.count_open_prs", return_value=2)
+    def test_different_repos_cached_independently(self, mock_count):
+        cached_count_open_prs("owner/repo-a", "koan-bot")
+        cached_count_open_prs("owner/repo-b", "koan-bot")
+        assert mock_count.call_count == 2
+
+    @patch("app.github.count_open_prs", return_value=7)
+    @patch("app.github.time.monotonic")
+    def test_ttl_expiry_refreshes(self, mock_time, mock_count):
+        """After TTL expires, the cache is refreshed."""
+        mock_time.return_value = 1000.0
+        assert cached_count_open_prs("owner/repo", "koan-bot") == 7
+
+        # Advance time past TTL (300s)
+        mock_time.return_value = 1301.0
+        assert cached_count_open_prs("owner/repo", "koan-bot") == 7
+        assert mock_count.call_count == 2
+
+    @patch("app.github.count_open_prs", return_value=4)
+    @patch("app.github.time.monotonic")
+    def test_within_ttl_uses_cache(self, mock_time, mock_count):
+        """Within TTL, cached value is returned without gh call."""
+        mock_time.return_value = 1000.0
+        cached_count_open_prs("owner/repo", "koan-bot")
+
+        # Still within TTL
+        mock_time.return_value = 1299.0
+        cached_count_open_prs("owner/repo", "koan-bot")
+        mock_count.assert_called_once()
