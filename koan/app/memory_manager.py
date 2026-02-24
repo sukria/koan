@@ -121,6 +121,46 @@ def _extract_session_digest(content: str) -> List[str]:
     return digests
 
 
+def _balanced_select(
+    sessions: List[Tuple[str, str, str]],
+    max_sessions: int,
+    min_per_project: int = 2,
+) -> List[Tuple[str, str, str]]:
+    """Select sessions preserving per-project representation.
+
+    Algorithm:
+    1. Reserve the last ``min_per_project`` sessions for each project.
+    2. If reserved count exceeds budget, fall back to 1 per project.
+    3. Fill remaining budget with the most recent unreserved sessions.
+    4. Return selected sessions in their original order.
+    """
+    by_project: Dict[str, List[int]] = defaultdict(list)
+    for idx, (_date, _text, project) in enumerate(sessions):
+        by_project[project].append(idx)
+
+    # Phase 1: reserve last min_per_project per project
+    kept_set = set()
+    for indices in by_project.values():
+        kept_set.update(indices[-min_per_project:])
+
+    # Phase 2: if over budget, reduce to 1 per project
+    if len(kept_set) > max_sessions:
+        kept_set = set()
+        for indices in by_project.values():
+            kept_set.add(indices[-1])
+
+    # Phase 3: fill remaining budget with most recent unreserved sessions
+    remaining = max_sessions - len(kept_set)
+    if remaining > 0:
+        candidates = [i for i in range(len(sessions)) if i not in kept_set]
+        for idx in candidates[-remaining:]:
+            kept_set.add(idx)
+
+    # Return in original order, capped at max_sessions
+    selected = sorted(kept_set)[-max_sessions:]
+    return [sessions[i] for i in selected]
+
+
 def _rebuild_sessions(title: str, sessions: List[Tuple[str, str, ...]]) -> str:
     """Rebuild summary content from a title and list of session tuples."""
     output_lines = []
@@ -195,8 +235,17 @@ class MemoryManager:
 
         return _rebuild_sessions(title, filtered)
 
-    def compact_summary(self, max_sessions: int = 10) -> int:
-        """Keep only the last N sessions in summary.md. Returns removed count."""
+    def compact_summary(self, max_sessions: int = 10, min_per_project: int = 2) -> int:
+        """Keep only the last N sessions in summary.md, preserving per-project balance.
+
+        Without balancing, a burst of work on one project (e.g. 15 consecutive
+        rebases) would evict ALL context for every other project.  This method
+        guarantees each project retains at least ``min_per_project`` sessions
+        (or 1, if the total budget is tight), then fills remaining slots with
+        the most recent sessions overall.
+
+        Returns the number of sessions removed.
+        """
         if not self.summary_path.exists():
             return 0
 
@@ -207,7 +256,7 @@ class MemoryManager:
             return 0
 
         title = _extract_title(content)
-        kept = sessions[-max_sessions:]
+        kept = _balanced_select(sessions, max_sessions, min_per_project)
         removed = len(sessions) - len(kept)
 
         atomic_write(self.summary_path, _rebuild_sessions(title, kept))
@@ -451,9 +500,9 @@ def scoped_summary(instance_dir: str, project_name: str) -> str:
     return MemoryManager(instance_dir).scoped_summary(project_name)
 
 
-def compact_summary(instance_dir: str, max_sessions: int = 10) -> int:
+def compact_summary(instance_dir: str, max_sessions: int = 10, min_per_project: int = 2) -> int:
     """Keep only the last N sessions in summary.md. Returns removed count."""
-    return MemoryManager(instance_dir).compact_summary(max_sessions)
+    return MemoryManager(instance_dir).compact_summary(max_sessions, min_per_project)
 
 
 def cleanup_learnings(instance_dir: str, project_name: str) -> int:

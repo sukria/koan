@@ -16,6 +16,7 @@ from app.memory_manager import (
     run_cleanup,
     _extract_project_hint,
     _extract_session_digest,
+    _balanced_select,
 )
 
 
@@ -174,6 +175,213 @@ class TestCompactSummary:
             lines.append(f"\n## 2026-02-{i:02d}\n\nSession {i} : work\n")
         (mem / "summary.md").write_text("".join(lines))
         assert compact_summary(str(tmp_path), max_sessions=5) == 0
+
+
+# ---------------------------------------------------------------------------
+# _balanced_select
+# ---------------------------------------------------------------------------
+
+class TestBalancedSelect:
+    """Tests for project-aware session selection logic."""
+
+    @staticmethod
+    def _session(date_str, project, num):
+        return (f"## {date_str}", f"Session {num} (project: {project}) : work", project)
+
+    def test_single_project_behaves_like_recency(self):
+        """With only one project, balanced select = last N."""
+        sessions = [self._session("2026-02-01", "koan", i) for i in range(10)]
+        result = _balanced_select(sessions, max_sessions=5)
+        assert len(result) == 5
+        # Should keep last 5
+        assert result[-1][1] == sessions[9][1]
+        assert result[0][1] == sessions[5][1]
+
+    def test_preserves_minority_project(self):
+        """A project with few sessions is NOT evicted by a dominant project."""
+        sessions = []
+        # 2 old sessions for project B
+        sessions.append(self._session("2026-01-01", "backend", 1))
+        sessions.append(self._session("2026-01-02", "backend", 2))
+        # 13 recent sessions for project A
+        for i in range(13):
+            sessions.append(self._session(f"2026-02-{i+1:02d}", "koan", 10 + i))
+
+        result = _balanced_select(sessions, max_sessions=10)
+        assert len(result) == 10
+        # Backend sessions must survive
+        projects = [s[2] for s in result]
+        assert "backend" in projects
+        assert projects.count("backend") >= 1
+
+    def test_many_projects_budget_tight(self):
+        """With many projects and tight budget, each gets at least 1 session."""
+        sessions = []
+        projects = ["koan", "tmf", "backend", "frontend", "traefik", "clone", "perl", "rsa"]
+        for i, proj in enumerate(projects):
+            sessions.append(self._session(f"2026-02-{i+1:02d}", proj, i + 1))
+            sessions.append(self._session(f"2026-02-{i+10:02d}", proj, i + 100))
+
+        # 16 sessions, 8 projects, budget=10 — each should get at least 1
+        result = _balanced_select(sessions, max_sessions=10)
+        assert len(result) == 10
+        result_projects = set(s[2] for s in result)
+        assert result_projects == set(projects)
+
+    def test_extremely_tight_budget(self):
+        """Budget < number of projects: keeps 1 per project up to budget."""
+        sessions = []
+        for i, proj in enumerate(["a", "b", "c", "d", "e"]):
+            sessions.append(self._session(f"2026-02-{i+1:02d}", proj, i))
+
+        # Budget of 3 for 5 projects — can't guarantee all
+        result = _balanced_select(sessions, max_sessions=3)
+        assert len(result) == 3
+        # Should keep the 3 most recent sessions
+        assert result[-1][1] == sessions[4][1]
+
+    def test_preserves_original_order(self):
+        """Selected sessions maintain chronological order."""
+        sessions = [
+            self._session("2026-01-01", "backend", 1),
+            self._session("2026-01-15", "koan", 2),
+            self._session("2026-02-01", "backend", 3),
+            self._session("2026-02-15", "koan", 4),
+        ]
+        result = _balanced_select(sessions, max_sessions=3)
+        # Verify order is preserved
+        dates = [s[0] for s in result]
+        assert dates == sorted(dates)
+
+    def test_untagged_sessions_treated_as_project(self):
+        """Sessions without a project hint (empty string) are grouped together."""
+        sessions = [
+            self._session("2026-01-01", "", 1),  # untagged
+            self._session("2026-01-02", "", 2),  # untagged
+            self._session("2026-02-01", "koan", 3),
+            self._session("2026-02-02", "koan", 4),
+            self._session("2026-02-03", "koan", 5),
+            self._session("2026-02-04", "koan", 6),
+            self._session("2026-02-05", "koan", 7),
+        ]
+        result = _balanced_select(sessions, max_sessions=5)
+        assert len(result) == 5
+        # At least 1 untagged session should survive
+        untagged = [s for s in result if s[2] == ""]
+        assert len(untagged) >= 1
+
+    def test_two_projects_fair_split(self):
+        """Two projects with equal sessions get balanced representation."""
+        sessions = []
+        for i in range(5):
+            sessions.append(self._session(f"2026-01-{i+1:02d}", "alpha", i))
+        for i in range(5):
+            sessions.append(self._session(f"2026-02-{i+1:02d}", "beta", 10 + i))
+
+        result = _balanced_select(sessions, max_sessions=6)
+        assert len(result) == 6
+        alpha_count = sum(1 for s in result if s[2] == "alpha")
+        beta_count = sum(1 for s in result if s[2] == "beta")
+        # Each project gets at least 2 (min_per_project default)
+        assert alpha_count >= 2
+        assert beta_count >= 2
+
+    def test_min_per_project_customizable(self):
+        """Callers can adjust the per-project minimum."""
+        sessions = []
+        sessions.append(self._session("2026-01-01", "rare", 1))
+        for i in range(9):
+            sessions.append(self._session(f"2026-02-{i+1:02d}", "common", 10 + i))
+
+        # min_per_project=1: rare gets 1, common fills rest
+        result = _balanced_select(sessions, max_sessions=5, min_per_project=1)
+        rare_count = sum(1 for s in result if s[2] == "rare")
+        assert rare_count == 1
+
+    def test_no_sessions_returns_empty(self):
+        assert _balanced_select([], max_sessions=5) == []
+
+    def test_fewer_sessions_than_budget(self):
+        """All sessions kept when under budget."""
+        sessions = [self._session("2026-02-01", "koan", 1)]
+        result = _balanced_select(sessions, max_sessions=10)
+        assert len(result) == 1
+
+
+class TestCompactSummaryBalanced:
+    """Integration tests for project-balanced compaction through the public API."""
+
+    def _build_summary(self, session_specs):
+        """Build a summary.md from a list of (date, project, session_num) tuples."""
+        lines = ["# Summary\n"]
+        for date_str, project, num in session_specs:
+            lines.append(f"\n## {date_str}\n\nSession {num} (project: {project}) : work on {project}\n")
+        return "".join(lines)
+
+    def test_dominant_project_doesnt_evict_others(self, tmp_path):
+        """The core bug: a project burst must not wipe all other project context."""
+        mem = tmp_path / "memory"
+        mem.mkdir()
+
+        specs = []
+        # 3 old sessions for backend
+        for i in range(3):
+            specs.append((f"2026-01-{i+1:02d}", "backend", i + 1))
+        # 3 old sessions for perl-versions
+        for i in range(3):
+            specs.append((f"2026-01-{i+10:02d}", "perl-versions", i + 10))
+        # 12 recent sessions for koan (dominant)
+        for i in range(12):
+            specs.append((f"2026-02-{i+1:02d}", "koan", i + 100))
+
+        (mem / "summary.md").write_text(self._build_summary(specs))
+
+        removed = compact_summary(str(tmp_path), max_sessions=10)
+        assert removed > 0
+
+        content = (mem / "summary.md").read_text()
+        # Both minority projects must have at least 1 session
+        assert "backend" in content
+        assert "perl-versions" in content
+        # Dominant project still gets the majority
+        assert content.count("project: koan") >= 5
+
+    def test_backward_compatible_with_single_project(self, tmp_path):
+        """With a single project, behaves identically to the old algorithm."""
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        lines = ["# Summary\n"]
+        for i in range(1, 16):
+            lines.append(f"\n## 2026-02-{i:02d}\n\nSession {i} (projet: koan) : work {i}\n")
+        (mem / "summary.md").write_text("".join(lines))
+
+        removed = compact_summary(str(tmp_path), max_sessions=5)
+        assert removed == 10
+        content = (mem / "summary.md").read_text()
+        assert "Session 15" in content
+        assert "Session 11" in content
+        assert "Session 1 " not in content
+
+    def test_many_projects_all_represented(self, tmp_path):
+        """With 8 projects, each retains representation after compaction."""
+        mem = tmp_path / "memory"
+        mem.mkdir()
+
+        projects = ["koan", "tmf", "backend", "frontend", "traefik", "clone", "perl", "rsa"]
+        specs = []
+        for idx, proj in enumerate(projects):
+            for j in range(3):
+                day = idx * 3 + j + 1
+                specs.append((f"2026-01-{day:02d}", proj, idx * 10 + j))
+
+        # 24 sessions, 8 projects, budget=15
+        (mem / "summary.md").write_text(self._build_summary(specs))
+        removed = compact_summary(str(tmp_path), max_sessions=15)
+        assert removed > 0
+
+        content = (mem / "summary.md").read_text()
+        for proj in projects:
+            assert proj in content, f"Project {proj} was evicted from summary"
 
 
 # ---------------------------------------------------------------------------
