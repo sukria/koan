@@ -189,6 +189,24 @@ class TestBuildPrompt:
             )
             assert result == "prompt"
 
+    def test_prompt_includes_pr_creation_step(self):
+        """implement.md must instruct Claude to push and create a draft PR."""
+        skill_dir = Path(__file__).resolve().parent.parent / "skills" / "core" / "implement"
+        from app.prompts import load_skill_prompt
+
+        prompt = load_skill_prompt(
+            skill_dir, "implement",
+            ISSUE_URL="https://github.com/o/r/issues/42",
+            ISSUE_TITLE="Test",
+            PLAN="Plan text",
+            CONTEXT="ctx",
+            BRANCH_PREFIX="koan/",
+            ISSUE_NUMBER="42",
+        )
+        assert "gh pr create --draft" in prompt
+        assert "git push" in prompt
+        assert "Closes https://github.com/o/r/issues/42" in prompt
+
 
 class TestExecuteImplementation:
     def test_passes_correct_run_command_params(self):

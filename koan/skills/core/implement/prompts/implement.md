@@ -42,4 +42,13 @@ You are implementing a plan from a GitHub issue. Your job is to read the plan ca
 
 9. **If the additional context specifies a subset** (e.g., "Phase 1 to 3"), only implement the specified phases. Skip the others.
 
+10. **Push and create a draft PR** after all phases are complete:
+    - Push the branch to origin: `git push -u origin HEAD`
+    - Create a draft PR using `gh pr create --draft`:
+      - Title: concise, under 70 characters
+      - Body: summary of changes, reference to the issue (`Closes {ISSUE_URL}`), and key decisions
+    - If the local repo is a fork, submit to the upstream repository:
+      `gh pr create --draft --repo <upstream-owner>/<repo> --head <fork-owner>:<branch> --title "..." --body "..."`
+    - PRs are **always draft**. Never create a non-draft PR.
+
 Keep your changes focused, testable, and consistent with the project's existing style.

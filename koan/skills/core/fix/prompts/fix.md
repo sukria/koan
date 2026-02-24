@@ -53,6 +53,28 @@ After each commit:
 15. **Run the full relevant test suite** to ensure no regressions.
 16. **Verify all issue items** are addressed.
 
+### Phase 7 — Submit Pull Request
+
+17. **Push the branch** to origin:
+    ```bash
+    git push -u origin HEAD
+    ```
+
+18. **Create a draft pull request** to upstream using `gh`:
+    ```bash
+    gh pr create --draft --title "fix: <concise title>" --body "<body>"
+    ```
+    - The PR title should be concise (under 70 characters), prefixed with `fix:`.
+    - The PR body should include:
+      - A short summary of what the fix does and why
+      - A reference to the issue: `Fixes {ISSUE_URL}`
+      - A list of the key changes
+    - If the local repo is a fork, submit the PR to the upstream repository:
+      ```bash
+      gh pr create --draft --repo <upstream-owner>/<repo> --head <fork-owner>:<branch> --title "..." --body "..."
+      ```
+    - PRs are **always draft**. Never create a non-draft PR.
+
 ## Rules
 
 - **Minimal changes.** Fix the issue, don't refactor unrelated code.
@@ -61,3 +83,4 @@ After each commit:
 - **Test before commit.** Never commit code that breaks tests.
 - **Be surgical.** Smallest change that solves the problem correctly.
 - **Document decisions.** If you made a non-obvious choice, explain it in a comment or commit message.
+- **Always submit a PR.** The fix is not complete until a draft PR is created.
