@@ -163,10 +163,14 @@ class TestOverview:
         from skills.core.stats.handler import handle
         result = handle(ctx)
         lines = result.split("\n")
-        # Project lines have format "  project: N (X% productive)" — skip header lines
+        # Project lines: "  project: N (X% productive)" — exclude headers and time lines
         project_lines = [
             l.strip() for l in lines
-            if "% productive)" in l and not l.strip().startswith("Total")
+            if "% productive)" in l
+            and not l.strip().startswith("Total")
+            and not l.strip().startswith("Today")
+            and not l.strip().startswith("This week")
+            and not l.strip().startswith("Last week")
         ]
         # beta (3 sessions) should come before alpha (1 session)
         assert project_lines[0].startswith("beta")
@@ -334,3 +338,222 @@ class TestHelpers:
     def test_load_outcomes_missing_file(self, tmp_path):
         from skills.core.stats.handler import _load_outcomes
         assert _load_outcomes(tmp_path / "missing.json") == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: Productive streak
+# ---------------------------------------------------------------------------
+
+class TestProductiveStreak:
+    def test_all_productive(self):
+        from skills.core.stats.handler import _productive_streak
+        outcomes = [{"outcome": "productive"}, {"outcome": "productive"}]
+        assert _productive_streak(outcomes) == 2
+
+    def test_broken_by_empty(self):
+        from skills.core.stats.handler import _productive_streak
+        outcomes = [
+            {"outcome": "productive"},
+            {"outcome": "empty"},
+            {"outcome": "productive"},
+        ]
+        assert _productive_streak(outcomes) == 1
+
+    def test_no_productive(self):
+        from skills.core.stats.handler import _productive_streak
+        outcomes = [{"outcome": "empty"}, {"outcome": "blocked"}]
+        assert _productive_streak(outcomes) == 0
+
+    def test_empty_list(self):
+        from skills.core.stats.handler import _productive_streak
+        assert _productive_streak([]) == 0
+
+    def test_long_streak(self):
+        from skills.core.stats.handler import _productive_streak
+        outcomes = [{"outcome": "productive"} for _ in range(10)]
+        assert _productive_streak(outcomes) == 10
+
+    def test_streak_shown_in_overview(self, tmp_path):
+        ctx = _make_ctx(tmp_path)
+        outcomes = [
+            _make_outcome(outcome="productive", hours_ago=i)
+            for i in range(3)
+        ]
+        _write_outcomes(ctx.instance_dir, outcomes)
+        from skills.core.stats.handler import handle
+        result = handle(ctx)
+        assert "Streak: 3 productive in a row" in result
+
+    def test_streak_hidden_when_one(self, tmp_path):
+        ctx = _make_ctx(tmp_path)
+        outcomes = [_make_outcome(outcome="productive")]
+        _write_outcomes(ctx.instance_dir, outcomes)
+        from skills.core.stats.handler import handle
+        result = handle(ctx)
+        assert "Streak" not in result
+
+    def test_streak_hidden_when_zero(self, tmp_path):
+        ctx = _make_ctx(tmp_path)
+        outcomes = [_make_outcome(outcome="empty")]
+        _write_outcomes(ctx.instance_dir, outcomes)
+        from skills.core.stats.handler import handle
+        result = handle(ctx)
+        assert "Streak" not in result
+
+    def test_streak_in_project_detail(self, tmp_path):
+        ctx = _make_ctx(tmp_path, args="koan")
+        outcomes = [
+            _make_outcome(outcome="productive", hours_ago=i)
+            for i in range(4)
+        ]
+        _write_outcomes(ctx.instance_dir, outcomes)
+        from skills.core.stats.handler import handle
+        result = handle(ctx)
+        assert "Streak: 4 productive in a row" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: Time-based filtering
+# ---------------------------------------------------------------------------
+
+class TestTimeFilter:
+    def test_filter_today(self):
+        from skills.core.stats.handler import _filter_by_period
+        now = datetime(2026, 2, 23, 15, 0, 0)
+        outcomes = [
+            {"timestamp": "2026-02-23T10:00:00"},  # today
+            {"timestamp": "2026-02-23T14:00:00"},  # today
+            {"timestamp": "2026-02-22T23:00:00"},  # yesterday
+        ]
+        result = _filter_by_period(outcomes, "today", now)
+        assert len(result) == 2
+
+    def test_filter_today_empty(self):
+        from skills.core.stats.handler import _filter_by_period
+        now = datetime(2026, 2, 23, 15, 0, 0)
+        outcomes = [
+            {"timestamp": "2026-02-22T23:00:00"},  # yesterday
+        ]
+        result = _filter_by_period(outcomes, "today", now)
+        assert len(result) == 0
+
+    def test_filter_week(self):
+        from skills.core.stats.handler import _filter_by_period
+        # 2026-02-23 is a Monday
+        now = datetime(2026, 2, 25, 15, 0, 0)  # Wednesday
+        outcomes = [
+            {"timestamp": "2026-02-23T10:00:00"},  # Monday (this week)
+            {"timestamp": "2026-02-24T10:00:00"},  # Tuesday (this week)
+            {"timestamp": "2026-02-22T10:00:00"},  # Sunday (last week)
+        ]
+        result = _filter_by_period(outcomes, "week", now)
+        assert len(result) == 2
+
+    def test_filter_last_week(self):
+        from skills.core.stats.handler import _filter_by_period
+        # 2026-02-23 is a Monday
+        now = datetime(2026, 2, 25, 15, 0, 0)  # Wednesday
+        # Last week = Mon Feb 16 to Sun Feb 22
+        outcomes = [
+            {"timestamp": "2026-02-23T10:00:00"},  # Monday (this week)
+            {"timestamp": "2026-02-18T10:00:00"},  # last Wednesday (last week)
+            {"timestamp": "2026-02-15T10:00:00"},  # Sunday (2 weeks ago)
+        ]
+        result = _filter_by_period(outcomes, "last_week", now)
+        assert len(result) == 1
+
+    def test_filter_invalid_timestamps_skipped(self):
+        from skills.core.stats.handler import _filter_by_period
+        now = datetime(2026, 2, 23, 15, 0, 0)
+        outcomes = [
+            {"timestamp": "2026-02-23T10:00:00"},
+            {"timestamp": "bad-timestamp"},
+            {},
+        ]
+        result = _filter_by_period(outcomes, "today", now)
+        assert len(result) == 1
+
+    def test_filter_unknown_period(self):
+        from skills.core.stats.handler import _filter_by_period
+        outcomes = [{"timestamp": "2026-02-23T10:00:00"}]
+        result = _filter_by_period(outcomes, "unknown", datetime(2026, 2, 23))
+        assert len(result) == 1  # returns all
+
+
+# ---------------------------------------------------------------------------
+# Tests: Period line formatting
+# ---------------------------------------------------------------------------
+
+class TestPeriodLine:
+    def test_format_period_line(self):
+        from skills.core.stats.handler import _format_period_line
+        outcomes = [
+            {"outcome": "productive"},
+            {"outcome": "productive"},
+            {"outcome": "empty"},
+        ]
+        result = _format_period_line(outcomes, "Today")
+        assert "Today: 3 sessions (66% productive)" in result
+
+    def test_empty_period(self):
+        from skills.core.stats.handler import _format_period_line
+        result = _format_period_line([], "Today")
+        assert result == ""
+
+    def test_all_productive(self):
+        from skills.core.stats.handler import _format_period_line
+        outcomes = [{"outcome": "productive"}, {"outcome": "productive"}]
+        result = _format_period_line(outcomes, "This week")
+        assert "100% productive" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: Time breakdowns in overview and detail
+# ---------------------------------------------------------------------------
+
+class TestTimeBreakdowns:
+    def test_overview_shows_today(self, tmp_path):
+        ctx = _make_ctx(tmp_path)
+        outcomes = [
+            _make_outcome(outcome="productive", hours_ago=1),
+            _make_outcome(outcome="empty", hours_ago=2),
+        ]
+        _write_outcomes(ctx.instance_dir, outcomes)
+        from skills.core.stats.handler import handle
+        result = handle(ctx)
+        assert "Today:" in result
+
+    def test_overview_shows_this_week(self, tmp_path):
+        ctx = _make_ctx(tmp_path)
+        outcomes = [
+            _make_outcome(outcome="productive", hours_ago=1),
+        ]
+        _write_outcomes(ctx.instance_dir, outcomes)
+        from skills.core.stats.handler import handle
+        result = handle(ctx)
+        assert "This week:" in result
+
+    def test_detail_shows_today(self, tmp_path):
+        ctx = _make_ctx(tmp_path, args="koan")
+        outcomes = [
+            _make_outcome(outcome="productive", hours_ago=1),
+            _make_outcome(outcome="productive", hours_ago=2),
+        ]
+        _write_outcomes(ctx.instance_dir, outcomes)
+        from skills.core.stats.handler import handle
+        result = handle(ctx)
+        assert "Today:" in result
+
+    def test_no_time_lines_for_old_data(self, tmp_path):
+        """Old outcomes (>2 weeks ago) shouldn't show Today/This week lines."""
+        ctx = _make_ctx(tmp_path)
+        # 500 hours ago = ~20 days
+        outcomes = [
+            _make_outcome(outcome="productive", hours_ago=500),
+        ]
+        _write_outcomes(ctx.instance_dir, outcomes)
+        from skills.core.stats.handler import handle
+        result = handle(ctx)
+        assert "Today:" not in result
+        # "This week:" should also be absent for data from 20 days ago
+        assert "This week:" not in result
