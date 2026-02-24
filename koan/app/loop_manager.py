@@ -289,6 +289,10 @@ def _get_known_repos_from_projects(koan_root: str) -> Optional[set]:
         if gh_url:
             normalized = _normalize_github_url(gh_url)
             known_repos.add(normalized)
+        # Also include all remotes (github_urls) for fork workflows
+        for url in proj.get("github_urls", []):
+            if url:
+                known_repos.add(_normalize_github_url(url))
 
     if known_repos:
         log.debug("GitHub: known repos from projects.yaml: %s", known_repos)

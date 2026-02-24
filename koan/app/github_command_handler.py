@@ -448,6 +448,7 @@ def process_single_notification(
     if not project_info:
         repo_name = notification.get("repository", {}).get("full_name", "?")
         log.debug("GitHub: repo %s not found in projects.yaml", repo_name)
+        mark_notification_read(str(notification.get("id", "")))
         return False, "Unknown repository — not configured in projects.yaml"
 
     project_name, owner, repo = project_info
@@ -560,11 +561,12 @@ def post_error_reply(
             method="POST",
             extra_args=["-f", f"body={body}"],
         )
-        _error_replies.add(error_key)
 
-        # Also add reaction to mark as processed
+        # Add reaction to mark as processed
         add_reaction(owner, repo, comment_id,
                      comment_api_url=comment_api_url)
+        # Mark as sent only after both comment and reaction succeed
+        _error_replies.add(error_key)
         return True
     except RuntimeError:
         return False

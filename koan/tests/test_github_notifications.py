@@ -1,6 +1,7 @@
 """Tests for github_notifications.py — notification fetching, parsing, reactions."""
 
 import json
+import subprocess
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +16,7 @@ from app.github_notifications import (
     check_user_permission,
     extract_comment_metadata,
     fetch_unread_notifications,
+    get_comment_from_notification,
     is_notification_stale,
     is_self_mention,
     parse_mention_command,
@@ -438,3 +440,67 @@ class TestAddReactionWithUrl:
             method="POST",
             extra_args=["-f", "content=+1"],
         )
+
+
+class TestGetCommentFromNotification:
+    """Tests for get_comment_from_notification."""
+
+    @patch("app.github_notifications.api")
+    def test_returns_comment_dict(self, mock_api):
+        comment = {"id": 42, "body": "hello", "user": {"login": "alice"}}
+        mock_api.return_value = json.dumps(comment)
+        notif = {
+            "subject": {
+                "latest_comment_url": "https://api.github.com/repos/o/r/issues/comments/42",
+            },
+        }
+        result = get_comment_from_notification(notif)
+        assert result == comment
+
+    @patch("app.github_notifications.api")
+    def test_returns_none_on_runtime_error(self, mock_api):
+        mock_api.side_effect = RuntimeError("API error")
+        notif = {
+            "subject": {
+                "latest_comment_url": "https://api.github.com/repos/o/r/issues/comments/42",
+            },
+        }
+        result = get_comment_from_notification(notif)
+        assert result is None
+
+    @patch("app.github_notifications.api")
+    def test_returns_none_on_timeout(self, mock_api):
+        """TimeoutExpired must be caught to avoid crashing the notification loop."""
+        mock_api.side_effect = subprocess.TimeoutExpired(cmd="gh", timeout=30)
+        notif = {
+            "subject": {
+                "latest_comment_url": "https://api.github.com/repos/o/r/issues/comments/42",
+            },
+        }
+        result = get_comment_from_notification(notif)
+        assert result is None
+
+    @patch("app.github_notifications.api")
+    def test_returns_none_on_invalid_json(self, mock_api):
+        mock_api.return_value = "not json"
+        notif = {
+            "subject": {
+                "latest_comment_url": "https://api.github.com/repos/o/r/issues/comments/42",
+            },
+        }
+        result = get_comment_from_notification(notif)
+        assert result is None
+
+    def test_returns_none_on_missing_url(self):
+        notif = {"subject": {}}
+        result = get_comment_from_notification(notif)
+        assert result is None
+
+    def test_returns_none_on_non_api_url(self):
+        notif = {
+            "subject": {
+                "latest_comment_url": "https://github.com/o/r/issues/1",
+            },
+        }
+        result = get_comment_from_notification(notif)
+        assert result is None
