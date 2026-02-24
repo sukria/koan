@@ -944,6 +944,50 @@ class TestHandlePause:
             result = handle_pause(str(koan_root), instance, 5)
             assert result is None
 
+    @patch("app.run.time.sleep")
+    def test_pause_breaks_on_stop_signal(self, mock_sleep, koan_root):
+        """Pause breaks out when .koan-stop appears, returns None."""
+        from app.run import handle_pause
+
+        instance = str(koan_root / "instance")
+        (koan_root / ".koan-pause").touch()
+
+        sleep_count = [0]
+        def create_stop_after_2(duration):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 2:
+                (koan_root / ".koan-stop").write_text("STOP")
+
+        mock_sleep.side_effect = create_stop_after_2
+
+        with patch("app.pause_manager.check_and_resume", return_value=None):
+            result = handle_pause(str(koan_root), instance, 5)
+            assert result is None
+            # Should break much earlier than 60 sleeps
+            assert mock_sleep.call_count < 10
+
+    @patch("app.run.time.sleep")
+    def test_pause_breaks_on_shutdown_signal(self, mock_sleep, koan_root):
+        """Pause breaks out when .koan-shutdown appears, returns None."""
+        from app.run import handle_pause
+
+        instance = str(koan_root / "instance")
+        (koan_root / ".koan-pause").touch()
+
+        sleep_count = [0]
+        def create_shutdown_after_2(duration):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 2:
+                (koan_root / ".koan-shutdown").write_text(str(int(time.time())))
+
+        mock_sleep.side_effect = create_shutdown_after_2
+
+        with patch("app.pause_manager.check_and_resume", return_value=None):
+            result = handle_pause(str(koan_root), instance, 5)
+            assert result is None
+            # Should break much earlier than 60 sleeps
+            assert mock_sleep.call_count < 10
+
 
 # ---------------------------------------------------------------------------
 # Test: run_claude_task
