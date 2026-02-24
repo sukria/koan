@@ -246,6 +246,29 @@ class protected_phase:
         return False  # Don't suppress exceptions
 
 
+def _kill_process_group(proc):
+    """Terminate a subprocess and its entire process group.
+
+    When a subprocess is started with ``start_new_session=True``, it becomes
+    the leader of a new process group.  A simple ``proc.terminate()`` only
+    sends SIGTERM to the leader — children survive.  This helper sends
+    SIGTERM to the whole group, then SIGKILL if still alive after 3 s.
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            os.killpg(pgid, signal.SIGKILL)
+            proc.wait(timeout=5)
+    except (ProcessLookupError, PermissionError, OSError):
+        # Process already gone or we lack permissions — nothing to do.
+        pass
+
+
 def _on_sigint(signum, frame):
     """SIGINT handler: first press warns, second press aborts."""
     if not _sig.task_running:
@@ -258,8 +281,7 @@ def _on_sigint(signum, frame):
             # Second CTRL-C within timeout — abort
             print()
             log("koan", "Confirmed. Aborting...")
-            if _sig.claude_proc and _sig.claude_proc.poll() is None:
-                _sig.claude_proc.terminate()
+            _kill_process_group(_sig.claude_proc)
             _sig.first_ctrl_c = 0
             _sig.task_running = False
             raise KeyboardInterrupt
@@ -333,8 +355,7 @@ def run_claude_task(
                             try:
                                 proc.wait(timeout=5)
                             except subprocess.TimeoutExpired:
-                                proc.kill()
-                                proc.wait()
+                                _kill_process_group(proc)
                             break
                         # Single CTRL-C — keep waiting
                         continue
@@ -1796,6 +1817,8 @@ def _run_skill_mission(
             text=True,
             start_new_session=True,
         )
+        # Register for double-tap CTRL-C termination.
+        _sig.claude_proc = proc
         # Drain stderr in a background thread to prevent deadlock.
         # If the child fills the stderr pipe buffer (~64KB) while we
         # block reading stdout, both processes stall indefinitely.
@@ -1835,8 +1858,7 @@ def _run_skill_mission(
             if skill_stderr:
                 debug_log(f"[run] skill stderr: {skill_stderr[:2000]}")
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        _kill_process_group(proc)
         log("error", "Skill runner timed out (10min)")
         debug_log("[run] skill exec: TIMEOUT (600s)")
         exit_code = 1
@@ -1849,6 +1871,7 @@ def _run_skill_mission(
         skill_stdout = "\n".join(stdout_lines)
         skill_stderr = "\n".join(stderr_lines)
     finally:
+        _sig.claude_proc = None
         _reset_terminal()
         # Restore koan repo branch if it was changed by the skill.
         _restore_koan_branch(koan_root, koan_branch_before)
