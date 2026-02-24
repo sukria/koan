@@ -1072,25 +1072,32 @@ def _handle_skill_dispatch(
         except Exception as e:
             log("error", f"Failed to create pending.md for skill dispatch: {e}")
 
-        with protected_phase(f"Skill: {mission_title[:50]}"):
-            exit_code = _run_skill_mission(
-                skill_cmd=skill_cmd,
-                koan_root=koan_root,
-                instance=instance,
-                project_name=project_name,
-                project_path=project_path,
-                run_num=run_num,
-                mission_title=mission_title,
-                autonomous_mode=autonomous_mode,
-            )
+        exit_code = 1
+        try:
+            with protected_phase(f"Skill: {mission_title[:50]}"):
+                exit_code = _run_skill_mission(
+                    skill_cmd=skill_cmd,
+                    koan_root=koan_root,
+                    instance=instance,
+                    project_name=project_name,
+                    project_path=project_path,
+                    run_num=run_num,
+                    mission_title=mission_title,
+                    autonomous_mode=autonomous_mode,
+                )
+            if exit_code == 0:
+                log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
+        except KeyboardInterrupt:
+            log("error", "Skill dispatch interrupted by user")
+            _finalize_mission(instance, mission_title, project_name, 1)
+            raise
+        except Exception as e:
+            log("error", f"Skill dispatch exception: {e}")
 
-        if exit_code == 0:
-            log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
         _notify_mission_end(
             instance, project_name, run_num, max_runs,
             exit_code, mission_title,
         )
-
         _finalize_mission(instance, mission_title, project_name, exit_code)
         _commit_instance(instance)
 

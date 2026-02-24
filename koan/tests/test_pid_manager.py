@@ -1847,3 +1847,56 @@ class TestWaitForExit:
             result = _wait_for_exit(42, 0)
 
         assert result is True
+
+
+class TestStartRunnerClearsPause:
+    """Bug fix: /start must clear .koan-pause so runner doesn't enter pause mode."""
+
+    def test_clears_pause_file_on_start(self, tmp_path):
+        """start_runner removes .koan-pause so the agent starts fresh."""
+        pause_file = tmp_path / ".koan-pause"
+        pause_file.write_text("2026-02-24T14:00:00")
+
+        with patch("app.pid_manager.subprocess.Popen"), \
+             patch("app.pid_manager.check_pidfile", side_effect=[None] * 10):
+            start_runner(tmp_path, verify_timeout=0.5)
+
+        assert not pause_file.exists()
+
+    def test_clears_pause_reason_on_start(self, tmp_path):
+        """start_runner removes .koan-pause-reason alongside .koan-pause."""
+        pause_file = tmp_path / ".koan-pause"
+        pause_file.write_text("2026-02-24T14:00:00")
+        reason_file = tmp_path / ".koan-pause-reason"
+        reason_file.write_text("errors")
+
+        with patch("app.pid_manager.subprocess.Popen"), \
+             patch("app.pid_manager.check_pidfile", side_effect=[None] * 10):
+            start_runner(tmp_path, verify_timeout=0.5)
+
+        assert not pause_file.exists()
+        assert not reason_file.exists()
+
+    def test_clears_all_signals_on_start(self, tmp_path):
+        """start_runner clears stop, pause, and pause-reason together."""
+        stop_file = tmp_path / ".koan-stop"
+        stop_file.write_text("STOP")
+        pause_file = tmp_path / ".koan-pause"
+        pause_file.write_text("2026-02-24T14:00:00")
+        reason_file = tmp_path / ".koan-pause-reason"
+        reason_file.write_text("manual")
+
+        with patch("app.pid_manager.subprocess.Popen"), \
+             patch("app.pid_manager.check_pidfile", side_effect=[None] * 10):
+            start_runner(tmp_path, verify_timeout=0.5)
+
+        assert not stop_file.exists()
+        assert not pause_file.exists()
+        assert not reason_file.exists()
+
+    def test_no_error_when_pause_files_absent(self, tmp_path):
+        """start_runner doesn't crash if pause files don't exist."""
+        with patch("app.pid_manager.subprocess.Popen"), \
+             patch("app.pid_manager.check_pidfile", side_effect=[None] * 10):
+            # Should not raise
+            start_runner(tmp_path, verify_timeout=0.5)

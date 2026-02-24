@@ -2950,3 +2950,149 @@ class TestRestartManagerIntegration:
                      (len(c.args) > 1 and c.args[1] > 0)]
             assert len(calls) >= 1, "check_restart must be called with since=start_time"
             mock_clear.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: skill dispatch exception must finalize mission
+# ---------------------------------------------------------------------------
+
+
+class TestSkillDispatchExceptionFinalization(TestRunSkillMissionEnv):
+    """Verify that _handle_skill_dispatch finalizes the mission even on exception."""
+
+    def test_exception_during_skill_still_finalizes(self, tmp_path):
+        """If _run_skill_mission raises, _finalize_mission must still be called."""
+        from app.run import _handle_skill_dispatch
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        with patch("app.run.subprocess.Popen", side_effect=OSError("exec failed")), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.protected_phase", return_value=MagicMock(
+                 __enter__=MagicMock(), __exit__=MagicMock(return_value=False)
+             )), \
+             patch("app.run._notify"), \
+             patch("app.run._notify_mission_end") as mock_notify_end, \
+             patch("app.run._finalize_mission") as mock_finalize, \
+             patch("app.run._commit_instance"), \
+             patch("app.run._sleep_between_runs"), \
+             patch("app.run.set_status"), \
+             patch("app.run.log"), \
+             patch("app.skill_dispatch.dispatch_skill_mission",
+                   return_value=["python3", "-m", "app.plan_runner"]), \
+             patch("app.mission_runner.run_post_mission"):
+            handled, _ = _handle_skill_dispatch(
+                mission_title="/plan test",
+                project_name="test",
+                project_path=str(tmp_path),
+                koan_root=koan_root,
+                instance=instance,
+                run_num=1,
+                max_runs=20,
+                autonomous_mode="implement",
+                interval=30,
+            )
+
+        assert handled is True
+        # _finalize_mission must have been called even though execution raised
+        mock_finalize.assert_called_once()
+        finalize_args = mock_finalize.call_args[0]
+        assert finalize_args[3] == 1  # exit_code should be 1 (failure)
+
+    def test_keyboard_interrupt_during_skill_finalizes_then_raises(self, tmp_path):
+        """KeyboardInterrupt during skill dispatch must finalize then re-raise."""
+        from app.run import _handle_skill_dispatch
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(returncode=1)
+        mock_proc.wait.side_effect = KeyboardInterrupt()
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.protected_phase", return_value=MagicMock(
+                 __enter__=MagicMock(), __exit__=MagicMock(return_value=False)
+             )), \
+             patch("app.run._notify"), \
+             patch("app.run._notify_mission_end"), \
+             patch("app.run._finalize_mission") as mock_finalize, \
+             patch("app.run._commit_instance"), \
+             patch("app.run._sleep_between_runs"), \
+             patch("app.run.set_status"), \
+             patch("app.run.log"), \
+             patch("app.skill_dispatch.dispatch_skill_mission",
+                   return_value=["python3", "-m", "app.plan_runner"]), \
+             patch("app.mission_runner.run_post_mission"):
+            with pytest.raises(KeyboardInterrupt):
+                _handle_skill_dispatch(
+                    mission_title="/plan test",
+                    project_name="test",
+                    project_path=str(tmp_path),
+                    koan_root=koan_root,
+                    instance=instance,
+                    run_num=1,
+                    max_runs=20,
+                    autonomous_mode="implement",
+                    interval=30,
+                )
+
+        # _finalize_mission called with exit_code=1 before re-raising
+        mock_finalize.assert_called_once()
+        assert mock_finalize.call_args[0][3] == 1
+
+    def test_successful_skill_dispatch_uses_real_exit_code(self, tmp_path):
+        """On success, _finalize_mission receives exit_code=0."""
+        from app.run import _handle_skill_dispatch
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(returncode=0, stdout_lines=["ok\n"])
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.protected_phase", return_value=MagicMock(
+                 __enter__=MagicMock(), __exit__=MagicMock(return_value=False)
+             )), \
+             patch("app.run._notify"), \
+             patch("app.run._notify_mission_end"), \
+             patch("app.run._finalize_mission") as mock_finalize, \
+             patch("app.run._commit_instance"), \
+             patch("app.run._sleep_between_runs"), \
+             patch("app.run.set_status"), \
+             patch("app.run.log"), \
+             patch("app.skill_dispatch.dispatch_skill_mission",
+                   return_value=["python3", "-m", "app.plan_runner"]), \
+             patch("app.mission_runner.run_post_mission"):
+            handled, _ = _handle_skill_dispatch(
+                mission_title="/plan test",
+                project_name="test",
+                project_path=str(tmp_path),
+                koan_root=koan_root,
+                instance=instance,
+                run_num=1,
+                max_runs=20,
+                autonomous_mode="implement",
+                interval=30,
+            )
+
+        assert handled is True
+        mock_finalize.assert_called_once()
+        assert mock_finalize.call_args[0][3] == 0  # exit_code=0 on success
