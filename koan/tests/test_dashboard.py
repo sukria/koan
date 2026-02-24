@@ -457,3 +457,318 @@ class TestApiProgressStream:
         resp = app_client.get("/api/progress/stream")
         assert resp.status_code == 200
         assert "text/event-stream" in resp.content_type
+
+
+# ---------------------------------------------------------------------------
+# Signal status — pause, reason, reset time, daily report
+# ---------------------------------------------------------------------------
+
+class TestSignalStatusPause:
+    """Test get_signal_status() pause reason parsing and edge cases."""
+
+    def test_pause_signal(self, tmp_path):
+        (tmp_path / ".koan-pause").write_text("1")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert status["paused"] is True
+
+    def test_pause_reason_quota(self, tmp_path):
+        (tmp_path / ".koan-pause").write_text("1")
+        (tmp_path / ".koan-pause-reason").write_text("quota\n")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert status["pause_reason"] == "quota"
+
+    def test_pause_reason_max_runs(self, tmp_path):
+        (tmp_path / ".koan-pause").write_text("1")
+        (tmp_path / ".koan-pause-reason").write_text("max_runs\n")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert status["pause_reason"] == "max_runs"
+
+    def test_pause_reason_with_timestamp_line(self, tmp_path):
+        """Pause reason file with 2 lines: reason + unix timestamp."""
+        (tmp_path / ".koan-pause").write_text("1")
+        (tmp_path / ".koan-pause-reason").write_text("quota\n1740000000\n")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path), \
+             patch("app.reset_parser.time_until_reset", return_value="2h30m"):
+            status = dashboard.get_signal_status()
+            assert status["pause_reason"] == "quota"
+            assert "2h30m" in status["reset_time"]
+
+    def test_pause_reason_with_three_lines(self, tmp_path):
+        """Pause reason with human-readable reset on line 3."""
+        (tmp_path / ".koan-pause").write_text("1")
+        (tmp_path / ".koan-pause-reason").write_text(
+            "quota\n1740000000\nResets at 15:30\n"
+        )
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert status["reset_time"] == "Resets at 15:30"
+
+    def test_pause_reason_bad_timestamp(self, tmp_path):
+        """Non-numeric timestamp — should not crash."""
+        (tmp_path / ".koan-pause").write_text("1")
+        (tmp_path / ".koan-pause-reason").write_text("quota\nnot-a-number\n")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert status["pause_reason"] == "quota"
+            # reset_time stays empty — ValueError caught silently
+            assert status["reset_time"] == ""
+
+    def test_pause_reason_import_error(self, tmp_path):
+        """Missing reset_parser module — should not crash."""
+        (tmp_path / ".koan-pause").write_text("1")
+        (tmp_path / ".koan-pause-reason").write_text("quota\n1740000000\n")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path), \
+             patch.dict("sys.modules", {"app.reset_parser": None}):
+            status = dashboard.get_signal_status()
+            assert status["pause_reason"] == "quota"
+
+    def test_pause_reason_empty_file(self, tmp_path):
+        """Empty pause-reason file."""
+        (tmp_path / ".koan-pause").write_text("1")
+        (tmp_path / ".koan-pause-reason").write_text("")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert status["pause_reason"] == ""
+
+    def test_daily_report(self, tmp_path):
+        (tmp_path / ".koan-daily-report").write_text("5 sessions, 3 productive")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert status["last_report"] == "5 sessions, 3 productive"
+
+    def test_no_daily_report(self, tmp_path):
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert "last_report" not in status
+
+    def test_quota_reset_signal(self, tmp_path):
+        (tmp_path / ".koan-quota-reset").write_text("1")
+        with patch.object(dashboard, "KOAN_ROOT", tmp_path):
+            status = dashboard.get_signal_status()
+            assert status["quota_paused"] is True
+
+
+# ---------------------------------------------------------------------------
+# Journal entries — flat files, mixed, limit, filtering
+# ---------------------------------------------------------------------------
+
+class TestJournalEntries:
+    """Test get_journal_entries() with various directory structures."""
+
+    def test_flat_journal_file(self, tmp_path):
+        journal = tmp_path / "journal"
+        journal.mkdir()
+        (journal / "2026-02-15.md").write_text("Flat journal entry.")
+        with patch.object(dashboard, "JOURNAL_DIR", journal):
+            entries = dashboard.get_journal_entries()
+            assert len(entries) == 1
+            assert entries[0]["date"] == "2026-02-15"
+            assert entries[0]["entries"][0]["project"] == "general"
+            assert "Flat journal entry" in entries[0]["entries"][0]["content"]
+
+    def test_mixed_flat_and_nested(self, tmp_path):
+        journal = tmp_path / "journal"
+        journal.mkdir()
+        (journal / "2026-02-15.md").write_text("Flat entry.")
+        nested = journal / "2026-02-16"
+        nested.mkdir()
+        (nested / "koan.md").write_text("Nested koan entry.")
+        with patch.object(dashboard, "JOURNAL_DIR", journal):
+            entries = dashboard.get_journal_entries()
+            assert len(entries) == 2
+            # Most recent first
+            assert entries[0]["date"] == "2026-02-16"
+            assert entries[1]["date"] == "2026-02-15"
+
+    def test_same_date_flat_and_nested(self, tmp_path):
+        """Same date has both flat and nested — both appear."""
+        journal = tmp_path / "journal"
+        journal.mkdir()
+        (journal / "2026-02-15.md").write_text("Flat.")
+        nested = journal / "2026-02-15"
+        nested.mkdir()
+        (nested / "backend.md").write_text("Nested.")
+        with patch.object(dashboard, "JOURNAL_DIR", journal):
+            entries = dashboard.get_journal_entries()
+            assert len(entries) == 1
+            # Should have both entries for the same date
+            assert len(entries[0]["entries"]) == 2
+
+    def test_limit_parameter(self, tmp_path):
+        journal = tmp_path / "journal"
+        journal.mkdir()
+        for i in range(10):
+            d = journal / f"2026-02-{i+1:02d}"
+            d.mkdir()
+            (d / "koan.md").write_text(f"Entry {i}")
+        with patch.object(dashboard, "JOURNAL_DIR", journal):
+            entries = dashboard.get_journal_entries(limit=3)
+            assert len(entries) == 3
+            # Most recent
+            assert entries[0]["date"] == "2026-02-10"
+
+    def test_non_date_files_ignored(self, tmp_path):
+        journal = tmp_path / "journal"
+        journal.mkdir()
+        (journal / "pending.md").write_text("not a date")
+        (journal / "README.md").write_text("not a date")
+        (journal / "2026-02-15").mkdir()
+        (journal / "2026-02-15" / "koan.md").write_text("valid")
+        with patch.object(dashboard, "JOURNAL_DIR", journal):
+            entries = dashboard.get_journal_entries()
+            assert len(entries) == 1
+            assert entries[0]["date"] == "2026-02-15"
+
+    def test_multiple_projects_in_nested(self, tmp_path):
+        journal = tmp_path / "journal"
+        d = journal / "2026-02-20"
+        d.mkdir(parents=True)
+        (d / "koan.md").write_text("Koan work.")
+        (d / "backend.md").write_text("Backend work.")
+        (d / "tmf.md").write_text("TMF work.")
+        with patch.object(dashboard, "JOURNAL_DIR", journal):
+            entries = dashboard.get_journal_entries()
+            assert len(entries) == 1
+            projects = [e["project"] for e in entries[0]["entries"]]
+            assert "koan" in projects
+            assert "backend" in projects
+            assert "tmf" in projects
+
+
+# ---------------------------------------------------------------------------
+# Index route — state determination
+# ---------------------------------------------------------------------------
+
+class TestIndexState:
+    """Test index route state label logic."""
+
+    def test_stopped_state(self, app_client, tmp_path):
+        (tmp_path / ".koan-stop").write_text("1")
+        resp = app_client.get("/")
+        assert resp.status_code == 200
+        assert b"Stopped" in resp.data
+
+    def test_quota_paused_state(self, app_client, tmp_path):
+        (tmp_path / ".koan-quota-reset").write_text("1")
+        resp = app_client.get("/")
+        assert resp.status_code == 200
+        assert b"Quota" in resp.data
+
+    def test_running_state_with_loop(self, app_client, tmp_path):
+        (tmp_path / ".koan-status").write_text("5/20")
+        resp = app_client.get("/")
+        assert resp.status_code == 200
+        assert b"5/20" in resp.data
+
+    def test_idle_state(self, app_client, tmp_path):
+        """No signal files at all — idle."""
+        resp = app_client.get("/")
+        assert resp.status_code == 200
+        assert b"Idle" in resp.data
+
+    def test_stop_takes_precedence(self, app_client, tmp_path):
+        """Stop + quota → shows Stopped."""
+        (tmp_path / ".koan-stop").write_text("1")
+        (tmp_path / ".koan-quota-reset").write_text("1")
+        (tmp_path / ".koan-status").write_text("3/20")
+        resp = app_client.get("/")
+        assert resp.status_code == 200
+        assert b"Stopped" in resp.data
+
+
+# ---------------------------------------------------------------------------
+# Add mission edge cases
+# ---------------------------------------------------------------------------
+
+class TestAddMissionEdges:
+    def test_add_empty_mission_redirects(self, app_client, instance_dir):
+        """Empty text should redirect without modifying missions."""
+        original = (instance_dir / "missions.md").read_text()
+        resp = app_client.post("/missions/add", data={
+            "mission": "",
+            "project": "koan",
+        })
+        assert resp.status_code == 302  # redirect
+        assert (instance_dir / "missions.md").read_text() == original
+
+    def test_add_whitespace_only_mission(self, app_client, instance_dir):
+        """Whitespace-only text should redirect without modifying missions."""
+        original = (instance_dir / "missions.md").read_text()
+        resp = app_client.post("/missions/add", data={
+            "mission": "   ",
+            "project": "",
+        })
+        assert resp.status_code == 302
+        assert (instance_dir / "missions.md").read_text() == original
+
+
+# ---------------------------------------------------------------------------
+# read_file helper
+# ---------------------------------------------------------------------------
+
+class TestReadFile:
+    def test_existing_file(self, tmp_path):
+        f = tmp_path / "test.md"
+        f.write_text("hello world")
+        assert dashboard.read_file(f) == "hello world"
+
+    def test_missing_file(self, tmp_path):
+        assert dashboard.read_file(tmp_path / "missing.md") == ""
+
+
+# ---------------------------------------------------------------------------
+# _build_dashboard_prompt — full mode
+# ---------------------------------------------------------------------------
+
+class TestBuildDashboardPromptFull:
+    """Test _build_dashboard_prompt in full (default) mode."""
+
+    def test_full_prompt_includes_journal_and_summary(self, instance_dir):
+        with patch.object(dashboard, "CONVERSATION_HISTORY_FILE", instance_dir / "history.jsonl"), \
+             patch.object(dashboard, "SOUL_FILE", instance_dir / "soul.md"), \
+             patch.object(dashboard, "SUMMARY_FILE", instance_dir / "memory" / "summary.md"), \
+             patch.object(dashboard, "INSTANCE_DIR", instance_dir), \
+             patch("app.dashboard.load_recent_history", return_value=[]), \
+             patch("app.dashboard.format_conversation_history", return_value=""), \
+             patch("app.dashboard.get_tools_description", return_value=""):
+            prompt = dashboard._build_dashboard_prompt("hello", lite=False)
+        assert "You are Kōan" in prompt
+        assert "Session 1: bootstrapped" in prompt
+
+    def test_full_prompt_truncates_summary(self, instance_dir):
+        """Summary > 1500 chars should be truncated."""
+        long_summary = "A" * 3000
+        (instance_dir / "memory" / "summary.md").write_text(long_summary)
+        with patch.object(dashboard, "CONVERSATION_HISTORY_FILE", instance_dir / "history.jsonl"), \
+             patch.object(dashboard, "SOUL_FILE", instance_dir / "soul.md"), \
+             patch.object(dashboard, "SUMMARY_FILE", instance_dir / "memory" / "summary.md"), \
+             patch.object(dashboard, "INSTANCE_DIR", instance_dir), \
+             patch("app.dashboard.load_recent_history", return_value=[]), \
+             patch("app.dashboard.format_conversation_history", return_value=""), \
+             patch("app.dashboard.get_tools_description", return_value=""):
+            prompt = dashboard._build_dashboard_prompt("hello")
+        # Full 3000-char summary should not appear
+        assert "A" * 3000 not in prompt
+        # But truncated version should
+        assert "A" * 1500 in prompt
+
+
+# ---------------------------------------------------------------------------
+# API status response structure
+# ---------------------------------------------------------------------------
+
+class TestApiStatusStructure:
+    def test_api_status_has_signals(self, app_client, tmp_path):
+        (tmp_path / ".koan-pause").write_text("1")
+        resp = app_client.get("/api/status")
+        data = resp.get_json()
+        assert "signals" in data
+        assert data["signals"]["paused"] is True
+
+    def test_api_status_done_count(self, app_client):
+        resp = app_client.get("/api/status")
+        data = resp.get_json()
+        assert data["missions"]["done"] == 1
