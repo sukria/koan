@@ -418,11 +418,15 @@ class TestOnSigint:
         _init_colors()
         _sig.task_running = True
         _sig.first_ctrl_c = time.time()  # Just set
-        _sig.claude_proc = MagicMock()
-        _sig.claude_proc.poll.return_value = None
-        with pytest.raises(KeyboardInterrupt):
-            _on_sigint(signal.SIGINT, None)
-        _sig.claude_proc.terminate.assert_called_once()
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 12345
+        _sig.claude_proc = mock_proc
+        with patch("app.run.os.getpgid", return_value=12345), \
+             patch("app.run.os.killpg") as mock_killpg:
+            with pytest.raises(KeyboardInterrupt):
+                _on_sigint(signal.SIGINT, None)
+            mock_killpg.assert_called_once_with(12345, signal.SIGTERM)
 
     def test_expired_timeout_resets(self, capsys):
         from app.run import _on_sigint, _sig, _init_colors
@@ -434,6 +438,63 @@ class TestOnSigint:
         assert _sig.first_ctrl_c > time.time() - 2
         out = capsys.readouterr().out
         assert "Press CTRL-C again" in out
+
+
+# ---------------------------------------------------------------------------
+# Test: _kill_process_group
+# ---------------------------------------------------------------------------
+
+class TestKillProcessGroup:
+    def test_kills_process_group_with_sigterm(self):
+        """_kill_process_group sends SIGTERM to the process group."""
+        from app.run import _kill_process_group
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 99999
+        proc.wait.return_value = 0
+        with patch("app.run.os.getpgid", return_value=99999) as mock_getpgid, \
+             patch("app.run.os.killpg") as mock_killpg:
+            _kill_process_group(proc)
+            mock_getpgid.assert_called_once_with(99999)
+            mock_killpg.assert_called_once_with(99999, signal.SIGTERM)
+            proc.wait.assert_called_once_with(timeout=3)
+
+    def test_falls_back_to_sigkill_on_timeout(self):
+        """_kill_process_group sends SIGKILL if SIGTERM times out."""
+        from app.run import _kill_process_group
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 99999
+        proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 3), 0]
+        with patch("app.run.os.getpgid", return_value=99999), \
+             patch("app.run.os.killpg") as mock_killpg:
+            _kill_process_group(proc)
+            assert mock_killpg.call_count == 2
+            mock_killpg.assert_any_call(99999, signal.SIGTERM)
+            mock_killpg.assert_any_call(99999, signal.SIGKILL)
+
+    def test_noop_when_proc_is_none(self):
+        """_kill_process_group does nothing for None."""
+        from app.run import _kill_process_group
+        _kill_process_group(None)  # Should not raise
+
+    def test_noop_when_proc_already_exited(self):
+        """_kill_process_group does nothing if process already exited."""
+        from app.run import _kill_process_group
+        proc = MagicMock()
+        proc.poll.return_value = 0
+        with patch("app.run.os.getpgid") as mock_getpgid:
+            _kill_process_group(proc)
+            mock_getpgid.assert_not_called()
+
+    def test_handles_process_lookup_error(self):
+        """_kill_process_group swallows ProcessLookupError."""
+        from app.run import _kill_process_group
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 99999
+        with patch("app.run.os.getpgid", side_effect=ProcessLookupError):
+            _kill_process_group(proc)  # Should not raise
 
 
 # ---------------------------------------------------------------------------
@@ -2852,6 +2913,111 @@ class TestRunSkillMissionEnv:
                 mission_title="/test no-stderr",
                 autonomous_mode="implement",
             )
+
+    def test_registers_proc_in_sig_for_ctrlc(self, tmp_path):
+        """_run_skill_mission registers subprocess in _sig.claude_proc."""
+        from app.run import _run_skill_mission, _sig
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
+        captured_proc = []
+
+        original_popen = patch("app.run.subprocess.Popen", return_value=mock_proc)
+
+        with original_popen, \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            # Intercept the Popen return to check _sig during execution
+            _sig.claude_proc = None
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/test signal",
+                autonomous_mode="implement",
+            )
+
+        # After execution, _sig.claude_proc should be cleared
+        assert _sig.claude_proc is None
+
+    def test_clears_sig_proc_on_timeout(self, tmp_path):
+        """_sig.claude_proc is cleared even when subprocess times out."""
+        from app.run import _run_skill_mission, _sig
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen()
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 600), 0]
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 77777
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.os.getpgid", return_value=77777), \
+             patch("app.run.os.killpg"), \
+             patch("app.mission_runner.run_post_mission"):
+            _sig.claude_proc = "should be replaced"
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/test timeout",
+                autonomous_mode="implement",
+            )
+
+        assert _sig.claude_proc is None
+
+    def test_timeout_uses_kill_process_group(self, tmp_path):
+        """Timeout path kills the whole process group, not just the leader."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen()
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 600), 0]
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 88888
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.os.getpgid", return_value=88888) as mock_getpgid, \
+             patch("app.run.os.killpg") as mock_killpg, \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/test kill group",
+                autonomous_mode="implement",
+            )
+
+        mock_getpgid.assert_called_with(88888)
+        mock_killpg.assert_any_call(88888, signal.SIGTERM)
 
 
 # ---------------------------------------------------------------------------
