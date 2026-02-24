@@ -514,9 +514,11 @@ class TestPeriodLine:
 class TestTimeBreakdowns:
     def test_overview_shows_today(self, tmp_path):
         ctx = _make_ctx(tmp_path)
+        # Use hours_ago=0 to guarantee "today" regardless of time of day
+        # (hours_ago=1 or 2 can cross midnight boundary)
         outcomes = [
-            _make_outcome(outcome="productive", hours_ago=1),
-            _make_outcome(outcome="empty", hours_ago=2),
+            _make_outcome(outcome="productive", hours_ago=0),
+            _make_outcome(outcome="empty", hours_ago=0),
         ]
         _write_outcomes(ctx.instance_dir, outcomes)
         from skills.core.stats.handler import handle
@@ -535,9 +537,10 @@ class TestTimeBreakdowns:
 
     def test_detail_shows_today(self, tmp_path):
         ctx = _make_ctx(tmp_path, args="koan")
+        # Use hours_ago=0 to guarantee "today" regardless of time of day
         outcomes = [
-            _make_outcome(outcome="productive", hours_ago=1),
-            _make_outcome(outcome="productive", hours_ago=2),
+            _make_outcome(outcome="productive", hours_ago=0),
+            _make_outcome(outcome="productive", hours_ago=0),
         ]
         _write_outcomes(ctx.instance_dir, outcomes)
         from skills.core.stats.handler import handle
