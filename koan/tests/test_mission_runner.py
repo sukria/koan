@@ -1043,4 +1043,616 @@ class TestCLIMain:
                 main()
             assert exc_info.value.code == 1
 
+    def test_build_command_subcommand(self):
+        """main() dispatches build-command to _cli_build_command."""
+        from app.mission_runner import main
+
+        with patch("app.mission_runner._cli_build_command") as mock_cli:
+            with patch.object(sys, "argv", ["mr", "build-command", "--prompt", "x"]):
+                main()
+            mock_cli.assert_called_once_with(["--prompt", "x"])
+
+    def test_parse_output_subcommand(self):
+        """main() dispatches parse-output to _cli_parse_output."""
+        from app.mission_runner import main
+
+        with patch("app.mission_runner._cli_parse_output") as mock_cli:
+            with patch.object(sys, "argv", ["mr", "parse-output", "/tmp/f"]):
+                main()
+            mock_cli.assert_called_once_with(["/tmp/f"])
+
+    def test_post_mission_subcommand(self):
+        """main() dispatches post-mission to _cli_post_mission."""
+        from app.mission_runner import main
+
+        with patch("app.mission_runner._cli_post_mission") as mock_cli:
+            with patch.object(sys, "argv", ["mr", "post-mission", "--instance", "x"]):
+                main()
+            mock_cli.assert_called_once_with(["--instance", "x"])
+
+
+class TestBuildMissionCommandReviewMode:
+    """Test build_mission_command in review mode — enforces read-only tools."""
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_review_mode_uses_read_only_tools(self, mock_provider):
+        from app.mission_runner import build_mission_command
+
+        cmd = build_mission_command(prompt="review code", autonomous_mode="review")
+        cmd_str = " ".join(cmd)
+        # Review mode must include Read, Glob, Grep
+        assert "Read" in cmd_str
+        assert "Glob" in cmd_str
+        assert "Grep" in cmd_str
+        # Review mode must NOT include write tools
+        assert "Bash" not in cmd_str
+        assert "Write" not in cmd_str
+        assert "Edit" not in cmd_str
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_review_mode_uses_review_model(self, mock_provider):
+        """Review mode should use the review_mode model when configured."""
+        from app.mission_runner import build_mission_command
+
+        with patch("app.config.get_model_config", return_value={
+            "mission": "sonnet",
+            "review_mode": "haiku",
+            "fallback": "sonnet",
+        }):
+            cmd = build_mission_command(
+                prompt="review code", autonomous_mode="review"
+            )
+            cmd_str = " ".join(cmd)
+            assert "haiku" in cmd_str
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_review_mode_falls_back_to_mission_model(self, mock_provider):
+        """When review_mode model is empty, falls back to mission model."""
+        from app.mission_runner import build_mission_command
+
+        with patch("app.config.get_model_config", return_value={
+            "mission": "opus",
+            "review_mode": "",
+            "fallback": "sonnet",
+        }):
+            cmd = build_mission_command(
+                prompt="review code", autonomous_mode="review"
+            )
+            cmd_str = " ".join(cmd)
+            # When review_mode is empty/falsy, mission model is used
+            assert "opus" in cmd_str
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_non_review_mode_uses_full_tools(self, mock_provider):
+        """Implement/deep modes should include write tools."""
+        from app.mission_runner import build_mission_command
+
+        for mode in ("implement", "deep"):
+            cmd = build_mission_command(prompt="code", autonomous_mode=mode)
+            cmd_str = " ".join(cmd)
+            # Non-review modes get the full toolset from config
+            assert "Bash" in cmd_str or "Read" in cmd_str
+
+
+class TestBuildMissionCommandProjectOverrides:
+    """Test build_mission_command with per-project tool/model overrides."""
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_project_name_forwarded_to_get_mission_tools(self, mock_provider):
+        from app.mission_runner import build_mission_command
+
+        with patch("app.config.get_mission_tools", return_value="Read,Grep") as mock_tools:
+            build_mission_command(
+                prompt="test", project_name="backend"
+            )
+            mock_tools.assert_called_once_with("backend")
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_project_name_forwarded_to_model_config(self, mock_provider):
+        from app.mission_runner import build_mission_command
+
+        with patch("app.config.get_model_config") as mock_models:
+            mock_models.return_value = {
+                "mission": "sonnet", "review_mode": "", "fallback": "haiku",
+            }
+            build_mission_command(prompt="test", project_name="backend")
+            mock_models.assert_called_once_with("backend")
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_multiple_plugin_dirs(self, mock_provider):
+        """Multiple plugin dirs should all appear as --plugin-dir flags."""
+        from app.mission_runner import build_mission_command
+
+        cmd = build_mission_command(
+            prompt="test",
+            plugin_dirs=["/tmp/plugin-a", "/tmp/plugin-b"],
+        )
+        indices = [i for i, arg in enumerate(cmd) if arg == "--plugin-dir"]
+        assert len(indices) == 2
+        assert cmd[indices[0] + 1] == "/tmp/plugin-a"
+        assert cmd[indices[1] + 1] == "/tmp/plugin-b"
+
+
+class TestParseClaudeOutputAdditional:
+    """Additional edge cases for parse_claude_output."""
+
+    def test_json_array_returns_raw(self):
+        """A JSON array (not object) should fall back to raw text."""
+        from app.mission_runner import parse_claude_output
+
+        raw = json.dumps([1, 2, 3])
+        result = parse_claude_output(raw)
+        # json.loads succeeds but result is a list, not dict — no .get() possible
+        # Actually, the code does `for key in ("result", ...): if key in data`
+        # which works on lists (checks membership), not key lookup
+        # But lists don't have .get(), and `key in [1,2,3]` checks values
+        assert result == raw.strip()
+
+    def test_json_boolean_values(self):
+        """Boolean values for result/content keys are not strings."""
+        from app.mission_runner import parse_claude_output
+
+        raw = json.dumps({"result": True, "content": False, "text": "actual"})
+        assert parse_claude_output(raw) == "actual"
+
+    def test_unicode_content(self):
+        from app.mission_runner import parse_claude_output
+
+        raw = json.dumps({"result": "Kōan — réflexion 🧘"})
+        assert parse_claude_output(raw) == "Kōan — réflexion 🧘"
+
+    def test_very_large_json(self):
+        """Large JSON payloads should parse correctly."""
+        from app.mission_runner import parse_claude_output
+
+        big_text = "x" * 100_000
+        raw = json.dumps({"result": big_text})
+        assert parse_claude_output(raw) == big_text
+
+    def test_multiline_raw_text(self):
+        from app.mission_runner import parse_claude_output
+
+        raw = "line1\nline2\nline3"
+        assert parse_claude_output(raw) == "line1\nline2\nline3"
+
+    def test_json_with_extra_whitespace(self):
+        from app.mission_runner import parse_claude_output
+
+        raw = '  \n  {"result": "clean"}  \n  '
+        assert parse_claude_output(raw) == "clean"
+
+
+class TestCLIBuildCommand:
+    """Test _cli_build_command — previously untested."""
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_basic_build_command_output(self, mock_provider, capsys):
+        from app.mission_runner import _cli_build_command
+
+        _cli_build_command(["--prompt", "Hello"])
+        output = capsys.readouterr().out
+        # Output is newline-separated command parts
+        parts = output.strip().splitlines()
+        assert len(parts) > 0
+        # Should contain the prompt somewhere
+        assert any("Hello" in p for p in parts)
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_build_command_with_extra_flags(self, mock_provider, capsys):
+        from app.mission_runner import _cli_build_command
+
+        _cli_build_command([
+            "--prompt", "test",
+            "--extra-flags", "--verbose --debug",
+        ])
+        output = capsys.readouterr().out
+        parts = output.strip().splitlines()
+        assert "--verbose" in parts
+        assert "--debug" in parts
+
+    @patch("app.cli_provider.get_provider_name", return_value="claude")
+    def test_build_command_review_mode(self, mock_provider, capsys):
+        from app.mission_runner import _cli_build_command
+
+        _cli_build_command([
+            "--prompt", "review",
+            "--autonomous-mode", "review",
+        ])
+        output = capsys.readouterr().out
+        # Review mode should restrict tools to read-only
+        assert "Read" in output
+        # Bash should NOT appear in review mode
+        assert "Bash" not in output
+
+
+class TestCLIPostMissionOutputDetails:
+    """Test post-mission CLI output formatting."""
+
+    @patch("app.mission_runner.run_post_mission")
+    def test_outputs_pending_archived_to_stderr(self, mock_run, tmp_path, capsys):
+        from app.mission_runner import _cli_post_mission
+
+        mock_run.return_value = {
+            "success": True,
+            "usage_updated": True,
+            "pending_archived": True,
+            "reflection_written": False,
+            "auto_merge_branch": None,
+            "quota_exhausted": False,
+            "quota_info": None,
+        }
+
+        with pytest.raises(SystemExit) as exc_info:
+            _cli_post_mission([
+                "--instance", str(tmp_path),
+                "--project-name", "koan",
+                "--project-path", str(tmp_path),
+                "--run-num", "1",
+                "--exit-code", "0",
+                "--stdout-file", "/tmp/out",
+                "--stderr-file", "/tmp/err",
+            ])
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "PENDING_ARCHIVED" in captured.err
+
+    @patch("app.mission_runner.run_post_mission")
+    def test_outputs_auto_merge_to_stderr(self, mock_run, tmp_path, capsys):
+        from app.mission_runner import _cli_post_mission
+
+        mock_run.return_value = {
+            "success": True,
+            "usage_updated": True,
+            "pending_archived": False,
+            "reflection_written": False,
+            "auto_merge_branch": "koan/my-feature",
+            "quota_exhausted": False,
+            "quota_info": None,
+        }
+
+        with pytest.raises(SystemExit) as exc_info:
+            _cli_post_mission([
+                "--instance", str(tmp_path),
+                "--project-name", "koan",
+                "--project-path", str(tmp_path),
+                "--run-num", "1",
+                "--exit-code", "0",
+                "--stdout-file", "/tmp/out",
+                "--stderr-file", "/tmp/err",
+            ])
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "AUTO_MERGE|koan/my-feature" in captured.err
+
+    @patch("app.mission_runner.run_post_mission")
+    def test_quota_exhausted_output_format(self, mock_run, tmp_path, capsys):
+        """Quota exhaustion output has specific pipe-delimited format."""
+        from app.mission_runner import _cli_post_mission
+
+        mock_run.return_value = {
+            "success": True,
+            "usage_updated": True,
+            "pending_archived": False,
+            "reflection_written": False,
+            "auto_merge_branch": None,
+            "quota_exhausted": True,
+            "quota_info": ("14:30 UTC", "Pausing until 14:30"),
+        }
+
+        with pytest.raises(SystemExit) as exc_info:
+            _cli_post_mission([
+                "--instance", str(tmp_path),
+                "--project-name", "koan",
+                "--project-path", str(tmp_path),
+                "--run-num", "5",
+                "--exit-code", "0",
+                "--stdout-file", "/tmp/out",
+                "--stderr-file", "/tmp/err",
+            ])
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "QUOTA_EXHAUSTED|14:30 UTC|Pausing until 14:30" in captured.out
+
+    @patch("app.mission_runner.run_post_mission")
+    def test_passes_all_cli_args_to_run_post_mission(self, mock_run, tmp_path):
+        """Verify all CLI args are correctly forwarded."""
+        from app.mission_runner import _cli_post_mission
+
+        mock_run.return_value = {
+            "success": True, "usage_updated": True, "pending_archived": False,
+            "reflection_written": False, "auto_merge_branch": None,
+            "quota_exhausted": False, "quota_info": None,
+        }
+
+        with pytest.raises(SystemExit):
+            _cli_post_mission([
+                "--instance", "/tmp/inst",
+                "--project-name", "myproj",
+                "--project-path", "/tmp/proj",
+                "--run-num", "7",
+                "--exit-code", "0",
+                "--stdout-file", "/tmp/stdout",
+                "--stderr-file", "/tmp/stderr",
+                "--mission-title", "audit security",
+                "--autonomous-mode", "deep",
+                "--start-time", "1700000000",
+            ])
+
+        mock_run.assert_called_once_with(
+            instance_dir="/tmp/inst",
+            project_name="myproj",
+            project_path="/tmp/proj",
+            run_num=7,
+            exit_code=0,
+            stdout_file="/tmp/stdout",
+            stderr_file="/tmp/stderr",
+            mission_title="audit security",
+            autonomous_mode="deep",
+            start_time=1700000000,
+        )
+
+
+class TestRunPostMissionOrdering:
+    """Test run_post_mission execution ordering and invariants."""
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_pending_content_read_before_archive(
+        self, mock_usage, mock_quota, mock_reflect, mock_merge,
+        mock_record, tmp_path
+    ):
+        """_read_pending_content must be called before archive_pending
+        so the content is available for session tracking even after archival."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        journal_dir = Path(instance_dir) / "journal"
+        journal_dir.mkdir(parents=True)
+        pending = journal_dir / "pending.md"
+        pending.write_text("# Mission: ordering test\n10:00 — working\n")
+
+        result = run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        # pending should be archived
+        assert result["pending_archived"] is True
+        # _record_session_outcome should have received the pending content
+        mock_record.assert_called_once()
+        journal_content = mock_record.call_args[0][4]
+        assert "ordering test" in journal_content
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_session_outcome_recorded_on_failure(
+        self, mock_usage, mock_quota, mock_archive, mock_reflect,
+        mock_merge, mock_record, tmp_path
+    ):
+        """Session outcome must be recorded even when exit_code != 0."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=3,
+            exit_code=1,  # failure
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+            autonomous_mode="implement",
+        )
+
+        # Even on failure, session outcome is recorded
+        mock_record.assert_called_once()
+        args = mock_record.call_args[0]
+        assert args[1] == "koan"
+        assert args[2] == "implement"
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.quota_handler.handle_quota_exhaustion",
+           return_value=("resets 10am", "Auto-resume"))
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_session_outcome_not_recorded_on_quota_exhaustion(
+        self, mock_usage, mock_quota, mock_record, tmp_path
+    ):
+        """When quota is exhausted, early return means no outcome recording."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        result = run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=5,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        assert result["quota_exhausted"] is True
+        # Quota exhaustion causes early return — no outcome recording
+        mock_record.assert_not_called()
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.mission_runner._read_pending_content", return_value="")
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_mission_title_used_over_autonomous_fallback(
+        self, mock_usage, mock_quota, mock_read, mock_archive,
+        mock_reflect, mock_merge, mock_record, tmp_path
+    ):
+        """When mission_title is provided, it's used instead of autonomous fallback."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+            mission_title="Fix the login bug",
+            autonomous_mode="implement",
+        )
+
+        mock_reflect.assert_called_once()
+        mission_text = mock_reflect.call_args[0][1]
+        assert mission_text == "Fix the login bug"
+        assert "Autonomous" not in mission_text
+
+
+class TestCheckAutoMergeBranchPrefix:
+    """Test check_auto_merge with various branch prefixes."""
+
+    @patch("app.git_auto_merge.auto_merge_branch")
+    @patch("app.git_sync.run_git", return_value="koan.atoomic/my-feature")
+    @patch("app.config.get_branch_prefix", return_value="koan.atoomic/")
+    def test_matches_dotted_prefix(self, mock_prefix, mock_git, mock_merge, tmp_path):
+        from app.mission_runner import check_auto_merge
+
+        result = check_auto_merge(str(tmp_path), "koan", str(tmp_path))
+        assert result == "koan.atoomic/my-feature"
+        mock_merge.assert_called_once()
+
+    @patch("app.git_sync.run_git", return_value="feature/new-login")
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    def test_rejects_non_matching_prefix(self, mock_prefix, mock_git, tmp_path):
+        from app.mission_runner import check_auto_merge
+
+        result = check_auto_merge(str(tmp_path), "koan", str(tmp_path))
+        assert result is None
+
+    @patch("app.git_sync.run_git", return_value="koan/")
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    def test_prefix_only_branch_name(self, mock_prefix, mock_git, tmp_path):
+        """A branch named exactly like the prefix (no suffix) should still match."""
+        from app.mission_runner import check_auto_merge
+
+        with patch("app.git_auto_merge.auto_merge_branch"):
+            result = check_auto_merge(str(tmp_path), "koan", str(tmp_path))
+        assert result == "koan/"
+
+
+class TestCommitInstanceEdgeCases:
+    """Additional edge cases for commit_instance."""
+
+    @patch("app.git_sync.run_git")
+    def test_commit_message_includes_timestamp(self, mock_git, tmp_path):
+        """Commit message should contain 'koan:' prefix and date-time."""
+        from app.mission_runner import commit_instance
+
+        mock_git.side_effect = [
+            "",          # git add -A
+            "changes",   # git diff --cached --name-only
+            "",          # git commit
+            "main",      # git rev-parse
+            "",          # git push
+        ]
+
+        commit_instance(str(tmp_path))
+        commit_call = mock_git.call_args_list[2]
+        commit_msg = commit_call[0][3]  # 4th positional arg to run_git
+        assert commit_msg.startswith("koan: ")
+        # Should contain date format YYYY-MM-DD
+        import re
+        assert re.search(r"\d{4}-\d{2}-\d{2}", commit_msg)
+
+    @patch("app.git_sync.run_git", side_effect=Exception("not a git repo"))
+    def test_returns_false_on_add_failure(self, mock_git, tmp_path):
+        """If even git add fails, returns False."""
+        from app.mission_runner import commit_instance
+
+        result = commit_instance(str(tmp_path))
+        assert result is False
+
+
+class TestTriggerReflectionEdgeCases:
+    """Additional edge cases for trigger_reflection."""
+
+    @patch("app.post_mission_reflection.write_to_journal", side_effect=Exception("IO"))
+    @patch("app.post_mission_reflection.run_reflection", return_value="insight")
+    @patch("app.post_mission_reflection.is_significant_mission", return_value=True)
+    @patch("app.post_mission_reflection._read_journal_file", return_value="content")
+    def test_returns_false_when_write_fails(
+        self, mock_read, mock_sig, mock_run, mock_write, tmp_path, capsys
+    ):
+        """If run_reflection succeeds but write_to_journal fails, returns False."""
+        from app.mission_runner import trigger_reflection
+
+        result = trigger_reflection(str(tmp_path), "audit", 60, project_name="koan")
+        assert result is False
+        captured = capsys.readouterr()
+        assert "Reflection failed" in captured.err
+
+    @patch("app.post_mission_reflection.write_to_journal")
+    @patch("app.post_mission_reflection.run_reflection", return_value="insight")
+    @patch("app.post_mission_reflection.is_significant_mission", return_value=True)
+    @patch("app.post_mission_reflection._read_journal_file", return_value="content")
+    def test_empty_project_name(
+        self, mock_read, mock_sig, mock_run, mock_write, tmp_path
+    ):
+        """Empty project_name should still be forwarded to _read_journal_file."""
+        from app.mission_runner import trigger_reflection
+
+        trigger_reflection(str(tmp_path), "audit", 60, project_name="")
+        mock_read.assert_called_once()
+        assert mock_read.call_args[0][1] == ""
+
+    @patch("app.post_mission_reflection.write_to_journal")
+    @patch("app.post_mission_reflection.run_reflection", return_value=None)
+    @patch("app.post_mission_reflection.is_significant_mission", return_value=True)
+    @patch("app.post_mission_reflection._read_journal_file", return_value="content")
+    def test_none_reflection_returns_false(
+        self, mock_read, mock_sig, mock_run, mock_write, tmp_path
+    ):
+        """When run_reflection returns None (not empty string), returns False."""
+        from app.mission_runner import trigger_reflection
+
+        result = trigger_reflection(str(tmp_path), "audit", 60, project_name="koan")
+        assert result is False
+        mock_write.assert_not_called()
+
+
+class TestUpdateUsageArgs:
+    """Test update_usage argument forwarding."""
+
+    @patch("app.usage_estimator.cmd_update")
+    def test_passes_path_objects_to_cmd_update(self, mock_update):
+        from app.mission_runner import update_usage
+
+        update_usage("/tmp/stdout.json", "/tmp/state.json", "/tmp/usage.md")
+        mock_update.assert_called_once()
+        args = mock_update.call_args[0]
+        assert isinstance(args[0], Path)
+        assert isinstance(args[1], Path)
+        assert isinstance(args[2], Path)
+        assert str(args[0]) == "/tmp/stdout.json"
+        assert str(args[1]) == "/tmp/state.json"
+        assert str(args[2]) == "/tmp/usage.md"
+
 
