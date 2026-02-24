@@ -743,6 +743,287 @@ class TestCLIPostMission:
         assert exc_info.value.code == 1
 
 
+class TestReadPendingContent:
+    """Test _read_pending_content private helper."""
+
+    def test_reads_existing_pending_file(self, tmp_path):
+        from app.mission_runner import _read_pending_content
+
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        pending = journal_dir / "pending.md"
+        pending.write_text("# Mission: test\n09:00 — started\n")
+
+        content = _read_pending_content(str(tmp_path))
+        assert "Mission: test" in content
+        assert "09:00" in content
+
+    def test_returns_empty_when_no_pending(self, tmp_path):
+        from app.mission_runner import _read_pending_content
+
+        # No journal dir at all
+        content = _read_pending_content(str(tmp_path))
+        assert content == ""
+
+    def test_returns_empty_when_journal_exists_but_no_pending(self, tmp_path):
+        from app.mission_runner import _read_pending_content
+
+        (tmp_path / "journal").mkdir()
+        content = _read_pending_content(str(tmp_path))
+        assert content == ""
+
+    def test_returns_empty_on_os_error(self, tmp_path):
+        from app.mission_runner import _read_pending_content
+
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        pending = journal_dir / "pending.md"
+        pending.write_text("content")
+
+        # Simulate OSError during read
+        with patch.object(Path, "read_text", side_effect=OSError("Permission denied")):
+            content = _read_pending_content(str(tmp_path))
+        assert content == ""
+
+
+class TestRecordSessionOutcome:
+    """Test _record_session_outcome fire-and-forget helper."""
+
+    @patch("app.session_tracker.record_outcome")
+    def test_calls_record_outcome(self, mock_record, tmp_path):
+        from app.mission_runner import _record_session_outcome
+
+        _record_session_outcome(
+            str(tmp_path), "koan", "implement", 15, "journal content"
+        )
+        mock_record.assert_called_once_with(
+            instance_dir=str(tmp_path),
+            project="koan",
+            mode="implement",
+            duration_minutes=15,
+            journal_content="journal content",
+        )
+
+    @patch("app.session_tracker.record_outcome")
+    def test_uses_unknown_mode_when_empty(self, mock_record, tmp_path):
+        from app.mission_runner import _record_session_outcome
+
+        _record_session_outcome(str(tmp_path), "koan", "", 5, "")
+        mock_record.assert_called_once()
+        assert mock_record.call_args.kwargs["mode"] == "unknown"
+
+    @patch("app.session_tracker.record_outcome", side_effect=Exception("db error"))
+    def test_silently_catches_exceptions(self, mock_record, tmp_path, capsys):
+        from app.mission_runner import _record_session_outcome
+
+        # Should not raise
+        _record_session_outcome(str(tmp_path), "koan", "deep", 30, "text")
+        captured = capsys.readouterr()
+        assert "Session outcome recording failed" in captured.err
+
+
+class TestRunPostMissionDuration:
+    """Test duration computation in run_post_mission."""
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.mission_runner._read_pending_content", return_value="")
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_duration_computed_from_start_time(
+        self, mock_usage, mock_quota, mock_read_pending, mock_archive,
+        mock_reflect, mock_merge, mock_record, tmp_path
+    ):
+        from app.mission_runner import run_post_mission
+        import time
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+        start = int(time.time()) - 600  # 10 minutes ago
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+            start_time=start,
+        )
+
+        # trigger_reflection should receive duration ~10 minutes
+        mock_reflect.assert_called_once()
+        call_args = mock_reflect.call_args
+        duration = call_args[1].get("duration_minutes") if "duration_minutes" in (call_args[1] or {}) else call_args[0][2]
+        assert 9 <= duration <= 11
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.mission_runner._read_pending_content", return_value="")
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_zero_start_time_gives_zero_duration(
+        self, mock_usage, mock_quota, mock_read_pending, mock_archive,
+        mock_reflect, mock_merge, mock_record, tmp_path
+    ):
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+            start_time=0,
+        )
+
+        mock_reflect.assert_called_once()
+        call_args = mock_reflect.call_args
+        duration = call_args[0][2]  # positional arg
+        assert duration == 0
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.mission_runner._read_pending_content", return_value="")
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_autonomous_mode_fallback_mission_text(
+        self, mock_usage, mock_quota, mock_read_pending, mock_archive,
+        mock_reflect, mock_merge, mock_record, tmp_path
+    ):
+        """When no mission_title, reflection uses 'Autonomous X on Y' text."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+            autonomous_mode="deep",
+        )
+
+        mock_reflect.assert_called_once()
+        mission_text = mock_reflect.call_args[0][1]
+        assert "Autonomous deep on koan" in mission_text
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.mission_runner._read_pending_content", return_value="pending content here")
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_pending_content_passed_to_record_outcome(
+        self, mock_usage, mock_quota, mock_read_pending, mock_archive,
+        mock_reflect, mock_merge, mock_record, tmp_path
+    ):
+        """Pending content is read before archival and passed to _record_session_outcome."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        mock_record.assert_called_once()
+        # _record_session_outcome is called with positional args
+        call_args = mock_record.call_args[0]
+        assert call_args[4] == "pending content here"  # journal_content is 5th positional arg
+
+
+class TestCheckAutoMergeErrors:
+    """Test check_auto_merge error handling."""
+
+    @patch("app.git_auto_merge.auto_merge_branch", side_effect=Exception("merge conflict"))
+    @patch("app.git_sync.run_git", return_value="koan/feature")
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    def test_returns_none_on_merge_error(self, mock_prefix, mock_git, mock_merge, tmp_path, capsys):
+        from app.mission_runner import check_auto_merge
+
+        result = check_auto_merge(str(tmp_path), "koan", str(tmp_path))
+        assert result is None
+        captured = capsys.readouterr()
+        assert "Auto-merge check failed" in captured.err
+
+    @patch("app.git_sync.run_git", side_effect=Exception("git error"))
+    def test_returns_none_on_git_error(self, mock_git, tmp_path, capsys):
+        from app.mission_runner import check_auto_merge
+
+        result = check_auto_merge(str(tmp_path), "koan", str(tmp_path))
+        assert result is None
+        captured = capsys.readouterr()
+        assert "Auto-merge check failed" in captured.err
+
+
+class TestTriggerReflectionErrors:
+    """Test trigger_reflection error handling."""
+
+    @patch("app.post_mission_reflection._read_journal_file", side_effect=Exception("IO error"))
+    def test_returns_false_on_exception(self, mock_read, tmp_path, capsys):
+        from app.mission_runner import trigger_reflection
+
+        result = trigger_reflection(str(tmp_path), "audit", 60, project_name="koan")
+        assert result is False
+        captured = capsys.readouterr()
+        assert "Reflection failed" in captured.err
+
+
+class TestParseClaudeOutputEdgeCases:
+    """Additional edge cases for parse_claude_output."""
+
+    def test_json_null_value(self):
+        from app.mission_runner import parse_claude_output
+
+        raw = json.dumps({"result": None, "content": None})
+        # None is not str, so falls back to raw
+        assert parse_claude_output(raw) == raw.strip()
+
+    def test_json_with_nested_content(self):
+        from app.mission_runner import parse_claude_output
+
+        raw = json.dumps({"result": {"inner": "data"}, "text": "plain"})
+        # result is dict (not str), text is str → should return "plain"
+        assert parse_claude_output(raw) == "plain"
+
+    def test_json_with_empty_string_result(self):
+        from app.mission_runner import parse_claude_output
+
+        raw = json.dumps({"result": "", "content": "fallback"})
+        # Empty string IS a string, so it's returned (truthy check not done on value)
+        assert parse_claude_output(raw) == ""
+
+    def test_whitespace_only_json(self):
+        from app.mission_runner import parse_claude_output
+
+        assert parse_claude_output("  \n\t  ") == ""
+
+
 class TestCLIMain:
     """Test main CLI entry point."""
 

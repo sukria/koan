@@ -409,6 +409,132 @@ class TestCLIMain:
         assert exc_info.value.code == 1
 
 
+# --- Additional edge case tests ---
+
+
+class TestShouldRunContemplativeEdgeCases:
+    """Additional boundary tests for probability roll."""
+
+    @patch("app.contemplative_runner.random.randint")
+    def test_chance_99_roll_98_triggers(self, mock_randint):
+        """99% chance with roll=98 should trigger (98 < 99)."""
+        mock_randint.return_value = 98
+        assert should_run_contemplative(99) is True
+
+    @patch("app.contemplative_runner.random.randint")
+    def test_chance_99_roll_99_no_trigger(self, mock_randint):
+        """99% chance with roll=99 should NOT trigger (99 < 99 is False)."""
+        mock_randint.return_value = 99
+        assert should_run_contemplative(99) is False
+
+    @patch("app.contemplative_runner.random.randint")
+    def test_chance_1_roll_0_triggers(self, mock_randint):
+        """1% chance with roll=0 should trigger (0 < 1)."""
+        mock_randint.return_value = 0
+        assert should_run_contemplative(1) is True
+
+    @patch("app.contemplative_runner.random.randint")
+    def test_chance_1_roll_1_no_trigger(self, mock_randint):
+        """1% chance with roll=1 should NOT trigger (1 < 1 is False)."""
+        mock_randint.return_value = 1
+        assert should_run_contemplative(1) is False
+
+
+class TestRunContemplativeSessionEdgeCases:
+    """Additional edge case tests for the session runner."""
+
+    @patch("app.claude_step.run_claude")
+    @patch("app.contemplative_runner.get_contemplative_flags")
+    @patch("app.contemplative_runner.build_contemplative_command")
+    def test_default_cwd_is_instance(self, mock_cmd, mock_flags, mock_run_claude):
+        """When cwd is not provided, instance path is used as working directory."""
+        mock_flags.return_value = []
+        mock_cmd.return_value = ["claude", "-p", "prompt"]
+        mock_run_claude.return_value = {
+            "success": True, "output": "", "error": ""
+        }
+
+        run_contemplative_session(
+            instance="/path/to/instance",
+            project_name="koan",
+            session_info="test",
+        )
+
+        assert mock_run_claude.call_args.kwargs["cwd"] == "/path/to/instance"
+
+    @patch("app.claude_step.run_claude")
+    @patch("app.contemplative_runner.get_contemplative_flags")
+    @patch("app.contemplative_runner.build_contemplative_command")
+    def test_default_timeout_is_300(self, mock_cmd, mock_flags, mock_run_claude):
+        """Default timeout should be 300 seconds."""
+        mock_flags.return_value = []
+        mock_cmd.return_value = ["claude", "-p", "prompt"]
+        mock_run_claude.return_value = {
+            "success": True, "output": "", "error": ""
+        }
+
+        run_contemplative_session(
+            instance="/path",
+            project_name="koan",
+            session_info="test",
+        )
+
+        assert mock_run_claude.call_args.kwargs["timeout"] == 300
+
+
+class TestCLIShouldRunEdgeCases:
+    """Additional CLI edge case tests."""
+
+    @patch("app.contemplative_runner.should_run_contemplative")
+    def test_zero_chance_parsed(self, mock_roll):
+        """'0' argument is parsed correctly."""
+        mock_roll.return_value = False
+        with pytest.raises(SystemExit) as exc_info:
+            main_with_args(["should-run", "0"])
+        assert exc_info.value.code == 1
+        mock_roll.assert_called_once_with(0)
+
+    def test_float_chance_rejected(self):
+        """Float chance argument exits with error."""
+        with pytest.raises(SystemExit) as exc_info:
+            main_with_args(["should-run", "3.14"])
+        assert exc_info.value.code == 1
+
+
+class TestCLIRunEdgeCases:
+    """Additional CLI run subcommand edge cases."""
+
+    @patch("app.contemplative_runner.run_contemplative_session")
+    def test_run_no_output_no_crash(self, mock_session):
+        """Empty output and empty error should not crash."""
+        mock_session.return_value = {
+            "success": True,
+            "output": "",
+            "error": "",
+        }
+        # Should not raise
+        main_with_args([
+            "run",
+            "--instance", "/path",
+            "--project-name", "koan",
+            "--session-info", "test",
+        ])
+
+    @patch("app.contemplative_runner.run_contemplative_session")
+    def test_run_default_timeout_300(self, mock_session):
+        """CLI default timeout should be 300."""
+        mock_session.return_value = {
+            "success": True, "output": "", "error": ""
+        }
+        main_with_args([
+            "run",
+            "--instance", "/path",
+            "--project-name", "koan",
+            "--session-info", "test",
+        ])
+        assert mock_session.call_args.kwargs["timeout"] == 300
+
+
 # --- Helpers ---
 
 

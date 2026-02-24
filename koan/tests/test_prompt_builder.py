@@ -719,3 +719,236 @@ class TestIntegration:
         assert "testproj" in result
         assert "Run 3/25" in result
         assert "contemplative" in result.lower()
+
+
+# --- Tests for _get_deep_research error handling ---
+
+
+class TestGetDeepResearchErrors:
+    """Additional error path tests for _get_deep_research."""
+
+    @patch("app.deep_research.DeepResearch")
+    def test_format_for_agent_returns_none(self, mock_cls, prompt_env):
+        """format_for_agent returning None should not crash."""
+        mock_instance = MagicMock()
+        mock_instance.format_for_agent.return_value = None
+        mock_cls.return_value = mock_instance
+
+        result = _get_deep_research(
+            prompt_env["instance"],
+            prompt_env["project_name"],
+            prompt_env["project_path"],
+        )
+        assert result == ""
+
+    @patch("app.deep_research.DeepResearch")
+    def test_format_for_agent_raises(self, mock_cls, prompt_env, capsys):
+        """Exception from format_for_agent is caught and logged."""
+        mock_instance = MagicMock()
+        mock_instance.format_for_agent.side_effect = RuntimeError("API timeout")
+        mock_cls.return_value = mock_instance
+
+        result = _get_deep_research(
+            prompt_env["instance"],
+            prompt_env["project_name"],
+            prompt_env["project_path"],
+        )
+        assert result == ""
+        captured = capsys.readouterr()
+        assert "Deep research failed" in captured.err
+
+
+# --- Tests for _get_staleness_section error handling ---
+
+
+class TestGetStalenessSectionErrors:
+    """Additional error path tests for _get_staleness_section."""
+
+    @patch("app.session_tracker.get_staleness_warning", return_value=None)
+    def test_none_warning_returns_empty(self, mock_warning, prompt_env):
+        """None (as opposed to empty string) returns empty section."""
+        result = _get_staleness_section(prompt_env["instance"], "testproj")
+        assert result == ""
+
+    @patch("app.session_tracker.get_staleness_warning", side_effect=ImportError("no module"))
+    def test_import_error_returns_empty(self, mock_warning, prompt_env, capsys):
+        """ImportError (module missing) is caught gracefully."""
+        result = _get_staleness_section(prompt_env["instance"], "testproj")
+        assert result == ""
+        captured = capsys.readouterr()
+        assert "Staleness check failed" in captured.err
+
+
+# --- Tests for _get_focus_section ---
+
+
+class TestGetFocusSection:
+    """Tests for focus mode section injection."""
+
+    @patch("app.focus_manager.check_focus", return_value=None)
+    def test_no_focus_returns_empty(self, mock_check, prompt_env):
+        from app.prompt_builder import _get_focus_section
+
+        result = _get_focus_section(prompt_env["instance"])
+        assert result == ""
+
+    @patch("app.focus_manager.check_focus")
+    def test_active_focus_includes_remaining(self, mock_check, prompt_env):
+        from app.prompt_builder import _get_focus_section
+
+        mock_state = MagicMock()
+        mock_state.remaining_display.return_value = "2h 30m"
+        mock_check.return_value = mock_state
+
+        result = _get_focus_section(prompt_env["instance"])
+        assert "2h 30m" in result
+
+    @patch("app.focus_manager.check_focus", side_effect=Exception("broken"))
+    def test_error_returns_empty(self, mock_check, prompt_env, capsys):
+        from app.prompt_builder import _get_focus_section
+
+        result = _get_focus_section(prompt_env["instance"])
+        assert result == ""
+        captured = capsys.readouterr()
+        assert "Focus check failed" in captured.err
+
+
+# --- Tests for _load_config_safe ---
+
+
+class TestLoadConfigSafe:
+    """Tests for config loading safety wrapper."""
+
+    @patch("app.utils.load_config", return_value={"key": "value"})
+    def test_returns_config(self, mock_load):
+        from app.prompt_builder import _load_config_safe
+
+        result = _load_config_safe()
+        assert result == {"key": "value"}
+
+    @patch("app.utils.load_config", side_effect=FileNotFoundError("no file"))
+    def test_returns_empty_on_error(self, mock_load):
+        from app.prompt_builder import _load_config_safe
+
+        result = _load_config_safe()
+        assert result == {}
+
+
+# --- Tests for _get_branch_prefix ---
+
+
+class TestGetBranchPrefix:
+    """Tests for branch prefix retrieval."""
+
+    @patch("app.config.get_branch_prefix", return_value="custom/")
+    def test_returns_configured_prefix(self, mock_prefix):
+        from app.prompt_builder import _get_branch_prefix
+
+        assert _get_branch_prefix() == "custom/"
+
+    @patch("app.config.get_branch_prefix", side_effect=Exception("no config"))
+    def test_returns_default_on_error(self, mock_prefix):
+        from app.prompt_builder import _get_branch_prefix
+
+        assert _get_branch_prefix() == "koan/"
+
+
+# --- Tests for build_agent_prompt section ordering ---
+
+
+class TestBuildAgentPromptSections:
+    """Test that sections are appended in correct order."""
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="\n# Verbose\n")
+    @patch("app.prompt_builder._get_focus_section", return_value="\n# Focus\n")
+    @patch("app.prompt_builder._get_staleness_section", return_value="\n# Stale\n")
+    @patch("app.prompt_builder._get_deep_research", return_value="\n# Deep\n")
+    @patch("app.prompt_builder._get_merge_policy", return_value="\n# Merge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
+    @patch("app.prompts.load_prompt", return_value="BASE")
+    def test_deep_autonomous_includes_all_sections(
+        self, mock_load, mock_prefix, mock_merge, mock_deep,
+        mock_stale, mock_focus, mock_verbose, prompt_env
+    ):
+        result = build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=1,
+            max_runs=25,
+            autonomous_mode="deep",
+            focus_area="test",
+            available_pct=80,
+            mission_title="",  # autonomous
+        )
+
+        # All sections should be present
+        assert "BASE" in result
+        assert "# Merge" in result
+        assert "# Stale" in result
+        assert "# Deep" in result
+        assert "# Focus" in result
+        assert "# Verbose" in result
+
+        # Sections in correct order: base, merge, stale, deep, focus, verbose
+        merge_idx = result.index("# Merge")
+        stale_idx = result.index("# Stale")
+        deep_idx = result.index("# Deep")
+        focus_idx = result.index("# Focus")
+        verbose_idx = result.index("# Verbose")
+        assert merge_idx < stale_idx < deep_idx < focus_idx < verbose_idx
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_focus_section", return_value="")
+    @patch("app.prompt_builder._get_staleness_section", return_value="\n# Stale\n")
+    @patch("app.prompt_builder._get_deep_research", return_value="\n# Deep\n")
+    @patch("app.prompt_builder._get_merge_policy", return_value="\n# Merge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
+    @patch("app.prompts.load_prompt", return_value="BASE")
+    def test_mission_excludes_staleness_and_deep(
+        self, mock_load, mock_prefix, mock_merge, mock_deep,
+        mock_stale, mock_focus, mock_verbose, prompt_env
+    ):
+        result = build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=1,
+            max_runs=25,
+            autonomous_mode="deep",
+            focus_area="test",
+            available_pct=80,
+            mission_title="Fix bug",  # has mission
+        )
+
+        # Staleness and deep should NOT be called for missions
+        mock_stale.assert_not_called()
+        mock_deep.assert_not_called()
+
+    @patch("app.prompt_builder._get_verbose_section", return_value="")
+    @patch("app.prompt_builder._get_focus_section", return_value="")
+    @patch("app.prompt_builder._get_staleness_section", return_value="\n# Stale\n")
+    @patch("app.prompt_builder._get_deep_research", return_value="\n# Deep\n")
+    @patch("app.prompt_builder._get_merge_policy", return_value="\n# Merge\n")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
+    @patch("app.prompts.load_prompt", return_value="BASE")
+    def test_implement_mode_excludes_deep_research(
+        self, mock_load, mock_prefix, mock_merge, mock_deep,
+        mock_stale, mock_focus, mock_verbose, prompt_env
+    ):
+        result = build_agent_prompt(
+            instance=prompt_env["instance"],
+            project_name="testproj",
+            project_path=prompt_env["project_path"],
+            run_num=1,
+            max_runs=25,
+            autonomous_mode="implement",
+            focus_area="test",
+            available_pct=50,
+            mission_title="",  # autonomous
+        )
+
+        # Deep research only in deep mode
+        mock_deep.assert_not_called()
+        # Staleness should be included for autonomous
+        mock_stale.assert_called_once()
