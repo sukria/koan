@@ -727,11 +727,17 @@ def handle_pause(
         _reset_usage_session(instance)
         return "resume"
 
-    # Sleep 5 min in 5s increments — check for resume/restart
+    # Sleep 5 min in 5s increments — check for resume/stop/restart/shutdown
     with protected_phase("Paused — waiting for resume"):
         for _ in range(60):
             if not Path(koan_root, ".koan-pause").exists():
                 return "resume"
+            if Path(koan_root, ".koan-stop").exists():
+                log("pause", "Stop signal detected while paused")
+                break
+            if Path(koan_root, ".koan-shutdown").exists():
+                log("pause", "Shutdown signal detected while paused")
+                break
             if check_restart(koan_root):
                 break
             time.sleep(5)
