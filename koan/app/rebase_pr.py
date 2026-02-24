@@ -9,7 +9,7 @@ Pipeline:
 2. Checkout the PR branch locally
 3. Rebase onto the upstream target branch
 4. Analyze review comments and apply changes (Claude-powered, if feedback exists)
-5. Push the result (force-push to existing branch, or create new draft PR)
+5. Force-push to the existing branch (never creates a new PR)
 6. Comment on the PR with a summary
 """
 
@@ -21,8 +21,6 @@ from typing import List, Optional, Tuple
 from app.claude_step import (
     _build_pr_prompt,
     _get_current_branch,
-    _is_permission_error,
-    _push_with_pr_fallback,
     _rebase_onto_target,
     _run_git,
     _safe_checkout,
@@ -137,7 +135,7 @@ def run_rebase(
         2. Checkout the PR branch locally
         3. Rebase onto the upstream target branch
         4. Analyze review comments and apply changes (if feedback exists)
-        5. Push the result (try existing branch first, then create new PR)
+        5. Force-push to the existing branch (always recycles the PR)
         6. Comment on the PR with a summary
 
     Args:
@@ -293,7 +291,12 @@ def _apply_review_feedback(
 
 
 def _checkout_pr_branch(branch: str, project_path: str) -> None:
-    """Checkout the PR branch, fetching from origin or upstream."""
+    """Checkout the PR branch, fetching from origin or upstream.
+
+    Uses ``git checkout -B`` to create or reset the local branch,
+    ensuring a stale local branch with the same name never blocks
+    the checkout.
+    """
     # Try origin first, then upstream (for cross-repo PRs)
     fetch_remote = "origin"
     try:
@@ -307,19 +310,11 @@ def _checkout_pr_branch(branch: str, project_path: str) -> None:
                 f"Branch `{branch}` not found on origin or upstream"
             )
 
-    # Try to checkout — may already exist locally
-    try:
-        _run_git(["git", "checkout", branch], cwd=project_path)
-    except Exception:
-        # Branch doesn't exist locally — create tracking branch
-        _run_git(
-            ["git", "checkout", "-b", branch, f"{fetch_remote}/{branch}"],
-            cwd=project_path,
-        )
-
-    # Reset to remote's version to ensure clean state
+    # -B creates the branch if missing, or resets it if it already exists.
+    # This avoids the "branch already exists" error when a stale local
+    # branch with the same name is present.
     _run_git(
-        ["git", "reset", "--hard", f"{fetch_remote}/{branch}"],
+        ["git", "checkout", "-B", branch, f"{fetch_remote}/{branch}"],
         cwd=project_path,
     )
 
@@ -332,11 +327,48 @@ def _push_with_fallback(
     context: dict,
     project_path: str,
 ) -> dict:
-    """Push rebased branch, falling back to new draft PR if permission denied."""
-    return _push_with_pr_fallback(
-        branch, base, full_repo, pr_number, context, project_path,
-        pr_type="rebase",
-    )
+    """Push rebased branch, always reusing the existing PR branch.
+
+    Rebase never creates a new branch or PR — it always pushes to the
+    same branch to recycle the existing pull request.  Tries
+    ``--force-with-lease`` first, then plain ``--force`` as fallback.
+    """
+    actions: List[str] = []
+
+    last_error = ""
+    for remote in ("origin", "upstream"):
+        # Try safe force-push first
+        try:
+            _run_git(
+                ["git", "push", remote, branch, "--force-with-lease"],
+                cwd=project_path,
+            )
+            actions.append(f"Force-pushed `{branch}` to {remote}")
+            return {"success": True, "actions": actions, "error": ""}
+        except Exception as e:
+            print(f"[rebase_pr] force-with-lease to {remote} failed: {e}", file=sys.stderr)
+            last_error = str(e)
+
+        # Fall back to plain force-push (handles stale tracking refs)
+        try:
+            _run_git(
+                ["git", "push", remote, branch, "--force"],
+                cwd=project_path,
+            )
+            actions.append(f"Force-pushed `{branch}` to {remote}")
+            return {"success": True, "actions": actions, "error": ""}
+        except Exception as e:
+            print(f"[rebase_pr] force push to {remote} failed: {e}", file=sys.stderr)
+            last_error = str(e)
+
+    return {
+        "success": False,
+        "actions": actions,
+        "error": (
+            f"Cannot push `{branch}`: all remotes rejected the push. "
+            f"Check write permissions on the branch."
+        ),
+    }
 
 
 def _build_rebase_comment(
@@ -413,7 +445,8 @@ def main(argv=None):
         try:
             ctx = fetch_pr_context(owner, repo, pr_number)
             pr_state = ctx.get("state", "").upper()
-        except Exception:
+        except Exception as e:
+            print(f"[rebase_pr] PR state check failed, proceeding with recreate: {e}", file=sys.stderr)
             pr_state = ""
 
         if pr_state in ("MERGED", "CLOSED"):
