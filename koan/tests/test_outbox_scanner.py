@@ -218,6 +218,102 @@ class TestScanOutboxContent:
         assert result.redacted_content is None
 
 
+class TestEnvLineThreshold:
+    """Tests for _ENV_LINE_THRESHOLD boundary behavior."""
+
+    def test_exactly_two_env_lines_warns_not_blocks(self):
+        """2 env-like lines is below threshold (3) — should warn, not block."""
+        content = "MY_CONFIG=value1\nANOTHER_SETTING=value2"
+        result = scan_outbox_content(content)
+        assert not result.blocked
+        assert result.warnings is not None
+        assert any("2 env-like" in w for w in result.warnings)
+
+    def test_exactly_three_env_lines_blocks(self):
+        """3 env-like lines hits threshold — should block."""
+        content = "MY_CONFIG=value1\nANOTHER_SETTING=value2\nTHIRD_VAR=value3"
+        result = scan_outbox_content(content)
+        assert result.blocked
+        assert "env dump" in result.reason.lower() or "variable" in result.reason.lower()
+
+    def test_one_env_line_warns(self):
+        """1 env-like line should just warn."""
+        content = "Some text\nMY_CONFIG=value1\nMore text"
+        result = scan_outbox_content(content)
+        assert not result.blocked
+        assert result.warnings is not None
+        assert any("1 env-like" in w for w in result.warnings)
+
+    def test_four_env_lines_blocks(self):
+        """4 env-like lines exceeds threshold — should block."""
+        content = "A_VAR=1\nB_VAR=2\nC_VAR=3\nD_VAR=4"
+        result = scan_outbox_content(content)
+        assert result.blocked
+
+    def test_env_lines_mixed_with_normal_text(self):
+        """Env lines mixed with normal text — only KEY=VALUE lines count."""
+        content = (
+            "Here's the report:\n"
+            "CONFIG_NAME=myapp\n"
+            "- Status: OK\n"
+            "MAX_RETRIES=3\n"
+            "- All tests pass\n"
+        )
+        result = scan_outbox_content(content)
+        # Only 2 env lines — should warn not block
+        assert not result.blocked
+
+
+class TestSensitiveEnvPatterns:
+    """Tests for specific sensitive variable name patterns."""
+
+    def test_database_url_always_blocked(self):
+        """DATABASE_URL should be blocked regardless of line count."""
+        result = scan_outbox_content("DATABASE_URL=postgres://user:pass@host/db")
+        assert result.blocked
+        assert "credential" in result.reason.lower() or "Database" in result.reason
+
+    def test_postgres_password_blocked(self):
+        """POSTGRES_PASSWORD should be blocked."""
+        result = scan_outbox_content("POSTGRES_PASSWORD=secret123")
+        assert result.blocked
+
+    def test_db_password_blocked(self):
+        """DB_PASSWORD should be blocked."""
+        result = scan_outbox_content("DB_PASSWORD: mysecret")
+        assert result.blocked
+
+    def test_koan_telegram_token_blocked(self):
+        """KOAN_TELEGRAM_TOKEN should be blocked."""
+        result = scan_outbox_content("KOAN_TELEGRAM_TOKEN=12345:abcdef")
+        assert result.blocked
+
+    def test_koan_slack_bot_token_blocked(self):
+        """KOAN_SLACK_BOT_TOKEN should be blocked."""
+        result = scan_outbox_content("KOAN_SLACK_BOT_TOKEN=xoxb-not-really")
+        assert result.blocked
+
+
+class TestScanResultDataclass:
+    """Additional tests for ScanResult construction."""
+
+    def test_scan_result_with_all_fields(self):
+        result = ScanResult(
+            blocked=True,
+            reason="test reason",
+            warnings=["w1", "w2"],
+            redacted_content="[REDACTED]",
+        )
+        assert result.blocked
+        assert result.reason == "test reason"
+        assert len(result.warnings) == 2
+        assert result.redacted_content == "[REDACTED]"
+
+    def test_scan_result_warnings_empty_list(self):
+        result = ScanResult(blocked=False, warnings=[])
+        assert result.warnings == []
+
+
 class TestScanAndLog:
     """Tests for the logging wrapper."""
 
@@ -241,3 +337,25 @@ class TestScanAndLog:
         result = scan_and_log("Normal message")
         assert isinstance(result, ScanResult)
         assert not result.blocked
+
+    def test_blocked_preview_truncated(self, capsys):
+        """Preview in blocked log is limited to 100 chars."""
+        long_secret = "api_key=" + "a" * 200
+        scan_and_log(long_secret)
+        captured = capsys.readouterr()
+        assert "BLOCKED" in captured.err
+        assert "Preview:" in captured.err
+        # The preview line should contain "..." indicating truncation
+        assert "..." in captured.err
+
+    def test_multiple_warnings_all_logged(self, capsys):
+        """Multiple warnings should all appear in stderr."""
+        # File dump pattern triggers a warning (not a block)
+        content = (
+            "Contents of ~/.env.local: CONFIG_A=val\n"
+        )
+        result = scan_and_log(content)
+        captured = capsys.readouterr()
+        if result.warnings:
+            for warning in result.warnings:
+                assert warning in captured.err
