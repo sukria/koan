@@ -340,6 +340,28 @@ class TestRunExploration:
         result_msg = notify.call_args_list[1][0][0]
         assert len(result_msg) <= 2100  # header + 2000 content
 
+    @patch("app.cli_provider.run_command", return_value="Found issues")
+    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
+    def test_max_turns_is_10(
+        self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
+        tmp_path
+    ):
+        """Regression: max_turns=5 was too low for AI exploration sessions.
+
+        AI exploration needs enough turns to read project context and produce
+        meaningful output. max_turns=5 caused frequent early termination.
+        """
+        notify = MagicMock()
+        run_exploration(
+            str(tmp_path), "myapp", str(tmp_path),
+            notify_fn=notify,
+        )
+        call_kwargs = mock_claude.call_args[1]
+        assert call_kwargs["max_turns"] == 10
+
 
 # ---------------------------------------------------------------------------
 # CLI entry point

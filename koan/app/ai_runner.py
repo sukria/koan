@@ -63,7 +63,7 @@ def run_exploration(
         result = run_command(
             prompt, project_path,
             allowed_tools=["Read", "Glob", "Grep", "Bash"],
-            max_turns=5, timeout=600,
+            max_turns=10, timeout=600,
         )
     except Exception as e:
         return False, f"Exploration failed: {str(e)[:300]}"

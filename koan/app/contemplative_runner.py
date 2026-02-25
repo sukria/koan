@@ -59,7 +59,7 @@ def build_contemplative_command(
     cmd = build_full_command(
         prompt=prompt,
         allowed_tools=["Read", "Write", "Glob", "Grep"],
-        max_turns=5,
+        max_turns=10,
     )
     if extra_flags:
         cmd.extend(extra_flags)
