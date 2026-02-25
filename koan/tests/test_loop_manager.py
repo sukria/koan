@@ -420,6 +420,97 @@ class TestInterruptibleSleep:
         )
         assert result == "stop"
 
+    def test_detects_signal_before_sleeping(self, tmp_path):
+        """Pre-existing signals must be detected immediately, without sleeping first."""
+        from app.loop_manager import interruptible_sleep
+
+        koan_root = str(tmp_path / "root")
+        instance = str(tmp_path / "instance")
+        os.makedirs(koan_root, exist_ok=True)
+        os.makedirs(instance, exist_ok=True)
+
+        # Pre-create stop file — should be detected before any sleep
+        Path(os.path.join(koan_root, ".koan-stop")).touch()
+
+        import time as _time
+        real_sleep = _time.sleep
+        sleep_calls = []
+
+        def tracking_sleep(secs):
+            sleep_calls.append(secs)
+            real_sleep(secs)
+
+        with patch("app.loop_manager.time.sleep", side_effect=tracking_sleep):
+            result = interruptible_sleep(
+                interval=60,
+                koan_root=koan_root,
+                instance_dir=instance,
+                check_interval=10,
+            )
+
+        assert result == "stop"
+        # No sleep should have happened — signal detected on first check
+        assert len(sleep_calls) == 0
+
+    def test_does_not_overshoot_interval(self, tmp_path):
+        """Sleep should not exceed the requested interval."""
+        from app.loop_manager import interruptible_sleep
+
+        koan_root = str(tmp_path / "root")
+        instance = str(tmp_path / "instance")
+        os.makedirs(koan_root, exist_ok=True)
+        os.makedirs(instance, exist_ok=True)
+
+        import time as _time
+        real_sleep = _time.sleep
+        total_slept = [0.0]
+
+        def tracking_sleep(secs):
+            total_slept[0] += secs
+            # Don't actually sleep — just track
+
+        with patch("app.loop_manager.time.sleep", side_effect=tracking_sleep), \
+             patch("app.loop_manager.process_github_notifications", return_value=0):
+            result = interruptible_sleep(
+                interval=25,
+                koan_root=koan_root,
+                instance_dir=instance,
+                check_interval=10,
+            )
+
+        assert result == "timeout"
+        # Total sleep should not exceed requested interval
+        assert total_slept[0] <= 25.0
+
+    def test_mission_detected_immediately_without_sleep(self, tmp_path):
+        """A pending mission should be detected before any sleep call."""
+        from app.loop_manager import interruptible_sleep
+
+        koan_root = str(tmp_path / "root")
+        instance = str(tmp_path / "instance")
+        os.makedirs(koan_root, exist_ok=True)
+        os.makedirs(instance, exist_ok=True)
+
+        # Pre-create mission
+        missions_md = Path(instance) / "missions.md"
+        missions_md.write_text("## Pending\n\n- Fix the bug\n\n## Done\n")
+
+        sleep_calls = []
+
+        def tracking_sleep(secs):
+            sleep_calls.append(secs)
+
+        with patch("app.loop_manager.time.sleep", side_effect=tracking_sleep):
+            result = interruptible_sleep(
+                interval=60,
+                koan_root=koan_root,
+                instance_dir=instance,
+                check_interval=10,
+            )
+
+        assert result == "mission"
+        assert len(sleep_calls) == 0
+
 
 # --- Test internal helpers ---
 

@@ -1105,6 +1105,55 @@ class TestRunClaudeTask:
         assert _sig.first_ctrl_c == 0
         assert _sig.claude_proc is None
 
+    def test_resets_signal_state_on_popen_failure(self, tmp_path):
+        """_sig.task_running must be reset even when popen_cli raises."""
+        from app.run import run_claude_task, _sig
+
+        _sig.task_running = False  # ensure clean start
+
+        stdout_f = str(tmp_path / "out.txt")
+        stderr_f = str(tmp_path / "err.txt")
+
+        with patch("app.cli_exec.popen_cli", side_effect=OSError("exec failed")):
+            try:
+                run_claude_task(
+                    cmd=["nonexistent"],
+                    stdout_file=stdout_f,
+                    stderr_file=stderr_f,
+                    cwd=str(tmp_path),
+                )
+            except OSError:
+                pass
+
+        # Signal state must be cleaned up despite the exception
+        assert _sig.task_running is False
+        assert _sig.first_ctrl_c == 0
+        assert _sig.claude_proc is None
+
+    def test_resets_signal_state_on_open_failure(self, tmp_path):
+        """_sig.task_running must be reset when stdout_file can't be opened."""
+        from app.run import run_claude_task, _sig
+
+        _sig.task_running = False
+
+        # Use a path that can't be opened (directory as file)
+        bad_dir = tmp_path / "baddir"
+        bad_dir.mkdir()
+        stderr_f = str(tmp_path / "err.txt")
+
+        try:
+            run_claude_task(
+                cmd=["echo", "hello"],
+                stdout_file=str(bad_dir),  # can't open a directory for writing
+                stderr_file=stderr_f,
+                cwd=str(tmp_path),
+            )
+        except (OSError, IsADirectoryError):
+            pass
+
+        assert _sig.task_running is False
+        assert _sig.claude_proc is None
+
 
 # ---------------------------------------------------------------------------
 # Test: main (restart wrapper)
@@ -2719,6 +2768,47 @@ class TestRunSkillMissionEnv:
 
         mock_restore.assert_called_once_with(koan_root, "main")
 
+    def test_kills_process_on_generic_exception(self, tmp_path):
+        """Generic exceptions during skill execution must kill the child process."""
+        from app.run import _run_skill_mission
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(["line1\n"])
+        mock_proc.stderr = iter([])
+        mock_proc.wait.side_effect = ValueError("unexpected error")
+        mock_proc.returncode = None
+        mock_proc.pid = 12345
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run._kill_process_group") as mock_kill, \
+             patch("app.run.protected_phase", return_value=MagicMock(
+                 __enter__=MagicMock(), __exit__=MagicMock(return_value=False)
+             )), \
+             patch("app.run.set_status"), \
+             patch("app.run.log"):
+            result = _run_skill_mission(
+                skill_cmd=["python3", "-m", "app.fake"],
+                mission_title="/fake test",
+                project_name="test",
+                project_path=str(tmp_path),
+                koan_root=koan_root,
+                instance=instance,
+                run_num=1,
+                autonomous_mode="implement",
+            )
+
+        mock_kill.assert_called_once_with(mock_proc)
+        assert result == 1  # exit code should be failure
+
     def test_restores_branch_even_on_exception(self, tmp_path):
         """Branch is restored even when subprocess raises an exception."""
         from app.run import _run_skill_mission
@@ -3262,3 +3352,49 @@ class TestSkillDispatchExceptionFinalization(TestRunSkillMissionEnv):
         assert handled is True
         mock_finalize.assert_called_once()
         assert mock_finalize.call_args[0][3] == 0  # exit_code=0 on success
+
+
+class TestUpdateMissionInFile:
+    """Test _update_mission_in_file needle matching."""
+
+    def test_finds_original_title_in_progress(self, tmp_path):
+        """The original (untranslated) title must match the In Progress line."""
+        from app.run import _update_mission_in_file
+
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        missions.write_text(
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- [project:test] /scope.myskill do something ⏳(2026-01-01T00:00) ▶(2026-01-01T00:01)\n\n"
+            "## Done\n"
+        )
+
+        _update_mission_in_file(str(missions.parent), "/scope.myskill do something")
+
+        content = missions.read_text()
+        # Mission should have moved from In Progress to Done
+        assert "/scope.myskill do something" not in content.split("## In Progress")[1].split("##")[0]
+        assert "/scope.myskill do something" in content.split("## Done")[1]
+
+    def test_translated_title_does_not_match(self, tmp_path):
+        """A translated title should NOT find the original in In Progress."""
+        from app.run import _update_mission_in_file
+
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        missions.write_text(
+            "# Missions\n\n"
+            "## Pending\n\n"
+            "## In Progress\n\n"
+            "- [project:test] /scope.myskill do something ⏳(2026-01-01T00:00) ▶(2026-01-01T00:01)\n\n"
+            "## Done\n"
+        )
+
+        # Using a translated title that differs — this should NOT match
+        _update_mission_in_file(str(missions.parent), "/my-tool do something")
+
+        content = missions.read_text()
+        # Mission should still be in In Progress (not moved)
+        assert "/scope.myskill do something" in content.split("## In Progress")[1].split("##")[0]

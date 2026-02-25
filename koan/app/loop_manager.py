@@ -530,9 +530,7 @@ def interruptible_sleep(
     """
     elapsed = 0
     while elapsed < interval:
-        time.sleep(check_interval)
-        elapsed += check_interval
-
+        # Check signals BEFORE sleeping so events are detected immediately.
         if check_pending_missions(instance_dir):
             return "mission"
         if _check_signal_file(koan_root, ".koan-stop"):
@@ -547,6 +545,12 @@ def interruptible_sleep(
         # Check GitHub notifications (throttled to once per 60s)
         if process_github_notifications(koan_root, instance_dir) > 0:
             return "mission"
+
+        # Sleep for the smaller of check_interval and remaining time
+        # to avoid overshooting the requested interval.
+        sleep_time = min(check_interval, interval - elapsed)
+        time.sleep(sleep_time)
+        elapsed += sleep_time
 
     return "timeout"
 
