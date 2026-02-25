@@ -186,6 +186,21 @@ def get_debug_enabled() -> bool:
     return bool(config.get("debug", False))
 
 
+def get_cli_output_journal() -> bool:
+    """Check if CLI output journal streaming is enabled.
+
+    When True, mission and contemplative CLI output is streamed to the
+    project's daily journal file in real-time for ``tail -f`` visibility.
+
+    Config key: cli_output_journal (default: True — opt-out to disable).
+    """
+    config = _load_config()
+    value = config.get("cli_output_journal")
+    if value is None:
+        return True
+    return bool(value)
+
+
 def get_max_runs() -> int:
     """Get maximum runs per day from config.yaml.
 

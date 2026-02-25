@@ -280,51 +280,77 @@ def run_claude_task(
     stdout_file: str,
     stderr_file: str,
     cwd: str,
+    instance_dir: str = "",
+    project_name: str = "",
+    run_num: int = 0,
 ) -> int:
     """Run Claude CLI as a subprocess with SIGINT isolation.
 
     The child process ignores SIGINT (via preexec_fn) so the double-tap
     pattern works: first CTRL-C only warns the user, second kills the child.
 
+    When *instance_dir* and *project_name* are provided and
+    ``cli_output_journal`` is enabled, stdout is streamed to the project's
+    daily journal file in real-time via a background tail thread.
+
     Returns the child exit code.
     """
     _sig.task_running = True
     _sig.first_ctrl_c = 0
 
+    # Start journal streaming if configured
+    journal_stream = None
+    if instance_dir and project_name:
+        from app.cli_journal_streamer import start_journal_stream
+        journal_stream = start_journal_stream(
+            stdout_file, instance_dir, project_name, run_num,
+        )
+
     from app.cli_exec import popen_cli
 
-    with open(stdout_file, "w") as out_f, open(stderr_file, "w") as err_f:
-        proc, cleanup = popen_cli(
-            cmd,
-            stdout=out_f,
-            stderr=err_f,
-            cwd=cwd,
-            start_new_session=True,
-        )
-        _sig.claude_proc = proc
+    exit_code = 1  # default if subprocess never completes
+    try:
+        with open(stdout_file, "w") as out_f, open(stderr_file, "w") as err_f:
+            proc, cleanup = popen_cli(
+                cmd,
+                stdout=out_f,
+                stderr=err_f,
+                cwd=cwd,
+                start_new_session=True,
+            )
+            _sig.claude_proc = proc
 
-        try:
-            # Wait for child, handling SIGINT interruptions gracefully
-            while True:
-                try:
-                    proc.wait()
-                    break
-                except (KeyboardInterrupt, InterruptedError):
-                    # If task_running was cleared by on_sigint (double-tap),
-                    # the child was terminated — wait for it to finish
-                    if not _sig.task_running:
-                        try:
-                            proc.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
-                            proc.wait()
+            try:
+                # Wait for child, handling SIGINT interruptions gracefully
+                while True:
+                    try:
+                        proc.wait()
                         break
-                    # Single CTRL-C — keep waiting
-                    continue
-        finally:
-            cleanup()
+                    except (KeyboardInterrupt, InterruptedError):
+                        # If task_running was cleared by on_sigint (double-tap),
+                        # the child was terminated — wait for it to finish
+                        if not _sig.task_running:
+                            try:
+                                proc.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+                                proc.wait()
+                            break
+                        # Single CTRL-C — keep waiting
+                        continue
+            finally:
+                cleanup()
 
-    exit_code = proc.returncode
+        exit_code = proc.returncode
+    finally:
+        # Always stop journal streaming, even on exception
+        if journal_stream:
+            from app.cli_journal_streamer import stop_journal_stream
+            stop_journal_stream(
+                journal_stream, exit_code, stderr_file,
+                instance_dir, project_name, run_num,
+            )
+
     _sig.claude_proc = None
     _sig.task_running = False
     _sig.first_ctrl_c = 0
@@ -931,7 +957,17 @@ def _handle_contemplative(
             project_name=project_name,
             session_info=f"Run {run_num}/{max_runs} on {project_name}. Mode: {plan['autonomous_mode']}.",
         )
-        run_claude_task(cmd, os.devnull, os.devnull, cwd=koan_root)
+        fd_out, stdout_file = tempfile.mkstemp(prefix="koan-contemp-out-")
+        fd_err, stderr_file = tempfile.mkstemp(prefix="koan-contemp-err-")
+        os.close(fd_out)
+        os.close(fd_err)
+        try:
+            run_claude_task(
+                cmd, stdout_file, stderr_file, cwd=koan_root,
+                instance_dir=instance, project_name=project_name, run_num=run_num,
+            )
+        finally:
+            _cleanup_temp(stdout_file, stderr_file)
     except KeyboardInterrupt:
         raise
     except Exception as e:
@@ -1398,7 +1434,10 @@ def _run_iteration(
 
         cmd_display = [c[:100] + '...' if len(c) > 100 else c for c in cmd[:6]]
         _debug_log(f"[run] cli: cmd={' '.join(cmd_display)}... cwd={project_path}")
-        claude_exit = run_claude_task(cmd, stdout_file, stderr_file, cwd=project_path)
+        claude_exit = run_claude_task(
+            cmd, stdout_file, stderr_file, cwd=project_path,
+            instance_dir=instance, project_name=project_name, run_num=run_num,
+        )
         _debug_log(f"[run] cli: exit_code={claude_exit}")
 
         # Parse and display output
