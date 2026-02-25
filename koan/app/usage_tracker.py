@@ -279,7 +279,7 @@ def _get_budget_thresholds() -> tuple:
         warn = max(0, min(100, warn))
         stop = max(0, min(100, stop))
         return warn, stop
-    except Exception:
+    except (ImportError, OSError, ValueError, TypeError):
         return 70, 85
 
 
@@ -294,7 +294,7 @@ def _get_budget_mode() -> str:
         mode = config.get("usage", {}).get("budget_mode", "session_only")
         if mode in ("full", "session_only", "disabled"):
             return mode
-    except Exception:
+    except (ImportError, OSError, ValueError):
         pass
     return "session_only"
 

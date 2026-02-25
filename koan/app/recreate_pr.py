@@ -115,7 +115,7 @@ def run_recreate(
         # Delete local branch if it exists (we're recreating from scratch)
         try:
             _run_git(["git", "branch", "-D", work_branch], cwd=project_path)
-        except Exception:
+        except (RuntimeError, OSError):
             pass  # Branch doesn't exist locally, that's fine
 
         _run_git(
@@ -219,7 +219,7 @@ def _fetch_upstream_target(base: str, project_path: str) -> Optional[str]:
         try:
             _run_git(["git", "fetch", remote, base], cwd=project_path)
             return remote
-        except Exception:
+        except (RuntimeError, OSError):
             continue
     return None
 
@@ -269,7 +269,7 @@ def _has_commits_on_branch(
             )
             if log.strip():
                 return True
-        except Exception:
+        except (RuntimeError, OSError):
             continue
     return False
 

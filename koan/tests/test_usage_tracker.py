@@ -465,5 +465,5 @@ class TestGetBudgetMode:
 
     def test_config_load_error_falls_back(self):
         """Config load failure falls back to session_only."""
-        with patch("app.utils.load_config", side_effect=Exception("nope")):
+        with patch("app.utils.load_config", side_effect=OSError("nope")):
             assert _get_budget_mode() == "session_only"
