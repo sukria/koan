@@ -139,8 +139,10 @@ def create_pause(
     content = f"{reason}\n{timestamp}\n{display}\n"
     atomic_write(reason_file, content)
 
-    # Touch the pause file (signal)
-    pause_file.touch()
+    # Create the pause signal file atomically (atomic_write uses
+    # temp-file + rename, unlike Path.touch() which can leave a
+    # partial state on crash).
+    atomic_write(pause_file, "")
 
 
 def remove_pause(koan_root: str) -> None:

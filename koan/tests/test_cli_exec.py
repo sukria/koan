@@ -228,6 +228,29 @@ class TestRunCli:
         assert actual_cmd == ["copilot", "-p", "my prompt", "--model", "opus"]
         assert mock_run.call_args[1]["stdin"] == subprocess.DEVNULL
 
+    @patch("app.cli_exec.subprocess.run")
+    def test_default_timeout_applied_when_missing(self, mock_run):
+        """run_cli applies DEFAULT_TIMEOUT when caller omits timeout=."""
+        from app.cli_exec import DEFAULT_TIMEOUT
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+        cmd = ["git", "status"]
+
+        run_cli(cmd, capture_output=True, text=True)
+
+        call_args = mock_run.call_args
+        assert call_args[1]["timeout"] == DEFAULT_TIMEOUT
+
+    @patch("app.cli_exec.subprocess.run")
+    def test_explicit_timeout_not_overridden(self, mock_run):
+        """run_cli respects an explicit timeout from the caller."""
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+        cmd = ["git", "status"]
+
+        run_cli(cmd, capture_output=True, text=True, timeout=42)
+
+        call_args = mock_run.call_args
+        assert call_args[1]["timeout"] == 42
+
 
 # ---------------------------------------------------------------------------
 # popen_cli
