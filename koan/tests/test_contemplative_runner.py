@@ -84,7 +84,25 @@ class TestBuildContemplativeCommand:
         assert "--allowedTools" in cmd
         assert "Read,Write,Glob,Grep" in cmd
         assert "--max-turns" in cmd
-        assert "5" in cmd
+        assert "10" in cmd
+
+    @patch("app.prompt_builder.build_contemplative_prompt")
+    def test_max_turns_is_10(self, mock_prompt):
+        """Regression: max_turns=5 was too low for contemplative prompts.
+
+        The contemplative prompt requires reading 5 files (soul.md, summary.md,
+        emotional-memory.md, personality-evolution.md, learnings.md) plus writing
+        output — 6-7 tool calls minimum. max_turns=5 caused ~40% of contemplative
+        sessions to hit the limit before producing any output.
+        """
+        mock_prompt.return_value = "test prompt"
+        cmd = build_contemplative_command(
+            instance="/path/instance",
+            project_name="koan",
+            session_info="test session",
+        )
+        idx = cmd.index("--max-turns")
+        assert cmd[idx + 1] == "10"
 
     @patch("app.prompt_builder.build_contemplative_prompt")
     def test_passes_args_to_prompt_builder(self, mock_prompt):
