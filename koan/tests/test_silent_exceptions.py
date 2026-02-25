@@ -16,7 +16,9 @@ considered non-silent — the error info propagates to the caller.
 
 The allowlist covers known-acceptable patterns where a broad catch
 intentionally discards the error (shutdown cleanup, best-effort display
-helpers, config loading defaults, etc.).
+helpers, config loading defaults, etc.).  Entries use **function names**
+(not line numbers) so they survive unrelated code changes like imports or
+formatting without requiring maintenance.
 """
 
 import ast
@@ -29,61 +31,57 @@ import pytest
 APP_DIR = Path(__file__).parent.parent / "app"
 
 # Known-acceptable silent broad catches.
-# Each entry is (filename, line_number).
+# Each entry is (filename, enclosing_function_name).
+# Uses function names instead of line numbers to survive unrelated code changes.
 # When adding: include a short justification comment.
-ALLOWLIST: Set[Tuple[str, int]] = {
+ALLOWLIST: Set[Tuple[str, str]] = {
     # --- Shutdown / terminal cleanup (terminal may be gone) ---
-    ("run.py", 79),                  # ANSI reset on shutdown
-    ("run.py", 1739),                # _get_koan_branch: git rev-parse fallback
-    ("run.py", 1917),                # _cleanup_temp_files: unlink best-effort
+    ("run.py", "_reset_terminal"),              # ANSI reset on shutdown
+    ("run.py", "_get_koan_branch"),             # git rev-parse fallback
+    ("run.py", "_cleanup_temp"),                # unlink best-effort
     # --- Best-effort display / info gathering ---
-    ("ai_runner.py", 127),           # dir listing for prompt context
-    ("startup_info.py", 25),         # config value fallback
-    ("startup_info.py", 62),         # provider detection fallback
-    ("startup_info.py", 80),         # project count fallback
-    ("startup_info.py", 99),         # skill count fallback
-    ("startup_info.py", 112),        # file size fallback
-    ("dashboard.py", 99),            # pause file read for web dashboard
+    ("ai_runner.py", "_gather_project_structure"),  # dir listing for prompt context
+    ("startup_info.py", "_get_config_value"),    # config value fallback
+    ("startup_info.py", "_get_provider"),         # provider detection fallback
+    ("startup_info.py", "_get_projects_summary"), # project count fallback
+    ("startup_info.py", "_get_skills_summary"),   # skill count fallback
+    ("startup_info.py", "_get_file_size"),         # file size fallback
+    ("dashboard.py", "get_signal_status"),        # pause file read for web dashboard
     # --- Config / init loading (defaults are safe) ---
-    ("debug.py", 32),                # debug mode config loading
-    ("pid_manager.py", 66),          # log rotation config loading
-    ("provider/claude.py", 88),      # tool allowlist parsing
-    ("provider/local.py", 39),       # model list parsing
+    ("debug.py", "_init"),                       # debug mode config loading
+    ("pid_manager.py", "_open_log_file"),         # log rotation config loading
+    ("provider/claude.py", "check_quota_available"),  # tool allowlist parsing
+    ("provider/local.py", "_get_config"),         # model list parsing
     # --- Context gathering for prompts (empty string is safe) ---
-    ("prompt_builder.py", 35),       # soul.md loading
-    ("prompt_builder.py", 46),       # personality-evolution.md loading
-    ("prompt_builder.py", 55),       # shared-journal.md loading
-    ("awake.py", 173),               # pending.md read for chat context
+    ("prompt_builder.py", "_load_config_safe"),   # config loading for prompt
+    ("prompt_builder.py", "_is_auto_merge_enabled"),  # merge config check
+    ("prompt_builder.py", "_get_branch_prefix"),  # branch prefix fallback
+    ("awake.py", "_build_chat_prompt"),           # pending.md read for chat context
     # --- GitHub API best-effort (None/empty is safe) ---
-    ("github.py", 183),              # gh username cache miss
-    ("github.py", 216),              # parent repo detection
-    ("github_auth.py", 56),          # token validation
+    ("github.py", "get_gh_username"),             # gh username cache miss
+    ("github.py", "detect_parent_repo"),          # parent repo detection
+    ("github_auth.py", "get_gh_token"),           # token validation
     # --- Git operations (abort after failed rebase) ---
-    ("claude_step.py", 52),          # rebase --abort after failed rebase
+    ("claude_step.py", "_rebase_onto_target"),    # rebase --abort after failed rebase
     # --- Non-critical subsystem fallbacks ---
-    ("cli_journal_streamer.py", 95), # journal append in tail-thread tight loop
-    ("iteration_manager.py", 318),   # recurring mission injection
-    ("schedule_manager.py", 186),    # schedule check
-    ("usage_tracker.py", 282),       # budget file read
-    ("usage_tracker.py", 297),       # budget file read
-    ("projects_merged.py", 245),     # github URL cache build
-    ("projects_config.py", 196),     # base branch resolution fallback (returns "main")
+    ("cli_journal_streamer.py", "_tail_loop"),    # journal append in tail-thread tight loop
+    ("schedule_manager.py", "get_schedule_config"),  # schedule check
+    ("usage_tracker.py", "_get_budget_thresholds"),  # budget threshold read
+    ("usage_tracker.py", "_get_budget_mode"),     # budget mode read
+    ("projects_merged.py", "get_yaml_project_names"),  # github URL cache build
+    ("projects_config.py", "resolve_base_branch"),  # base branch fallback (returns "main")
     # --- Setup wizard (interactive, errors shown in UI) ---
-    ("setup_wizard.py", 85),         # config loading
-    ("setup_wizard.py", 183),        # project path resolution
+    ("setup_wizard.py", "_load_wizard_projects"),  # config loading
+    ("setup_wizard.py", "get_chat_id_from_updates"),  # project path resolution
     # --- CLI runners: cleanup after main work done ---
-    ("rebase_pr.py", 313),           # branch cleanup after success
-    ("rebase_pr.py", 416),           # branch cleanup after success
-    ("recreate_pr.py", 118),         # local branch delete (may not exist)
-    ("recreate_pr.py", 222),         # fetch from origin/upstream fallback
-    ("recreate_pr.py", 272),         # git log check fallback
-    ("run.py", 1693),                # get current branch (best-effort)
-    ("run.py", 1871),                # temp file cleanup
+    ("recreate_pr.py", "run_recreate"),           # local branch delete (may not exist)
+    ("recreate_pr.py", "_fetch_upstream_target"),  # fetch from origin/upstream fallback
+    ("recreate_pr.py", "_has_commits_on_branch"),  # git log check fallback
     # --- Prompt/config loading with hardcoded fallback ---
-    ("local_llm_runner.py", 321),    # system prompt file fallback
-    ("pid_manager.py", 469),         # provider detection fallback
+    ("local_llm_runner.py", "_default_system_prompt"),  # system prompt file fallback
+    ("pid_manager.py", "_detect_provider"),        # provider detection fallback
     # --- Retry without optional parameter ---
-    ("plan_runner.py", 123),         # issue label retry (inner catch has e2)
+    ("plan_runner.py", "_run_new_plan"),           # issue label retry (inner catch has e2)
 }
 
 
@@ -106,6 +104,22 @@ _DIAG_ATTR_NAMES: Set[str] = {
 _DIAG_ATTR_CHAINS: Set[str] = {
     "sys.stderr",
 }
+
+
+def _get_enclosing_function(tree: ast.AST, target_line: int) -> str:
+    """Return the name of the innermost function containing *target_line*.
+
+    Returns ``"<module>"`` when the handler sits at module level.
+    """
+    best: ast.AST | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if (node.lineno <= target_line
+                    and (node.end_lineno is None
+                         or node.end_lineno >= target_line)):
+                if best is None or node.lineno > best.lineno:
+                    best = node
+    return best.name if best else "<module>"
 
 
 def _is_broad_exception(handler: ast.ExceptHandler) -> bool:
@@ -206,14 +220,15 @@ def _find_silent_broad_catches(filepath: Path) -> List[Tuple[int, str]]:
         if _has_diagnostic_output(node.body):
             continue
 
-        # Check allowlist (supports both flat filenames and subdir paths)
+        # Check allowlist by enclosing function name (not line number).
         rel_name = filepath.name
         try:
             rel_path = str(filepath.relative_to(APP_DIR))
         except ValueError:
             rel_path = rel_name
-        if (rel_name, node.lineno) in ALLOWLIST or \
-           (rel_path, node.lineno) in ALLOWLIST:
+        func_name = _get_enclosing_function(tree, node.lineno)
+        if (rel_name, func_name) in ALLOWLIST or \
+           (rel_path, func_name) in ALLOWLIST:
             continue
 
         # Extract the except line for context
@@ -279,7 +294,8 @@ class TestNoSilentBroadExceptions:
                 "or use logging/log()."
             )
             msg_parts.append(
-                "If the catch is intentionally silent, add it to ALLOWLIST "
+                "If the catch is intentionally silent, add "
+                '("filename", "function_name") to ALLOWLIST '
                 "in test_silent_exceptions.py with a comment."
             )
             pytest.fail("\n".join(msg_parts))
@@ -403,6 +419,130 @@ class TestScannerAccuracy:
         for node in ast.walk(tree):
             if isinstance(node, ast.ExceptHandler):
                 assert _has_diagnostic_output(node.body)
+
+
+class TestEnclosingFunction:
+    """Verify _get_enclosing_function resolves to the right scope."""
+
+    def test_top_level_function(self):
+        """Handler in a top-level function returns that function's name."""
+        code = "def foo():\n  try:\n    x()\n  except Exception:\n    pass\n"
+        tree = ast.parse(code)
+        # except is on line 4
+        assert _get_enclosing_function(tree, 4) == "foo"
+
+    def test_nested_function(self):
+        """Handler in a nested function returns the inner function's name."""
+        code = (
+            "def outer():\n"
+            "  def inner():\n"
+            "    try:\n"
+            "      x()\n"
+            "    except Exception:\n"
+            "      pass\n"
+        )
+        tree = ast.parse(code)
+        assert _get_enclosing_function(tree, 5) == "inner"
+
+    def test_module_level(self):
+        """Handler at module level returns '<module>'."""
+        code = "try:\n  x()\nexcept Exception:\n  pass\n"
+        tree = ast.parse(code)
+        assert _get_enclosing_function(tree, 3) == "<module>"
+
+    def test_class_method(self):
+        """Handler in a class method returns the method name."""
+        code = (
+            "class Foo:\n"
+            "  def bar(self):\n"
+            "    try:\n"
+            "      x()\n"
+            "    except Exception:\n"
+            "      pass\n"
+        )
+        tree = ast.parse(code)
+        assert _get_enclosing_function(tree, 5) == "bar"
+
+    def test_async_function(self):
+        """Handler in an async function is properly resolved."""
+        code = (
+            "async def fetch():\n"
+            "  try:\n"
+            "    await x()\n"
+            "  except Exception:\n"
+            "    pass\n"
+        )
+        tree = ast.parse(code)
+        assert _get_enclosing_function(tree, 4) == "fetch"
+
+
+class TestAllowlistConsistency:
+    """Verify the ALLOWLIST entries match actual code."""
+
+    def test_all_allowlist_functions_exist(self):
+        """Every (file, function) in ALLOWLIST must exist in the codebase."""
+        missing = []
+        for fname, func_name in sorted(ALLOWLIST):
+            fpath = APP_DIR / fname
+            if not fpath.exists():
+                missing.append(f"{fname}: file not found")
+                continue
+            source = fpath.read_text()
+            tree = ast.parse(source, str(fpath))
+            # Collect all function names in the file
+            func_names = set()
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    func_names.add(node.name)
+            if func_name != "<module>" and func_name not in func_names:
+                missing.append(f"{fname}: function '{func_name}' not found")
+        if missing:
+            pytest.fail(
+                "Stale ALLOWLIST entries (function renamed or removed):\n"
+                + "\n".join(f"  {m}" for m in missing)
+            )
+
+    def test_all_allowlist_entries_still_needed(self):
+        """Every ALLOWLIST entry must match a real silent broad catch.
+
+        If a function no longer has a silent broad catch (e.g. it was
+        narrowed to a specific exception), the entry is stale and should
+        be removed.
+        """
+        used = set()
+        for py_file in _collect_all_app_files():
+            try:
+                source = py_file.read_text()
+                tree = ast.parse(source, str(py_file))
+            except SyntaxError:
+                continue
+            rel_name = py_file.name
+            try:
+                rel_path = str(py_file.relative_to(APP_DIR))
+            except ValueError:
+                rel_path = rel_name
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ExceptHandler):
+                    continue
+                if not _is_broad_exception(node):
+                    continue
+                if node.name and _references_var(node.body, node.name):
+                    continue
+                if _has_diagnostic_output(node.body):
+                    continue
+                func_name = _get_enclosing_function(tree, node.lineno)
+                used.add((rel_name, func_name))
+                used.add((rel_path, func_name))
+
+        unused = []
+        for entry in sorted(ALLOWLIST):
+            if entry not in used:
+                unused.append(f'("{entry[0]}", "{entry[1]}")')
+        if unused:
+            pytest.fail(
+                "Stale ALLOWLIST entries (no matching silent broad catch):\n"
+                + "\n".join(f"  {u}" for u in unused)
+            )
 
 
 class TestExceptionVarPropagation:
