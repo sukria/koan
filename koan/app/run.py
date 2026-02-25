@@ -380,10 +380,12 @@ def run_claude_task(
                 journal_stream, exit_code, stderr_file,
                 instance_dir, project_name, run_num,
             )
+        # Reset signal state even on exception — otherwise _sig.task_running
+        # stays True and CTRL-C requires a double-tap when no subprocess is running.
+        _sig.claude_proc = None
+        _sig.task_running = False
+        _sig.first_ctrl_c = 0
 
-    _sig.claude_proc = None
-    _sig.task_running = False
-    _sig.first_ctrl_c = 0
     return exit_code
 
 
@@ -1392,6 +1394,10 @@ def _run_iteration(
         log("error", f"Git prep error for {project_name}: {e}")
 
     # --- Mark mission as In Progress ---
+    # Save the original title before skill dispatch may translate it.
+    # _finalize_mission must use the original title because that's the
+    # needle recorded in missions.md "In Progress" section.
+    original_mission_title = mission_title
     if mission_title:
         _start_mission_in_file(instance, mission_title)
 
@@ -1496,8 +1502,10 @@ def _run_iteration(
 
         # Complete/fail mission in missions.md (safety net — idempotent if Claude already did it)
         # Done BEFORE post-mission pipeline so quota exhaustion can't skip it.
-        if mission_title:
-            _finalize_mission(instance, mission_title, project_name, claude_exit)
+        # Use original_mission_title because that's the needle in "In Progress".
+        # cli_skill translation may have changed mission_title to a different string.
+        if original_mission_title:
+            _finalize_mission(instance, original_mission_title, project_name, claude_exit)
 
         # Post-mission pipeline
         set_status(koan_root, f"Run {run_num}/{max_runs} — post-mission processing")
@@ -1824,6 +1832,7 @@ def _run_skill_mission(
     debug_log(f"[run] skill exec: cwd={koan_pkg_dir}")
     stdout_lines = []
     stderr_lines = []
+    proc = None
     try:
         proc = subprocess.Popen(
             skill_cmd,
@@ -1883,6 +1892,8 @@ def _run_skill_mission(
         skill_stdout = "\n".join(stdout_lines)
         skill_stderr = "\n".join(stderr_lines)
     except Exception as e:
+        if proc is not None:
+            _kill_process_group(proc)
         log("error", f"Skill runner failed: {e}")
         debug_log(f"[run] skill exec: EXCEPTION {e}")
         exit_code = 1
