@@ -12,23 +12,20 @@ CLI:
 """
 
 import logging
-import os
 import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.git_utils import run_git_strict
-from app.github import detect_parent_repo, fetch_issue_with_comments, run_gh, pr_create
+from app.github import fetch_issue_with_comments
 from app.github_url_parser import parse_issue_url
-from app.projects_config import resolve_base_branch
+from app.pr_submit import (
+    get_current_branch,
+    guess_project_name,
+    submit_draft_pr,
+)
 from app.prompts import load_prompt, load_skill_prompt
 
 logger = logging.getLogger(__name__)
-
-
-def _guess_project_name(project_path: str) -> str:
-    """Extract project name from the directory path."""
-    return Path(project_path).name
 
 
 # Regex pattern matching plan structure markers
@@ -112,9 +109,8 @@ def run_implement(
     # Post-implementation: submit draft PR
     pr_url = None
     try:
-        pr_url = _submit_draft_pr(
+        pr_url = _submit_implement_pr(
             project_path=project_path,
-            project_name=_guess_project_name(project_path),
             owner=owner,
             repo=repo,
             issue_number=str(issue_number),
@@ -126,7 +122,7 @@ def run_implement(
         logger.warning("PR submission failed: %s", e)
 
     # Build notification and summary
-    branch = _get_current_branch(project_path)
+    branch = get_current_branch(project_path)
     if pr_url:
         notify_fn(
             f"\u2705 Implementation complete for issue #{issue_number}"
@@ -160,10 +156,10 @@ def run_implement(
 
 def _is_plan_content(text: str) -> bool:
     """Check if text contains plan structure markers.
-    
+
     Args:
         text: Text to check for plan markers.
-        
+
     Returns:
         True if text contains markdown headings indicating a plan structure.
     """
@@ -210,20 +206,7 @@ def _build_prompt(
     branch_prefix: str = "koan/",
     issue_number: str = "",
 ) -> str:
-    """Build the implementation prompt from the issue and plan.
-
-    Args:
-        issue_url: GitHub issue URL.
-        issue_title: Issue title.
-        plan: Extracted plan text.
-        context: Additional user context.
-        skill_dir: Path to skill directory for prompt loading.
-        branch_prefix: Git branch prefix for the project.
-        issue_number: Issue number for branch naming.
-
-    Returns:
-        Formatted prompt string.
-    """
+    """Build the implementation prompt from the issue and plan."""
     template_vars = dict(
         ISSUE_URL=issue_url,
         ISSUE_TITLE=issue_title,
@@ -250,16 +233,6 @@ def _generate_pr_summary(
 
     Falls back to a bullet list of commit subjects if the model call
     fails or times out.
-
-    Args:
-        project_path: Path to the project repository.
-        issue_title: Issue title for context.
-        issue_url: Issue URL for cross-reference.
-        commit_subjects: List of commit subject lines.
-        skill_dir: Path to skill directory for prompt loading.
-
-    Returns:
-        PR summary text.
     """
     commits_text = "\n".join(f"- {s}" for s in commit_subjects) or "(no commits)"
     fallback = f"Implements {issue_url}\n\n{commits_text}"
@@ -303,20 +276,7 @@ def _execute_implementation(
     skill_dir: Optional[Path] = None,
     issue_number: str = "",
 ) -> str:
-    """Execute the implementation via Claude CLI.
-
-    Args:
-        project_path: Path to the project repository.
-        issue_url: GitHub issue URL.
-        issue_title: Issue title.
-        plan: Extracted plan text.
-        context: Additional user context.
-        skill_dir: Path to skill directory for prompt loading.
-        issue_number: Issue number for branch naming.
-
-    Returns:
-        Claude CLI output.
-    """
+    """Execute the implementation via Claude CLI."""
     from app.config import get_branch_prefix
     branch_prefix = get_branch_prefix()
 
@@ -335,81 +295,11 @@ def _execute_implementation(
 
 
 # ---------------------------------------------------------------------------
-# Post-implementation: draft PR submission
+# Post-implementation: draft PR submission (delegates to app.pr_submit)
 # ---------------------------------------------------------------------------
 
-
-def _get_current_branch(project_path: str) -> str:
-    """Return the current git branch name, or 'main' on error."""
-    try:
-        return run_git_strict(
-            "rev-parse", "--abbrev-ref", "HEAD",
-            cwd=project_path,
-        ).strip()
-    except Exception:
-        return "main"
-
-
-def _get_commit_subjects(project_path: str, base_branch: str = "main") -> List[str]:
-    """Return commit subject lines from base_branch..HEAD."""
-    try:
-        output = run_git_strict(
-            "log", f"{base_branch}..HEAD", "--format=%s",
-            cwd=project_path,
-        )
-        return [s for s in output.strip().splitlines() if s.strip()]
-    except Exception:
-        return []
-
-
-def _get_fork_owner(project_path: str) -> str:
-    """Return the GitHub owner login of the current repo."""
-    try:
-        return run_gh(
-            "repo", "view", "--json", "owner", "--jq", ".owner.login",
-            cwd=project_path, timeout=15,
-        ).strip()
-    except Exception:
-        return ""
-
-
-def _resolve_submit_target(
+def _submit_implement_pr(
     project_path: str,
-    project_name: str,
-    owner: str,
-    repo: str,
-) -> dict:
-    """Determine where to submit the PR.
-
-    Resolution order:
-    1. submit_to_repository in projects.yaml config
-    2. Auto-detect fork parent via gh
-    3. Fall back to issue's owner/repo
-
-    Returns dict with 'repo' (owner/repo) and 'is_fork' (bool).
-    """
-    from app.projects_config import load_projects_config, get_project_submit_to_repository
-
-    koan_root = os.environ.get("KOAN_ROOT", "")
-    if koan_root:
-        config = load_projects_config(koan_root)
-        if config:
-            submit_cfg = get_project_submit_to_repository(config, project_name)
-            if submit_cfg.get("repo"):
-                return {"repo": submit_cfg["repo"], "is_fork": True}
-
-    # Auto-detect fork parent
-    parent = detect_parent_repo(project_path)
-    if parent:
-        return {"repo": parent, "is_fork": True}
-
-    # Fall back to issue's owner/repo
-    return {"repo": f"{owner}/{repo}", "is_fork": False}
-
-
-def _submit_draft_pr(
-    project_path: str,
-    project_name: str,
     owner: str,
     repo: str,
     issue_number: str,
@@ -417,90 +307,39 @@ def _submit_draft_pr(
     issue_url: str,
     skill_dir: Optional[Path] = None,
 ) -> Optional[str]:
-    """Push branch and create a draft PR after successful implementation.
+    """Build implement-specific PR title/body and delegate to shared submit."""
+    from app.pr_submit import get_commit_subjects
+    from app.projects_config import resolve_base_branch
 
-    Returns the PR URL on success, or None on failure.
-    """
-    # Check current branch
-    branch = _get_current_branch(project_path)
-    if branch in ("main", "master"):
-        logger.info("On %s — skipping PR creation", branch)
-        return None
-
-    # Check for existing PR on this branch
-    try:
-        existing = run_gh(
-            "pr", "list", "--head", branch, "--json", "url", "--jq", ".[0].url",
-            cwd=project_path, timeout=15,
-        ).strip()
-        if existing:
-            logger.info("PR already exists: %s", existing)
-            return existing
-    except Exception:
-        pass  # No existing PR, continue
-
-    # Get commit subjects
+    project_name = guess_project_name(project_path)
     base_branch = resolve_base_branch(project_name)
-    commits = _get_commit_subjects(project_path, base_branch=base_branch)
-    if not commits:
-        logger.info("No commits on branch — skipping PR creation")
-        return None
+    commits = get_commit_subjects(project_path, base_branch=base_branch)
 
-    # Push branch
-    try:
-        run_git_strict(
-            "push", "-u", "origin", branch,
-            cwd=project_path, timeout=120,
-        )
-    except Exception as e:
-        logger.warning("Failed to push branch: %s", e)
-        return None
-
-    # Generate PR summary
     summary = _generate_pr_summary(
         project_path, issue_title, issue_url, commits, skill_dir,
     )
 
-    # Build PR body
-    pr_body = f"## Summary\n\n{summary}\n\nCloses {issue_url}\n\n---\n*Generated by Kōan /implement*"
-
-    # Resolve where to submit
-    target = _resolve_submit_target(project_path, project_name, owner, repo)
     pr_title = f"Implement: {issue_title}"[:70]
+    pr_body = (
+        f"## Summary\n\n{summary}\n\n"
+        f"Closes {issue_url}\n\n"
+        f"---\n*Generated by Kōan /implement*"
+    )
 
-    # Build pr_create kwargs
-    pr_kwargs = {
-        "title": pr_title,
-        "body": pr_body,
-        "draft": True,
-        "cwd": project_path,
-    }
-
-    if target["is_fork"]:
-        pr_kwargs["repo"] = target["repo"]
-        fork_owner = _get_fork_owner(project_path)
-        if fork_owner:
-            pr_kwargs["head"] = f"{fork_owner}:{branch}"
-
-    # Create draft PR
     try:
-        pr_url = pr_create(**pr_kwargs)
-    except Exception as e:
-        logger.warning("Failed to create PR: %s", e)
-        return None
-
-    # Comment on the issue with the PR link
-    try:
-        run_gh(
-            "issue", "comment", str(issue_number),
-            "--repo", f"{owner}/{repo}",
-            "--body", f"Draft PR submitted: {pr_url}",
-            cwd=project_path, timeout=15,
+        return submit_draft_pr(
+            project_path=project_path,
+            project_name=project_name,
+            owner=owner,
+            repo=repo,
+            issue_number=issue_number,
+            pr_title=pr_title,
+            pr_body=pr_body,
+            issue_url=issue_url,
         )
     except Exception as e:
-        logger.debug("Failed to comment on issue: %s", e)
-
-    return pr_url
+        logger.warning("PR submission failed: %s", e)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -508,10 +347,7 @@ def _submit_draft_pr(
 # ---------------------------------------------------------------------------
 
 def main(argv=None):
-    """CLI entry point for implement_runner.
-
-    Returns exit code (0 = success, 1 = failure).
-    """
+    """CLI entry point for implement_runner."""
     import argparse
 
     parser = argparse.ArgumentParser(

@@ -12,22 +12,19 @@ CLI:
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.git_utils import run_git_strict
-from app.github import detect_parent_repo, fetch_issue_with_comments, run_gh, pr_create
+from app.github import fetch_issue_with_comments
 from app.github_url_parser import parse_issue_url
-from app.projects_config import resolve_base_branch
+from app.pr_submit import (
+    get_current_branch,
+    guess_project_name,
+    submit_draft_pr,
+)
 from app.prompts import load_prompt, load_skill_prompt
 
 logger = logging.getLogger(__name__)
-
-
-def _guess_project_name(project_path: str) -> str:
-    """Extract project name from the directory path."""
-    return Path(project_path).name
 
 
 def run_fix(
@@ -100,23 +97,17 @@ def run_fix(
         return False, "Claude returned empty output."
 
     # Post-fix: submit draft PR
-    pr_url = None
-    try:
-        pr_url = _submit_draft_pr(
-            project_path=project_path,
-            project_name=_guess_project_name(project_path),
-            owner=owner,
-            repo=repo,
-            issue_number=str(issue_number),
-            issue_title=title,
-            issue_url=issue_url,
-            skill_dir=skill_dir,
-        )
-    except Exception as e:
-        logger.warning("PR submission failed: %s", e)
+    pr_url = _submit_fix_pr(
+        project_path=project_path,
+        owner=owner,
+        repo=repo,
+        issue_number=str(issue_number),
+        issue_title=title,
+        issue_url=issue_url,
+    )
 
     # Build notification and summary
-    branch = _get_current_branch(project_path)
+    branch = get_current_branch(project_path)
     if pr_url:
         notify_fn(
             f"\u2705 Fix complete for issue #{issue_number}"
@@ -179,20 +170,7 @@ def _execute_fix(
     skill_dir: Optional[Path] = None,
     issue_number: str = "",
 ) -> str:
-    """Execute the fix via Claude CLI.
-
-    Args:
-        project_path: Path to the project repository.
-        issue_url: GitHub issue URL.
-        issue_title: Issue title.
-        issue_body: Full issue content.
-        context: Additional user context.
-        skill_dir: Path to skill directory for prompt loading.
-        issue_number: Issue number for branch naming.
-
-    Returns:
-        Claude CLI output.
-    """
+    """Execute the fix via Claude CLI."""
     from app.config import get_branch_prefix
     branch_prefix = get_branch_prefix()
 
@@ -236,119 +214,27 @@ def _build_prompt(
 
 
 # ---------------------------------------------------------------------------
-# Post-fix: draft PR submission (reuses implement_runner patterns)
+# Post-fix: draft PR submission (delegates to app.pr_submit)
 # ---------------------------------------------------------------------------
 
-def _get_current_branch(project_path: str) -> str:
-    """Return the current git branch name, or 'main' on error."""
-    try:
-        return run_git_strict(
-            "rev-parse", "--abbrev-ref", "HEAD",
-            cwd=project_path,
-        ).strip()
-    except Exception:
-        return "main"
-
-
-def _get_commit_subjects(project_path: str, base_branch: str = "main") -> List[str]:
-    """Return commit subject lines from base_branch..HEAD."""
-    try:
-        output = run_git_strict(
-            "log", f"{base_branch}..HEAD", "--format=%s",
-            cwd=project_path,
-        )
-        return [s for s in output.strip().splitlines() if s.strip()]
-    except Exception:
-        return []
-
-
-def _get_fork_owner(project_path: str) -> str:
-    """Return the GitHub owner login of the current repo."""
-    try:
-        return run_gh(
-            "repo", "view", "--json", "owner", "--jq", ".owner.login",
-            cwd=project_path, timeout=15,
-        ).strip()
-    except Exception:
-        return ""
-
-
-def _resolve_submit_target(
+def _submit_fix_pr(
     project_path: str,
-    project_name: str,
-    owner: str,
-    repo: str,
-) -> dict:
-    """Determine where to submit the PR.
-
-    Resolution order:
-    1. submit_to_repository in projects.yaml config
-    2. Auto-detect fork parent via gh
-    3. Fall back to issue's owner/repo
-    """
-    from app.projects_config import load_projects_config, get_project_submit_to_repository
-
-    koan_root = os.environ.get("KOAN_ROOT", "")
-    if koan_root:
-        config = load_projects_config(koan_root)
-        if config:
-            submit_cfg = get_project_submit_to_repository(config, project_name)
-            if submit_cfg.get("repo"):
-                return {"repo": submit_cfg["repo"], "is_fork": True}
-
-    parent = detect_parent_repo(project_path)
-    if parent:
-        return {"repo": parent, "is_fork": True}
-
-    return {"repo": f"{owner}/{repo}", "is_fork": False}
-
-
-def _submit_draft_pr(
-    project_path: str,
-    project_name: str,
     owner: str,
     repo: str,
     issue_number: str,
     issue_title: str,
     issue_url: str,
-    skill_dir: Optional[Path] = None,
 ) -> Optional[str]:
-    """Push branch and create a draft PR after successful fix."""
-    branch = _get_current_branch(project_path)
-    if branch in ("main", "master"):
-        logger.info("On %s — skipping PR creation", branch)
-        return None
+    """Build fix-specific PR title/body and delegate to shared submit."""
+    from app.pr_submit import get_commit_subjects
+    from app.projects_config import resolve_base_branch
 
-    # Check for existing PR
-    try:
-        existing = run_gh(
-            "pr", "list", "--head", branch, "--json", "url", "--jq", ".[0].url",
-            cwd=project_path, timeout=15,
-        ).strip()
-        if existing:
-            logger.info("PR already exists: %s", existing)
-            return existing
-    except Exception:
-        pass
-
+    project_name = guess_project_name(project_path)
     base_branch = resolve_base_branch(project_name)
-    commits = _get_commit_subjects(project_path, base_branch=base_branch)
-    if not commits:
-        logger.info("No commits on branch — skipping PR creation")
-        return None
-
-    # Push branch
-    try:
-        run_git_strict(
-            "push", "-u", "origin", branch,
-            cwd=project_path, timeout=120,
-        )
-    except Exception as e:
-        logger.warning("Failed to push branch: %s", e)
-        return None
-
-    # Build PR body
+    commits = get_commit_subjects(project_path, base_branch=base_branch)
     commits_text = "\n".join(f"- {s}" for s in commits)
+
+    pr_title = f"fix: {issue_title}"[:70]
     pr_body = (
         f"## Summary\n\n"
         f"Fixes {issue_url}\n\n"
@@ -356,41 +242,20 @@ def _submit_draft_pr(
         f"---\n*Generated by Koan /fix*"
     )
 
-    # Resolve where to submit
-    target = _resolve_submit_target(project_path, project_name, owner, repo)
-    pr_title = f"fix: {issue_title}"[:70]
-
-    pr_kwargs = {
-        "title": pr_title,
-        "body": pr_body,
-        "draft": True,
-        "cwd": project_path,
-    }
-
-    if target["is_fork"]:
-        pr_kwargs["repo"] = target["repo"]
-        fork_owner = _get_fork_owner(project_path)
-        if fork_owner:
-            pr_kwargs["head"] = f"{fork_owner}:{branch}"
-
     try:
-        pr_url = pr_create(**pr_kwargs)
-    except Exception as e:
-        logger.warning("Failed to create PR: %s", e)
-        return None
-
-    # Comment on the issue
-    try:
-        run_gh(
-            "issue", "comment", str(issue_number),
-            "--repo", f"{owner}/{repo}",
-            "--body", f"Draft fix submitted: {pr_url}",
-            cwd=project_path, timeout=15,
+        return submit_draft_pr(
+            project_path=project_path,
+            project_name=project_name,
+            owner=owner,
+            repo=repo,
+            issue_number=issue_number,
+            pr_title=pr_title,
+            pr_body=pr_body,
+            issue_url=issue_url,
         )
     except Exception as e:
-        logger.debug("Failed to comment on issue: %s", e)
-
-    return pr_url
+        logger.warning("PR submission failed: %s", e)
+        return None
 
 
 # ---------------------------------------------------------------------------
