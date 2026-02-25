@@ -263,7 +263,16 @@ def _kill_process_group(proc):
             proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             os.killpg(pgid, signal.SIGKILL)
-            proc.wait(timeout=5)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                # Process didn't die even after SIGKILL — give up to
+                # avoid blocking the caller.  The OS will reap the
+                # zombie eventually.
+                print(
+                    f"[run] warning: pid {proc.pid} did not exit after SIGKILL",
+                    file=sys.stderr,
+                )
     except (ProcessLookupError, PermissionError, OSError):
         # Process already gone or we lack permissions — nothing to do.
         pass

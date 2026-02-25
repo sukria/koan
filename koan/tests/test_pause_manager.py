@@ -783,16 +783,21 @@ class TestBudgetLoopRegression:
 class TestCreatePauseAtomicWrite:
     """Test that create_pause uses atomic_write for thread safety."""
 
-    def test_uses_atomic_write_for_reason_file(self, tmp_path):
+    def test_uses_atomic_write_for_both_files(self, tmp_path):
         from unittest.mock import patch
 
         from app.pause_manager import create_pause
 
         with patch("app.utils.atomic_write") as mock_aw:
             create_pause(str(tmp_path), "quota", 1707000000, "resets 10am")
-            mock_aw.assert_called_once()
-            call_path = str(mock_aw.call_args[0][0])
-            assert call_path.endswith(".koan-pause-reason")
-            content = mock_aw.call_args[0][1]
+            assert mock_aw.call_count == 2
+            # First call: reason file
+            reason_path = str(mock_aw.call_args_list[0][0][0])
+            assert reason_path.endswith(".koan-pause-reason")
+            content = mock_aw.call_args_list[0][0][1]
             assert "quota" in content
             assert "1707000000" in content
+            # Second call: pause signal file (atomic, not touch())
+            pause_path = str(mock_aw.call_args_list[1][0][0])
+            assert pause_path.endswith(".koan-pause")
+            assert mock_aw.call_args_list[1][0][1] == ""

@@ -496,6 +496,25 @@ class TestKillProcessGroup:
         with patch("app.run.os.getpgid", side_effect=ProcessLookupError):
             _kill_process_group(proc)  # Should not raise
 
+    def test_handles_sigkill_timeout(self, capsys):
+        """_kill_process_group handles TimeoutExpired after SIGKILL gracefully."""
+        from app.run import _kill_process_group
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.pid = 77777
+        # First wait (SIGTERM) times out, second wait (SIGKILL) also times out
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired("cmd", 3),
+            subprocess.TimeoutExpired("cmd", 5),
+        ]
+        with patch("app.run.os.getpgid", return_value=77777), \
+             patch("app.run.os.killpg") as mock_killpg:
+            _kill_process_group(proc)  # Should not raise
+            mock_killpg.assert_any_call(77777, signal.SIGTERM)
+            mock_killpg.assert_any_call(77777, signal.SIGKILL)
+        captured = capsys.readouterr()
+        assert "did not exit after SIGKILL" in captured.err
+
 
 # ---------------------------------------------------------------------------
 # Test: protected_phase context manager

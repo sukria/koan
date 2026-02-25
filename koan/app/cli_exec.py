@@ -18,6 +18,10 @@ from typing import Callable, List, Optional, Tuple
 
 STDIN_PLACEHOLDER = "@stdin"
 
+# Default timeout for run_cli (seconds).  All current callers pass an
+# explicit timeout, but this guards against future callers forgetting.
+DEFAULT_TIMEOUT = 600  # 10 minutes
+
 
 def _uses_stdin_passing() -> bool:
     """Check if the current provider supports stdin-based prompt passing.
@@ -83,7 +87,10 @@ def run_cli(cmd, **kwargs) -> subprocess.CompletedProcess:
     """Run a CLI command with the prompt passed via temp-file stdin.
 
     Drop-in replacement for ``subprocess.run(cmd, stdin=DEVNULL, ...)``.
+    A default timeout of :data:`DEFAULT_TIMEOUT` seconds is applied if
+    the caller does not provide one, preventing indefinite hangs.
     """
+    kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
     cmd, prompt_path = prepare_prompt_file(cmd)
     if prompt_path:
         try:
