@@ -7,14 +7,22 @@ from skills.core.fix.fix_runner import (
     run_fix,
     _build_issue_body,
     _build_prompt,
-    _get_current_branch,
-    _get_commit_subjects,
-    _get_fork_owner,
-    _resolve_submit_target,
-    _submit_draft_pr,
-    _guess_project_name,
+    _submit_fix_pr,
     main,
 )
+
+# Shared helpers imported via app.pr_submit
+from app.pr_submit import (
+    get_current_branch,
+    get_commit_subjects,
+    get_fork_owner,
+    guess_project_name,
+    resolve_submit_target,
+)
+
+
+_FIX_MODULE = "skills.core.fix.fix_runner"
+_PR_MODULE = "app.pr_submit"
 
 
 # ---------------------------------------------------------------------------
@@ -117,79 +125,79 @@ class TestBuildPrompt:
 
 
 # ---------------------------------------------------------------------------
-# _guess_project_name
+# guess_project_name (shared via app.pr_submit)
 # ---------------------------------------------------------------------------
 
 class TestGuessProjectName:
     def test_simple_path(self):
-        assert _guess_project_name("/home/user/workspace/investmindr") == "investmindr"
+        assert guess_project_name("/home/user/workspace/investmindr") == "investmindr"
 
     def test_nested_path(self):
-        assert _guess_project_name("/Users/atoobot/workspace/anantys/investmindr") == "investmindr"
+        assert guess_project_name("/Users/atoobot/workspace/anantys/investmindr") == "investmindr"
 
 
 # ---------------------------------------------------------------------------
-# _get_current_branch
+# get_current_branch (shared via app.pr_submit)
 # ---------------------------------------------------------------------------
 
 class TestGetCurrentBranch:
-    @patch("skills.core.fix.fix_runner.run_git_strict", return_value="koan.atoomic/fix-issue-42\n")
+    @patch(f"{_PR_MODULE}.run_git_strict", return_value="koan.atoomic/fix-issue-42\n")
     def test_returns_branch(self, mock_git):
-        assert _get_current_branch("/path") == "koan.atoomic/fix-issue-42"
+        assert get_current_branch("/path") == "koan.atoomic/fix-issue-42"
 
-    @patch("skills.core.fix.fix_runner.run_git_strict", side_effect=Exception("fail"))
+    @patch(f"{_PR_MODULE}.run_git_strict", side_effect=Exception("fail"))
     def test_fallback_on_error(self, mock_git):
-        assert _get_current_branch("/path") == "main"
+        assert get_current_branch("/path") == "main"
 
 
 # ---------------------------------------------------------------------------
-# _get_commit_subjects
+# get_commit_subjects (shared via app.pr_submit)
 # ---------------------------------------------------------------------------
 
 class TestGetCommitSubjects:
-    @patch("skills.core.fix.fix_runner.run_git_strict", return_value="Fix auth bug\nAdd test\n")
+    @patch(f"{_PR_MODULE}.run_git_strict", return_value="Fix auth bug\nAdd test\n")
     def test_returns_subjects(self, mock_git):
-        subjects = _get_commit_subjects("/path")
+        subjects = get_commit_subjects("/path")
         assert subjects == ["Fix auth bug", "Add test"]
 
-    @patch("skills.core.fix.fix_runner.run_git_strict", return_value="")
+    @patch(f"{_PR_MODULE}.run_git_strict", return_value="")
     def test_empty_on_no_commits(self, mock_git):
-        assert _get_commit_subjects("/path") == []
+        assert get_commit_subjects("/path") == []
 
-    @patch("skills.core.fix.fix_runner.run_git_strict", side_effect=Exception("fail"))
+    @patch(f"{_PR_MODULE}.run_git_strict", side_effect=Exception("fail"))
     def test_empty_on_error(self, mock_git):
-        assert _get_commit_subjects("/path") == []
+        assert get_commit_subjects("/path") == []
 
 
 # ---------------------------------------------------------------------------
-# _get_fork_owner
+# get_fork_owner (shared via app.pr_submit)
 # ---------------------------------------------------------------------------
 
 class TestGetForkOwner:
-    @patch("skills.core.fix.fix_runner.run_gh", return_value="atoomic\n")
+    @patch(f"{_PR_MODULE}.run_gh", return_value="atoomic\n")
     def test_returns_owner(self, mock_gh):
-        assert _get_fork_owner("/path") == "atoomic"
+        assert get_fork_owner("/path") == "atoomic"
 
-    @patch("skills.core.fix.fix_runner.run_gh", side_effect=Exception("fail"))
+    @patch(f"{_PR_MODULE}.run_gh", side_effect=Exception("fail"))
     def test_empty_on_error(self, mock_gh):
-        assert _get_fork_owner("/path") == ""
+        assert get_fork_owner("/path") == ""
 
 
 # ---------------------------------------------------------------------------
-# _resolve_submit_target
+# resolve_submit_target (shared via app.pr_submit)
 # ---------------------------------------------------------------------------
 
 class TestResolveSubmitTarget:
-    @patch("skills.core.fix.fix_runner.detect_parent_repo", return_value=None)
+    @patch(f"{_PR_MODULE}.detect_parent_repo", return_value=None)
     @patch.dict("os.environ", {"KOAN_ROOT": ""}, clear=False)
     def test_fallback_to_issue_repo(self, mock_detect):
-        result = _resolve_submit_target("/path", "proj", "Anantys", "investmindr")
+        result = resolve_submit_target("/path", "proj", "Anantys", "investmindr")
         assert result == {"repo": "Anantys/investmindr", "is_fork": False}
 
-    @patch("skills.core.fix.fix_runner.detect_parent_repo", return_value="upstream/repo")
+    @patch(f"{_PR_MODULE}.detect_parent_repo", return_value="upstream/repo")
     @patch.dict("os.environ", {"KOAN_ROOT": ""}, clear=False)
     def test_fork_detected(self, mock_detect):
-        result = _resolve_submit_target("/path", "proj", "o", "r")
+        result = resolve_submit_target("/path", "proj", "o", "r")
         assert result == {"repo": "upstream/repo", "is_fork": True}
 
 
@@ -198,10 +206,10 @@ class TestResolveSubmitTarget:
 # ---------------------------------------------------------------------------
 
 class TestRunFix:
-    @patch("skills.core.fix.fix_runner._submit_draft_pr", return_value="https://github.com/o/r/pull/1")
-    @patch("skills.core.fix.fix_runner._get_current_branch", return_value="koan.atoomic/fix-issue-42")
-    @patch("skills.core.fix.fix_runner._execute_fix", return_value="Done")
-    @patch("skills.core.fix.fix_runner.fetch_issue_with_comments")
+    @patch(f"{_FIX_MODULE}._submit_fix_pr", return_value="https://github.com/o/r/pull/1")
+    @patch(f"{_FIX_MODULE}.get_current_branch", return_value="koan.atoomic/fix-issue-42")
+    @patch(f"{_FIX_MODULE}._execute_fix", return_value="Done")
+    @patch(f"{_FIX_MODULE}.fetch_issue_with_comments")
     def test_success_with_pr(self, mock_fetch, mock_execute, mock_branch, mock_pr):
         mock_fetch.return_value = ("Bug title", "Bug body", [])
         notify = MagicMock()
@@ -215,7 +223,7 @@ class TestRunFix:
         assert success is True
         assert "https://github.com/o/r/pull/1" in summary
 
-    @patch("skills.core.fix.fix_runner.fetch_issue_with_comments")
+    @patch(f"{_FIX_MODULE}.fetch_issue_with_comments")
     def test_invalid_url(self, mock_fetch):
         notify = MagicMock()
         success, summary = run_fix(
@@ -225,7 +233,7 @@ class TestRunFix:
         )
         assert success is False
 
-    @patch("skills.core.fix.fix_runner.fetch_issue_with_comments")
+    @patch(f"{_FIX_MODULE}.fetch_issue_with_comments")
     def test_empty_issue(self, mock_fetch):
         mock_fetch.return_value = ("Title", "", [])
         notify = MagicMock()
@@ -238,10 +246,10 @@ class TestRunFix:
         assert success is False
         assert "no content" in summary.lower()
 
-    @patch("skills.core.fix.fix_runner._submit_draft_pr", return_value=None)
-    @patch("skills.core.fix.fix_runner._get_current_branch", return_value="koan.atoomic/fix-issue-42")
-    @patch("skills.core.fix.fix_runner._execute_fix", return_value="Done")
-    @patch("skills.core.fix.fix_runner.fetch_issue_with_comments")
+    @patch(f"{_FIX_MODULE}._submit_fix_pr", return_value=None)
+    @patch(f"{_FIX_MODULE}.get_current_branch", return_value="koan.atoomic/fix-issue-42")
+    @patch(f"{_FIX_MODULE}._execute_fix", return_value="Done")
+    @patch(f"{_FIX_MODULE}.fetch_issue_with_comments")
     def test_success_no_pr(self, mock_fetch, mock_execute, mock_branch, mock_pr):
         mock_fetch.return_value = ("Title", "Body text", [])
         notify = MagicMock()
@@ -254,8 +262,8 @@ class TestRunFix:
         assert success is True
         assert "Branch: koan.atoomic/fix-issue-42" in summary
 
-    @patch("skills.core.fix.fix_runner._execute_fix", return_value="")
-    @patch("skills.core.fix.fix_runner.fetch_issue_with_comments")
+    @patch(f"{_FIX_MODULE}._execute_fix", return_value="")
+    @patch(f"{_FIX_MODULE}.fetch_issue_with_comments")
     def test_empty_claude_output(self, mock_fetch, mock_execute):
         mock_fetch.return_value = ("Title", "Body", [])
         notify = MagicMock()
@@ -274,17 +282,17 @@ class TestRunFix:
 # ---------------------------------------------------------------------------
 
 class TestMain:
-    @patch("skills.core.fix.fix_runner.run_fix", return_value=(True, "Fix complete"))
+    @patch(f"{_FIX_MODULE}.run_fix", return_value=(True, "Fix complete"))
     def test_success_exit_code(self, mock_run):
         result = main(["--project-path", "/path", "--issue-url", "https://github.com/o/r/issues/1"])
         assert result == 0
 
-    @patch("skills.core.fix.fix_runner.run_fix", return_value=(False, "Failed"))
+    @patch(f"{_FIX_MODULE}.run_fix", return_value=(False, "Failed"))
     def test_failure_exit_code(self, mock_run):
         result = main(["--project-path", "/path", "--issue-url", "https://github.com/o/r/issues/1"])
         assert result == 1
 
-    @patch("skills.core.fix.fix_runner.run_fix", return_value=(True, "Done"))
+    @patch(f"{_FIX_MODULE}.run_fix", return_value=(True, "Done"))
     def test_context_passed(self, mock_run):
         main([
             "--project-path", "/path",
