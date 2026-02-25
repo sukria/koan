@@ -122,6 +122,29 @@ def _get_staleness_section(instance: str, project_name: str) -> str:
     return ""
 
 
+def _get_pr_feedback_section(project_path: str) -> str:
+    """Get PR merge feedback for autonomous topic alignment.
+
+    Summarizes which types of work get merged quickly vs. slowly,
+    helping the agent choose high-alignment work. Uses gh CLI
+    (network call), so kept lightweight with small limits.
+    """
+    try:
+        from app.pr_feedback import get_alignment_summary
+        summary = get_alignment_summary(project_path)
+        if summary:
+            return (
+                f"\n\n# PR Merge Feedback\n\n"
+                f"Recent merge patterns for your PRs on this project:\n"
+                f"{summary}\n\n"
+                f"Use this to guide autonomous topic selection — "
+                f"prioritize work types that get merged quickly.\n"
+            )
+    except Exception as e:
+        print(f"[prompt_builder] PR feedback failed: {e}", file=sys.stderr)
+    return ""
+
+
 def _get_verbose_section(instance: str) -> str:
     """Build the verbose mode section if .koan-verbose exists."""
     koan_root = str(Path(instance).parent)
@@ -202,6 +225,10 @@ def build_agent_prompt(
     # Append staleness warning (all autonomous modes — cheap local read)
     if not mission_title:
         prompt += _get_staleness_section(instance, project_name)
+
+    # Append PR merge feedback (autonomous only — helps topic alignment)
+    if not mission_title and autonomous_mode in ("deep", "implement"):
+        prompt += _get_pr_feedback_section(project_path)
 
     # Append deep research suggestions (DEEP mode, autonomous only)
     if autonomous_mode == "deep" and not mission_title:
