@@ -9,9 +9,11 @@ import pytest
 from app.github_command_handler import (
     _error_replies,
     _extract_url_from_context,
+    _fetch_and_filter_comment,
     _notify_github_question,
     _notify_github_reply,
     _try_reply,
+    _validate_and_parse_command,
     build_mission_from_command,
     extract_issue_number_from_notification,
     format_help_message,
@@ -1084,3 +1086,704 @@ class TestCommentApiUrlThreading:
             "99", "testbot", "sukria", "koan",
             comment_api_url=issue_comment_url,
         )
+
+
+# ---------------------------------------------------------------------------
+# _fetch_and_filter_comment — direct unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAndFilterComment:
+    """Direct tests for _fetch_and_filter_comment helper."""
+
+    @pytest.fixture
+    def notification(self):
+        return {
+            "id": "7777",
+            "repository": {"full_name": "owner/repo"},
+            "subject": {
+                "url": "https://api.github.com/repos/owner/repo/issues/10",
+                "latest_comment_url": "https://api.github.com/repos/owner/repo/issues/comments/555",
+            },
+        }
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.is_notification_stale", return_value=True)
+    def test_stale_notification_returns_none_and_marks_read(
+        self, mock_stale, mock_read, notification,
+    ):
+        result = _fetch_and_filter_comment(notification, "bot", max_age_hours=24)
+        assert result is None
+        mock_read.assert_called_once_with("7777")
+
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification", return_value=None)
+    def test_no_comment_returns_none(self, mock_comment, mock_stale, notification):
+        result = _fetch_and_filter_comment(notification, "bot", max_age_hours=24)
+        assert result is None
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.is_self_mention", return_value=True)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    def test_self_mention_returns_none_and_marks_read(
+        self, mock_comment, mock_stale, mock_self, mock_read, notification,
+    ):
+        mock_comment.return_value = {
+            "id": 555, "body": "@bot hello", "user": {"login": "bot"},
+        }
+        result = _fetch_and_filter_comment(notification, "bot", max_age_hours=24)
+        assert result is None
+        mock_read.assert_called_once_with("7777")
+
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    def test_valid_comment_returned(self, mock_comment, mock_stale, mock_self, notification):
+        comment = {"id": 555, "body": "@bot rebase", "user": {"login": "alice"}}
+        mock_comment.return_value = comment
+        result = _fetch_and_filter_comment(notification, "bot", max_age_hours=24)
+        assert result == comment
+
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    def test_missing_notification_id_still_works(self, mock_comment, mock_stale, mock_self):
+        """Notification with missing id field should not crash."""
+        notification = {"repository": {"full_name": "o/r"}, "subject": {}}
+        mock_comment.return_value = {
+            "id": 1, "body": "@bot test", "user": {"login": "alice"},
+        }
+        result = _fetch_and_filter_comment(notification, "bot", max_age_hours=24)
+        assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# _validate_and_parse_command — direct unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestValidateAndParseCommand:
+    """Direct tests for _validate_and_parse_command helper."""
+
+    @pytest.fixture
+    def notification(self):
+        return {
+            "id": "8888",
+            "repository": {"full_name": "sukria/koan"},
+            "subject": {
+                "url": "https://api.github.com/repos/sukria/koan/pulls/42",
+            },
+        }
+
+    @pytest.fixture
+    def config(self):
+        return {"github": {"nickname": "testbot"}}
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.check_already_processed", return_value=True)
+    def test_already_processed_returns_none_tuple(
+        self, mock_processed, mock_read, notification, config, registry,
+    ):
+        comment = {"id": 42, "url": "", "body": "@testbot rebase", "user": {"login": "a"}}
+        skill, cmd, ctx = _validate_and_parse_command(
+            notification, comment, config, registry, "testbot", "sukria", "koan",
+        )
+        assert skill is None
+        assert cmd is None
+        mock_read.assert_called_once_with("8888")
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.parse_mention_command", return_value=None)
+    def test_no_mention_returns_none_tuple(
+        self, mock_parse, mock_processed, mock_read, notification, config, registry,
+    ):
+        comment = {"id": 42, "url": "", "body": "some text", "user": {"login": "a"}}
+        skill, cmd, ctx = _validate_and_parse_command(
+            notification, comment, config, registry, "testbot", "sukria", "koan",
+        )
+        assert skill is None
+        assert cmd is None
+        mock_read.assert_called_once_with("8888")
+
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.parse_mention_command", return_value=("rebase", ""))
+    def test_valid_command_returns_skill(
+        self, mock_parse, mock_processed, notification, config, registry,
+    ):
+        comment = {"id": 42, "url": "", "body": "@testbot rebase", "user": {"login": "a"}}
+        skill, cmd, ctx = _validate_and_parse_command(
+            notification, comment, config, registry, "testbot", "sukria", "koan",
+        )
+        assert skill is not None
+        assert skill.name == "rebase"
+        assert cmd == "rebase"
+
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.parse_mention_command", return_value=("badcmd", "extra"))
+    def test_invalid_command_returns_none_skill_with_name(
+        self, mock_parse, mock_processed, notification, config, registry,
+    ):
+        comment = {"id": 42, "url": "", "body": "@testbot badcmd extra", "user": {"login": "a"}}
+        skill, cmd, ctx = _validate_and_parse_command(
+            notification, comment, config, registry, "testbot", "sukria", "koan",
+        )
+        assert skill is None
+        assert cmd == "badcmd"
+        assert ctx == "extra"
+
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.parse_mention_command", return_value=("implement", "do it"))
+    def test_context_passed_through(
+        self, mock_parse, mock_processed, notification, config, registry,
+    ):
+        comment = {"id": 42, "url": "", "body": "@testbot implement do it", "user": {"login": "a"}}
+        skill, cmd, ctx = _validate_and_parse_command(
+            notification, comment, config, registry, "testbot", "sukria", "koan",
+        )
+        assert skill is not None
+        assert cmd == "implement"
+        assert ctx == "do it"
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases for process_single_notification
+# ---------------------------------------------------------------------------
+
+
+class TestProcessNotificationEdgeCases:
+    """Edge cases for process_single_notification not covered by existing tests."""
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.is_self_mention", return_value=True)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    def test_self_mention_skipped(
+        self, mock_comment, mock_stale, mock_self, mock_read,
+        registry, sample_notification,
+    ):
+        """Self-mentions should be silently skipped."""
+        mock_comment.return_value = {
+            "id": 99, "body": "@bot rebase", "user": {"login": "bot"},
+        }
+        success, error = process_single_notification(
+            sample_notification, registry, {}, None, "bot",
+        )
+        assert success is False
+        assert error is None
+        mock_read.assert_called()
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.check_already_processed", return_value=True)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_already_processed_skipped(
+        self, mock_resolve, mock_comment, mock_stale, mock_self,
+        mock_processed, mock_read, registry, sample_notification,
+    ):
+        """Already-processed comments should be silently skipped."""
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99, "url": "", "body": "@testbot rebase",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot"}}
+        success, error = process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+        assert success is False
+        assert error is None
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_context_aware_command_includes_context_in_mission(
+        self, mock_insert, mock_resolve, mock_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification, tmp_path,
+    ):
+        """Context-aware commands should include context in mission text."""
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99, "body": "@testbot implement focus on API layer",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            success, error = process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+
+        assert success is True
+        mission_arg = mock_insert.call_args[0][1]
+        assert "focus on API layer" in mission_arg
+        assert "/implement" in mission_arg
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_non_context_aware_command_excludes_context(
+        self, mock_insert, mock_resolve, mock_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification, tmp_path,
+    ):
+        """Non-context-aware commands should NOT include extra context."""
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99, "body": "@testbot rebase this needs fixing",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            success, error = process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+
+        assert success is True
+        mission_arg = mock_insert.call_args[0][1]
+        assert "this needs fixing" not in mission_arg
+        assert "/rebase" in mission_arg
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_url_in_context_overrides_notification_url(
+        self, mock_insert, mock_resolve, mock_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification, tmp_path,
+    ):
+        """URL in user context should override notification's subject URL."""
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99,
+            "body": "@testbot rebase https://github.com/other/repo/pull/7",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            success, error = process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+
+        assert success is True
+        mission_arg = mock_insert.call_args[0][1]
+        assert "https://github.com/other/repo/pull/7" in mission_arg
+        # Original notification URL should not appear
+        assert "sukria/koan/pull/42" not in mission_arg
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_reaction_called_after_successful_insert(
+        self, mock_insert, mock_resolve, mock_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, registry, sample_notification, tmp_path,
+    ):
+        """Reaction should only happen AFTER mission is successfully persisted."""
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_comment.return_value = {
+            "id": 99, "body": "@testbot rebase",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        call_order = []
+        mock_insert.side_effect = lambda *a, **kw: call_order.append("insert")
+        mock_react.side_effect = lambda *a, **kw: call_order.append("react")
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+
+        assert call_order == ["insert", "react"]
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases for post_error_reply
+# ---------------------------------------------------------------------------
+
+
+class TestPostErrorReplyEdgeCases:
+    """Edge cases for post_error_reply."""
+
+    def setup_method(self):
+        _error_replies.clear()
+
+    @patch("app.github.api", side_effect=RuntimeError("API error"))
+    def test_api_failure_returns_false(self, mock_api):
+        result = post_error_reply("owner", "repo", "42", "123", "error msg")
+        assert result is False
+
+    @patch("app.github.api", side_effect=RuntimeError("API error"))
+    def test_api_failure_not_cached_as_sent(self, mock_api):
+        """API failures should NOT be cached — allow retry."""
+        post_error_reply("owner", "repo", "42", "123", "error msg")
+        assert "123:error msg" not in _error_replies
+
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github.api")
+    def test_comment_api_url_passed_to_reaction(self, mock_api, mock_react):
+        mock_api.return_value = ""
+        post_error_reply(
+            "owner", "repo", "42", "123", "error",
+            comment_api_url="https://api.github.com/repos/o/r/pulls/comments/123",
+        )
+        mock_react.assert_called_once_with(
+            "owner", "repo", "123",
+            comment_api_url="https://api.github.com/repos/o/r/pulls/comments/123",
+        )
+
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github.api")
+    def test_error_body_has_emoji_prefix(self, mock_api, mock_react):
+        """Error reply body should start with ❌."""
+        mock_api.return_value = ""
+        post_error_reply("owner", "repo", "42", "123", "Test error")
+        call_args = mock_api.call_args
+        # Check -f body= arg
+        extra_args = call_args[1].get("extra_args", call_args[0][1] if len(call_args[0]) > 1 else [])
+        body_arg = [a for a in extra_args if a.startswith("body=")]
+        assert body_arg
+        assert body_arg[0].startswith("body=❌")
+
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github.api")
+    def test_different_comments_same_error_not_deduplicated(self, mock_api, mock_react):
+        """Same error text on different comments should not be deduplicated."""
+        mock_api.return_value = ""
+        post_error_reply("owner", "repo", "42", "111", "same error")
+        post_error_reply("owner", "repo", "42", "222", "same error")
+        assert mock_api.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases for _extract_url_from_context
+# ---------------------------------------------------------------------------
+
+
+class TestExtractUrlFromContextEdgeCases:
+    """Additional edge cases for URL extraction."""
+
+    def test_url_at_beginning_of_context(self):
+        result = _extract_url_from_context("https://github.com/owner/repo/pull/1 please fix")
+        assert result is not None
+        url, remaining = result
+        assert url == "https://github.com/owner/repo/pull/1"
+        assert remaining == "please fix"
+
+    def test_url_at_end_of_context(self):
+        result = _extract_url_from_context("please fix https://github.com/owner/repo/pull/1")
+        assert result is not None
+        url, remaining = result
+        assert url == "https://github.com/owner/repo/pull/1"
+        assert remaining == "please fix"
+
+    def test_url_only(self):
+        result = _extract_url_from_context("https://github.com/owner/repo/pull/1")
+        assert result is not None
+        url, remaining = result
+        assert url == "https://github.com/owner/repo/pull/1"
+        assert remaining == ""
+
+    def test_http_url(self):
+        """HTTP URLs should be extracted too."""
+        result = _extract_url_from_context("fix http://github.com/owner/repo/issues/5")
+        assert result is not None
+        url, _ = result
+        assert url == "http://github.com/owner/repo/issues/5"
+
+    def test_multiple_urls_returns_first(self):
+        text = "see https://github.com/a/b/pull/1 and https://github.com/c/d/pull/2"
+        result = _extract_url_from_context(text)
+        assert result is not None
+        url, _ = result
+        assert url == "https://github.com/a/b/pull/1"
+
+    def test_non_github_url_ignored(self):
+        result = _extract_url_from_context("check https://example.com/page")
+        assert result is None
+
+    def test_empty_string(self):
+        assert _extract_url_from_context("") is None
+
+    def test_underscore_in_repo_name(self):
+        result = _extract_url_from_context("https://github.com/org/my_repo/issues/3")
+        assert result is not None
+        url, _ = result
+        assert url == "https://github.com/org/my_repo/issues/3"
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases for extract_issue_number_from_notification
+# ---------------------------------------------------------------------------
+
+
+class TestExtractIssueNumberEdgeCases:
+
+    def test_commits_url_no_number(self):
+        """Commit URLs should return None (no issues/pulls pattern)."""
+        notif = {"subject": {"url": "https://api.github.com/repos/o/r/commits/abc123"}}
+        assert extract_issue_number_from_notification(notif) is None
+
+    def test_empty_subject(self):
+        notif = {"subject": {}}
+        assert extract_issue_number_from_notification(notif) is None
+
+    def test_large_issue_number(self):
+        notif = {"subject": {"url": "https://api.github.com/repos/o/r/issues/99999"}}
+        assert extract_issue_number_from_notification(notif) == "99999"
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases for resolve_project_from_notification
+# ---------------------------------------------------------------------------
+
+
+class TestResolveProjectEdgeCases:
+
+    def test_empty_full_name(self):
+        notif = {"repository": {"full_name": ""}}
+        assert resolve_project_from_notification(notif) is None
+
+    def test_no_slash_in_full_name(self):
+        notif = {"repository": {"full_name": "noowner"}}
+        assert resolve_project_from_notification(notif) is None
+
+    def test_missing_repository_key(self):
+        assert resolve_project_from_notification({"id": "1"}) is None
+
+
+# ---------------------------------------------------------------------------
+# Telegram notification truncation boundary tests
+# ---------------------------------------------------------------------------
+
+
+class TestTelegramNotificationBoundaries:
+    """Exact boundary tests for 200-char truncation."""
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_question_exactly_200_chars_no_truncation(self, mock_send):
+        text = "x" * 200
+        _notify_github_question("alice", "o", "r", "1", text)
+        msg = mock_send.call_args[0][0]
+        assert "…" not in msg
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_question_201_chars_truncated(self, mock_send):
+        text = "x" * 201
+        _notify_github_question("alice", "o", "r", "1", text)
+        msg = mock_send.call_args[0][0]
+        assert "…" in msg
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_reply_exactly_200_chars_no_truncation(self, mock_send):
+        text = "y" * 200
+        _notify_github_reply("o", "r", "1", text)
+        msg = mock_send.call_args[0][0]
+        assert "…" not in msg
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_reply_201_chars_truncated(self, mock_send):
+        text = "y" * 201
+        _notify_github_reply("o", "r", "1", text)
+        msg = mock_send.call_args[0][0]
+        assert "…" in msg
+
+
+# ---------------------------------------------------------------------------
+# _try_reply — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestTryReplyEdgeCases:
+
+    @pytest.fixture
+    def reply_notification(self):
+        return {
+            "id": "77777",
+            "subject": {
+                "url": "https://api.github.com/repos/sukria/koan/issues/42",
+            },
+            "repository": {"full_name": "sukria/koan"},
+        }
+
+    @pytest.fixture
+    def reply_comment(self):
+        return {
+            "id": 55555,
+            "body": "@bot what about this?",
+            "user": {"login": "alice"},
+            "url": "https://api.github.com/repos/sukria/koan/issues/comments/55555",
+        }
+
+    @pytest.fixture
+    def reply_config(self):
+        return {
+            "github": {
+                "nickname": "bot",
+                "reply_enabled": True,
+                "authorized_users": ["*"],
+            }
+        }
+
+    @patch("app.github_command_handler._notify_github_question")
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_reply.generate_reply", return_value=None)
+    @patch("app.github_reply.fetch_thread_context", return_value={
+        "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
+    })
+    @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
+    def test_question_notification_sent_before_generation(
+        self, mock_resolve, mock_ctx, mock_gen, mock_perm,
+        mock_notify_q, reply_notification, reply_comment, reply_config,
+    ):
+        """Question notification should be sent BEFORE generation (even if it fails)."""
+        _try_reply(
+            reply_notification, reply_comment, reply_config, None,
+            "bot", "sukria", "koan", "koan", "question?",
+        )
+        mock_notify_q.assert_called_once()
+
+    @patch("app.github_command_handler._notify_github_reply")
+    @patch("app.github_command_handler._notify_github_question")
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.generate_reply", return_value="reply text")
+    @patch("app.github_reply.fetch_thread_context", return_value={
+        "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
+    })
+    @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
+    def test_eyes_reaction_used_for_replies(
+        self, mock_resolve, mock_ctx, mock_gen, mock_post,
+        mock_perm, mock_react, mock_read,
+        mock_notify_q, mock_notify_r,
+        reply_notification, reply_comment, reply_config,
+    ):
+        """Reply reactions should use 'eyes' emoji, not the default 'thumbsup'."""
+        _try_reply(
+            reply_notification, reply_comment, reply_config, None,
+            "bot", "sukria", "koan", "koan", "question?",
+        )
+        mock_react.assert_called_once()
+        assert mock_react.call_args[1].get("emoji") == "eyes"
+
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.utils.resolve_project_path", return_value="/tmp/koan")
+    def test_projects_config_passed_to_authorized_users(
+        self, mock_resolve, mock_perm,
+        reply_notification, reply_comment, reply_config,
+    ):
+        """projects_config should be passed through to get_github_authorized_users."""
+        projects_cfg = {"koan": {"github": {"authorized_users": ["bob"]}}}
+        with patch("app.github_command_handler.get_github_authorized_users") as mock_auth:
+            mock_auth.return_value = ["bob"]
+            with patch("app.github_command_handler.extract_issue_number_from_notification", return_value="42"):
+                with patch("app.github_reply.fetch_thread_context"):
+                    with patch("app.github_reply.generate_reply", return_value=None):
+                        with patch("app.github_command_handler._notify_github_question"):
+                            _try_reply(
+                                reply_notification, reply_comment, reply_config,
+                                projects_cfg, "bot", "sukria", "koan", "koan", "q",
+                            )
+            mock_auth.assert_called_once_with(reply_config, "koan", projects_cfg)
+
+
+# ---------------------------------------------------------------------------
+# build_mission_from_command — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestBuildMissionEdgeCases:
+
+    def test_context_url_but_not_context_aware(self):
+        """URL in context should still be used even if skill is not context-aware."""
+        skill = Skill(
+            name="rebase", scope="core", github_enabled=True,
+            github_context_aware=False,
+            commands=[SkillCommand(name="rebase")],
+        )
+        notif = {"subject": {"url": "https://api.github.com/repos/o/r/pulls/1"}}
+        mission = build_mission_from_command(
+            skill, "rebase",
+            "https://github.com/other/repo/pull/5 extra text",
+            notif, "proj",
+        )
+        # URL override happens before context_aware check
+        assert "https://github.com/other/repo/pull/5" in mission
+        # Context text should NOT be included (not context-aware)
+        assert "extra text" not in mission
+
+    def test_empty_context_no_trailing_space(self):
+        """Empty context should not add trailing spaces."""
+        skill = Skill(
+            name="fix", scope="core", github_enabled=True,
+            github_context_aware=True,
+            commands=[SkillCommand(name="fix")],
+        )
+        notif = {"subject": {"url": "https://api.github.com/repos/o/r/issues/3"}}
+        mission = build_mission_from_command(skill, "fix", "", notif, "myproj")
+        assert mission == "- [project:myproj] /fix https://github.com/o/r/issues/3"
+        assert not mission.endswith(" ")
+
+    def test_no_web_url_and_no_context(self):
+        """Mission with no URL and no context."""
+        skill = Skill(
+            name="check", scope="core", github_enabled=True,
+            github_context_aware=False,
+            commands=[SkillCommand(name="check")],
+        )
+        notif = {"subject": {}}
+        mission = build_mission_from_command(skill, "check", "", notif, "proj")
+        assert mission == "- [project:proj] /check"
+
+
+# ---------------------------------------------------------------------------
+# validate_command — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestValidateCommandEdgeCases:
+
+    def test_empty_command_name(self, registry):
+        assert validate_command("", registry) is None
+
+    def test_case_sensitive(self, registry):
+        """Command lookup should be case-sensitive."""
+        assert validate_command("REBASE", registry) is None
+
+    def test_empty_registry(self):
+        reg = SkillRegistry()
+        assert validate_command("rebase", reg) is None
