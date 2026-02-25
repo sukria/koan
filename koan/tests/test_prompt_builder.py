@@ -65,7 +65,7 @@ class TestIsAutoMergeEnabled:
         mock_merge_cfg.return_value = {"enabled": True, "rules": []}
         assert _is_auto_merge_enabled("myproject") is False
 
-    @patch("app.prompt_builder._load_config_safe", side_effect=Exception("no config"))
+    @patch("app.prompt_builder._load_config_safe", side_effect=ImportError("no config"))
     def test_config_error_returns_false(self, _mock):
         assert _is_auto_merge_enabled("myproject") is False
 
@@ -942,7 +942,7 @@ class TestGetBranchPrefix:
 
         assert _get_branch_prefix() == "custom/"
 
-    @patch("app.config.get_branch_prefix", side_effect=Exception("no config"))
+    @patch("app.config.get_branch_prefix", side_effect=OSError("no config"))
     def test_returns_default_on_error(self, mock_prefix):
         from app.prompt_builder import _get_branch_prefix
 

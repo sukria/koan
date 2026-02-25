@@ -32,7 +32,7 @@ def _load_config_safe() -> dict:
     try:
         from app.utils import load_config
         return load_config()
-    except Exception:
+    except (ImportError, OSError, ValueError):
         return {}
 
 
@@ -43,7 +43,7 @@ def _is_auto_merge_enabled(project_name: str) -> bool:
         config = _load_config_safe()
         merge_cfg = get_auto_merge_config(config, project_name)
         return bool(merge_cfg.get("enabled", True) and merge_cfg.get("rules"))
-    except Exception:
+    except (ImportError, OSError, ValueError, KeyError, TypeError):
         return False
 
 
@@ -52,7 +52,7 @@ def _get_branch_prefix() -> str:
     try:
         from app.config import get_branch_prefix
         return get_branch_prefix()
-    except Exception:
+    except (ImportError, OSError, ValueError):
         return "koan/"
 
 

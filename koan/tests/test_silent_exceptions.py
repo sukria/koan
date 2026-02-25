@@ -53,9 +53,8 @@ ALLOWLIST: Set[Tuple[str, str]] = {
     ("provider/claude.py", "check_quota_available"),  # tool allowlist parsing
     ("provider/local.py", "_get_config"),         # model list parsing
     # --- Context gathering for prompts (empty string is safe) ---
-    ("prompt_builder.py", "_load_config_safe"),   # config loading for prompt
-    ("prompt_builder.py", "_is_auto_merge_enabled"),  # merge config check
-    ("prompt_builder.py", "_get_branch_prefix"),  # branch prefix fallback
+    # prompt_builder.py: _load_config_safe, _is_auto_merge_enabled, _get_branch_prefix
+    # narrowed to specific exceptions — removed from allowlist
     ("awake.py", "_build_chat_prompt"),           # pending.md read for chat context
     # --- GitHub API best-effort (None/empty is safe) ---
     ("github.py", "get_gh_username"),             # gh username cache miss
@@ -65,18 +64,16 @@ ALLOWLIST: Set[Tuple[str, str]] = {
     ("claude_step.py", "_rebase_onto_target"),    # rebase --abort after failed rebase
     # --- Non-critical subsystem fallbacks ---
     ("cli_journal_streamer.py", "_tail_loop"),    # journal append in tail-thread tight loop
-    ("schedule_manager.py", "get_schedule_config"),  # schedule check
-    ("usage_tracker.py", "_get_budget_thresholds"),  # budget threshold read
-    ("usage_tracker.py", "_get_budget_mode"),     # budget mode read
-    ("projects_merged.py", "get_yaml_project_names"),  # github URL cache build
-    ("projects_config.py", "resolve_base_branch"),  # base branch fallback (returns "main")
+    # schedule_manager.py: get_schedule_config — narrowed to (ImportError, OSError, ValueError)
+    # usage_tracker.py: _get_budget_thresholds, _get_budget_mode — narrowed to specific exceptions
+    # projects_merged.py: get_yaml_project_names — narrowed to (ValueError, OSError)
+    # projects_config.py: resolve_base_branch — narrowed to (ValueError, OSError, KeyError)
     # --- Setup wizard (interactive, errors shown in UI) ---
     ("setup_wizard.py", "_load_wizard_projects"),  # config loading
     ("setup_wizard.py", "get_chat_id_from_updates"),  # project path resolution
     # --- CLI runners: cleanup after main work done ---
-    ("recreate_pr.py", "run_recreate"),           # local branch delete (may not exist)
-    ("recreate_pr.py", "_fetch_upstream_target"),  # fetch from origin/upstream fallback
-    ("recreate_pr.py", "_has_commits_on_branch"),  # git log check fallback
+    # recreate_pr.py: run_recreate, _fetch_upstream_target, _has_commits_on_branch
+    # narrowed to (RuntimeError, OSError)
     # --- Prompt/config loading with hardcoded fallback ---
     ("local_llm_runner.py", "_default_system_prompt"),  # system prompt file fallback
     ("pid_manager.py", "_detect_provider"),        # provider detection fallback

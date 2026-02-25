@@ -193,7 +193,7 @@ def resolve_base_branch(project_name: str) -> str:
             if config:
                 am = get_project_auto_merge(config, project_name)
                 return am.get("base_branch", "main")
-    except Exception:
+    except (ValueError, OSError, KeyError):
         pass
     return "main"
 

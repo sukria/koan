@@ -183,7 +183,7 @@ def get_schedule_config() -> Tuple[str, str]:
         deep = str(schedule.get("deep_hours", ""))
         work = str(schedule.get("work_hours", ""))
         return deep, work
-    except Exception:
+    except (ImportError, OSError, ValueError):
         return "", ""
 
 
