@@ -2087,15 +2087,19 @@ class TestMainCrashRecovery:
 
 
 # ---------------------------------------------------------------------------
-# Test: _run_iteration action=error raises RuntimeError
+# Test: _run_iteration action=error fails mission and returns
 # ---------------------------------------------------------------------------
 
 class TestRunIterationErrorAction:
-    """The action=error path raises RuntimeError instead of sys.exit(1)."""
+    """The action=error path moves mission to Failed and returns (no raise)."""
 
+    @patch("app.run._commit_instance")
+    @patch("app.run._update_mission_in_file")
     @patch("app.run.plan_iteration")
     @patch("app.run._notify")
-    def test_error_action_raises(self, mock_notify, mock_plan, koan_root):
+    def test_error_action_fails_mission_and_returns(
+        self, mock_notify, mock_plan, mock_update, mock_commit, koan_root,
+    ):
         from app.run import _run_iteration
 
         mock_plan.return_value = {
@@ -2114,16 +2118,68 @@ class TestRunIterationErrorAction:
 
         instance = str(koan_root / "instance")
 
-        with pytest.raises(RuntimeError, match="Unknown project: foo"):
-            _run_iteration(
-                koan_root=str(koan_root),
-                instance=instance,
-                projects=[("test", str(koan_root))],
-                count=0,
-                max_runs=5,
-                interval=10,
-                git_sync_interval=5,
-            )
+        # Should return normally, NOT raise RuntimeError
+        _run_iteration(
+            koan_root=str(koan_root),
+            instance=instance,
+            projects=[("test", str(koan_root))],
+            count=0,
+            max_runs=5,
+            interval=10,
+            git_sync_interval=5,
+        )
+
+        # Mission moved to Failed
+        mock_update.assert_called_once_with(instance, "do stuff", failed=True)
+        # User notified
+        mock_notify.assert_called_once()
+        assert "Unknown project: foo" in mock_notify.call_args[0][1]
+        # Instance committed
+        mock_commit.assert_called_once_with(instance)
+
+    @patch("app.run._commit_instance")
+    @patch("app.run._update_mission_in_file")
+    @patch("app.run.plan_iteration")
+    @patch("app.run._notify")
+    def test_error_action_without_mission_just_notifies(
+        self, mock_notify, mock_plan, mock_update, mock_commit, koan_root,
+    ):
+        """When action=error has no mission_title, only notify (no file update)."""
+        from app.run import _run_iteration
+
+        mock_plan.return_value = {
+            "action": "error",
+            "error": "Some iteration error",
+            "project_name": "test",
+            "project_path": str(koan_root),
+            "mission_title": "",
+            "autonomous_mode": "implement",
+            "focus_area": "",
+            "available_pct": 50,
+            "decision_reason": "Default",
+            "display_lines": [],
+            "recurring_injected": [],
+        }
+
+        instance = str(koan_root / "instance")
+
+        _run_iteration(
+            koan_root=str(koan_root),
+            instance=instance,
+            projects=[("test", str(koan_root))],
+            count=0,
+            max_runs=5,
+            interval=10,
+            git_sync_interval=5,
+        )
+
+        # No mission file update
+        mock_update.assert_not_called()
+        # No instance commit
+        mock_commit.assert_not_called()
+        # Notification sent
+        mock_notify.assert_called_once()
+        assert "Iteration error" in mock_notify.call_args[0][1]
 
 
 # ---------------------------------------------------------------------------
@@ -2160,16 +2216,16 @@ class TestRunIterationGitHubPreCheck:
         instance = str(koan_root / "instance")
 
         with patch("app.utils.get_known_projects", return_value=[("test", str(koan_root))]):
-            with pytest.raises(RuntimeError):
-                _run_iteration(
-                    koan_root=str(koan_root),
-                    instance=instance,
-                    projects=[("test", str(koan_root))],
-                    count=0,
-                    max_runs=5,
-                    interval=10,
-                    git_sync_interval=5,
-                )
+            # action=error with empty mission_title returns normally (no raise)
+            _run_iteration(
+                koan_root=str(koan_root),
+                instance=instance,
+                projects=[("test", str(koan_root))],
+                count=0,
+                max_runs=5,
+                interval=10,
+                git_sync_interval=5,
+            )
 
         mock_gh_notif.assert_called_once_with(str(koan_root), instance)
 
@@ -2200,17 +2256,16 @@ class TestRunIterationGitHubPreCheck:
         instance = str(koan_root / "instance")
 
         with patch("app.utils.get_known_projects", return_value=[("test", str(koan_root))]):
-            # Should raise RuntimeError from plan_iteration error action, NOT from GitHub check
-            with pytest.raises(RuntimeError, match="test-stop"):
-                _run_iteration(
-                    koan_root=str(koan_root),
-                    instance=instance,
-                    projects=[("test", str(koan_root))],
-                    count=0,
-                    max_runs=5,
-                    interval=10,
-                    git_sync_interval=5,
-                )
+            # Should return normally — GitHub error is caught, action=error returns
+            _run_iteration(
+                koan_root=str(koan_root),
+                instance=instance,
+                projects=[("test", str(koan_root))],
+                count=0,
+                max_runs=5,
+                interval=10,
+                git_sync_interval=5,
+            )
 
 
 class TestRunIterationProjectRefresh:
@@ -2242,16 +2297,16 @@ class TestRunIterationProjectRefresh:
 
         with patch("app.utils.get_known_projects", return_value=refreshed_projects), \
              patch("app.loop_manager.process_github_notifications", return_value=0):
-            with pytest.raises(RuntimeError):
-                _run_iteration(
-                    koan_root=str(koan_root),
-                    instance=instance,
-                    projects=[("test", str(koan_root))],
-                    count=0,
-                    max_runs=5,
-                    interval=10,
-                    git_sync_interval=5,
-                )
+            # action=error returns normally now (no raise)
+            _run_iteration(
+                koan_root=str(koan_root),
+                instance=instance,
+                projects=[("test", str(koan_root))],
+                count=0,
+                max_runs=5,
+                interval=10,
+                git_sync_interval=5,
+            )
 
         # plan_iteration should have received the refreshed list
         call_kwargs = mock_plan.call_args[1]
@@ -2283,16 +2338,16 @@ class TestRunIterationProjectRefresh:
 
         with patch("app.utils.get_known_projects", return_value=[]), \
              patch("app.loop_manager.process_github_notifications", return_value=0):
-            with pytest.raises(RuntimeError):
-                _run_iteration(
-                    koan_root=str(koan_root),
-                    instance=instance,
-                    projects=original_projects,
-                    count=0,
-                    max_runs=5,
-                    interval=10,
-                    git_sync_interval=5,
-                )
+            # action=error returns normally (no raise)
+            _run_iteration(
+                koan_root=str(koan_root),
+                instance=instance,
+                projects=original_projects,
+                count=0,
+                max_runs=5,
+                interval=10,
+                git_sync_interval=5,
+            )
 
         # plan_iteration should keep the original list
         call_kwargs = mock_plan.call_args[1]

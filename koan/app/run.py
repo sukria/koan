@@ -1286,10 +1286,19 @@ def _run_iteration(
     project_path = plan["project_path"]
 
     if action == "error":
-        log("error", plan.get("error", "Unknown error"))
-        _notify(instance, f"Mission error: {plan.get('error', 'Unknown')}")
-        # Don't kill the process — raise so the caller can recover
-        raise RuntimeError(f"Mission error: {plan.get('error', 'Unknown')}")
+        error_msg = plan.get("error", "Unknown error")
+        mission_title = plan.get("mission_title", "")
+        log("error", error_msg)
+        # Move the mission to Failed so it doesn't block the queue.
+        # Without this, the same mission gets picked every iteration,
+        # causing a retry loop until MAX_CONSECUTIVE_ERRORS triggers pause.
+        if mission_title:
+            _update_mission_in_file(instance, mission_title, failed=True)
+            _notify(instance, f"❌ Mission failed: {error_msg}")
+            _commit_instance(instance)
+        else:
+            _notify(instance, f"⚠️ Iteration error: {error_msg}")
+        return
 
     if action == "contemplative":
         _handle_contemplative(plan, run_num, max_runs, koan_root, instance, interval)
