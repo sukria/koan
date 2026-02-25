@@ -136,12 +136,36 @@ def _read_pending_content(instance_dir: str) -> str:
     return ""
 
 
+def _read_stdout_summary(stdout_file: str, max_chars: int = 2000) -> str:
+    """Extract text summary from Claude stdout file for session classification.
+
+    When the agent deletes pending.md as part of its Mission Completion
+    Checklist, the pending content is empty. The stdout file contains
+    Claude's full JSON output which often includes productive signals
+    (branch names, PR numbers, test results).
+
+    Returns a truncated text extract, or empty string on error.
+    """
+    try:
+        stdout_path = Path(stdout_file)
+        if not stdout_path.exists():
+            return ""
+        raw = stdout_path.read_text(errors="replace")
+        if not raw.strip():
+            return ""
+        text = parse_claude_output(raw)
+        return text[:max_chars] if text else ""
+    except (OSError, FileNotFoundError):
+        return ""
+
+
 def _record_session_outcome(
     instance_dir: str,
     project_name: str,
     autonomous_mode: str,
     duration_minutes: int,
     journal_content: str,
+    mission_title: str = "",
 ) -> None:
     """Record session outcome for staleness tracking (fire-and-forget)."""
     try:
@@ -152,6 +176,7 @@ def _record_session_outcome(
             mode=autonomous_mode or "unknown",
             duration_minutes=duration_minutes,
             journal_content=journal_content,
+            mission_title=mission_title,
         )
     except Exception as e:
         print(f"[mission_runner] Session outcome recording failed: {e}", file=sys.stderr)
@@ -359,8 +384,12 @@ def run_post_mission(
         return result  # Early return — no further processing on quota exhaustion
 
     # 3. Archive pending.md if agent didn't clean up
-    # Read pending content before archival for session outcome tracking
+    # Read pending content before archival for session outcome tracking.
+    # When the agent follows Mission Completion Checklist, it deletes
+    # pending.md before exiting — so we fall back to stdout content.
     pending_content = _read_pending_content(instance_dir)
+    if not pending_content.strip():
+        pending_content = _read_stdout_summary(stdout_file)
     result["pending_archived"] = archive_pending(instance_dir, project_name, run_num)
 
     # 4. Compute duration (needed for reflection and outcome tracking)
@@ -387,6 +416,7 @@ def run_post_mission(
     _record_session_outcome(
         instance_dir, project_name, autonomous_mode,
         duration_minutes, pending_content,
+        mission_title=mission_title,
     )
 
     return result

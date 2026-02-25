@@ -61,8 +61,15 @@ _WEAK_PRODUCTIVE_RE = re.compile(
     r"\b(?:implemented|refactored|migrated)\b", re.IGNORECASE
 )
 
+# Skill commands that are inherently productive (they DO things:
+# create branches, push code, write PRs). A session executing one of
+# these should never be classified as "empty".
+_PRODUCTIVE_SKILLS = re.compile(
+    r"^/(?:rebase|recreate|fix|implement|plan|review|refactor|ai|check|claudemd|mission)\b"
+)
 
-def classify_session(journal_content: str) -> str:
+
+def classify_session(journal_content: str, mission_title: str = "") -> str:
     """Classify a session as productive, empty, or blocked.
 
     Uses keyword matching on the journal/pending content to determine
@@ -75,10 +82,18 @@ def classify_session(journal_content: str) -> str:
 
     Args:
         journal_content: The session's journal entry or pending.md content.
+        mission_title: The mission title (e.g. "/rebase https://...").
+            Skill commands are inherently productive.
 
     Returns:
         "productive", "empty", or "blocked"
     """
+    # Skill commands are inherently productive — they create branches,
+    # push code, write PRs. Even if pending.md is empty (agent cleaned up),
+    # running /rebase or /fix IS work.
+    if mission_title and _PRODUCTIVE_SKILLS.search(mission_title.strip()):
+        return "productive"
+
     if not journal_content:
         return "empty"
 
@@ -151,6 +166,7 @@ def record_outcome(
     mode: str,
     duration_minutes: int,
     journal_content: str,
+    mission_title: str = "",
 ) -> dict:
     """Record a session outcome to session_outcomes.json.
 
@@ -160,11 +176,12 @@ def record_outcome(
         mode: Autonomous mode (review/implement/deep).
         duration_minutes: Session duration in minutes.
         journal_content: The session's journal/pending content for classification.
+        mission_title: The mission title for skill-aware classification.
 
     Returns:
         The recorded outcome dict.
     """
-    outcome_type = classify_session(journal_content)
+    outcome_type = classify_session(journal_content, mission_title=mission_title)
     summary = _extract_summary(journal_content)
 
     entry = {
