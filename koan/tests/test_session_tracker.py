@@ -521,6 +521,103 @@ class TestClassifySessionEdgeCases:
         assert classify_session(content) == "empty"
 
 
+# --- classify_session with mission_title ---
+
+class TestClassifySessionMissionTitle:
+    """Tests for mission_title-aware session classification.
+
+    Skill commands (/rebase, /fix, etc.) are inherently productive —
+    they create branches, push code, open PRs. A session executing
+    a skill should never be classified as 'empty' even if pending.md
+    was cleaned up by the agent.
+    """
+
+    def test_rebase_skill_is_productive(self):
+        """A /rebase session is productive regardless of content."""
+        assert classify_session("", mission_title="/rebase https://github.com/o/r/pull/1") == "productive"
+
+    def test_recreate_skill_is_productive(self):
+        assert classify_session("", mission_title="/recreate https://github.com/o/r/pull/42") == "productive"
+
+    def test_fix_skill_is_productive(self):
+        assert classify_session("", mission_title="/fix https://github.com/o/r/issues/99") == "productive"
+
+    def test_implement_skill_is_productive(self):
+        assert classify_session("", mission_title="/implement https://github.com/o/r/issues/10") == "productive"
+
+    def test_plan_skill_is_productive(self):
+        assert classify_session("", mission_title="/plan https://github.com/o/r/issues/5") == "productive"
+
+    def test_review_skill_is_productive(self):
+        assert classify_session("", mission_title="/review https://github.com/o/r/pull/3") == "productive"
+
+    def test_refactor_skill_is_productive(self):
+        assert classify_session("", mission_title="/refactor https://github.com/o/r/pull/7") == "productive"
+
+    def test_ai_skill_is_productive(self):
+        assert classify_session("", mission_title="/ai koan") == "productive"
+
+    def test_check_skill_is_productive(self):
+        assert classify_session("", mission_title="/check https://github.com/o/r/pull/1") == "productive"
+
+    def test_claudemd_skill_is_productive(self):
+        assert classify_session("", mission_title="/claudemd koan") == "productive"
+
+    def test_mission_skill_is_productive(self):
+        assert classify_session("", mission_title="/mission do something") == "productive"
+
+    def test_non_skill_mission_with_empty_content_is_empty(self):
+        """Regular free-text missions with empty content remain empty."""
+        assert classify_session("", mission_title="Look at the auth module") == "empty"
+
+    def test_empty_mission_title_with_empty_content_is_empty(self):
+        assert classify_session("", mission_title="") == "empty"
+
+    def test_none_mission_title_with_empty_content_is_empty(self):
+        assert classify_session("") == "empty"
+
+    def test_skill_title_overrides_empty_keywords(self):
+        """A skill mission title wins even if content has empty keywords."""
+        content = "No code changes. Verification session."
+        assert classify_session(content, mission_title="/rebase https://...") == "productive"
+
+    def test_content_productive_without_mission_title(self):
+        """Normal productive content still works without mission_title."""
+        assert classify_session("Branch pushed. PR #42 created.") == "productive"
+
+    def test_autonomous_mode_label_is_not_skill(self):
+        """'Autonomous deep on koan' should not be treated as a skill."""
+        assert classify_session("", mission_title="Autonomous deep on koan") == "empty"
+
+
+# --- record_outcome with mission_title ---
+
+class TestRecordOutcomeMissionTitle:
+    """Verify mission_title flows through to session classification."""
+
+    def test_skill_mission_recorded_as_productive(self, tracker_env):
+        entry = record_outcome(
+            tracker_env, "koan", "implement", 5, "",
+            mission_title="/rebase https://github.com/o/r/pull/1",
+        )
+        assert entry["outcome"] == "productive"
+
+    def test_empty_mission_without_title_recorded_as_empty(self, tracker_env):
+        entry = record_outcome(
+            tracker_env, "koan", "deep", 10, "",
+            mission_title="",
+        )
+        assert entry["outcome"] == "empty"
+
+    def test_backward_compat_without_mission_title(self, tracker_env):
+        """Calling without mission_title works (backward compatible)."""
+        entry = record_outcome(
+            tracker_env, "koan", "deep", 10,
+            "Branch pushed with fix.",
+        )
+        assert entry["outcome"] == "productive"
+
+
 # --- _load_outcomes type validation ---
 
 class TestLoadOutcomesValidation:

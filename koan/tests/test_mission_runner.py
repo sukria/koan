@@ -786,6 +786,51 @@ class TestReadPendingContent:
         assert content == ""
 
 
+class TestReadStdoutSummary:
+    """Test _read_stdout_summary — fallback content for session classification."""
+
+    def test_reads_json_output(self, tmp_path):
+        from app.mission_runner import _read_stdout_summary
+
+        stdout = tmp_path / "out.json"
+        stdout.write_text('{"result": "Branch pushed. PR #42 created."}')
+        assert "Branch pushed" in _read_stdout_summary(str(stdout))
+
+    def test_reads_plain_text(self, tmp_path):
+        from app.mission_runner import _read_stdout_summary
+
+        stdout = tmp_path / "out.txt"
+        stdout.write_text("Implemented feature. Tests pass.")
+        assert "Tests pass" in _read_stdout_summary(str(stdout))
+
+    def test_returns_empty_for_missing_file(self):
+        from app.mission_runner import _read_stdout_summary
+
+        assert _read_stdout_summary("/nonexistent/path") == ""
+
+    def test_returns_empty_for_empty_file(self, tmp_path):
+        from app.mission_runner import _read_stdout_summary
+
+        stdout = tmp_path / "out.json"
+        stdout.write_text("")
+        assert _read_stdout_summary(str(stdout)) == ""
+
+    def test_truncates_long_output(self, tmp_path):
+        from app.mission_runner import _read_stdout_summary
+
+        stdout = tmp_path / "out.txt"
+        stdout.write_text("x" * 5000)
+        result = _read_stdout_summary(str(stdout), max_chars=100)
+        assert len(result) == 100
+
+    def test_handles_json_with_content_key(self, tmp_path):
+        from app.mission_runner import _read_stdout_summary
+
+        stdout = tmp_path / "out.json"
+        stdout.write_text('{"content": "Draft PR submitted."}')
+        assert "Draft PR" in _read_stdout_summary(str(stdout))
+
+
 class TestRecordSessionOutcome:
     """Test _record_session_outcome fire-and-forget helper."""
 
@@ -802,7 +847,19 @@ class TestRecordSessionOutcome:
             mode="implement",
             duration_minutes=15,
             journal_content="journal content",
+            mission_title="",
         )
+
+    @patch("app.session_tracker.record_outcome")
+    def test_passes_mission_title(self, mock_record, tmp_path):
+        from app.mission_runner import _record_session_outcome
+
+        _record_session_outcome(
+            str(tmp_path), "koan", "implement", 15, "",
+            mission_title="/rebase https://github.com/o/r/pull/1",
+        )
+        mock_record.assert_called_once()
+        assert mock_record.call_args.kwargs["mission_title"] == "/rebase https://github.com/o/r/pull/1"
 
     @patch("app.session_tracker.record_outcome")
     def test_uses_unknown_mode_when_empty(self, mock_record, tmp_path):
@@ -1524,6 +1581,71 @@ class TestRunPostMissionOrdering:
         mission_text = mock_reflect.call_args[0][1]
         assert mission_text == "Fix the login bug"
         assert "Autonomous" not in mission_text
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_stdout_fallback_when_pending_empty(
+        self, mock_usage, mock_quota, mock_archive,
+        mock_reflect, mock_merge, mock_record, tmp_path
+    ):
+        """When pending.md is empty (agent deleted it), stdout content is used."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+        # No pending.md — agent cleaned up
+
+        # Create stdout file with productive content
+        stdout_file = str(tmp_path / "stdout.json")
+        Path(stdout_file).write_text('{"result": "Branch pushed. PR #42 created."}')
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file=stdout_file,
+            stderr_file="/tmp/err.txt",
+        )
+
+        mock_record.assert_called_once()
+        journal_content = mock_record.call_args[0][4]
+        assert "Branch pushed" in journal_content
+
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_mission_title_passed_to_record_outcome(
+        self, mock_usage, mock_quota, mock_archive,
+        mock_reflect, mock_merge, mock_record, tmp_path
+    ):
+        """mission_title is forwarded to _record_session_outcome."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+            mission_title="/rebase https://github.com/o/r/pull/42",
+        )
+
+        mock_record.assert_called_once()
+        assert mock_record.call_args.kwargs["mission_title"] == "/rebase https://github.com/o/r/pull/42"
 
 
 class TestCheckAutoMergeBranchPrefix:
