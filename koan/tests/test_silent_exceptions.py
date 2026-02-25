@@ -34,8 +34,8 @@ APP_DIR = Path(__file__).parent.parent / "app"
 ALLOWLIST: Set[Tuple[str, int]] = {
     # --- Shutdown / terminal cleanup (terminal may be gone) ---
     ("run.py", 79),                  # ANSI reset on shutdown
-    ("run.py", 1679),                # _get_koan_branch: git rev-parse fallback
-    ("run.py", 1855),                # _cleanup_temp_files: unlink best-effort
+    ("run.py", 1718),                # _get_koan_branch: git rev-parse fallback
+    ("run.py", 1894),                # _cleanup_temp_files: unlink best-effort
     # --- Best-effort display / info gathering ---
     ("ai_runner.py", 127),           # dir listing for prompt context
     ("startup_info.py", 25),         # config value fallback
@@ -61,6 +61,7 @@ ALLOWLIST: Set[Tuple[str, int]] = {
     # --- Git operations (abort after failed rebase) ---
     ("claude_step.py", 52),          # rebase --abort after failed rebase
     # --- Non-critical subsystem fallbacks ---
+    ("cli_journal_streamer.py", 95), # journal append in tail-thread tight loop
     ("iteration_manager.py", 318),   # recurring mission injection
     ("schedule_manager.py", 186),    # schedule check
     ("usage_tracker.py", 282),       # budget file read

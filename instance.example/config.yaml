@@ -25,6 +25,12 @@ fast_reply: false
 # Use `tail -f .koan-debug.log` to watch dispatch decisions, commands, and errors
 # debug: false
 
+# CLI output journal — stream CLI output to the daily journal file in real-time
+# When enabled, mission and contemplative CLI output is appended to the project's
+# journal file as it runs. Use `tail -f instance/journal/YYYY-MM-DD/project.md`
+# to watch the agent work. Set to false to disable.
+# cli_output_journal: true
+
 # Branch prefix — used for all agent-created branches
 # Default is "koan" which creates branches like "koan/fix-something"
 # Change this for multi-bot setups to avoid branch name collisions
