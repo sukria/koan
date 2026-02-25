@@ -145,6 +145,39 @@ class DeepResearch:
         # Extract section headers (## Something)
         return re.findall(r"^## (.+?)$", content, re.MULTILINE)
 
+    def get_pr_feedback(self) -> dict:
+        """Get PR merge feedback for this project.
+
+        Returns:
+            Dict with keys:
+            - alignment_summary: str (formatted for prompt)
+            - category_boosts: dict (category → priority adjustment)
+        """
+        try:
+            from app.pr_feedback import get_alignment_summary, get_category_boost
+            summary = get_alignment_summary(str(self.project_path))
+            boosts = get_category_boost(str(self.project_path))
+            return {
+                "alignment_summary": summary,
+                "category_boosts": boosts,
+            }
+        except Exception as e:
+            print(f"[deep_research] PR feedback failed: {e}", file=sys.stderr)
+            return {"alignment_summary": "", "category_boosts": {}}
+
+    def _match_topic_to_category(self, topic: str) -> str:
+        """Best-effort match a topic string to a PR work category.
+
+        Uses the same categorization logic as pr_feedback.categorize_pr()
+        to enable feedback-based priority adjustment.
+        """
+        try:
+            from app.pr_feedback import categorize_pr
+            return categorize_pr(topic)
+        except Exception as e:
+            print(f"[deep_research] Topic categorization failed: {e}", file=sys.stderr)
+            return "other"
+
     def suggest_topics(self) -> list[dict]:
         """
         Analyze all sources and suggest prioritized topics.
@@ -211,6 +244,21 @@ class DeepResearch:
                 "priority": 3,
             })
 
+        # Apply PR merge feedback to adjust priorities
+        feedback = self.get_pr_feedback()
+        boosts = feedback.get("category_boosts", {})
+        if boosts:
+            for suggestion in suggestions:
+                category = self._match_topic_to_category(suggestion["topic"])
+                adjustment = boosts.get(category, 0)
+                if adjustment != 0:
+                    old_prio = suggestion["priority"]
+                    suggestion["priority"] = max(1, min(3, old_prio + adjustment))
+                    if adjustment < 0:
+                        suggestion["reasoning"] += " (boosted: this type of work gets merged quickly)"
+                    else:
+                        suggestion["reasoning"] += " (deprioritized: this type of work tends to stay open)"
+
         # Sort by priority
         suggestions.sort(key=lambda x: x["priority"])
 
@@ -270,6 +318,15 @@ class DeepResearch:
             lines.append("No specific suggestions — use your judgment on what would be most valuable.")
             lines.append("")
 
+        # PR merge feedback (what work gets valued)
+        feedback = self.get_pr_feedback()
+        alignment = feedback.get("alignment_summary", "")
+        if alignment:
+            lines.append("### PR Merge Feedback (what the human merges quickly)")
+            lines.append("")
+            lines.append(alignment)
+            lines.append("")
+
         if do_not_touch:
             lines.append("### Avoid These Areas")
             lines.append("")
@@ -286,12 +343,17 @@ class DeepResearch:
 
     def to_json(self) -> str:
         """Return all analysis as JSON."""
+        feedback = self.get_pr_feedback()
         return json.dumps({
             "priorities": self.get_priorities(),
             "suggestions": self.suggest_topics(),
             "do_not_touch": self.get_do_not_touch(),
             "open_issues": self.get_open_issues(),
             "recent_topics": self.get_recent_journal_topics(),
+            "pr_feedback": {
+                "alignment_summary": feedback.get("alignment_summary", ""),
+                "category_boosts": feedback.get("category_boosts", {}),
+            },
         }, indent=2)
 
 
