@@ -685,7 +685,7 @@ def _read_current_project(koan_root: str) -> str:
     """
     try:
         return Path(koan_root, ".koan-project").read_text().strip() or "unknown"
-    except Exception:
+    except (OSError, ValueError):
         return "unknown"
 
 
