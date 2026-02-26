@@ -96,7 +96,7 @@ def get_signal_status() -> dict:
                     status["reset_time"] = f"in ~{time_until_reset(ts)}"
                 except (ValueError, ImportError):
                     pass
-        except Exception:
+        except OSError:
             pass
 
     status_file = KOAN_ROOT / ".koan-status"

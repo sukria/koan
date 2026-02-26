@@ -29,7 +29,7 @@ def _init() -> None:
     try:
         from app.config import get_debug_enabled
         _enabled = get_debug_enabled()
-    except Exception:
+    except (ImportError, OSError, ValueError):
         _enabled = False
 
     if _enabled:

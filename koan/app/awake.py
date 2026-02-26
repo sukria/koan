@@ -170,7 +170,7 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
                 pending_context = "Live progress (pending.md, last entries):\n...\n" + pending_content[-1500:]
             else:
                 pending_context = "Live progress (pending.md):\n" + pending_content
-        except Exception:
+        except OSError:
             pass
 
     # Load current mission state (live sync with run loop)

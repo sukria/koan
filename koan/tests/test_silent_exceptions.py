@@ -35,48 +35,16 @@ APP_DIR = Path(__file__).parent.parent / "app"
 # Uses function names instead of line numbers to survive unrelated code changes.
 # When adding: include a short justification comment.
 ALLOWLIST: Set[Tuple[str, str]] = {
-    # --- Shutdown / terminal cleanup (terminal may be gone) ---
-    ("run.py", "_reset_terminal"),              # ANSI reset on shutdown
-    ("run.py", "_get_koan_branch"),             # git rev-parse fallback
-    ("run.py", "_cleanup_temp"),                # unlink best-effort
-    # --- Best-effort display / info gathering ---
-    ("ai_runner.py", "_gather_project_structure"),  # dir listing for prompt context
-    ("startup_info.py", "_get_config_value"),    # config value fallback
-    ("startup_info.py", "_get_provider"),         # provider detection fallback
-    ("startup_info.py", "_get_projects_summary"), # project count fallback
-    ("startup_info.py", "_get_skills_summary"),   # skill count fallback
-    ("startup_info.py", "_get_file_size"),         # file size fallback
-    ("dashboard.py", "get_signal_status"),        # pause file read for web dashboard
     # --- Config / init loading (defaults are safe) ---
-    ("debug.py", "_init"),                       # debug mode config loading
-    ("pid_manager.py", "_open_log_file"),         # log rotation config loading
     ("provider/claude.py", "check_quota_available"),  # tool allowlist parsing
     ("provider/local.py", "_get_config"),         # model list parsing
-    # --- Context gathering for prompts (empty string is safe) ---
-    # prompt_builder.py: _load_config_safe, _is_auto_merge_enabled, _get_branch_prefix
-    # narrowed to specific exceptions — removed from allowlist
-    ("awake.py", "_build_chat_prompt"),           # pending.md read for chat context
-    # --- GitHub API best-effort (None/empty is safe) ---
-    ("github.py", "get_gh_username"),             # gh username cache miss
-    ("github.py", "detect_parent_repo"),          # parent repo detection
-    ("github_auth.py", "get_gh_token"),           # token validation
     # --- Git operations (abort after failed rebase) ---
     ("claude_step.py", "_rebase_onto_target"),    # rebase --abort after failed rebase
     # --- Non-critical subsystem fallbacks ---
     ("cli_journal_streamer.py", "_tail_loop"),    # journal append in tail-thread tight loop
-    # schedule_manager.py: get_schedule_config — narrowed to (ImportError, OSError, ValueError)
-    # usage_tracker.py: _get_budget_thresholds, _get_budget_mode — narrowed to specific exceptions
-    # projects_merged.py: get_yaml_project_names — narrowed to (ValueError, OSError)
-    # projects_config.py: resolve_base_branch — narrowed to (ValueError, OSError, KeyError)
     # --- Setup wizard (interactive, errors shown in UI) ---
     ("setup_wizard.py", "_load_wizard_projects"),  # config loading
     ("setup_wizard.py", "get_chat_id_from_updates"),  # project path resolution
-    # --- CLI runners: cleanup after main work done ---
-    # recreate_pr.py: run_recreate, _fetch_upstream_target, _has_commits_on_branch
-    # narrowed to (RuntimeError, OSError)
-    # --- Prompt/config loading with hardcoded fallback ---
-    ("local_llm_runner.py", "_default_system_prompt"),  # system prompt file fallback
-    ("pid_manager.py", "_detect_provider"),        # provider detection fallback
     # --- Retry without optional parameter ---
     ("plan_runner.py", "_run_new_plan"),           # issue label retry (inner catch has e2)
 }

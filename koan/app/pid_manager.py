@@ -63,7 +63,7 @@ def _open_log_file(koan_root: Path, process_name: str):
     try:
         from app.utils import load_config
         config = load_config()
-    except Exception:
+    except (ImportError, OSError, ValueError):
         pass  # Fall back to defaults
     
     cfg = get_log_config(config)
@@ -466,7 +466,7 @@ def _detect_provider(koan_root: Path) -> str:
         # Lazy import to avoid circular deps and keep pid_manager lightweight
         from app.provider import get_provider_name
         return get_provider_name()
-    except Exception:
+    except (ImportError, OSError, ValueError):
         return "claude"
 
 

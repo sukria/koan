@@ -180,7 +180,7 @@ def get_gh_username() -> str:
 
     try:
         _cached_gh_username = run_gh("api", "user", "--jq", ".login", timeout=15)
-    except Exception:
+    except (RuntimeError, subprocess.SubprocessError, OSError):
         _cached_gh_username = ""
 
     return _cached_gh_username
@@ -213,7 +213,7 @@ def detect_parent_repo(project_path: str) -> Optional[str]:
         if len(parts) == 2 and all(parts):
             return output.strip()
         return None
-    except Exception:
+    except (RuntimeError, subprocess.SubprocessError, OSError):
         return None
 
 
