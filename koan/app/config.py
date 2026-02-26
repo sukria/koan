@@ -256,6 +256,22 @@ def get_branch_prefix() -> str:
     return f"{prefix}/"
 
 
+def get_skill_timeout() -> int:
+    """Get timeout in seconds for skill execution (fix, implement, recreate).
+
+    Controls how long Claude CLI calls are allowed to run before being
+    killed.  This applies to the heavy-lifting skills that invoke Claude
+    with full tool access.
+
+    Config key: skill_timeout (default: 3600 — 60 minutes).
+
+    Returns:
+        Timeout in seconds.
+    """
+    config = _load_config()
+    return _safe_int(config.get("skill_timeout", 3600), 3600)
+
+
 def get_contemplative_chance() -> int:
     """Get probability (0-100) of triggering contemplative mode on autonomous runs.
 

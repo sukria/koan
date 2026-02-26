@@ -276,10 +276,11 @@ def _execute_implementation(
     )
 
     from app.cli_provider import CLAUDE_TOOLS, run_command
+    from app.config import get_skill_timeout
     return run_command(
         prompt, project_path,
         allowed_tools=sorted(CLAUDE_TOOLS),
-        max_turns=50, timeout=900,
+        max_turns=50, timeout=get_skill_timeout(),
     )
 
 
