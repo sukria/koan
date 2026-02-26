@@ -17,7 +17,7 @@ from app.cli_provider import build_full_command, run_command
 from app.config import get_model_config
 from app.git_utils import run_git_strict
 from app.github import pr_create, run_gh
-from app.prompts import load_prompt, load_skill_prompt
+from app.prompts import load_prompt_or_skill
 from app.utils import truncate_text
 
 # Backward-compatible alias — callers should import from app.cli_provider
@@ -274,9 +274,7 @@ def _build_pr_prompt(
         REVIEWS=context.get("reviews", ""),
         ISSUE_COMMENTS=context.get("issue_comments", ""),
     )
-    if skill_dir is not None:
-        return load_skill_prompt(skill_dir, prompt_name, **kwargs)
-    return load_prompt(prompt_name, **kwargs)
+    return load_prompt_or_skill(skill_dir, prompt_name, **kwargs)
 
 
 # -- Push with PR fallback (shared config) ----------------------------------
