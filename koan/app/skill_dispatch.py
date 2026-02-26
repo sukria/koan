@@ -29,6 +29,13 @@ from typing import List, Optional, Tuple
 from app.github_url_parser import ISSUE_URL_PATTERN, PR_URL_PATTERN
 from app.utils import is_known_project
 
+# Module-level registry cache for the run process.
+# bridge_state.py caches via _get_registry(), but translate_cli_skill_mission()
+# (called from run.py) was rebuilding the registry from filesystem on every
+# invocation.  This cache avoids that overhead.
+_cached_registry = None
+_cached_extra_dirs: Optional[tuple] = None
+
 
 # Mapping of skill command names to their CLI runner modules.
 # Each entry: command_name -> (module_name, arg_builder_function_name)
@@ -391,10 +398,15 @@ def translate_cli_skill_mission(
     if scope == "core":
         return None
 
-    # Look up skill in registry (build_registry already imported at line 383)
+    # Look up skill in registry — cached to avoid rebuilding from filesystem
+    # on every mission check.
+    global _cached_registry, _cached_extra_dirs
     instance_skills_dir = instance_dir / "skills"
-    extra = [instance_skills_dir] if instance_skills_dir.is_dir() else []
-    registry = build_registry(extra)
+    extra = tuple(p for p in [instance_skills_dir] if p.is_dir())
+    if _cached_registry is None or extra != _cached_extra_dirs:
+        _cached_registry = build_registry(list(extra))
+        _cached_extra_dirs = extra
+    registry = _cached_registry
 
     skill = registry.get(scope, name)
     if skill is None or not skill.cli_skill:

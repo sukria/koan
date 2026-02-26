@@ -428,10 +428,15 @@ class TestTranslateCliSkillMission:
     """Tests for translate_cli_skill_mission()."""
 
     def _translate(self, mission_text, skills_root=None, instance_dir=None, tmp_path=None):
+        import app.skill_dispatch as _sd_mod
         from app.skill_dispatch import translate_cli_skill_mission
 
         koan_root = tmp_path or Path("/tmp/koan")
         inst = instance_dir or (tmp_path / "instance" if tmp_path else Path("/tmp/koan/instance"))
+
+        # Clear registry cache so each test builds a fresh registry.
+        _sd_mod._cached_registry = None
+        _sd_mod._cached_extra_dirs = None
 
         if skills_root:
             # Patch build_registry to load from our tmp skills dir
@@ -441,6 +446,7 @@ class TestTranslateCliSkillMission:
             try:
                 return translate_cli_skill_mission(mission_text, koan_root, inst)
             finally:
+                _sd_mod._cached_registry = None
                 _skills_mod.get_default_skills_dir = orig
 
         return translate_cli_skill_mission(mission_text, koan_root, inst)
