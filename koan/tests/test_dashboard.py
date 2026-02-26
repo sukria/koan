@@ -425,13 +425,22 @@ class TestApiProgress:
 
 class TestApiProgressStream:
     def test_stream_returns_sse_content_type(self, app_client):
-        resp = app_client.get("/api/progress/stream")
+        # Call the view function directly to get the Response object without
+        # iterating the infinite SSE generator (which blocks ~14s in the test
+        # client waiting for output).
+        with dashboard.app.test_request_context("/api/progress/stream"):
+            resp = dashboard.api_progress_stream()
         assert resp.content_type == "text/event-stream; charset=utf-8"
+        assert resp.headers.get("Cache-Control") == "no-cache"
+        assert resp.headers.get("X-Accel-Buffering") == "no"
 
     def test_stream_sends_initial_event_when_file_exists(self, app_client, instance_dir):
         pending = instance_dir / "journal" / "pending.md"
         pending.write_text("# Mission: live test\n---\n04:30 — doing stuff\n")
-        resp = app_client.get("/api/progress/stream")
+        # Patch time.sleep to terminate the generator after the first event.
+        # The generator yields a data event (file exists) then hits sleep → error.
+        with patch("app.dashboard.time.sleep", side_effect=RuntimeError("break")):
+            resp = app_client.get("/api/progress/stream")
         # Read the first chunk from the streaming response
         import json
         data_line = None
@@ -451,11 +460,10 @@ class TestApiProgressStream:
         pending = instance_dir / "journal" / "pending.md"
         if pending.exists():
             pending.unlink()
-        # The SSE generator won't emit until content changes.
-        # For the no-file case with last_content=None initially, it won't emit.
-        # We just verify the endpoint returns a valid SSE response.
-        resp = app_client.get("/api/progress/stream")
-        assert resp.status_code == 200
+        # Call the view function directly — we only need to verify the Response
+        # metadata, not iterate the generator.
+        with dashboard.app.test_request_context("/api/progress/stream"):
+            resp = dashboard.api_progress_stream()
         assert "text/event-stream" in resp.content_type
 
 

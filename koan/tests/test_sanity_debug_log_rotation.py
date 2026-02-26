@@ -41,18 +41,13 @@ class TestRotateDebugLog:
     def test_large_file_rotated(self, tmp_path):
         """File over threshold → truncated to MAX_KEEP_LINES."""
         path = tmp_path / DEBUG_LOG_FILENAME
-        # Write more than MAX_SIZE_BYTES of content
-        total_lines = MAX_KEEP_LINES + 1000
-        lines = [f"[2026-02-23 10:00:00] debug line {i}\n" for i in range(total_lines)]
+        # Build a file that exceeds MAX_SIZE_BYTES in one pass.
+        # Each line is ~240 bytes; calculate how many we need.
+        line_template = "[2026-02-23 10:00:00] " + "x" * 200 + " line {}\n"
+        bytes_per_line = len(line_template.format(0).encode())
+        total_lines = max(MAX_KEEP_LINES + 1000, MAX_SIZE_BYTES // bytes_per_line + 100)
+        lines = [line_template.format(i) for i in range(total_lines)]
         path.write_text("".join(lines))
-
-        # Ensure file is actually over the size threshold
-        # If lines are short and don't exceed MAX_SIZE_BYTES, pad them
-        while path.stat().st_size <= MAX_SIZE_BYTES:
-            extra = [f"[2026-02-23 10:00:00] {'x' * 200} line {i}\n" for i in range(10000)]
-            lines.extend(extra)
-            total_lines += 10000
-            path.write_text("".join(lines))
 
         modified, changes = rotate_debug_log(str(path))
         assert modified
@@ -67,19 +62,19 @@ class TestRotateDebugLog:
     def test_keeps_last_lines(self, tmp_path):
         """Rotation keeps the LAST lines, not the first."""
         path = tmp_path / DEBUG_LOG_FILENAME
-        # Create a file with identifiable first and last lines
+        # Create a file with identifiable content lines at the end
         total = MAX_KEEP_LINES + 500
-        lines = [f"line-{i:06d}\n" for i in range(total)]
-        content = "".join(lines)
+        content_lines = [f"line-{i:06d}\n" for i in range(total)]
 
-        # Pad to exceed size threshold
-        while len(content.encode()) <= MAX_SIZE_BYTES:
-            padding = "x" * 200 + "\n"
-            lines.insert(0, padding)
-            total += 1
-            content = "".join(lines)
+        # Calculate padding needed upfront to exceed MAX_SIZE_BYTES in one pass.
+        # Each content line is ~13 bytes; we need padding to fill the rest.
+        content_size = sum(len(l.encode()) for l in content_lines)
+        padding_line = "x" * 200 + "\n"
+        padding_bytes = len(padding_line.encode())
+        padding_needed = max(0, (MAX_SIZE_BYTES - content_size) // padding_bytes + 100)
+        lines = [padding_line] * padding_needed + content_lines
 
-        path.write_text(content)
+        path.write_text("".join(lines))
 
         modified, _ = rotate_debug_log(str(path))
         assert modified
