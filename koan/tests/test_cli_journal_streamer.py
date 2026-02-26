@@ -9,6 +9,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _fast_poll():
+    """Patch poll interval from 1.0s to 0.05s for all tests in this module."""
+    with patch("app.cli_journal_streamer._POLL_INTERVAL", 0.05):
+        yield
+
+
 @pytest.fixture
 def tmp_env(tmp_path):
     """Set up a temp instance directory with journal structure."""
@@ -60,7 +67,7 @@ class TestStartTailThread:
             f.write("line one\n")
             f.flush()
 
-        time.sleep(2.0)
+        time.sleep(0.2)
         stop_tail_thread(thread, stop_event)
         assert not thread.is_alive()
 
@@ -75,7 +82,7 @@ class TestStartTailThread:
             stdout_file, tmp_env["instance_dir"], tmp_env["project_name"], run_num=3,
         )
 
-        time.sleep(0.5)
+        time.sleep(0.15)
         content = _journal_content(tmp_env)
         assert "Run 3" in content
         assert "🖥️" in content
@@ -103,7 +110,7 @@ class TestStartTailThread:
         thread, stop_event = start_tail_thread(
             nonexistent, tmp_env["instance_dir"], tmp_env["project_name"], run_num=1,
         )
-        time.sleep(1.5)
+        time.sleep(0.2)
         stop_tail_thread(thread, stop_event)
         assert not thread.is_alive()
 
@@ -323,13 +330,13 @@ class TestTailLoop:
         with open(stdout_file, "a") as f:
             f.write("burst one\n")
             f.flush()
-        time.sleep(1.5)
+        time.sleep(0.2)
 
         # Second burst
         with open(stdout_file, "a") as f:
             f.write("burst two\n")
             f.flush()
-        time.sleep(1.5)
+        time.sleep(0.2)
 
         stop_tail_thread(thread, stop_event)
 
@@ -358,13 +365,13 @@ class TestTailLoop:
         thread, stop_event = start_tail_thread(
             stdout_file, tmp_env["instance_dir"], tmp_env["project_name"], run_num=1,
         )
-        time.sleep(1.5)
+        time.sleep(0.2)
 
         # Truncate the file (simulate log rotation)
         with open(stdout_file, "w") as f:
             f.write("")
 
-        time.sleep(1.5)
+        time.sleep(0.2)
         stop_tail_thread(thread, stop_event)
         assert not thread.is_alive()
 
@@ -385,7 +392,7 @@ class TestTailLoop:
             f.write(b"valid text\xff\xfe more text\n")
             f.flush()
 
-        time.sleep(1.5)
+        time.sleep(0.2)
         stop_tail_thread(thread, stop_event)
 
         content = _journal_content(tmp_env)
