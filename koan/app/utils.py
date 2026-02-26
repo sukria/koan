@@ -248,6 +248,62 @@ def truncate_text(text: str, max_chars: int) -> str:
     return text[:max_chars] + "\n...(truncated)"
 
 
+def _locked_missions_rw(missions_path: Path, transform):
+    """Read-modify-write missions.md with crash-safe atomic writes.
+
+    Uses a separate lock file for cross-process synchronization so that
+    the data file can be replaced atomically via temp + rename. A process
+    crash between truncate() and write() previously risked leaving
+    missions.md empty; this pattern eliminates that window entirely.
+
+    Args:
+        missions_path: Path to missions.md
+        transform: Callable(content: str) -> str that returns modified content.
+
+    Returns the transformed content.
+    """
+    lock_path = missions_path.with_suffix(".lock")
+    missions_path = Path(missions_path)
+
+    with _MISSIONS_LOCK:
+        # Ensure parent directory exists (for first-run or test scenarios)
+        missions_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(lock_path, "w") as lock_f:
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+            try:
+                # Read current content (or default if missing/empty)
+                if missions_path.exists():
+                    content = missions_path.read_text(encoding="utf-8")
+                else:
+                    content = ""
+                if not content.strip():
+                    content = _MISSIONS_DEFAULT
+
+                new_content = transform(content)
+
+                # Atomic write: temp file + rename (same dir = same filesystem)
+                fd, tmp = tempfile.mkstemp(
+                    dir=str(missions_path.parent), prefix=".missions-",
+                )
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp, str(missions_path))
+                except BaseException:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+                    raise
+            finally:
+                fcntl.flock(lock_f, fcntl.LOCK_UN)
+
+    return new_content
+
+
 def insert_pending_mission(missions_path: Path, entry: str, *, urgent: bool = False):
     """Insert a mission entry into the pending section of missions.md.
 
@@ -260,23 +316,10 @@ def insert_pending_mission(missions_path: Path, entry: str, *, urgent: bool = Fa
     """
     from app.missions import insert_mission
 
-    # Thread lock (in-process) + file lock (cross-process) for full protection
-    with _MISSIONS_LOCK:
-        # Open with "a+" to create if missing, then lock before any read/write
-        with open(missions_path, "a+") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            f.seek(0)
-            content = f.read()
-            if not content.strip():
-                content = _MISSIONS_DEFAULT
-
-            content = insert_mission(content, entry, urgent=urgent)
-
-            f.seek(0)
-            f.truncate()
-            f.write(content)
-            f.flush()
-            fcntl.flock(f, fcntl.LOCK_UN)
+    _locked_missions_rw(
+        missions_path,
+        lambda content: insert_mission(content, entry, urgent=urgent),
+    )
 
 
 def modify_missions_file(missions_path: Path, transform):
@@ -288,24 +331,7 @@ def modify_missions_file(missions_path: Path, transform):
 
     Returns the transformed content.
     """
-    with _MISSIONS_LOCK:
-        # Open with "a+" to create if missing, then lock before any read/write
-        with open(missions_path, "a+") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            f.seek(0)
-            content = f.read()
-            if not content.strip():
-                content = _MISSIONS_DEFAULT
-
-            new_content = transform(content)
-
-            f.seek(0)
-            f.truncate()
-            f.write(new_content)
-            f.flush()
-            fcntl.flock(f, fcntl.LOCK_UN)
-
-    return new_content
+    return _locked_missions_rw(missions_path, transform)
 
 
 def get_known_projects() -> list:

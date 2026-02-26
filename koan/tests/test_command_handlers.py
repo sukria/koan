@@ -152,6 +152,27 @@ class TestHandleCommandRouting:
         assert "/status" in msg
         assert "Show agent status" in msg
 
+    def test_help_command_with_inconsistent_registry(
+        self, patch_bridge_state, mock_send, mock_registry
+    ):
+        """If find_by_command returns a skill whose commands don't match,
+        the handler should gracefully send an error instead of crashing."""
+        from app.command_handlers import handle_command
+        from app.skills import Skill, SkillCommand
+
+        # Registry returns a skill for "status", but the skill's commands
+        # contain "different" — simulating an inconsistent registry.
+        skill = MagicMock(spec=Skill)
+        cmd = SkillCommand(name="different", description="Mismatch")
+        skill.commands = [cmd]
+        mock_registry.find_by_command.return_value = skill
+
+        # Should not raise StopIteration
+        handle_command("/help status")
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "Unknown command" in msg
+
 
 # ---------------------------------------------------------------------------
 # Test: project-name fallback for unknown commands
