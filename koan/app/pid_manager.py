@@ -83,12 +83,42 @@ def _read_pid(pidfile: Path) -> Optional[int]:
 
 
 def _is_process_alive(pid: int) -> bool:
-    """Check if a process with the given PID is alive."""
+    """Check if a process with the given PID is alive (not a zombie).
+
+    ``os.kill(pid, 0)`` succeeds for zombie processes, which look alive
+    but are effectively dead.  When the caller is not the parent (common
+    with ``make stop``), zombies are not reapable via ``waitpid`` and
+    would cause ``_wait_for_exit`` to burn the full timeout.
+
+    Falls back to ``ps`` to detect zombie state on macOS/Linux.
+    """
     try:
         os.kill(pid, 0)
-        return True
     except (OSError, ProcessLookupError):
         return False
+
+    # os.kill(pid, 0) succeeded — but it could be a zombie.
+    # Try /proc first (Linux, fast), then ps (macOS/Linux, slower).
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("State:"):
+                    return "Z" not in line
+    except (FileNotFoundError, PermissionError, OSError):
+        pass  # macOS or /proc not available
+
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "state=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=2,
+        )
+        state = result.stdout.strip()
+        if state and state[0] in ("Z", "z"):
+            return False
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+    return True
 
 
 def acquire_pidfile(koan_root: Path, process_name: str) -> IO:

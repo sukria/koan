@@ -105,6 +105,38 @@ class TestIsProcessAlive:
         result = _is_process_alive(0)
         assert isinstance(result, bool)
 
+    def test_zombie_detected_via_ps(self):
+        """Zombie processes (state=Z) should be reported as dead."""
+        ps_result = MagicMock(stdout="Z", returncode=0)
+        with patch("os.kill"):  # kill(pid, 0) succeeds (zombie exists)
+            with patch("builtins.open", side_effect=FileNotFoundError):  # no /proc
+                with patch("app.pid_manager.subprocess.run", return_value=ps_result):
+                    assert _is_process_alive(42) is False
+
+    def test_zombie_detected_via_proc(self):
+        """On Linux, zombie detected via /proc/PID/status."""
+        from io import StringIO
+        proc_content = StringIO("Name:\ttest\nState:\tZ (zombie)\nPid:\t42\n")
+        with patch("os.kill"):  # kill(pid, 0) succeeds
+            with patch("builtins.open", return_value=proc_content):
+                assert _is_process_alive(42) is False
+
+    def test_alive_process_not_zombie(self):
+        """Running process detected via ps should be reported as alive."""
+        ps_result = MagicMock(stdout="S", returncode=0)
+        with patch("os.kill"):  # kill(pid, 0) succeeds
+            with patch("builtins.open", side_effect=FileNotFoundError):  # no /proc
+                with patch("app.pid_manager.subprocess.run", return_value=ps_result):
+                    assert _is_process_alive(42) is True
+
+    def test_ps_failure_assumes_alive(self):
+        """If ps fails, assume process is alive (safe default)."""
+        with patch("os.kill"):  # kill(pid, 0) succeeds
+            with patch("builtins.open", side_effect=FileNotFoundError):
+                with patch("app.pid_manager.subprocess.run",
+                           side_effect=subprocess.SubprocessError("ps failed")):
+                    assert _is_process_alive(42) is True
+
 
 # ---------------------------------------------------------------------------
 # acquire_pidfile (flock-based, for Python processes)
