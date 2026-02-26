@@ -372,11 +372,15 @@ def _handle_help_command(command_name: str):
         send_telegram(f"Unknown command: /{command_name}\nUse /help to see all commands.")
         return
 
-    # find_by_command maps both names and aliases, so the match is guaranteed
+    # find_by_command maps both names and aliases, so the match should exist
     cmd = next(
-        c for c in skill.commands
-        if c.name == command_name or command_name in c.aliases
+        (c for c in skill.commands
+         if c.name == command_name or command_name in c.aliases),
+        None,
     )
+    if cmd is None:
+        send_telegram(f"Unknown command: /{command_name}\nUse /help to see all commands.")
+        return
 
     parts = [f"/{cmd.name}"]
     desc = cmd.description or skill.description
