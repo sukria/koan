@@ -211,11 +211,14 @@ def run_recreate(
 # ---------------------------------------------------------------------------
 
 def _fetch_upstream_target(base: str, project_path: str) -> Optional[str]:
-    """Fetch the target branch from origin or upstream.
+    """Fetch the target branch from upstream or origin.
+
+    Prefers upstream (source-of-truth in fork setups) over origin
+    to ensure the freshest base when recreating a PR from scratch.
 
     Returns the remote name used, or None on failure.
     """
-    for remote in ("origin", "upstream"):
+    for remote in ("upstream", "origin"):
         try:
             _run_git(["git", "fetch", remote, base], cwd=project_path)
             return remote

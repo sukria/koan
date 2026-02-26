@@ -101,8 +101,9 @@ def load_skill_prompt(skill_dir: Path, name: str, **kwargs: str) -> str:
         The prompt string with placeholders replaced.
     """
     skill_prompt = skill_dir / "prompts" / f"{name}.md"
-    if skill_prompt.exists():
-        template = skill_prompt.read_text()
-    else:
+    try:
+        template = _read_prompt_with_git_fallback(skill_prompt)
+    except FileNotFoundError:
+        # Skill prompt not found even via git — fall back to system-prompts/
         template = _read_prompt_with_git_fallback(get_prompt_path(name))
     return _substitute(template, kwargs)

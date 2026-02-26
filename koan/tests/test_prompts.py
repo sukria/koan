@@ -312,3 +312,48 @@ class TestGitFallback:
             with patch("app.prompts.subprocess.run", side_effect=se):
                 result = load_skill_prompt(skill_dir, "nonexistent")
         assert result == "content from origin"
+
+    def test_skill_prompt_git_fallback_before_system_prompts(self, tmp_path):
+        """When skill prompt is missing on disk, try git for the skill path first."""
+        skill_dir = tmp_path / "myskill"
+        skill_dir.mkdir()
+        # Skill prompt doesn't exist on disk, but git show finds it
+        se = _make_run_side_effect(
+            remotes={"upstream/main": "ok", "origin/main": "fail"},
+            repo_root=str(tmp_path),
+        )
+        with patch("app.prompts.subprocess.run", side_effect=se):
+            result = load_skill_prompt(skill_dir, "recreate")
+        assert result == "content from upstream"
+
+    def test_skill_prompt_falls_through_to_system_on_git_miss(self, tmp_path):
+        """When skill prompt not on disk AND not in git, try system-prompts."""
+        skill_dir = tmp_path / "myskill"
+        skill_dir.mkdir()
+
+        # First call to _read_prompt_with_git_fallback (skill path) fails entirely
+        # Second call (system-prompts path) succeeds via origin
+        call_count = [0]
+        se_both_fail = _make_run_side_effect(
+            remotes={"upstream/main": "fail", "origin/main": "fail"},
+            repo_root=str(tmp_path),
+        )
+        se_origin_ok = _make_run_side_effect(
+            remotes={"upstream/main": "fail", "origin/main": "ok"},
+            repo_root=str(tmp_path),
+        )
+
+        def alternating_se(cmd, **kwargs):
+            if cmd[:2] == ["git", "show"]:
+                ref = cmd[2]
+                # Skill path calls fail, system-prompt calls succeed
+                if "myskill" in ref:
+                    return se_both_fail(cmd, **kwargs)
+                return se_origin_ok(cmd, **kwargs)
+            return se_origin_ok(cmd, **kwargs)
+
+        fake_sys = tmp_path / "someprompt.md"
+        with patch("app.prompts.get_prompt_path", return_value=fake_sys):
+            with patch("app.prompts.subprocess.run", side_effect=alternating_se):
+                result = load_skill_prompt(skill_dir, "someprompt")
+        assert result == "content from origin"
