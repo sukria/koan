@@ -18,7 +18,6 @@ Usage:
         send_message(content)
 """
 
-import os
 import re
 from dataclasses import dataclass
 from typing import List, Optional

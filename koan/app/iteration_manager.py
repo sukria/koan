@@ -251,7 +251,6 @@ def _should_contemplate(autonomous_mode: str, focus_active: bool,
             contemplative_chance, schedule_state
         )
 
-    import random
     return random.randint(0, 99) < contemplative_chance
 
 
