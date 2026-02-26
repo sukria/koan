@@ -323,3 +323,193 @@ projects:
         result = get_all_projects(str(koan_root))
         names = [n for n, _ in result]
         assert names == ["alpha", "Middle", "Zebra"]
+
+
+class TestGetYamlProjectNames:
+    """Tests for get_yaml_project_names()."""
+
+    def test_returns_names_with_paths(self, koan_root):
+        """Returns names of projects that have path configured."""
+        from app.projects_merged import get_yaml_project_names
+        proj_dir = koan_root / "myapp"
+        proj_dir.mkdir()
+        _write_projects_yaml(koan_root, f"""
+projects:
+  myapp:
+    path: "{proj_dir}"
+  overrides_only:
+    models:
+      mission: "opus"
+""")
+        names = get_yaml_project_names(str(koan_root))
+        assert "myapp" in names
+        assert "overrides_only" not in names
+
+    def test_returns_empty_when_no_yaml(self, tmp_path):
+        """Returns empty set when projects.yaml doesn't exist."""
+        from app.projects_merged import get_yaml_project_names
+        assert get_yaml_project_names(str(tmp_path)) == set()
+
+    def test_returns_empty_on_bad_yaml(self, koan_root):
+        """Returns empty set on invalid yaml."""
+        from app.projects_merged import get_yaml_project_names
+        (koan_root / "projects.yaml").write_text("{{bad yaml")
+        assert get_yaml_project_names(str(koan_root)) == set()
+
+
+class TestPopulateWorkspaceGithubUrls:
+    """Tests for populate_workspace_github_urls()."""
+
+    def test_discovers_git_remotes(self, koan_root):
+        """Discovers github URLs from workspace git repos."""
+        from app.projects_merged import populate_workspace_github_urls
+        ws = koan_root / "workspace"
+        proj = ws / "myproj"
+        proj.mkdir()
+        (proj / ".git").mkdir()
+
+        with patch("app.utils.get_github_remote", return_value="https://github.com/me/myproj"):
+            count = populate_workspace_github_urls(str(koan_root))
+
+        assert count == 1
+        assert get_github_url("myproj") == "https://github.com/me/myproj"
+
+    def test_skips_yaml_projects(self, koan_root):
+        """Skips projects that are in projects.yaml."""
+        from app.projects_merged import populate_workspace_github_urls
+        proj_dir = koan_root / "yaml-proj"
+        proj_dir.mkdir()
+        (proj_dir / ".git").mkdir()
+        _write_projects_yaml(koan_root, f"""
+projects:
+  yaml-proj:
+    path: "{proj_dir}"
+""")
+        ws = koan_root / "workspace"
+        ws_proj = ws / "ws-proj"
+        ws_proj.mkdir()
+        (ws_proj / ".git").mkdir()
+
+        with patch("app.utils.get_github_remote", return_value="https://github.com/me/proj"):
+            count = populate_workspace_github_urls(str(koan_root))
+
+        assert count == 1
+        assert get_github_url("ws-proj") == "https://github.com/me/proj"
+        assert get_github_url("yaml-proj") is None
+
+    def test_skips_already_cached(self, koan_root):
+        """Skips projects that already have a cached URL."""
+        from app.projects_merged import populate_workspace_github_urls
+        ws = koan_root / "workspace"
+        proj = ws / "myproj"
+        proj.mkdir()
+        (proj / ".git").mkdir()
+        set_github_url("myproj", "https://github.com/existing/url")
+
+        with patch("app.utils.get_github_remote") as mock_remote:
+            populate_workspace_github_urls(str(koan_root))
+            mock_remote.assert_not_called()
+
+    def test_skips_non_git_dirs(self, koan_root):
+        """Skips workspace directories that aren't git repos."""
+        from app.projects_merged import populate_workspace_github_urls
+        ws = koan_root / "workspace"
+        (ws / "not-git").mkdir()
+
+        with patch("app.utils.get_github_remote") as mock_remote:
+            count = populate_workspace_github_urls(str(koan_root))
+
+        assert count == 0
+        mock_remote.assert_not_called()
+
+    def test_skips_no_github_remote(self, koan_root):
+        """Skips repos with no github remote."""
+        from app.projects_merged import populate_workspace_github_urls
+        ws = koan_root / "workspace"
+        proj = ws / "myproj"
+        proj.mkdir()
+        (proj / ".git").mkdir()
+
+        with patch("app.utils.get_github_remote", return_value=None):
+            count = populate_workspace_github_urls(str(koan_root))
+
+        assert count == 0
+        assert get_github_url("myproj") is None
+
+
+class TestCacheDifferentRoots:
+    """Cache correctly handles different KOAN_ROOT values."""
+
+    def test_different_root_triggers_rescan(self, tmp_path):
+        """Switching to a different root triggers a new scan."""
+        root1 = tmp_path / "root1"
+        root1.mkdir()
+        (root1 / "workspace").mkdir()
+        (root1 / "workspace" / "proj1").mkdir()
+
+        root2 = tmp_path / "root2"
+        root2.mkdir()
+        (root2 / "workspace").mkdir()
+        (root2 / "workspace" / "proj2").mkdir()
+
+        result1 = get_all_projects(str(root1))
+        assert len(result1) == 1
+        assert result1[0][0] == "proj1"
+
+        result2 = get_all_projects(str(root2))
+        assert len(result2) == 1
+        assert result2[0][0] == "proj2"
+
+
+class TestCaseInsensitiveDuplicates:
+    """Case-insensitive duplicate detection."""
+
+    def test_case_insensitive_yaml_wins(self, koan_root):
+        """Yaml project 'MyProj' overrides workspace 'myproj'."""
+        yaml_dir = koan_root / "yaml-path"
+        yaml_dir.mkdir()
+        _write_projects_yaml(koan_root, f"""
+projects:
+  MyProj:
+    path: "{yaml_dir}"
+""")
+        ws = koan_root / "workspace"
+        (ws / "myproj").mkdir()
+
+        result = get_all_projects(str(koan_root))
+        # Yaml entry takes precedence
+        assert len(result) == 1
+        assert result[0][0] == "MyProj"
+        assert result[0][1] == str(yaml_dir)
+
+
+class TestYamlChangeInvalidatesCache:
+    """Changes to projects.yaml invalidate the cache."""
+
+    def test_yaml_modified_triggers_rescan(self, koan_root):
+        """Modifying projects.yaml triggers a rescan."""
+        proj1 = koan_root / "proj1"
+        proj1.mkdir()
+        _write_projects_yaml(koan_root, f"""
+projects:
+  proj1:
+    path: "{proj1}"
+""")
+        result1 = get_all_projects(str(koan_root))
+        assert len(result1) == 1
+
+        # Modify yaml — add another project
+        proj2 = koan_root / "proj2"
+        proj2.mkdir()
+        import time
+        time.sleep(0.01)  # Ensure mtime differs
+        _write_projects_yaml(koan_root, f"""
+projects:
+  proj1:
+    path: "{proj1}"
+  proj2:
+    path: "{proj2}"
+""")
+
+        result2 = get_all_projects(str(koan_root))
+        assert len(result2) == 2
