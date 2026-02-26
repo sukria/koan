@@ -22,7 +22,7 @@ from app.pr_submit import (
     guess_project_name,
     submit_draft_pr,
 )
-from app.prompts import load_prompt, load_skill_prompt
+from app.prompts import load_prompt_or_skill
 
 logger = logging.getLogger(__name__)
 
@@ -207,10 +207,7 @@ def _build_prompt(
         ISSUE_NUMBER=issue_number,
     )
 
-    if skill_dir is not None:
-        return load_skill_prompt(skill_dir, "fix", **template_vars)
-
-    return load_prompt("fix", **template_vars)
+    return load_prompt_or_skill(skill_dir, "fix", **template_vars)
 
 
 # ---------------------------------------------------------------------------

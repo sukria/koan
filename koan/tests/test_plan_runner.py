@@ -400,7 +400,7 @@ class TestGeneratePlan:
         mock_run.return_value = MagicMock(
             returncode=0, stdout="## Plan\n\nStep 1", stderr=""
         )
-        with patch("app.plan_runner.load_skill_prompt", return_value="prompt"), \
+        with patch("app.plan_runner.load_prompt_or_skill", return_value="prompt"), \
              patch("app.claude_step.get_model_config",
                     return_value={"chat": "sonnet", "fallback": "haiku"}), \
              patch("app.claude_step.build_full_command",
@@ -412,7 +412,7 @@ class TestGeneratePlan:
     @patch("app.cli_exec.run_cli")
     def test_includes_context(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
-        with patch("app.plan_runner.load_skill_prompt") as mock_load, \
+        with patch("app.plan_runner.load_prompt_or_skill") as mock_load, \
              patch("app.claude_step.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
              patch("app.claude_step.build_full_command",
@@ -425,7 +425,7 @@ class TestGeneratePlan:
     @patch("app.cli_exec.run_cli")
     def test_raises_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="rate limited")
-        with patch("app.plan_runner.load_skill_prompt", return_value="prompt"), \
+        with patch("app.plan_runner.load_prompt_or_skill", return_value="prompt"), \
              patch("app.claude_step.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
              patch("app.claude_step.build_full_command",
@@ -436,7 +436,7 @@ class TestGeneratePlan:
     @patch("app.cli_exec.run_cli")
     def test_uses_read_only_tools(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
-        with patch("app.plan_runner.load_skill_prompt", return_value="prompt"), \
+        with patch("app.plan_runner.load_prompt_or_skill", return_value="prompt"), \
              patch("app.claude_step.get_model_config",
                     return_value={"chat": "", "fallback": ""}):
             _generate_plan("/project", "idea", skill_dir=Path("/fake"))
@@ -446,7 +446,7 @@ class TestGeneratePlan:
     @patch("app.cli_exec.run_cli")
     def test_no_skill_dir_uses_load_prompt(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
-        with patch("app.plan_runner.load_prompt", return_value="prompt") as mock_load, \
+        with patch("app.plan_runner.load_prompt_or_skill", return_value="prompt") as mock_load, \
              patch("app.claude_step.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
              patch("app.claude_step.build_full_command",
@@ -465,7 +465,7 @@ class TestGenerateIterationPlan:
         mock_run.return_value = MagicMock(
             returncode=0, stdout="## Updated Plan", stderr=""
         )
-        with patch("app.plan_runner.load_skill_prompt") as mock_load, \
+        with patch("app.plan_runner.load_prompt_or_skill") as mock_load, \
              patch("app.config.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
              patch("app.cli_provider.build_full_command",
@@ -483,20 +483,20 @@ class TestGenerateIterationPlan:
     @patch("app.cli_exec.run_cli")
     def test_no_skill_dir_uses_load_prompt(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="plan", stderr="")
-        with patch("app.plan_runner.load_prompt") as mock_load, \
+        with patch("app.plan_runner.load_prompt_or_skill") as mock_load, \
              patch("app.config.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
              patch("app.cli_provider.build_full_command",
                     return_value=["claude"]):
             _generate_iteration_plan("/project", "context")
             mock_load.assert_called_once_with(
-                "plan-iterate", ISSUE_CONTEXT="context"
+                None, "plan-iterate", ISSUE_CONTEXT="context"
             )
 
     @patch("app.cli_exec.run_cli")
     def test_raises_on_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="error")
-        with patch("app.plan_runner.load_skill_prompt", return_value="prompt"), \
+        with patch("app.plan_runner.load_prompt_or_skill", return_value="prompt"), \
              patch("app.config.get_model_config",
                     return_value={"chat": "", "fallback": ""}), \
              patch("app.cli_provider.build_full_command",

@@ -166,7 +166,7 @@ class TestFetchIssueWithComments:
 class TestBuildPrompt:
     def test_uses_skill_prompt_when_skill_dir_given(self):
         skill_dir = Path("/fake/skill/dir")
-        with patch(f"{_IMPL_MODULE}.load_skill_prompt", return_value="prompt") as mock_load:
+        with patch(f"{_IMPL_MODULE}.load_prompt_or_skill", return_value="prompt") as mock_load:
             result = _build_prompt(
                 "http://url", "Title", "Plan", "Context",
                 skill_dir=skill_dir,
@@ -183,12 +183,12 @@ class TestBuildPrompt:
             assert result == "prompt"
 
     def test_uses_global_prompt_when_no_skill_dir(self):
-        with patch(f"{_IMPL_MODULE}.load_prompt", return_value="prompt") as mock_load:
+        with patch(f"{_IMPL_MODULE}.load_prompt_or_skill", return_value="prompt") as mock_load:
             result = _build_prompt(
                 "http://url", "Title", "Plan", "Context",
             )
             mock_load.assert_called_once_with(
-                "implement",
+                None, "implement",
                 ISSUE_URL="http://url",
                 ISSUE_TITLE="Title",
                 PLAN="Plan",
@@ -496,7 +496,7 @@ class TestResolveSubmitTarget:
 
 class TestGeneratePRSummary:
     def test_happy_path(self):
-        with patch(f"{_IMPL_MODULE}.load_skill_prompt",
+        with patch(f"{_IMPL_MODULE}.load_prompt_or_skill",
                     return_value="prompt"), \
              patch("app.cli_provider.run_command",
                     return_value="A great summary"):
@@ -508,7 +508,7 @@ class TestGeneratePRSummary:
             assert result == "A great summary"
 
     def test_fallback_on_model_failure(self):
-        with patch(f"{_IMPL_MODULE}.load_skill_prompt",
+        with patch(f"{_IMPL_MODULE}.load_prompt_or_skill",
                     return_value="prompt"), \
              patch("app.cli_provider.run_command",
                     side_effect=RuntimeError("model unavailable")):
@@ -521,7 +521,7 @@ class TestGeneratePRSummary:
             assert "feat: add X" in result
 
     def test_fallback_on_empty_output(self):
-        with patch(f"{_IMPL_MODULE}.load_skill_prompt",
+        with patch(f"{_IMPL_MODULE}.load_prompt_or_skill",
                     return_value="prompt"), \
              patch("app.cli_provider.run_command", return_value=""):
             result = _generate_pr_summary(
@@ -532,17 +532,18 @@ class TestGeneratePRSummary:
             assert "http://issue/1" in result
 
     def test_no_skill_dir_uses_load_prompt(self):
-        with patch(f"{_IMPL_MODULE}.load_prompt",
+        with patch(f"{_IMPL_MODULE}.load_prompt_or_skill",
                     return_value="prompt") as mock_load, \
              patch("app.cli_provider.run_command", return_value="summary"):
             _generate_pr_summary(
                 "/project", "Title", "http://issue/1", ["c1"],
             )
             mock_load.assert_called_once()
-            assert mock_load.call_args[0][0] == "pr_summary"
+            assert mock_load.call_args[0][0] is None
+            assert mock_load.call_args[0][1] == "pr_summary"
 
     def test_empty_commits(self):
-        with patch(f"{_IMPL_MODULE}.load_skill_prompt",
+        with patch(f"{_IMPL_MODULE}.load_prompt_or_skill",
                     return_value="prompt"), \
              patch("app.cli_provider.run_command", return_value="summary"):
             result = _generate_pr_summary(

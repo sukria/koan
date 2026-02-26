@@ -608,27 +608,28 @@ class TestBuildPrPrompt:
             "issue_comments": "",
         }
 
-    @patch("app.claude_step.load_skill_prompt", return_value="skill prompt")
-    def test_with_skill_dir(self, mock_lsp, context, tmp_path):
+    @patch("app.claude_step.load_prompt_or_skill", return_value="skill prompt")
+    def test_with_skill_dir(self, mock_lp, context, tmp_path):
         from app.claude_step import _build_pr_prompt
         result = _build_pr_prompt("rebase", context, skill_dir=tmp_path)
         assert result == "skill prompt"
-        mock_lsp.assert_called_once()
-        args, kwargs = mock_lsp.call_args
+        mock_lp.assert_called_once()
+        args, kwargs = mock_lp.call_args
         assert args[0] == tmp_path
         assert args[1] == "rebase"
         assert kwargs["TITLE"] == "feat: add scanner"
 
-    @patch("app.claude_step.load_prompt", return_value="system prompt")
+    @patch("app.claude_step.load_prompt_or_skill", return_value="system prompt")
     def test_without_skill_dir(self, mock_lp, context):
         from app.claude_step import _build_pr_prompt
         result = _build_pr_prompt("recreate", context, skill_dir=None)
         assert result == "system prompt"
         mock_lp.assert_called_once()
         args, kwargs = mock_lp.call_args
-        assert args[0] == "recreate"
+        assert args[0] is None
+        assert args[1] == "recreate"
 
-    @patch("app.claude_step.load_prompt", return_value="ok")
+    @patch("app.claude_step.load_prompt_or_skill", return_value="ok")
     def test_passes_all_context_fields(self, mock_lp, context):
         from app.claude_step import _build_pr_prompt
         _build_pr_prompt("rebase", context)

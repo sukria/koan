@@ -23,7 +23,7 @@ from app.pr_submit import (
     guess_project_name,
     submit_draft_pr,
 )
-from app.prompts import load_prompt, load_skill_prompt
+from app.prompts import load_prompt_or_skill
 
 logger = logging.getLogger(__name__)
 
@@ -216,10 +216,7 @@ def _build_prompt(
         ISSUE_NUMBER=issue_number,
     )
 
-    if skill_dir is not None:
-        return load_skill_prompt(skill_dir, "implement", **template_vars)
-
-    return load_prompt("implement", **template_vars)
+    return load_prompt_or_skill(skill_dir, "implement", **template_vars)
 
 
 def _generate_pr_summary(
@@ -238,20 +235,12 @@ def _generate_pr_summary(
     fallback = f"Implements {issue_url}\n\n{commits_text}"
 
     try:
-        if skill_dir is not None:
-            prompt = load_skill_prompt(
-                skill_dir, "pr_summary",
-                ISSUE_URL=issue_url,
-                ISSUE_TITLE=issue_title,
-                COMMIT_SUBJECTS=commits_text,
-            )
-        else:
-            prompt = load_prompt(
-                "pr_summary",
-                ISSUE_URL=issue_url,
-                ISSUE_TITLE=issue_title,
-                COMMIT_SUBJECTS=commits_text,
-            )
+        prompt = load_prompt_or_skill(
+            skill_dir, "pr_summary",
+            ISSUE_URL=issue_url,
+            ISSUE_TITLE=issue_title,
+            COMMIT_SUBJECTS=commits_text,
+        )
 
         from app.cli_provider import run_command
         output = run_command(

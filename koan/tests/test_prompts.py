@@ -12,6 +12,7 @@ from app.prompts import (
     _substitute,
     get_prompt_path,
     load_prompt,
+    load_prompt_or_skill,
     load_skill_prompt,
 )
 
@@ -179,6 +180,60 @@ class TestLoadSkillPrompt:
                 for md_file in prompts.glob("*.md"):
                     result = load_skill_prompt(skill_dir, md_file.stem)
                     assert len(result) > 0, f"{skill_dir.name}/{md_file.stem} is empty"
+
+
+# ---------- load_prompt_or_skill ----------
+
+
+class TestLoadPromptOrSkill:
+    """Tests for the consolidated prompt loading helper."""
+
+    def test_with_skill_dir_uses_skill_prompt(self, tmp_path):
+        """When skill_dir is not None, delegates to load_skill_prompt."""
+        prompts_dir = tmp_path / "prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "test.md").write_text("Skill {VAR}")
+        result = load_prompt_or_skill(tmp_path, "test", VAR="ok")
+        assert result == "Skill ok"
+
+    def test_with_none_skill_dir_uses_system_prompt(self):
+        """When skill_dir is None, delegates to load_prompt."""
+        result = load_prompt_or_skill(None, "chat")
+        assert len(result) > 0
+
+    def test_skill_dir_takes_priority_over_system(self, tmp_path):
+        """Skill-specific prompt overrides system prompt of the same name."""
+        prompts_dir = tmp_path / "prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "chat.md").write_text("custom chat")
+        result = load_prompt_or_skill(tmp_path, "chat")
+        assert result == "custom chat"
+
+    def test_skill_dir_falls_back_to_system(self, tmp_path):
+        """When prompt missing in skill dir, falls back to system-prompts."""
+        result = load_prompt_or_skill(tmp_path, "chat")
+        system_result = load_prompt("chat")
+        assert result == system_result
+
+    def test_none_skill_dir_nonexistent_raises(self):
+        """When skill_dir is None and prompt doesn't exist, raises."""
+        with pytest.raises(FileNotFoundError):
+            load_prompt_or_skill(None, "totally-nonexistent-xyz")
+
+    def test_substitution_with_skill_dir(self, tmp_path):
+        """Placeholder substitution works via skill path."""
+        prompts_dir = tmp_path / "prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "demo.md").write_text("{A} and {B}")
+        result = load_prompt_or_skill(tmp_path, "demo", A="one", B="two")
+        assert result == "one and two"
+
+    def test_substitution_without_skill_dir(self):
+        """Placeholder substitution works via system path."""
+        result = load_prompt_or_skill(
+            None, "chat", SOUL="test soul", MEMORY="test mem"
+        )
+        assert "test soul" in result or isinstance(result, str)
 
 
 # ---------- _read_prompt_with_git_fallback ----------

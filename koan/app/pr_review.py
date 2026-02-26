@@ -27,31 +27,17 @@ from app.claude_step import (
 )
 from app.github import run_gh
 from app.github_url_parser import parse_pr_url
-from app.prompts import load_prompt, load_skill_prompt
+from app.prompts import load_prompt_or_skill
 from app.rebase_pr import fetch_pr_context
 
 # Matches skill names like `atoomic.refactor` or my.review (with or without backticks)
 _SKILL_RE = re.compile(r'`?([a-zA-Z0-9_-]+\.(?:refactor|review))\b`?')
 
 
-def _load_prompt(name: str, skill_dir: Path = None, **kwargs) -> str:
-    """Lazy-load a prompt template by name.
-
-    Args:
-        name: Prompt file name without .md extension.
-        skill_dir: If provided, look in skill's prompts/ directory first.
-        **kwargs: Placeholder substitutions.
-    """
-    if skill_dir is not None:
-        return load_skill_prompt(skill_dir, name, **kwargs)
-    return load_prompt(name, **kwargs)
-
-
 def build_pr_prompt(context: dict, skill_dir: Path = None) -> str:
     """Build a prompt for Claude to address PR review feedback."""
-    return _load_prompt(
-        "pr-review",
-        skill_dir=skill_dir,
+    return load_prompt_or_skill(
+        skill_dir, "pr-review",
         TITLE=context["title"],
         BODY=context["body"],
         BRANCH=context["branch"],
@@ -65,7 +51,7 @@ def build_pr_prompt(context: dict, skill_dir: Path = None) -> str:
 
 def build_refactor_prompt(project_path: str, skill_name: str = "", skill_dir: Path = None) -> str:
     """Build a prompt for the refactor pass on recent changes."""
-    prompt = _load_prompt("pr-refactor", skill_dir=skill_dir, PROJECT_PATH=project_path)
+    prompt = load_prompt_or_skill(skill_dir, "pr-refactor", PROJECT_PATH=project_path)
     if skill_name:
         prompt += (
             f"\n\n## Skill Invocation\n\n"
@@ -78,7 +64,7 @@ def build_refactor_prompt(project_path: str, skill_name: str = "", skill_dir: Pa
 
 def build_quality_review_prompt(project_path: str, skill_name: str = "", skill_dir: Path = None) -> str:
     """Build a prompt for the quality review pass on recent changes."""
-    prompt = _load_prompt("pr-quality-review", skill_dir=skill_dir, PROJECT_PATH=project_path)
+    prompt = load_prompt_or_skill(skill_dir, "pr-quality-review", PROJECT_PATH=project_path)
     if skill_name:
         prompt += (
             f"\n\n## Skill Invocation\n\n"

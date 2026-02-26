@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from app.github import run_gh, issue_create, api, fetch_issue_with_comments
-from app.prompts import load_prompt, load_skill_prompt
+from app.prompts import load_prompt_or_skill
 
 
 # GitHub issue URL pattern
@@ -206,22 +206,16 @@ def _run_issue_plan(
 
 def _generate_plan(project_path, idea, context="", skill_dir=None):
     """Run Claude to generate a structured plan for a new idea."""
-    if skill_dir is not None:
-        prompt = load_skill_prompt(skill_dir, "plan", IDEA=idea, CONTEXT=context)
-    else:
-        prompt = load_prompt("plan", IDEA=idea, CONTEXT=context)
+    prompt = load_prompt_or_skill(skill_dir, "plan", IDEA=idea, CONTEXT=context)
 
     return _run_claude_plan(prompt, project_path)
 
 
 def _generate_iteration_plan(project_path, issue_context, skill_dir=None):
     """Run Claude to generate an updated plan based on issue + comments."""
-    if skill_dir is not None:
-        prompt = load_skill_prompt(
-            skill_dir, "plan-iterate", ISSUE_CONTEXT=issue_context
-        )
-    else:
-        prompt = load_prompt("plan-iterate", ISSUE_CONTEXT=issue_context)
+    prompt = load_prompt_or_skill(
+        skill_dir, "plan-iterate", ISSUE_CONTEXT=issue_context
+    )
 
     return _run_claude_plan(prompt, project_path)
 
