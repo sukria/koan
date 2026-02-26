@@ -3,6 +3,8 @@
 import pytest
 from datetime import datetime, timedelta
 
+from tests._helpers import run_module
+
 try:
     import zoneinfo
     ZoneInfo = zoneinfo.ZoneInfo
