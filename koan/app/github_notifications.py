@@ -309,11 +309,11 @@ def check_user_permission(owner: str, repo: str, username: str,
     Returns:
         True if authorized.
     """
-    # Check allowlist (unless wildcard)
-    if "*" not in allowed_users and username not in allowed_users:
-        return False
+    # Explicit allowlist: trust the admin's decision, no API call needed
+    if "*" not in allowed_users:
+        return username in allowed_users
 
-    # Always verify at least write access via GitHub API
+    # Wildcard: verify at least write access via GitHub API
     try:
         raw = api(f"repos/{owner}/{repo}/collaborators/{username}/permission")
         data = json.loads(raw) if raw else {}

@@ -236,18 +236,14 @@ class TestCheckUserPermission:
 
     @patch("app.github_notifications.api")
     def test_in_allowlist_with_write(self, mock_api):
-        mock_api.return_value = json.dumps({"permission": "write"})
         assert check_user_permission("o", "r", "alice", ["alice"]) is True
+        mock_api.assert_not_called()
 
     @patch("app.github_notifications.api")
-    def test_in_allowlist_with_admin(self, mock_api):
-        mock_api.return_value = json.dumps({"permission": "admin"})
-        assert check_user_permission("o", "r", "alice", ["alice"]) is True
-
-    @patch("app.github_notifications.api")
-    def test_in_allowlist_read_only_denied(self, mock_api):
-        mock_api.return_value = json.dumps({"permission": "read"})
-        assert check_user_permission("o", "r", "alice", ["alice"]) is False
+    def test_in_allowlist_no_api_call(self, mock_api):
+        """Explicit user in allowlist returns True without any GitHub API call."""
+        assert check_user_permission("o", "r", "bob", ["alice", "bob"]) is True
+        mock_api.assert_not_called()
 
 
 class TestIsNotificationStale:
