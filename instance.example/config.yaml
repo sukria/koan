@@ -37,6 +37,12 @@ fast_reply: false
 # e.g., "koan-alice" creates branches like "koan-alice/fix-something"
 # branch_prefix: "koan"
 
+# Skill timeout — maximum seconds for heavy skill execution (fix, implement, recreate)
+# These skills invoke Claude with full tool access and can run for a long time.
+# Increase if you see timeouts on complex issues; decrease to save quota.
+# Default: 3600 (60 minutes). Previous default was 900 (15 minutes).
+skill_timeout: 3600
+
 # Contemplative mode trigger chance (0-100%)
 # When no mission is pending, this is the probability of running a reflective
 # session instead of autonomous work. Allows regular moments of introspection

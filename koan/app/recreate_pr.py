@@ -243,6 +243,7 @@ def _reimpl_feature(
 
     Returns True if the step produced a commit, False otherwise.
     """
+    from app.config import get_skill_timeout
     prompt = _build_recreate_prompt(context, skill_dir=skill_dir)
     return run_claude_step(
         prompt=prompt,
@@ -252,7 +253,7 @@ def _reimpl_feature(
         failure_label="Feature reimplementation step failed",
         actions_log=actions_log,
         max_turns=30,
-        timeout=900,
+        timeout=get_skill_timeout(),
     )
 
 
