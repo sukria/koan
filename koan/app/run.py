@@ -76,7 +76,7 @@ def _reset_terminal():
     try:
         sys.stdout.write(_ANSI_RESET)
         sys.stdout.flush()
-    except Exception:
+    except OSError:
         pass  # Terminal may be gone during shutdown
 
 
@@ -1762,7 +1762,7 @@ def _get_koan_branch(koan_root: str) -> str:
             timeout=5,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         return ""
 
 
@@ -1943,7 +1943,7 @@ def _cleanup_temp(*files):
     for f in files:
         try:
             Path(f).unlink(missing_ok=True)
-        except Exception:
+        except OSError:
             pass
 
 

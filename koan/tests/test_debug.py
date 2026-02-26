@@ -68,7 +68,7 @@ class TestDebugLog:
 
     def test_handles_config_error(self, tmp_path, monkeypatch):
         monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
-        with patch("app.config.get_debug_enabled", side_effect=RuntimeError("boom")):
+        with patch("app.config.get_debug_enabled", side_effect=ImportError("boom")):
             # Should not raise — falls back to disabled
             debug_log("config error")
         assert not (tmp_path / ".koan-debug.log").exists()

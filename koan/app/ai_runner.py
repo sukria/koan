@@ -124,7 +124,7 @@ def _gather_project_structure(project_path: str) -> str:
         if files:
             parts.append("Files: " + ", ".join(files[:20]))
         return "\n".join(parts)
-    except Exception:
+    except OSError:
         return "Structure unavailable."
 
 

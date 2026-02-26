@@ -318,7 +318,7 @@ def _default_system_prompt() -> str:
     try:
         from app.prompts import load_prompt
         return load_prompt("local-llm-agent")
-    except Exception:
+    except (ImportError, OSError, ValueError):
         # Fallback if running outside the koan package context
         return (
             "You are an AI coding assistant. You have access to tools for "
