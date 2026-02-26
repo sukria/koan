@@ -3,6 +3,8 @@
 import pytest
 from datetime import datetime, timedelta
 
+from tests._helpers import run_module
+
 try:
     import zoneinfo
     ZoneInfo = zoneinfo.ZoneInfo
@@ -535,7 +537,6 @@ class TestCLIMainBlock:
 
     def test_cli_parse_valid(self):
         """CLI parse command outputs timestamp|info."""
-        import runpy
         import sys
         from unittest.mock import patch
         from io import StringIO
@@ -544,7 +545,7 @@ class TestCLIMainBlock:
         with patch.object(sys, "argv", ["reset_parser", "parse", "resets 5pm (Europe/Paris)"]):
             with patch("sys.stdout", out):
                 try:
-                    runpy.run_module("app.reset_parser", run_name="__main__")
+                    run_module("app.reset_parser", run_name="__main__")
                 except SystemExit:
                     pass
 
@@ -554,7 +555,6 @@ class TestCLIMainBlock:
 
     def test_cli_parse_empty(self):
         """CLI parse with no text outputs |<text>."""
-        import runpy
         import sys
         from unittest.mock import patch
         from io import StringIO
@@ -563,7 +563,7 @@ class TestCLIMainBlock:
         with patch.object(sys, "argv", ["reset_parser", "parse"]):
             with patch("sys.stdout", out):
                 try:
-                    runpy.run_module("app.reset_parser", run_name="__main__")
+                    run_module("app.reset_parser", run_name="__main__")
                 except SystemExit:
                     pass
 
@@ -572,53 +572,48 @@ class TestCLIMainBlock:
 
     def test_cli_check_should_resume(self):
         """CLI check command exits 0 when past reset time."""
-        import runpy
         import sys
         from unittest.mock import patch
 
         past_ts = str(int(datetime(2020, 1, 1).timestamp()))
         with patch.object(sys, "argv", ["reset_parser", "check", past_ts]):
             with pytest.raises(SystemExit) as exc_info:
-                runpy.run_module("app.reset_parser", run_name="__main__")
+                run_module("app.reset_parser", run_name="__main__")
             assert exc_info.value.code == 0
 
     def test_cli_check_should_not_resume(self):
         """CLI check command exits 1 when before reset time."""
-        import runpy
         import sys
         from unittest.mock import patch
 
         future_ts = str(int(datetime(2099, 1, 1).timestamp()))
         with patch.object(sys, "argv", ["reset_parser", "check", future_ts]):
             with pytest.raises(SystemExit) as exc_info:
-                runpy.run_module("app.reset_parser", run_name="__main__")
+                run_module("app.reset_parser", run_name="__main__")
             assert exc_info.value.code == 1
 
     def test_cli_check_invalid_value(self):
         """CLI check with invalid value exits 1."""
-        import runpy
         import sys
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["reset_parser", "check", "not-a-number"]):
             with pytest.raises(SystemExit) as exc_info:
-                runpy.run_module("app.reset_parser", run_name="__main__")
+                run_module("app.reset_parser", run_name="__main__")
             assert exc_info.value.code == 1
 
     def test_cli_check_no_args(self):
         """CLI check with no timestamp exits 1."""
-        import runpy
         import sys
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["reset_parser", "check"]):
             with pytest.raises(SystemExit) as exc_info:
-                runpy.run_module("app.reset_parser", run_name="__main__")
+                run_module("app.reset_parser", run_name="__main__")
             assert exc_info.value.code == 1
 
     def test_cli_until_valid(self):
         """CLI until command outputs human-readable time."""
-        import runpy
         import sys
         from unittest.mock import patch
         from io import StringIO
@@ -628,7 +623,7 @@ class TestCLIMainBlock:
         with patch.object(sys, "argv", ["reset_parser", "until", future_ts]):
             with patch("sys.stdout", out):
                 try:
-                    runpy.run_module("app.reset_parser", run_name="__main__")
+                    run_module("app.reset_parser", run_name="__main__")
                 except SystemExit:
                     pass
 
@@ -637,7 +632,6 @@ class TestCLIMainBlock:
 
     def test_cli_until_invalid_value(self):
         """CLI until with invalid value outputs 'unknown'."""
-        import runpy
         import sys
         from unittest.mock import patch
         from io import StringIO
@@ -646,7 +640,7 @@ class TestCLIMainBlock:
         with patch.object(sys, "argv", ["reset_parser", "until", "bad"]):
             with patch("sys.stdout", out):
                 try:
-                    runpy.run_module("app.reset_parser", run_name="__main__")
+                    run_module("app.reset_parser", run_name="__main__")
                 except SystemExit:
                     pass
 
@@ -654,7 +648,6 @@ class TestCLIMainBlock:
 
     def test_cli_until_no_args(self):
         """CLI until with no args outputs 'unknown'."""
-        import runpy
         import sys
         from unittest.mock import patch
         from io import StringIO
@@ -663,7 +656,7 @@ class TestCLIMainBlock:
         with patch.object(sys, "argv", ["reset_parser", "until"]):
             with patch("sys.stdout", out):
                 try:
-                    runpy.run_module("app.reset_parser", run_name="__main__")
+                    run_module("app.reset_parser", run_name="__main__")
                 except SystemExit:
                     pass
 
@@ -671,22 +664,20 @@ class TestCLIMainBlock:
 
     def test_cli_no_args_exits_1(self):
         """CLI with no arguments exits 1."""
-        import runpy
         import sys
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["reset_parser"]):
             with pytest.raises(SystemExit) as exc_info:
-                runpy.run_module("app.reset_parser", run_name="__main__")
+                run_module("app.reset_parser", run_name="__main__")
             assert exc_info.value.code == 1
 
     def test_cli_unknown_command_exits_1(self):
         """CLI with unknown command exits 1."""
-        import runpy
         import sys
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["reset_parser", "bogus"]):
             with pytest.raises(SystemExit) as exc_info:
-                runpy.run_module("app.reset_parser", run_name="__main__")
+                run_module("app.reset_parser", run_name="__main__")
             assert exc_info.value.code == 1
