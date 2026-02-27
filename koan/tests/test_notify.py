@@ -1,10 +1,14 @@
 """Tests for notify.py — facade delegation, format_and_send, CLI entry point."""
 
+import subprocess
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.notify import send_telegram, format_and_send, reset_flood_state
+from app.notify import (
+    send_telegram, format_and_send, reset_flood_state,
+    _send_raw_bypass_flood, _direct_send,
+)
 
 
 class TestSendTelegram:
@@ -110,6 +114,144 @@ class TestFormatAndSend:
 
         mock_mem.assert_called_once()
         assert mock_mem.call_args[0][1] == "myproject"
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_subprocess_error_uses_fallback(self, mock_send, instance_dir):
+        """SubprocessError in formatting triggers fallback path."""
+        with patch("app.format_outbox.load_soul",
+                   side_effect=subprocess.SubprocessError("cmd failed")), \
+             patch("app.format_outbox.fallback_format", return_value="fallback"):
+            result = format_and_send("raw", instance_dir=str(instance_dir))
+        assert result is True
+        mock_send.assert_called_once_with("fallback")
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_value_error_uses_fallback(self, mock_send, instance_dir):
+        """ValueError in formatting triggers fallback path."""
+        with patch("app.format_outbox.load_soul",
+                   side_effect=ValueError("parse error")), \
+             patch("app.format_outbox.fallback_format", return_value="fallback"):
+            result = format_and_send("raw", instance_dir=str(instance_dir))
+        assert result is True
+        mock_send.assert_called_once_with("fallback")
+
+
+class TestResetFloodState:
+    """Tests for reset_flood_state() edge cases."""
+
+    @patch("app.messaging.get_messaging_provider")
+    def test_calls_reset_when_available(self, mock_get_provider):
+        mock_provider = MagicMock()
+        mock_provider.reset_flood_state = MagicMock()
+        mock_get_provider.return_value = mock_provider
+        reset_flood_state()
+        mock_provider.reset_flood_state.assert_called_once()
+
+    @patch("app.messaging.get_messaging_provider")
+    def test_skips_when_no_reset_method(self, mock_get_provider):
+        mock_provider = MagicMock(spec=[])  # no reset_flood_state attribute
+        mock_get_provider.return_value = mock_provider
+        reset_flood_state()  # should not raise
+
+    @patch("app.messaging.get_messaging_provider", side_effect=SystemExit(1))
+    def test_silently_handles_system_exit(self, mock_get_provider):
+        reset_flood_state()  # should not raise
+
+
+class TestSendRawBypassFlood:
+    """Tests for _send_raw_bypass_flood() function."""
+
+    @patch("app.messaging.get_messaging_provider")
+    def test_uses_provider_send_raw(self, mock_get_provider):
+        mock_provider = MagicMock()
+        mock_provider._send_raw.return_value = True
+        mock_get_provider.return_value = mock_provider
+        assert _send_raw_bypass_flood("test") is True
+        mock_provider._send_raw.assert_called_once_with("test")
+
+    @patch("app.messaging.get_messaging_provider")
+    def test_falls_back_to_send_message(self, mock_get_provider):
+        """When provider has no _send_raw, use regular send_message."""
+        mock_provider = MagicMock(spec=["send_message"])
+        mock_provider.send_message.return_value = True
+        mock_get_provider.return_value = mock_provider
+        assert _send_raw_bypass_flood("test") is True
+        mock_provider.send_message.assert_called_once_with("test")
+
+    @patch("app.messaging.get_messaging_provider", side_effect=SystemExit(1))
+    @patch("app.notify._direct_send", return_value=True)
+    def test_system_exit_falls_back_to_direct(self, mock_direct, mock_get_provider):
+        assert _send_raw_bypass_flood("test") is True
+        mock_direct.assert_called_once_with("test")
+
+
+class TestDirectSend:
+    """Tests for _direct_send() — Telegram API fallback."""
+
+    @patch("app.notify.load_dotenv")
+    def test_no_token_returns_false(self, mock_dotenv, monkeypatch):
+        monkeypatch.delenv("KOAN_TELEGRAM_TOKEN", raising=False)
+        monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
+        assert _direct_send("hello") is False
+
+    @patch("app.notify.load_dotenv")
+    def test_no_chat_id_returns_false(self, mock_dotenv, monkeypatch):
+        monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
+        monkeypatch.delenv("KOAN_TELEGRAM_CHAT_ID", raising=False)
+        assert _direct_send("hello") is False
+
+    @patch("app.notify.load_dotenv")
+    def test_successful_send(self, mock_dotenv, monkeypatch):
+        monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
+        monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        with patch("requests.post", return_value=mock_resp) as mock_post:
+            assert _direct_send("hello") is True
+        mock_post.assert_called_once()
+        assert "bottok" in mock_post.call_args[0][0]
+
+    @patch("app.notify.load_dotenv")
+    def test_api_error_returns_false(self, mock_dotenv, monkeypatch):
+        monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
+        monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": False}
+        mock_resp.text = "Bad Request"
+        with patch("requests.post", return_value=mock_resp):
+            assert _direct_send("hello") is False
+
+    @patch("app.notify.load_dotenv")
+    def test_request_exception_returns_false(self, mock_dotenv, monkeypatch):
+        import requests
+        monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
+        monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
+        with patch("requests.post", side_effect=requests.RequestException("timeout")):
+            assert _direct_send("hello") is False
+
+    @patch("app.notify.load_dotenv")
+    def test_chunking_long_message(self, mock_dotenv, monkeypatch):
+        """Messages exceeding DEFAULT_MAX_MESSAGE_SIZE are chunked."""
+        monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
+        monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
+        from app.messaging.base import DEFAULT_MAX_MESSAGE_SIZE
+        long_msg = "x" * (DEFAULT_MAX_MESSAGE_SIZE + 100)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        with patch("requests.post", return_value=mock_resp) as mock_post:
+            assert _direct_send(long_msg) is True
+        assert mock_post.call_count == 2  # split into 2 chunks
+
+    @patch("app.notify.load_dotenv")
+    def test_empty_message_sends_once(self, mock_dotenv, monkeypatch):
+        """Empty string still sends a single API call."""
+        monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
+        monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        with patch("requests.post", return_value=mock_resp) as mock_post:
+            assert _direct_send("") is True
+        mock_post.assert_called_once()
 
 
 class TestNotifyCLI:

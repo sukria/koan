@@ -215,7 +215,6 @@ class TestScanOutboxContent:
         assert not result.blocked
         assert result.reason is None
         assert result.warnings is None
-        assert result.redacted_content is None
 
 
 class TestEnvLineThreshold:
@@ -302,12 +301,10 @@ class TestScanResultDataclass:
             blocked=True,
             reason="test reason",
             warnings=["w1", "w2"],
-            redacted_content="[REDACTED]",
         )
         assert result.blocked
         assert result.reason == "test reason"
         assert len(result.warnings) == 2
-        assert result.redacted_content == "[REDACTED]"
 
     def test_scan_result_warnings_empty_list(self):
         result = ScanResult(blocked=False, warnings=[])
