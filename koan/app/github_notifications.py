@@ -153,13 +153,17 @@ def api_url_to_web_url(api_url: str) -> str:
 def get_comment_from_notification(notification: dict) -> Optional[dict]:
     """Fetch the latest comment that triggered the notification.
 
+    Note: subject.latest_comment_url points to the most recent comment on
+    the thread, not necessarily the one that triggered the notification.
+    When the bot itself posts a comment after the @mention, this URL shifts.
+    Use find_mention_in_thread() as a fallback when this returns a self-authored comment.
+
     Args:
         notification: A notification dict from the GitHub API.
 
     Returns:
         The comment dict, or None if it can't be fetched.
     """
-    # The notification's latest_comment_url points to the triggering comment
     comment_url = notification.get("subject", {}).get("latest_comment_url", "")
     if not comment_url:
         return None
@@ -177,6 +181,83 @@ def get_comment_from_notification(notification: dict) -> Optional[dict]:
         return json.loads(raw) if raw else None
     except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
         return None
+
+
+def find_mention_in_thread(
+    notification: dict,
+    bot_username: str,
+) -> Optional[dict]:
+    """Search a PR/issue thread for an unprocessed @mention comment.
+
+    Fallback for when latest_comment_url points to a bot comment (self-mention
+    race condition). Fetches recent comments on the thread and finds the first
+    unprocessed @mention of the bot.
+
+    Args:
+        notification: A notification dict from the GitHub API.
+        bot_username: The bot's GitHub username.
+
+    Returns:
+        The comment dict containing the @mention, or None if not found.
+    """
+    subject_url = notification.get("subject", {}).get("url", "")
+    if not subject_url:
+        return None
+
+    # Extract owner/repo/number from subject URL
+    # e.g. https://api.github.com/repos/cpanel/Test-MockFile/pulls/208
+    match = re.match(
+        r'https://api\.github\.com/repos/([^/]+)/([^/]+)/(?:pulls|issues)/(\d+)',
+        subject_url,
+    )
+    if not match:
+        return None
+
+    owner, repo, number = match.groups()
+
+    # Fetch recent comments (newest first, limited to 30 to control API cost)
+    endpoint = (
+        f"repos/{owner}/{repo}/issues/{number}/comments"
+        "?per_page=30&sort=created&direction=desc"
+    )
+    try:
+        raw = api(endpoint)
+        comments = json.loads(raw) if raw else []
+    except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        return None
+
+    if not isinstance(comments, list):
+        return None
+
+    bot_lower = f"@{bot_username}".lower()
+
+    for comment in comments:
+        # Skip bot's own comments
+        if comment.get("user", {}).get("login") == bot_username:
+            continue
+
+        # Check if this comment mentions the bot
+        body = comment.get("body", "")
+        if bot_lower not in body.lower():
+            continue
+
+        # Check if already processed (has bot reaction)
+        comment_id = str(comment.get("id", ""))
+        comment_api_url = comment.get("url", "")
+        if check_already_processed(
+            comment_id, bot_username, owner, repo,
+            comment_api_url=comment_api_url,
+        ):
+            continue
+
+        log.debug(
+            "GitHub: found unprocessed @mention in comment %s by @%s",
+            comment_id,
+            comment.get("user", {}).get("login", "?"),
+        )
+        return comment
+
+    return None
 
 
 def mark_notification_read(thread_id: str) -> bool:

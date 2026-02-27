@@ -1123,18 +1123,37 @@ class TestFetchAndFilterComment:
         assert result is None
 
     @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.find_mention_in_thread", return_value=None)
     @patch("app.github_command_handler.is_self_mention", return_value=True)
     @patch("app.github_command_handler.is_notification_stale", return_value=False)
     @patch("app.github_command_handler.get_comment_from_notification")
-    def test_self_mention_returns_none_and_marks_read(
-        self, mock_comment, mock_stale, mock_self, mock_read, notification,
+    def test_self_mention_searches_thread_then_skips(
+        self, mock_comment, mock_stale, mock_self, mock_find, mock_read, notification,
     ):
+        """When latest_comment_url is bot's own, search thread; skip if no mention found."""
         mock_comment.return_value = {
-            "id": 555, "body": "@bot hello", "user": {"login": "bot"},
+            "id": 555, "body": "my fix", "user": {"login": "bot"},
         }
         result = _fetch_and_filter_comment(notification, "bot", max_age_hours=24)
         assert result is None
+        mock_find.assert_called_once_with(notification, "bot")
         mock_read.assert_called_once_with("7777")
+
+    @patch("app.github_command_handler.find_mention_in_thread")
+    @patch("app.github_command_handler.is_self_mention", return_value=True)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    def test_self_mention_fallback_returns_real_mention(
+        self, mock_comment, mock_stale, mock_self, mock_find, notification,
+    ):
+        """When latest_comment_url is bot's own, but thread has an unprocessed @mention."""
+        mock_comment.return_value = {
+            "id": 555, "body": "my fix", "user": {"login": "bot"},
+        }
+        real_mention = {"id": 888, "body": "@bot rebase", "user": {"login": "alice"}}
+        mock_find.return_value = real_mention
+        result = _fetch_and_filter_comment(notification, "bot", max_age_hours=24)
+        assert result == real_mention
 
     @patch("app.github_command_handler.is_self_mention", return_value=False)
     @patch("app.github_command_handler.is_notification_stale", return_value=False)
@@ -1256,16 +1275,17 @@ class TestProcessNotificationEdgeCases:
     """Edge cases for process_single_notification not covered by existing tests."""
 
     @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.find_mention_in_thread", return_value=None)
     @patch("app.github_command_handler.is_self_mention", return_value=True)
     @patch("app.github_command_handler.is_notification_stale", return_value=False)
     @patch("app.github_command_handler.get_comment_from_notification")
-    def test_self_mention_skipped(
-        self, mock_comment, mock_stale, mock_self, mock_read,
+    def test_self_mention_skipped_when_no_thread_mention(
+        self, mock_comment, mock_stale, mock_self, mock_find, mock_read,
         registry, sample_notification,
     ):
-        """Self-mentions should be silently skipped."""
+        """Self-mentions with no unprocessed @mention in thread should be silently skipped."""
         mock_comment.return_value = {
-            "id": 99, "body": "@bot rebase", "user": {"login": "bot"},
+            "id": 99, "body": "my fix", "user": {"login": "bot"},
         }
         success, error = process_single_notification(
             sample_notification, registry, {}, None, "bot",

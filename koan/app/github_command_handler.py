@@ -34,6 +34,7 @@ from app.github_notifications import (
     api_url_to_web_url,
     check_already_processed,
     check_user_permission,
+    find_mention_in_thread,
     get_comment_from_notification,
     is_notification_stale,
     is_self_mention,
@@ -240,9 +241,23 @@ def _fetch_and_filter_comment(notification: dict, bot_username: str, max_age_hou
     comment_author = comment.get("user", {}).get("login", "?")
     log.debug("GitHub: notification %s from %s — comment by @%s", thread_id, repo_name, comment_author)
 
-    # Skip self-mentions
+    # Self-mention: latest_comment_url may point to a bot comment posted AFTER
+    # the actual @mention (race condition). Search the thread for the real trigger.
     if is_self_mention(comment, bot_username):
-        log.debug("GitHub: skipping notification %s — self-mention (author=%s)", thread_id, comment_author)
+        log.debug(
+            "GitHub: latest comment on %s is self-authored — searching thread for @mention",
+            repo_name,
+        )
+        mention_comment = find_mention_in_thread(notification, bot_username)
+        if mention_comment:
+            mention_author = mention_comment.get("user", {}).get("login", "?")
+            log.debug(
+                "GitHub: found @mention by @%s in thread (latest_comment_url was stale)",
+                mention_author,
+            )
+            return mention_comment
+
+        log.debug("GitHub: no unprocessed @mention in thread — skipping notification %s", thread_id)
         mark_notification_read(str(notification.get("id", "")))
         return None
 

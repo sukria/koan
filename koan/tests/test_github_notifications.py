@@ -16,6 +16,7 @@ from app.github_notifications import (
     check_user_permission,
     extract_comment_metadata,
     fetch_unread_notifications,
+    find_mention_in_thread,
     get_comment_from_notification,
     is_notification_stale,
     is_self_mention,
@@ -500,3 +501,126 @@ class TestGetCommentFromNotification:
         }
         result = get_comment_from_notification(notif)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# find_mention_in_thread — fallback when latest_comment_url is stale
+# ---------------------------------------------------------------------------
+
+
+class TestFindMentionInThread:
+    """Tests for find_mention_in_thread."""
+
+    @pytest.fixture
+    def notification(self):
+        return {
+            "subject": {
+                "url": "https://api.github.com/repos/cpanel/Test-MockFile/pulls/208",
+            },
+        }
+
+    @patch("app.github_notifications.check_already_processed", return_value=False)
+    @patch("app.github_notifications.api")
+    def test_finds_unprocessed_mention(self, mock_api, mock_processed, notification):
+        """Should return the first unprocessed @mention by a non-bot user."""
+        comments = [
+            # Newest first (direction=desc)
+            {"id": 300, "url": "u/300", "body": "my fix", "user": {"login": "Koan-Bot"}},
+            {"id": 200, "url": "u/200", "body": "@Koan-Bot rebase", "user": {"login": "atoomic"}},
+            {"id": 100, "url": "u/100", "body": "smoker failure output", "user": {"login": "atoomic"}},
+        ]
+        mock_api.return_value = json.dumps(comments)
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is not None
+        assert result["id"] == 200
+
+    @patch("app.github_notifications.check_already_processed", return_value=True)
+    @patch("app.github_notifications.api")
+    def test_skips_already_processed_mention(self, mock_api, mock_processed, notification):
+        """Should skip mentions that already have a bot reaction."""
+        comments = [
+            {"id": 200, "url": "u/200", "body": "@Koan-Bot rebase", "user": {"login": "atoomic"}},
+        ]
+        mock_api.return_value = json.dumps(comments)
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is None
+
+    @patch("app.github_notifications.api")
+    def test_skips_bot_comments(self, mock_api, notification):
+        """Should never return the bot's own comments."""
+        comments = [
+            {"id": 300, "url": "u/300", "body": "@Koan-Bot test", "user": {"login": "Koan-Bot"}},
+        ]
+        mock_api.return_value = json.dumps(comments)
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is None
+
+    @patch("app.github_notifications.api")
+    def test_returns_none_when_no_mentions(self, mock_api, notification):
+        """Should return None when no comments mention the bot."""
+        comments = [
+            {"id": 100, "url": "u/100", "body": "just a regular comment", "user": {"login": "alice"}},
+        ]
+        mock_api.return_value = json.dumps(comments)
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is None
+
+    @patch("app.github_notifications.api")
+    def test_returns_none_on_api_error(self, mock_api, notification):
+        """Should handle API errors gracefully."""
+        mock_api.side_effect = RuntimeError("API error")
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is None
+
+    def test_returns_none_on_missing_subject_url(self):
+        """Should return None when notification has no subject URL."""
+        result = find_mention_in_thread({"subject": {}}, "Koan-Bot")
+        assert result is None
+
+    def test_returns_none_on_invalid_subject_url(self):
+        """Should return None when subject URL doesn't match expected pattern."""
+        notif = {"subject": {"url": "https://example.com/not-github"}}
+        result = find_mention_in_thread(notif, "Koan-Bot")
+        assert result is None
+
+    @patch("app.github_notifications.check_already_processed", return_value=False)
+    @patch("app.github_notifications.api")
+    def test_case_insensitive_mention_matching(self, mock_api, mock_processed, notification):
+        """Should match @mentions case-insensitively."""
+        comments = [
+            {"id": 200, "url": "u/200", "body": "@koan-bot rebase", "user": {"login": "alice"}},
+        ]
+        mock_api.return_value = json.dumps(comments)
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is not None
+        assert result["id"] == 200
+
+    @patch("app.github_notifications.api")
+    def test_handles_non_list_response(self, mock_api, notification):
+        """Should handle unexpected API response type."""
+        mock_api.return_value = json.dumps({"error": "not found"})
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is None
+
+    @patch("app.github_notifications.api")
+    def test_works_with_issues_url(self, mock_api):
+        """Should work for issue threads, not just pull requests."""
+        notif = {
+            "subject": {
+                "url": "https://api.github.com/repos/owner/repo/issues/42",
+            },
+        }
+        mock_api.return_value = json.dumps([])
+
+        result = find_mention_in_thread(notif, "bot")
+        assert result is None
+        # Verify correct endpoint was called
+        call_args = mock_api.call_args[0][0]
+        assert "repos/owner/repo/issues/42/comments" in call_args
