@@ -165,6 +165,8 @@ usage:
 #   commands_enabled: false          # Master switch (default: false)
 #   authorized_users: ["*"]          # "*" = all users, or list of GitHub usernames
 #   max_age_hours: 24                # Ignore notifications older than this (default: 24)
+#   check_interval_seconds: 60       # Base polling interval (default: 60, min: 10)
+#   max_check_interval_seconds: 180  # Backoff cap when idle (default: 180, min: 30)
 #   reply_enabled: false             # AI replies to non-command @mentions (default: false)
 #                                    # When enabled, the bot replies to questions/requests
 #                                    # from authorized users with contextual AI-generated answers.
