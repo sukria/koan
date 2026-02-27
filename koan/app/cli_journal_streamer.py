@@ -92,7 +92,7 @@ def _tail_loop(
                     if text:
                         try:
                             append(instance_dir, project_name, text)
-                        except Exception:
+                        except OSError:
                             pass  # non-critical; avoid log spam in tight loop
         except OSError:
             pass  # file may not exist yet

@@ -34,18 +34,8 @@ APP_DIR = Path(__file__).parent.parent / "app"
 # Each entry is (filename, enclosing_function_name).
 # Uses function names instead of line numbers to survive unrelated code changes.
 # When adding: include a short justification comment.
-ALLOWLIST: Set[Tuple[str, str]] = {
-    # --- Config / init loading (defaults are safe) ---
-    ("provider/claude.py", "check_quota_available"),  # tool allowlist parsing
-    ("provider/local.py", "_get_config"),         # model list parsing
-    # --- Non-critical subsystem fallbacks ---
-    ("cli_journal_streamer.py", "_tail_loop"),    # journal append in tail-thread tight loop
-    # --- Setup wizard (interactive, errors shown in UI) ---
-    ("setup_wizard.py", "_load_wizard_projects"),  # config loading
-    ("setup_wizard.py", "get_chat_id_from_updates"),  # project path resolution
-    # --- Retry without optional parameter ---
-    ("plan_runner.py", "_run_new_plan"),           # issue label retry (inner catch has e2)
-}
+ALLOWLIST: Set[Tuple[str, str]] = set()
+# All entries narrowed to specific exception types as of 2026-02-27.
 
 
 # ---------------------------------------------------------------------------

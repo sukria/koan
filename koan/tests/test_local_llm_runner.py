@@ -386,6 +386,48 @@ class TestRunAgent:
         assert Path(out_path).read_text() == "created!"
 
     @patch("app.local_llm_runner._call_api")
+    def test_empty_choices_returns_error(self, mock_api):
+        """API returning empty choices list doesn't crash with IndexError."""
+        mock_api.return_value = {
+            "choices": [],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+        }
+        result = run_agent(
+            prompt="Test empty",
+            base_url="http://localhost:11434/v1",
+            model="test-model",
+        )
+        assert "Error" in result["result"]
+        assert "empty choices" in result["result"].lower()
+
+    @patch("app.local_llm_runner._call_api")
+    def test_missing_choices_key_returns_error(self, mock_api):
+        """API response with no 'choices' key doesn't crash."""
+        mock_api.return_value = {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+        }
+        result = run_agent(
+            prompt="Test missing",
+            base_url="http://localhost:11434/v1",
+            model="test-model",
+        )
+        assert "Error" in result["result"]
+
+    @patch("app.local_llm_runner._call_api")
+    def test_null_choices_returns_error(self, mock_api):
+        """API response with choices=null doesn't crash."""
+        mock_api.return_value = {
+            "choices": None,
+            "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+        }
+        result = run_agent(
+            prompt="Test null",
+            base_url="http://localhost:11434/v1",
+            model="test-model",
+        )
+        assert "Error" in result["result"]
+
+    @patch("app.local_llm_runner._call_api")
     def test_invalid_tool_args_json(self, mock_api):
         """Handles malformed JSON in tool arguments gracefully."""
         mock_api.side_effect = [

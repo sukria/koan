@@ -120,11 +120,11 @@ def _run_new_plan(
         result_url = issue_create(
             title, issue_body, labels=[_PLAN_LABEL], cwd=project_path
         )
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         # Label may not exist — retry without label
         try:
             result_url = issue_create(title, issue_body, cwd=project_path)
-        except Exception as e2:
+        except (RuntimeError, OSError) as e2:
             notify_fn(
                 f"\u26a0\ufe0f Plan ready but issue creation failed "
                 f"({e2}):\n\n{plan[:3000]}"

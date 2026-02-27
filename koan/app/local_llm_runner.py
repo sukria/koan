@@ -414,7 +414,14 @@ def run_agent(
         total_input_tokens += usage.get("prompt_tokens", 0)
         total_output_tokens += usage.get("completion_tokens", 0)
 
-        choice = response.get("choices", [{}])[0]
+        choices = response.get("choices") or []
+        if not choices:
+            return {
+                "result": "Error: API returned empty choices",
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+            }
+        choice = choices[0]
         message = choice.get("message", {})
 
         # If the model returned tool calls, execute them
