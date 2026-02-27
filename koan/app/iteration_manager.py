@@ -91,9 +91,9 @@ def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
     except Exception as e:
         _log_iteration("error", f"Usage tracker error: {e}")
         return {
-            "mode": "implement",
-            "available_pct": 50,
-            "reason": "Tracker error — fallback",
+            "mode": "review",
+            "available_pct": 0,
+            "reason": "Tracker error — safe fallback (review only)",
             "project_idx": 0,
             "display_lines": [],
         }

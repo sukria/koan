@@ -123,7 +123,7 @@ def fallback_extract(missions_path: Path, projects_str: str) -> tuple:
         title = re.sub(r"\[projec?t:[a-zA-Z0-9_-]+\]\s*", "", line).lstrip("- ").strip()
     else:
         # Default to first project
-        parts = projects_str.split(";")
+        parts = [p for p in projects_str.split(";") if p]
         project = parts[0].split(":")[0] if parts else "default"
         title = line.lstrip("- ").strip()
 
