@@ -85,6 +85,6 @@ class ClaudeProvider(CLIProvider):
         except subprocess.TimeoutExpired:
             # Timeout — proceed optimistically
             return True, ""
-        except Exception:
+        except (subprocess.SubprocessError, OSError, ImportError):
             # Non-quota error — proceed optimistically
             return True, ""

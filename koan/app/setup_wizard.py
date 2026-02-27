@@ -82,7 +82,7 @@ def _load_wizard_projects() -> list:
 
     try:
         return [{"name": name, "path": path} for name, path in get_known_projects()]
-    except Exception:
+    except (OSError, ValueError, ImportError):
         return []
 
 
@@ -180,7 +180,7 @@ def get_chat_id_from_updates(token: str) -> Optional[str]:
                     chat = msg.get("chat", {})
                     if chat.get("id"):
                         return str(chat["id"])
-    except Exception:
+    except (OSError, ValueError):
         pass
     return None
 

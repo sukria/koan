@@ -649,7 +649,7 @@ class TestGetChatIdFromUpdates:
 
         assert wiz.get_chat_id_from_updates("123:ABC") == "99999"
 
-    @patch("urllib.request.urlopen", side_effect=Exception("timeout"))
+    @patch("urllib.request.urlopen", side_effect=OSError("timeout"))
     def test_network_error_returns_none(self, mock_urlopen, temp_koan_root):
         """Network error returns None silently."""
         import app.setup_wizard as wiz
@@ -713,7 +713,7 @@ class TestLoadWizardProjects:
         assert len(result) == 2
         assert result[0] == {"name": "proj1", "path": "/a"}
 
-    @patch("app.utils.get_known_projects", side_effect=Exception("config broken"))
+    @patch("app.utils.get_known_projects", side_effect=OSError("config broken"))
     def test_exception_returns_empty(self, mock_gkp, temp_koan_root):
         """Exception is caught, returns empty list."""
         import app.setup_wizard as wiz
