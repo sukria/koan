@@ -52,6 +52,59 @@ Your quota resets 10am (Europe/Paris)."""
         assert detect_quota_exhaustion(text) is True
 
 
+class TestDetectQuotaExhaustionCopilot:
+    """Test detect_quota_exhaustion with Copilot/GitHub-style messages."""
+
+    def test_detects_too_many_requests(self):
+        from app.quota_handler import detect_quota_exhaustion
+
+        assert detect_quota_exhaustion("Error: too many requests") is True
+
+    def test_detects_usage_limit(self):
+        from app.quota_handler import detect_quota_exhaustion
+
+        assert detect_quota_exhaustion("You've reached your usage limit") is True
+
+    def test_detects_exceeded_copilot_rate(self):
+        from app.quota_handler import detect_quota_exhaustion
+
+        assert detect_quota_exhaustion("You have exceeded a secondary rate limit") is True
+        assert detect_quota_exhaustion("exceeded copilot rate limit") is True
+
+    def test_detects_copilot_not_available(self):
+        from app.quota_handler import detect_quota_exhaustion
+
+        assert detect_quota_exhaustion("Copilot is not available for this account") is True
+        assert detect_quota_exhaustion("Copilot unavailable") is True
+
+    def test_detects_http_429(self):
+        from app.quota_handler import detect_quota_exhaustion
+
+        assert detect_quota_exhaustion("HTTP 429 Too Many Requests") is True
+        assert detect_quota_exhaustion("status: 429") is True
+
+    def test_detects_retry_after(self):
+        from app.quota_handler import detect_quota_exhaustion
+
+        assert detect_quota_exhaustion("Retry-After: 60") is True
+        assert detect_quota_exhaustion("retry after 120") is True
+
+    def test_copilot_in_longer_text(self):
+        from app.quota_handler import detect_quota_exhaustion
+
+        text = """Error running copilot agent:
+API returned HTTP 429: too many requests.
+Retry-After: 300
+Please try again later."""
+        assert detect_quota_exhaustion(text) is True
+
+    def test_no_false_positive_on_copilot_normal_output(self):
+        from app.quota_handler import detect_quota_exhaustion
+
+        assert detect_quota_exhaustion("Copilot completed the task successfully") is False
+        assert detect_quota_exhaustion("Using copilot provider for mission") is False
+
+
 class TestExtractResetInfo:
     """Test extract_reset_info function."""
 
@@ -87,6 +140,99 @@ resets 5pm (US/Eastern)
 Please try again later."""
         result = extract_reset_info(text)
         assert "resets 5pm" in result
+
+
+class TestExtractResetInfoCopilot:
+    """Test extract_reset_info with Copilot/GitHub-style retry info."""
+
+    def test_extracts_retry_after_seconds(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Error: rate limit exceeded\nRetry-After: 300"
+        result = extract_reset_info(text)
+        assert "resets in 5m" == result
+
+    def test_extracts_retry_after_large_seconds(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Retry-After: 3600"
+        result = extract_reset_info(text)
+        assert "resets in 1h" == result
+
+    def test_extracts_retry_after_seconds_with_remainder(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Retry-After: 5400"
+        result = extract_reset_info(text)
+        assert "resets in 1h 30m" == result
+
+    def test_extracts_try_again_in_minutes(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Rate limited. try again in 15 minutes"
+        result = extract_reset_info(text)
+        assert "resets in 15m" == result
+
+    def test_extracts_try_again_in_hours(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Usage limit. try again in 2 hours"
+        result = extract_reset_info(text)
+        assert "resets in 2h" == result
+
+    def test_extracts_try_again_in_seconds(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "try again in 30 seconds"
+        result = extract_reset_info(text)
+        assert "resets in 30s" == result
+
+    def test_claude_style_takes_precedence_over_retry_after(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "resets 10am (Europe/Paris)\nRetry-After: 300"
+        result = extract_reset_info(text)
+        assert "resets 10am" in result
+
+    def test_retry_after_small_value(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Retry-After: 45"
+        result = extract_reset_info(text)
+        assert "resets in 45s" == result
+
+
+class TestSecondsToHuman:
+    """Test _seconds_to_human helper."""
+
+    def test_seconds_only(self):
+        from app.quota_handler import _seconds_to_human
+
+        assert _seconds_to_human(30) == "30s"
+        assert _seconds_to_human(59) == "59s"
+
+    def test_minutes_only(self):
+        from app.quota_handler import _seconds_to_human
+
+        assert _seconds_to_human(60) == "1m"
+        assert _seconds_to_human(300) == "5m"
+
+    def test_hours_only(self):
+        from app.quota_handler import _seconds_to_human
+
+        assert _seconds_to_human(3600) == "1h"
+        assert _seconds_to_human(7200) == "2h"
+
+    def test_hours_and_minutes(self):
+        from app.quota_handler import _seconds_to_human
+
+        assert _seconds_to_human(5400) == "1h 30m"
+        assert _seconds_to_human(3660) == "1h 1m"
+
+    def test_zero(self):
+        from app.quota_handler import _seconds_to_human
+
+        assert _seconds_to_human(0) == "0s"
 
 
 class TestParseResetTime:
