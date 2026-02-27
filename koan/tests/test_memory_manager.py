@@ -889,3 +889,245 @@ class TestMemoryManagerClass:
         content = (proj / "learnings.md").read_text()
         assert "fact 299" in content
         assert "fact 0" not in content
+
+
+# ---------------------------------------------------------------------------
+# CLI __main__ interface
+# ---------------------------------------------------------------------------
+
+class TestCLIMainBlock:
+    """Test the CLI interface via runpy."""
+
+    def test_no_args_exits_1(self, capsys):
+        """CLI with no arguments prints usage and exits 1."""
+        import sys
+        from unittest.mock import patch
+        from tests._helpers import run_module
+
+        with patch.object(sys, "argv", ["memory_manager", ]):
+            with pytest.raises(SystemExit) as exc_info:
+                run_module("app.memory_manager", run_name="__main__")
+            assert exc_info.value.code == 1
+
+    def test_only_instance_dir_exits_1(self, tmp_path, capsys):
+        """CLI with only instance_dir (no command) exits 1."""
+        import sys
+        from unittest.mock import patch
+        from tests._helpers import run_module
+
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path)]):
+            with pytest.raises(SystemExit) as exc_info:
+                run_module("app.memory_manager", run_name="__main__")
+            assert exc_info.value.code == 1
+
+    def test_unknown_command_exits_1(self, tmp_path, capsys):
+        """CLI with unknown command exits 1."""
+        import sys
+        from unittest.mock import patch
+        from tests._helpers import run_module
+        from io import StringIO
+
+        err = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "bogus"]):
+            with patch("sys.stderr", err):
+                with pytest.raises(SystemExit) as exc_info:
+                    run_module("app.memory_manager", run_name="__main__")
+            assert exc_info.value.code == 1
+        assert "Unknown command: bogus" in err.getvalue()
+
+    def test_scoped_summary_command(self, tmp_path):
+        """CLI scoped-summary outputs filtered summary."""
+        import sys
+        from unittest.mock import patch
+        from io import StringIO
+        from tests._helpers import run_module
+
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        (mem / "summary.md").write_text(
+            "# Summary\n\n## 2026-02-01\n\n"
+            "Session 1 (project: koan) : koan work\n\n"
+            "Session 2 (project: other) : other work\n"
+        )
+
+        out = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "scoped-summary", "koan"]):
+            with patch("sys.stdout", out):
+                try:
+                    run_module("app.memory_manager", run_name="__main__")
+                except SystemExit:
+                    pass
+        assert "koan work" in out.getvalue()
+        assert "other work" not in out.getvalue()
+
+    def test_scoped_summary_no_project_exits_1(self, tmp_path):
+        """CLI scoped-summary without project name exits 1."""
+        import sys
+        from unittest.mock import patch
+        from tests._helpers import run_module
+
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "scoped-summary"]):
+            with pytest.raises(SystemExit) as exc_info:
+                run_module("app.memory_manager", run_name="__main__")
+            assert exc_info.value.code == 1
+
+    def test_compact_command(self, tmp_path):
+        """CLI compact reports removal count."""
+        import sys
+        from unittest.mock import patch
+        from io import StringIO
+        from tests._helpers import run_module
+
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        lines = ["# Summary\n"]
+        for i in range(1, 12):
+            lines.append(f"\n## 2026-02-{i:02d}\n\nSession {i} : work\n")
+        (mem / "summary.md").write_text("".join(lines))
+
+        out = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "compact", "5"]):
+            with patch("sys.stdout", out):
+                try:
+                    run_module("app.memory_manager", run_name="__main__")
+                except SystemExit:
+                    pass
+        assert "Compacted: 6 sessions removed" in out.getvalue()
+
+    def test_compact_default_max(self, tmp_path):
+        """CLI compact without max_sessions defaults to 15."""
+        import sys
+        from unittest.mock import patch
+        from io import StringIO
+        from tests._helpers import run_module
+
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        (mem / "summary.md").write_text("# Summary\n\n## 2026-02-01\n\nSession 1 : work\n")
+
+        out = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "compact"]):
+            with patch("sys.stdout", out):
+                try:
+                    run_module("app.memory_manager", run_name="__main__")
+                except SystemExit:
+                    pass
+        assert "Compacted: 0 sessions removed" in out.getvalue()
+
+    def test_cleanup_learnings_command(self, tmp_path):
+        """CLI cleanup-learnings reports dedup count."""
+        import sys
+        from unittest.mock import patch
+        from io import StringIO
+        from tests._helpers import run_module
+
+        proj = tmp_path / "memory" / "projects" / "koan"
+        proj.mkdir(parents=True)
+        (proj / "learnings.md").write_text("# L\n\n- dup\n- dup\n- unique\n")
+
+        out = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "cleanup-learnings", "koan"]):
+            with patch("sys.stdout", out):
+                try:
+                    run_module("app.memory_manager", run_name="__main__")
+                except SystemExit:
+                    pass
+        assert "Deduped: 1 lines removed" in out.getvalue()
+
+    def test_cleanup_learnings_no_project_exits_1(self, tmp_path):
+        """CLI cleanup-learnings without project name exits 1."""
+        import sys
+        from unittest.mock import patch
+        from tests._helpers import run_module
+
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "cleanup-learnings"]):
+            with pytest.raises(SystemExit) as exc_info:
+                run_module("app.memory_manager", run_name="__main__")
+            assert exc_info.value.code == 1
+
+    def test_archive_journals_command(self, tmp_path):
+        """CLI archive-journals reports stats."""
+        import sys
+        from unittest.mock import patch
+        from io import StringIO
+        from tests._helpers import run_module
+        from datetime import date, timedelta
+
+        old_date = (date.today() - timedelta(days=35)).strftime("%Y-%m-%d")
+        day_dir = tmp_path / "journal" / old_date
+        day_dir.mkdir(parents=True)
+        (day_dir / "koan.md").write_text("## Session 1\n\n### Work\n\nDetails.\n")
+
+        out = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "archive-journals"]):
+            with patch("sys.stdout", out):
+                try:
+                    run_module("app.memory_manager", run_name="__main__")
+                except SystemExit:
+                    pass
+        output = out.getvalue()
+        assert "archived_days" in output
+
+    def test_archive_journals_custom_days(self, tmp_path):
+        """CLI archive-journals with custom days argument."""
+        import sys
+        from unittest.mock import patch
+        from io import StringIO
+        from tests._helpers import run_module
+
+        (tmp_path / "journal").mkdir(parents=True)
+
+        out = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "archive-journals", "7"]):
+            with patch("sys.stdout", out):
+                try:
+                    run_module("app.memory_manager", run_name="__main__")
+                except SystemExit:
+                    pass
+        output = out.getvalue()
+        assert "archived_days" in output
+
+    def test_cleanup_command(self, tmp_path):
+        """CLI cleanup runs all tasks and reports stats."""
+        import sys
+        from unittest.mock import patch
+        from io import StringIO
+        from tests._helpers import run_module
+
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        (mem / "summary.md").write_text("# Summary\n\n## 2026-02-01\n\nSession 1 : work\n")
+
+        out = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "cleanup"]):
+            with patch("sys.stdout", out):
+                try:
+                    run_module("app.memory_manager", run_name="__main__")
+                except SystemExit:
+                    pass
+        output = out.getvalue()
+        assert "summary_compacted" in output
+
+    def test_cleanup_custom_max_sessions(self, tmp_path):
+        """CLI cleanup with custom max_sessions argument."""
+        import sys
+        from unittest.mock import patch
+        from io import StringIO
+        from tests._helpers import run_module
+
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        lines = ["# Summary\n"]
+        for i in range(1, 25):
+            lines.append(f"\n## 2026-02-{i:02d}\n\nSession {i} : work\n")
+        (mem / "summary.md").write_text("".join(lines))
+
+        out = StringIO()
+        with patch.object(sys, "argv", ["memory_manager", str(tmp_path), "cleanup", "5"]):
+            with patch("sys.stdout", out):
+                try:
+                    run_module("app.memory_manager", run_name="__main__")
+                except SystemExit:
+                    pass
+        output = out.getvalue()
+        assert "summary_compacted" in output
