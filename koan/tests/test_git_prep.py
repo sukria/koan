@@ -290,8 +290,8 @@ class TestPrepareProjectBranch:
         assert result.success is False
         assert "reset failed" in result.error
 
-    def test_stash_failure_continues(self):
-        """Stash failure is non-fatal — prep continues."""
+    def test_stash_failure_on_dirty_tree_aborts(self):
+        """Stash failure on dirty tree aborts to prevent data loss."""
         def side_effect(*args, **kwargs):
             cmd = args[0] if args else ""
             if cmd == "rev-parse":
@@ -312,8 +312,35 @@ class TestPrepareProjectBranch:
         with stack:
             result = prepare_project_branch("/proj", "myproj", "/koan")
 
-        assert result.success is True
+        assert result.success is False
         assert result.stashed is False
+        assert "stash failed" in result.error
+
+    def test_stash_failure_on_dirty_tree_skips_checkout(self):
+        """When stash fails on dirty tree, checkout and merge are never called."""
+        calls = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else ""
+            calls.append(cmd)
+            if cmd == "rev-parse":
+                return (0, "feature", "")
+            if cmd == "fetch":
+                return (0, "", "")
+            if cmd == "status":
+                return (0, "M dirty.py", "")
+            if cmd == "stash":
+                return (1, "", "cannot stash")
+            return (0, "", "")
+
+        stack, _ = self._patch_all(run_git_side_effect=side_effect)
+        with stack:
+            result = prepare_project_branch("/proj", "myproj", "/koan")
+
+        assert result.success is False
+        assert "checkout" not in calls
+        assert "merge" not in calls
+        assert "reset" not in calls
 
     def test_checkout_failure_after_stash(self):
         """Checkout fails after successful stash — reports error."""
