@@ -1,5 +1,7 @@
 """Tests for git_auto_merge.py — automatic branch merging."""
 
+import os
+import sys
 import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
@@ -1234,3 +1236,48 @@ class TestSquashCommitFailureCleanup:
         reset_call = mock_git.call_args_list[5]
         assert "reset" in reset_call[0]
         assert "--hard" in reset_call[0]
+
+
+# ---------------------------------------------------------------------------
+# CLI __main__ interface
+# ---------------------------------------------------------------------------
+
+class TestCLIMainBlock:
+    """Test the CLI interface via runpy."""
+
+    def test_no_args_exits_1(self):
+        """CLI with insufficient arguments exits 1."""
+        import sys
+        from unittest.mock import patch
+        from tests._helpers import run_module
+
+        with patch.object(sys, "argv", ["git_auto_merge"]):
+            with pytest.raises(SystemExit) as exc_info:
+                run_module("app.git_auto_merge", run_name="__main__")
+            assert exc_info.value.code == 1
+
+    def test_too_few_args_exits_1(self):
+        """CLI with 3 args (needs 4) exits 1."""
+        import sys
+        from unittest.mock import patch
+        from tests._helpers import run_module
+
+        with patch.object(sys, "argv", ["git_auto_merge", "/inst", "proj", "/path"]):
+            with pytest.raises(SystemExit) as exc_info:
+                run_module("app.git_auto_merge", run_name="__main__")
+            assert exc_info.value.code == 1
+
+    def test_calls_auto_merge_branch(self, tmp_path):
+        """CLI with 4 args creates merger and calls auto_merge_branch."""
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "app.git_auto_merge",
+             str(tmp_path), "testproj", str(tmp_path), "koan/fake-branch"],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(Path(__file__).resolve().parent.parent),
+            env={**os.environ, "KOAN_ROOT": str(tmp_path)},
+        )
+        # Should run without crashing (may fail gracefully since no git config)
+        # The key test: arg parsing works and it reaches the merger logic
+        assert "Usage:" not in result.stdout
+        assert result.returncode in (0, 1)  # 0=success or 1=merge not configured
