@@ -595,7 +595,15 @@ def main():
 
     try:
         while True:
-            updates = get_updates(offset)
+            try:
+                updates = get_updates(offset)
+            except StopIteration:
+                raise
+            except Exception as e:
+                log("error", f"get_updates failed: {e}")
+                time.sleep(POLL_INTERVAL)
+                continue
+
             for update in updates:
                 offset = update["update_id"] + 1
                 msg = update.get("message", {})
@@ -623,8 +631,15 @@ def main():
                 clear_shutdown(str(KOAN_ROOT))
                 first_poll = False
 
-            flush_outbox()
-            write_heartbeat(str(KOAN_ROOT))
+            try:
+                flush_outbox()
+            except Exception as e:
+                log("error", f"flush_outbox failed: {e}")
+
+            try:
+                write_heartbeat(str(KOAN_ROOT))
+            except Exception as e:
+                log("error", f"write_heartbeat failed: {e}")
 
             # Check for restart signal (set by /restart command).
             # Only react to files created AFTER we started — stale files

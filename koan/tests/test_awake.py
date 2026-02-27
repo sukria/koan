@@ -2616,3 +2616,105 @@ class TestBridgeExceptionResilience:
         with pytest.raises(StopIteration):
             main()
         # Bridge survived both exceptions
+
+
+class TestBridgeInfrastructureResilience:
+    """Infrastructure calls (get_updates, flush_outbox, write_heartbeat) must not crash the bridge."""
+
+    TEST_CHAT_ID = "123456789"
+
+    @pytest.fixture(autouse=True)
+    def mock_pid_manager(self):
+        with patch("app.pid_manager.acquire_pidfile") as mock_acquire, \
+             patch("app.pid_manager.release_pidfile"):
+            mock_acquire.return_value = MagicMock()
+            yield
+
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates", side_effect=ConnectionError("network down"))
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    @patch("app.awake.time.sleep", side_effect=[None, StopIteration])
+    def test_get_updates_exception_does_not_crash_bridge(
+        self, mock_sleep, mock_config, mock_updates, mock_handle,
+        mock_flush, mock_heartbeat, capsys
+    ):
+        """If get_updates raises, bridge logs error and retries next iteration."""
+        from app.awake import main
+        with pytest.raises(StopIteration):
+            main()
+        # handle_message never called (no updates received)
+        mock_handle.assert_not_called()
+        # flush_outbox and heartbeat NOT called when get_updates fails
+        # (continue skips to next iteration)
+        captured = capsys.readouterr()
+        assert "get_updates failed" in captured.err
+
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox", side_effect=OSError("disk full"))
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates")
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    @patch("app.awake.time.sleep", side_effect=StopIteration)
+    def test_flush_outbox_exception_does_not_crash_bridge(
+        self, mock_sleep, mock_config, mock_updates, mock_handle,
+        mock_flush, mock_heartbeat, capsys
+    ):
+        """If flush_outbox raises, bridge logs error and continues."""
+        from app.awake import main
+        mock_updates.return_value = []
+        with pytest.raises(StopIteration):
+            main()
+        mock_flush.assert_called_once()
+        # Heartbeat still called despite flush failure
+        mock_heartbeat.assert_called()
+        captured = capsys.readouterr()
+        assert "flush_outbox failed" in captured.err
+
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox")
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates")
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    @patch("app.awake.time.sleep", side_effect=StopIteration)
+    def test_write_heartbeat_exception_does_not_crash_bridge(
+        self, mock_sleep, mock_config, mock_updates, mock_handle,
+        mock_flush, mock_heartbeat, capsys
+    ):
+        """If write_heartbeat raises in the loop, bridge logs error and continues."""
+        from app.awake import main
+        mock_updates.return_value = []
+        # First call succeeds (startup), second call (loop) fails
+        mock_heartbeat.side_effect = [None, PermissionError("read-only fs")]
+        with pytest.raises(StopIteration):
+            main()
+        mock_flush.assert_called_once()
+        assert mock_heartbeat.call_count == 2
+        captured = capsys.readouterr()
+        assert "write_heartbeat failed" in captured.err
+
+    @patch("app.awake.write_heartbeat")
+    @patch("app.awake.flush_outbox", side_effect=OSError("flush boom"))
+    @patch("app.awake.handle_message")
+    @patch("app.awake.get_updates")
+    @patch("app.awake.check_config")
+    @patch("app.awake.CHAT_ID", TEST_CHAT_ID)
+    @patch("app.awake.time.sleep", side_effect=StopIteration)
+    def test_multiple_infrastructure_failures_do_not_crash(
+        self, mock_sleep, mock_config, mock_updates, mock_handle,
+        mock_flush, mock_heartbeat, capsys
+    ):
+        """Both flush_outbox and write_heartbeat can fail without crashing."""
+        from app.awake import main
+        mock_updates.return_value = []
+        # First call succeeds (startup), second call (loop) fails
+        mock_heartbeat.side_effect = [None, RuntimeError("heartbeat boom")]
+        with pytest.raises(StopIteration):
+            main()
+        captured = capsys.readouterr()
+        assert "flush_outbox failed" in captured.err
+        assert "write_heartbeat failed" in captured.err

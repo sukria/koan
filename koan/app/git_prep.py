@@ -112,7 +112,12 @@ def prepare_project_branch(
         )
         if rc == 0:
             result.stashed = True
-        # Stash failure is non-fatal — continue anyway
+        else:
+            # Abort: continuing with a dirty tree risks data loss
+            # if a downstream reset --hard is needed
+            result.success = False
+            result.error = f"stash failed on dirty tree: {stderr}"
+            return result
 
     # Checkout base branch
     rc, _, stderr = run_git("checkout", base_branch, cwd=project_path)
