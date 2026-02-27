@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.github_notifications import (
+    FetchResult,
     _processed_comments,
     _reactions_endpoint,
     add_reaction,
@@ -94,7 +95,7 @@ class TestApiUrlToWebUrl:
 
 class TestFetchUnreadNotifications:
     @patch("app.github_notifications.api")
-    def test_returns_mentions_only(self, mock_api):
+    def test_returns_actionable_reasons(self, mock_api):
         notifications = [
             {"reason": "mention", "repository": {"full_name": "owner/repo"}},
             {"reason": "review_requested", "repository": {"full_name": "owner/repo"}},
@@ -103,8 +104,9 @@ class TestFetchUnreadNotifications:
         mock_api.return_value = json.dumps(notifications)
 
         result = fetch_unread_notifications()
-        assert len(result) == 2
-        assert all(n["reason"] == "mention" for n in result)
+        assert isinstance(result, FetchResult)
+        assert len(result.actionable) == 2
+        assert all(n["reason"] == "mention" for n in result.actionable)
 
     @patch("app.github_notifications.api")
     def test_filters_by_known_repos(self, mock_api):
@@ -115,23 +117,116 @@ class TestFetchUnreadNotifications:
         mock_api.return_value = json.dumps(notifications)
 
         result = fetch_unread_notifications(known_repos={"owner/repo"})
-        assert len(result) == 1
-        assert result[0]["repository"]["full_name"] == "owner/repo"
+        assert len(result.actionable) == 1
+        assert result.actionable[0]["repository"]["full_name"] == "owner/repo"
 
     @patch("app.github_notifications.api")
     def test_handles_api_error(self, mock_api):
         mock_api.side_effect = RuntimeError("API error")
-        assert fetch_unread_notifications() == []
+        result = fetch_unread_notifications()
+        assert isinstance(result, FetchResult)
+        assert result.actionable == []
+        assert result.drain == []
 
     @patch("app.github_notifications.api")
     def test_handles_empty_response(self, mock_api):
         mock_api.return_value = ""
-        assert fetch_unread_notifications() == []
+        result = fetch_unread_notifications()
+        assert isinstance(result, FetchResult)
+        assert result.actionable == []
+        assert result.drain == []
 
     @patch("app.github_notifications.api")
     def test_handles_invalid_json(self, mock_api):
         mock_api.return_value = "not json"
-        assert fetch_unread_notifications() == []
+        result = fetch_unread_notifications()
+        assert isinstance(result, FetchResult)
+        assert result.actionable == []
+        assert result.drain == []
+
+    @patch("app.github_notifications.api")
+    def test_author_reason_in_actionable(self, mock_api):
+        """Notifications with reason=author should appear in actionable."""
+        notifications = [
+            {"reason": "author", "repository": {"full_name": "owner/repo"}},
+        ]
+        mock_api.return_value = json.dumps(notifications)
+
+        result = fetch_unread_notifications()
+        assert len(result.actionable) == 1
+        assert result.actionable[0]["reason"] == "author"
+        assert result.drain == []
+
+    @patch("app.github_notifications.api")
+    def test_comment_reason_in_actionable(self, mock_api):
+        """Notifications with reason=comment should appear in actionable."""
+        notifications = [
+            {"reason": "comment", "repository": {"full_name": "owner/repo"}},
+        ]
+        mock_api.return_value = json.dumps(notifications)
+
+        result = fetch_unread_notifications()
+        assert len(result.actionable) == 1
+        assert result.actionable[0]["reason"] == "comment"
+        assert result.drain == []
+
+    @patch("app.github_notifications.api")
+    def test_ci_activity_in_drain(self, mock_api):
+        """Notifications with reason=ci_activity should appear in drain."""
+        notifications = [
+            {"reason": "ci_activity", "repository": {"full_name": "owner/repo"}},
+        ]
+        mock_api.return_value = json.dumps(notifications)
+
+        result = fetch_unread_notifications()
+        assert result.actionable == []
+        assert len(result.drain) == 1
+        assert result.drain[0]["reason"] == "ci_activity"
+
+    @patch("app.github_notifications.api")
+    def test_review_requested_in_drain(self, mock_api):
+        """Notifications with reason=review_requested should appear in drain."""
+        notifications = [
+            {"reason": "review_requested", "repository": {"full_name": "owner/repo"}},
+        ]
+        mock_api.return_value = json.dumps(notifications)
+
+        result = fetch_unread_notifications()
+        assert result.actionable == []
+        assert len(result.drain) == 1
+        assert result.drain[0]["reason"] == "review_requested"
+
+    @patch("app.github_notifications.api")
+    def test_mixed_reasons_categorized_correctly(self, mock_api):
+        """Mixed reasons are split between actionable and drain correctly."""
+        notifications = [
+            {"reason": "mention", "repository": {"full_name": "o/r"}},
+            {"reason": "author", "repository": {"full_name": "o/r"}},
+            {"reason": "comment", "repository": {"full_name": "o/r"}},
+            {"reason": "ci_activity", "repository": {"full_name": "o/r"}},
+            {"reason": "review_requested", "repository": {"full_name": "o/r"}},
+            {"reason": "assign", "repository": {"full_name": "o/r"}},
+        ]
+        mock_api.return_value = json.dumps(notifications)
+
+        result = fetch_unread_notifications()
+        assert len(result.actionable) == 3  # mention, author, comment
+        assert len(result.drain) == 3  # ci_activity, review_requested, assign
+        actionable_reasons = {n["reason"] for n in result.actionable}
+        assert actionable_reasons == {"mention", "author", "comment"}
+
+    @patch("app.github_notifications.api")
+    def test_unknown_repo_skipped_entirely(self, mock_api):
+        """Notifications from unknown repos appear in neither actionable nor drain."""
+        notifications = [
+            {"reason": "mention", "repository": {"full_name": "unknown/repo"}},
+            {"reason": "ci_activity", "repository": {"full_name": "unknown/repo"}},
+        ]
+        mock_api.return_value = json.dumps(notifications)
+
+        result = fetch_unread_notifications(known_repos={"owner/repo"})
+        assert result.actionable == []
+        assert result.drain == []
 
 
 class TestCheckAlreadyProcessed:
