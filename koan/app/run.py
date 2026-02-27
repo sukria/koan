@@ -1834,8 +1834,11 @@ def _run_skill_mission(
     # the branch, subsequent runs break.
     koan_branch_before = _get_koan_branch(koan_root)
 
+    from app.config import get_skill_timeout
+    skill_timeout = get_skill_timeout()
+
     debug_log(f"[run] skill exec: cmd={' '.join(skill_cmd)}")
-    debug_log(f"[run] skill exec: cwd={koan_pkg_dir}")
+    debug_log(f"[run] skill exec: cwd={koan_pkg_dir} timeout={skill_timeout}s")
     stdout_lines = []
     stderr_lines = []
     proc = None
@@ -1873,11 +1876,13 @@ def _run_skill_mission(
                     f.write(f"{stripped}\n")
             except OSError:
                 pass
-        # Wait for stderr thread to finish after stdout is exhausted
-        stderr_thread.join(timeout=10)
+        # Wait for stderr thread to finish after stdout is exhausted.
+        # Use a fraction of the skill timeout — stderr should be done
+        # shortly after stdout, but avoid blocking indefinitely.
+        stderr_thread.join(timeout=min(30, skill_timeout))
         if stderr_lines:
             print("\n".join(stderr_lines), file=sys.stderr)
-        proc.wait(timeout=600)
+        proc.wait(timeout=skill_timeout)
         exit_code = proc.returncode
         skill_stdout = "\n".join(stdout_lines)
         skill_stderr = "\n".join(stderr_lines)
@@ -1892,8 +1897,8 @@ def _run_skill_mission(
                 debug_log(f"[run] skill stderr: {skill_stderr[:2000]}")
     except subprocess.TimeoutExpired:
         _kill_process_group(proc)
-        log("error", "Skill runner timed out (10min)")
-        debug_log("[run] skill exec: TIMEOUT (600s)")
+        log("error", f"Skill runner timed out ({skill_timeout}s)")
+        debug_log(f"[run] skill exec: TIMEOUT ({skill_timeout}s)")
         exit_code = 1
         skill_stdout = "\n".join(stdout_lines)
         skill_stderr = "\n".join(stderr_lines)

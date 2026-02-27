@@ -512,14 +512,15 @@ class TestGenerateIterationPlan:
 # ---------------------------------------------------------------------------
 
 class TestRunClaudePlan:
+    @patch("app.config.get_skill_timeout", return_value=3600)
     @patch("app.cli_provider.run_command", return_value="result with spaces")
-    def test_returns_stripped_output(self, mock_cmd):
+    def test_returns_stripped_output(self, mock_cmd, mock_timeout):
         result = _run_claude_plan("test prompt", "/project")
         assert result == "result with spaces"
         mock_cmd.assert_called_once_with(
             "test prompt", "/project",
             allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
-            max_turns=25, timeout=600,
+            max_turns=25, timeout=3600,
         )
 
     @patch("app.cli_provider.run_command",

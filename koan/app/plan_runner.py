@@ -276,10 +276,11 @@ def _is_error_output(output: str) -> bool:
 def _run_claude_plan(prompt, project_path):
     """Execute Claude CLI with the given prompt and return the output."""
     from app.cli_provider import run_command
+    from app.config import get_skill_timeout
     output = run_command(
         prompt, project_path,
         allowed_tools=["Read", "Glob", "Grep", "WebFetch"],
-        max_turns=25, timeout=600,
+        max_turns=25, timeout=get_skill_timeout(),
     )
     if _is_error_output(output):
         raise RuntimeError(output)
