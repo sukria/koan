@@ -97,6 +97,20 @@ def get_github_check_interval(config: dict) -> int:
         return 60
 
 
+def get_github_max_check_interval(config: dict) -> int:
+    """Get the maximum backoff interval in seconds for notification checks.
+
+    When consecutive checks find no notifications, the interval grows
+    exponentially up to this cap.  Default: 180 seconds (3 minutes).
+    """
+    github = config.get("github") or {}
+    try:
+        val = int(github.get("max_check_interval_seconds", 180))
+        return max(30, val)  # Floor at 30s — below that backoff is pointless
+    except (ValueError, TypeError):
+        return 180
+
+
 def validate_github_config(config: dict) -> Optional[str]:
     """Validate GitHub configuration at startup.
 
