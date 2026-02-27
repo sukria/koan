@@ -2865,7 +2865,7 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen()
         # First call (with timeout) raises, second call (after kill) returns 0
-        mock_proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 600), 0]
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 3600), 0]
 
         with patch("app.run.subprocess.Popen", return_value=mock_proc), \
              patch("app.run._get_koan_branch", return_value="main"), \
@@ -3191,6 +3191,67 @@ class TestRunSkillMissionEnv:
 
         assert _sig.claude_proc is None
 
+    def test_uses_configurable_skill_timeout(self, tmp_path):
+        """_run_skill_mission uses get_skill_timeout() for proc.wait()."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.config.get_skill_timeout", return_value=7200), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/fix test",
+                autonomous_mode="implement",
+            )
+
+        # proc.wait() should be called with the configurable timeout (7200s)
+        mock_proc.wait.assert_called_once_with(timeout=7200)
+
+    def test_skill_timeout_default_is_3600(self, tmp_path):
+        """Default skill timeout should be 3600s (60 minutes)."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
+
+        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        # Default timeout from get_skill_timeout() is 3600s
+        mock_proc.wait.assert_called_once_with(timeout=3600)
+
     def test_timeout_uses_kill_process_group(self, tmp_path):
         """Timeout path kills the whole process group, not just the leader."""
         from app.run import _run_skill_mission
@@ -3201,7 +3262,7 @@ class TestRunSkillMissionEnv:
         (tmp_path / "koan").mkdir()
 
         mock_proc = self._make_mock_popen()
-        mock_proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 600), 0]
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 3600), 0]
         mock_proc.poll.return_value = None
         mock_proc.pid = 88888
 
