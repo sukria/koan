@@ -296,3 +296,37 @@ class TestCheckPendingJournal:
 
         result = check_pending_journal(str(tmp_path))
         assert result is False
+
+    def test_zero_progress_lines(self, tmp_path, capsys):
+        """Pending file with separator but no progress lines still detected."""
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        (journal_dir / "pending.md").write_text("# Header\n---\n")
+
+        result = check_pending_journal(str(tmp_path))
+        assert result is True
+        captured = capsys.readouterr()
+        assert "0 progress entries" in captured.out
+
+    def test_no_separator(self, tmp_path, capsys):
+        """Pending file without --- separator has 0 progress entries."""
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        (journal_dir / "pending.md").write_text("# Header\nSome content\n")
+
+        result = check_pending_journal(str(tmp_path))
+        assert result is True
+        captured = capsys.readouterr()
+        assert "0 progress entries" in captured.out
+
+    def test_blank_lines_not_counted(self, tmp_path, capsys):
+        """Blank lines after separator are not counted as progress."""
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        (journal_dir / "pending.md").write_text(
+            "# Header\n---\n\n09:12 — Done\n\n"
+        )
+
+        check_pending_journal(str(tmp_path))
+        captured = capsys.readouterr()
+        assert "1 progress entries" in captured.out
