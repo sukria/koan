@@ -30,7 +30,6 @@ class ScanResult:
     blocked: bool
     reason: Optional[str] = None
     warnings: Optional[List[str]] = None
-    redacted_content: Optional[str] = None
 
 
 # Patterns that indicate secrets or credentials
