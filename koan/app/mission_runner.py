@@ -369,7 +369,7 @@ def run_post_mission(
     # 2. Check for quota exhaustion
     from app.quota_handler import handle_quota_exhaustion
 
-    koan_root = str(Path(instance_dir).parent)
+    koan_root = os.environ.get("KOAN_ROOT", str(Path(instance_dir).parent))
     quota_result = handle_quota_exhaustion(
         koan_root=koan_root,
         instance_dir=instance_dir,

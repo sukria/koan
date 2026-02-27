@@ -106,6 +106,14 @@ class TestFallbackExtract:
         project, title = fallback_extract(missions, "koan:/path")
         assert project is None
 
+    def test_empty_projects_str_defaults_to_default(self, tmp_path):
+        """When projects_str is empty, untagged missions get project='default'."""
+        missions = tmp_path / "missions.md"
+        missions.write_text("# Missions\n\n## Pending\n\n- fix tests\n\n## In Progress\n\n## Done\n")
+        project, title = fallback_extract(missions, "")
+        assert project == "default"
+        assert title == "fix tests"
+
 
 class TestPickMission:
     """Integration tests — mock the Claude subprocess call."""

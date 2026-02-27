@@ -156,7 +156,10 @@ def write_to_journal(instance_dir: Path, reflection: str):
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    existing = journal_file.read_text() if journal_file.exists() else ""
+    try:
+        existing = journal_file.read_text()
+    except OSError:
+        existing = ""
     new_content = existing.rstrip() + f"\n\n### Kōan — {timestamp}\n\n{reflection}\n"
 
     atomic_write(journal_file, new_content)

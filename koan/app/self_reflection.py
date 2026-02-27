@@ -150,7 +150,10 @@ def save_reflection(instance_dir: Path, observations: str):
 
     timestamp = datetime.now().strftime("%Y-%m-%d")
 
-    new_content = personality_file.read_text() if personality_file.exists() else ""
+    try:
+        new_content = personality_file.read_text()
+    except OSError:
+        new_content = ""
     new_content += f"\n\n## Reflection — {timestamp}\n\n{observations}\n"
 
     atomic_write(personality_file, new_content)

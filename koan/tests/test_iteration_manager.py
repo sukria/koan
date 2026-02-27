@@ -217,6 +217,16 @@ class TestGetUsageDecision:
         result = _get_usage_decision(usage_md, 5, PROJECTS_STR)
         assert result["mode"] == "wait"
 
+    @patch("app.usage_tracker.UsageTracker", side_effect=Exception("tracker crash"))
+    def test_tracker_error_falls_back_to_review_mode(self, mock_tracker, tmp_path):
+        """When the usage tracker crashes, fallback to 'review' (read-only) not 'implement'."""
+        usage_md = tmp_path / "usage.md"
+        usage_md.write_text("Session (5hr) : 50%\n")
+        result = _get_usage_decision(usage_md, 3, PROJECTS_STR)
+        assert result["mode"] == "review"
+        assert result["available_pct"] == 0
+        assert "safe fallback" in result["reason"].lower() or "tracker error" in result["reason"].lower()
+
     def test_medium_usage_returns_implement(self, tmp_path):
         usage_md = tmp_path / "usage.md"
         usage_md.write_text(

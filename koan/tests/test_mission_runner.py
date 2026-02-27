@@ -519,6 +519,71 @@ class TestRunPostMission:
         assert result["auto_merge_branch"] == "koan/feature"
 
 
+class TestRunPostMissionKoanRoot:
+    """Test that run_post_mission uses KOAN_ROOT env var for koan_root."""
+
+    @patch("app.mission_runner.commit_instance")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_uses_koan_root_env_var(self, mock_usage, mock_quota, mock_archive,
+                                     mock_reflect, mock_merge, mock_commit,
+                                     tmp_path, monkeypatch):
+        """run_post_mission should prefer KOAN_ROOT env var over Path.parent."""
+        from app.mission_runner import run_post_mission
+
+        koan_root = str(tmp_path / "my-koan")
+        instance_dir = str(tmp_path / "deep" / "nested" / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+        monkeypatch.setenv("KOAN_ROOT", koan_root)
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        # quota_handler should receive the KOAN_ROOT, not instance_dir's parent
+        call_kwargs = mock_quota.call_args[1]
+        assert call_kwargs["koan_root"] == koan_root
+
+    @patch("app.mission_runner.commit_instance")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_falls_back_to_parent_without_env(self, mock_usage, mock_quota,
+                                               mock_archive, mock_reflect,
+                                               mock_merge, mock_commit,
+                                               tmp_path, monkeypatch):
+        """Without KOAN_ROOT env, falls back to instance_dir's parent."""
+        from app.mission_runner import run_post_mission
+
+        monkeypatch.delenv("KOAN_ROOT", raising=False)
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        call_kwargs = mock_quota.call_args[1]
+        assert call_kwargs["koan_root"] == str(tmp_path)
+
+
 class TestCommitInstance:
     """Test commit_instance function."""
 
