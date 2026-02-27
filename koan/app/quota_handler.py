@@ -2,8 +2,13 @@
 """
 Kōan -- Quota Exhaustion Handler
 
-Detects quota exhaustion from Claude CLI output, parses reset times,
-writes journal entries, and creates pause state.
+Detects quota exhaustion from CLI output (Claude, Copilot, etc.),
+parses reset times, writes journal entries, and creates pause state.
+
+Supports provider-specific error patterns:
+- Claude: "out of extra usage", "quota reached", "resets 10am (TZ)"
+- Copilot/GitHub: "too many requests", "HTTP 429", "Retry-After: N",
+  "usage limit", "try again in X minutes"
 
 Usage:
     python -m app.quota_handler check <koan_root> <instance> <project_name> <run_count> <stdout_file> <stderr_file>
@@ -20,25 +25,45 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
-# Patterns that indicate quota exhaustion in Claude CLI output
+# Patterns that indicate quota exhaustion in CLI output.
+# Shared across providers (Claude, Copilot, etc.).
 QUOTA_PATTERNS = [
+    # Claude-specific
     r"out of extra usage",
     r"quota.*reached",
+    # Generic / shared
     r"rate limit",
+    # Copilot / GitHub API
+    r"too many requests",
+    r"usage limit",
+    r"exceeded.*(?:copilot|secondary).*(?:limit|rate)",
+    r"copilot.*(?:not available|unavailable)",
+    r"HTTP\s+429",
+    r"status[\s:]+429",
+    r"retry[\s-]+after",
 ]
 
 # Compiled regex for performance
 _QUOTA_RE = re.compile("|".join(QUOTA_PATTERNS), re.IGNORECASE)
 
-# Pattern to extract reset info from output (must start with "resets" or "reset ")
+# Pattern to extract reset info from output.
+# Claude: "resets 10am (Europe/Paris)"
+# Copilot/GitHub: "Retry-After: 60" or "retry after 60 seconds" or "try again in X minutes"
 _RESET_RE = re.compile(r"resets\s+.+", re.IGNORECASE)
+_RETRY_AFTER_RE = re.compile(
+    r"(?:retry[\s-]+after[\s:]+(\d+))|(?:try again in\s+(\d+)\s*(seconds?|minutes?|hours?))",
+    re.IGNORECASE,
+)
 
 
 def detect_quota_exhaustion(text: str) -> bool:
     """Check if text contains quota exhaustion signals.
 
+    Works across providers (Claude, Copilot, etc.) by matching
+    a shared set of rate-limit and quota patterns.
+
     Args:
-        text: Combined stdout + stderr from Claude CLI
+        text: Combined stdout + stderr from CLI execution
 
     Returns:
         True if quota exhaustion detected
@@ -47,18 +72,54 @@ def detect_quota_exhaustion(text: str) -> bool:
 
 
 def extract_reset_info(text: str) -> str:
-    """Extract the reset info string from Claude output.
+    """Extract the reset info string from CLI output.
+
+    Supports both Claude-style ("resets 10am") and Copilot/GitHub-style
+    ("Retry-After: 60", "try again in 5 minutes") reset info.
 
     Args:
         text: Combined output text
 
     Returns:
-        Reset info string (e.g., "resets 10am (Europe/Paris)") or empty string
+        Reset info string or empty string
     """
+    # Claude-style: "resets 10am (Europe/Paris)"
     match = _RESET_RE.search(text)
     if match:
         return match.group(0).strip()
+
+    # Copilot/GitHub-style: "Retry-After: 60" or "try again in 5 minutes"
+    retry_match = _RETRY_AFTER_RE.search(text)
+    if retry_match:
+        # "Retry-After: N" (seconds)
+        if retry_match.group(1):
+            seconds = int(retry_match.group(1))
+            return f"resets in {_seconds_to_human(seconds)}"
+        # "try again in N unit"
+        if retry_match.group(2) and retry_match.group(3):
+            value = int(retry_match.group(2))
+            unit = retry_match.group(3).lower()
+            if unit.startswith("minute"):
+                return f"resets in {value * 60 // 3600}h" if value >= 60 else f"resets in {value}m"
+            elif unit.startswith("hour"):
+                return f"resets in {value}h"
+            else:
+                return f"resets in {_seconds_to_human(value)}"
     return ""
+
+
+def _seconds_to_human(seconds: int) -> str:
+    """Convert seconds to a human-readable duration string."""
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    remaining = minutes % 60
+    if remaining:
+        return f"{hours}h {remaining}m"
+    return f"{hours}h"
 
 
 def parse_reset_time(reset_info: str) -> Tuple[Optional[int], str]:
@@ -125,7 +186,7 @@ def write_quota_journal(
     entry = f"""
 ## Quota Exhausted — {now}
 
-Claude quota reached after {run_count} runs (project: {project_name}). {reset_display}
+Quota reached after {run_count} runs (project: {project_name}). {reset_display}
 
 {resume_message} or use `/resume` to restart manually.
 """
@@ -143,16 +204,17 @@ def handle_quota_exhaustion(
 ) -> Optional[Tuple[str, str]]:
     """Full quota exhaustion handler.
 
-    Checks Claude output for quota signals, parses reset time,
-    writes journal, and creates pause state.
+    Checks CLI output for quota signals, parses reset time,
+    writes journal, and creates pause state.  Works for any
+    provider (Claude, Copilot, etc.).
 
     Args:
         koan_root: Path to koan root directory
         instance_dir: Path to instance directory
         project_name: Current project name
         run_count: Number of completed runs
-        stdout_file: Path to Claude stdout capture file
-        stderr_file: Path to Claude stderr capture file
+        stdout_file: Path to CLI stdout capture file
+        stderr_file: Path to CLI stderr capture file
 
     Returns:
         (reset_display, resume_message) if quota exhausted, None otherwise
