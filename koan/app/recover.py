@@ -29,8 +29,11 @@ def check_pending_journal(instance_dir: str) -> bool:
     We just log its presence so the human knows recovery will happen.
     """
     pending_path = Path(instance_dir) / "journal" / "pending.md"
-    if pending_path.exists():
+    try:
         content = pending_path.read_text().strip()
+    except FileNotFoundError:
+        return False
+    if content:
         lines = content.splitlines()
         # Count progress lines (after the --- separator)
         separator_seen = False

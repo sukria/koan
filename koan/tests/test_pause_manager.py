@@ -297,6 +297,36 @@ class TestRemovePause:
         # Should not raise
         remove_pause(str(tmp_path))
 
+    def test_removes_reason_before_pause(self, tmp_path):
+        """Reason file must be removed before the pause signal file.
+
+        If interrupted between the two removals, the system should still
+        report as paused (reason gone + pause present) rather than the
+        reverse (pause gone + orphan reason file).
+        """
+        from app.pause_manager import is_paused, remove_pause
+
+        pause_file = tmp_path / ".koan-pause"
+        reason_file = tmp_path / ".koan-pause-reason"
+        pause_file.touch()
+        reason_file.write_text("quota\n1000\ninfo\n")
+
+        from unittest.mock import patch
+
+        removal_order = []
+        original_remove = os.remove
+
+        def tracking_remove(path):
+            name = os.path.basename(path)
+            removal_order.append(name)
+            original_remove(path)
+
+        with patch("app.pause_manager.os.remove", side_effect=tracking_remove):
+            remove_pause(str(tmp_path))
+
+        assert removal_order == [".koan-pause-reason", ".koan-pause"], \
+            "reason file must be removed before the pause signal file"
+
 
 class TestCheckAndResume:
     """Test check_and_resume function."""

@@ -146,8 +146,13 @@ def create_pause(
 
 
 def remove_pause(koan_root: str) -> None:
-    """Remove both pause files."""
-    for name in (".koan-pause", ".koan-pause-reason"):
+    """Remove both pause files.
+
+    Order matters: remove the reason file first (informational), then the
+    signal file (the gate). If interrupted between the two removals, the
+    system still reports as paused (safer than the reverse).
+    """
+    for name in (".koan-pause-reason", ".koan-pause"):
         path = os.path.join(koan_root, name)
         try:
             os.remove(path)

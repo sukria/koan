@@ -1537,6 +1537,12 @@ def _run_iteration(
                 else:
                     reset_display, resume_msg = "", "Auto-resume in ~5h"
                 log("quota", f"Quota reached. {reset_display}")
+
+                # Create pause state so the main loop actually stops
+                reset_ts, _disp = _compute_quota_reset_ts(instance)
+                from app.pause_manager import create_pause
+                create_pause(koan_root, "quota", reset_ts, reset_display or _disp)
+
                 _commit_instance(instance, f"koan: quota exhausted {time.strftime('%Y-%m-%d-%H:%M')}")
                 _notify(instance, (
                     f"⚠️ Claude quota exhausted. {reset_display}\n\n"

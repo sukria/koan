@@ -38,8 +38,6 @@ ALLOWLIST: Set[Tuple[str, str]] = {
     # --- Config / init loading (defaults are safe) ---
     ("provider/claude.py", "check_quota_available"),  # tool allowlist parsing
     ("provider/local.py", "_get_config"),         # model list parsing
-    # --- Git operations (abort after failed rebase) ---
-    ("claude_step.py", "_rebase_onto_target"),    # rebase --abort after failed rebase
     # --- Non-critical subsystem fallbacks ---
     ("cli_journal_streamer.py", "_tail_loop"),    # journal append in tail-thread tight loop
     # --- Setup wizard (interactive, errors shown in UI) ---

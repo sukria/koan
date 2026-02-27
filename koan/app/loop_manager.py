@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.missions import count_pending
+from app.utils import atomic_write
 
 
 # --- Focus area resolution ---
@@ -155,7 +156,7 @@ Mode: {mode}
 
 ---
 """
-    pending_path.write_text(content)
+    atomic_write(pending_path, content)
     return str(pending_path)
 
 
