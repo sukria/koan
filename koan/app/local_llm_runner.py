@@ -198,8 +198,9 @@ def _tool_glob(arguments: Dict[str, Any], cwd: str) -> str:
     pattern = arguments["pattern"]
     matches = sorted(glob_module.glob(os.path.join(base, pattern), recursive=True))
     if len(matches) > 200:
+        total = len(matches)
         matches = matches[:200]
-        return "\n".join(matches) + f"\n... ({len(matches)}+ matches, truncated)"
+        return "\n".join(matches) + f"\n... ({total} matches, showing first 200)"
     return "\n".join(matches) if matches else "No matches found"
 
 
@@ -212,7 +213,10 @@ def _tool_grep(arguments: Dict[str, Any], cwd: str) -> str:
     cmd = ["grep", "-rn", "--include", file_glob, pattern, path] if file_glob else [
         "grep", "-rn", pattern, path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30,
+        stdin=subprocess.DEVNULL,
+    )
     output = result.stdout
     if len(output) > 20000:
         output = output[:20000] + "\n... (truncated)"
@@ -223,7 +227,7 @@ def _tool_shell(arguments: Dict[str, Any], cwd: str) -> str:
     command = arguments["command"]
     result = subprocess.run(
         command, shell=True, capture_output=True, text=True,
-        timeout=120, cwd=cwd,
+        timeout=120, cwd=cwd, stdin=subprocess.DEVNULL,
     )
     output = result.stdout
     if result.stderr:
@@ -342,7 +346,7 @@ def _filter_tools(
     allowed_funcs = None
     disallowed_funcs = set()
 
-    if allowed:
+    if allowed is not None:
         allowed_funcs = {TOOL_NAME_MAP.get(t, t.lower()) for t in allowed}
     if disallowed:
         disallowed_funcs = {TOOL_NAME_MAP.get(t, t.lower()) for t in disallowed}
@@ -414,7 +418,14 @@ def run_agent(
         total_input_tokens += usage.get("prompt_tokens", 0)
         total_output_tokens += usage.get("completion_tokens", 0)
 
-        choice = response.get("choices", [{}])[0]
+        choices = response.get("choices") or []
+        if not choices:
+            return {
+                "result": "Error: API returned empty choices",
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+            }
+        choice = choices[0]
         message = choice.get("message", {})
 
         # If the model returned tool calls, execute them
