@@ -117,10 +117,11 @@ class TestFetchAndFilterCommentLogging:
         assert "no comment" in caplog.text
 
     @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.find_mention_in_thread", return_value=None)
     @patch("app.github_command_handler.is_self_mention", return_value=True)
     @patch("app.github_command_handler.get_comment_from_notification", return_value={"id": "c1", "user": {"login": "bot"}})
     @patch("app.github_command_handler.is_notification_stale", return_value=False)
-    def test_logs_self_mention(self, mock_stale, mock_comment, mock_self, mock_read, caplog):
+    def test_logs_self_mention(self, mock_stale, mock_comment, mock_self, mock_find, mock_read, caplog):
         from app.github_command_handler import _fetch_and_filter_comment
 
         notif = {"id": "77"}
@@ -128,7 +129,7 @@ class TestFetchAndFilterCommentLogging:
             result = _fetch_and_filter_comment(notif, "bot", 24)
 
         assert result is None
-        assert "self-mention" in caplog.text
+        assert "self-authored" in caplog.text
 
 
 # --- Tests for _validate_and_parse_command debug logging ---
