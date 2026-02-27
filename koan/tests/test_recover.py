@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.recover import recover_missions
+from app.recover import check_pending_journal, recover_missions
 
 
 def _missions(pending="", in_progress="", done=""):
@@ -257,3 +257,42 @@ class TestRecoverCLI:
 
         mock_send.assert_called_once()
         assert "1 mission" in mock_send.call_args[0][0]
+
+
+class TestCheckPendingJournal:
+    """Tests for check_pending_journal — TOCTOU-safe file reading."""
+
+    def test_returns_true_when_pending_exists(self, tmp_path, capsys):
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        pending = journal_dir / "pending.md"
+        pending.write_text("# Mission\n---\n10:00 — started\n10:01 — working\n")
+
+        result = check_pending_journal(str(tmp_path))
+        assert result is True
+        captured = capsys.readouterr()
+        assert "2 progress entries" in captured.out
+
+    def test_returns_false_when_no_pending(self, tmp_path):
+        result = check_pending_journal(str(tmp_path))
+        assert result is False
+
+    def test_handles_file_deleted_between_check_and_read(self, tmp_path):
+        """Regression: FileNotFoundError should be caught, not propagated."""
+        # The file doesn't exist at all — the new code uses try/except
+        # instead of exists() + read_text(), so this should just return False
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        # No pending.md file — simulates the race where it was deleted
+
+        result = check_pending_journal(str(tmp_path))
+        assert result is False
+
+    def test_empty_pending_returns_false(self, tmp_path):
+        """An empty pending.md (e.g. truncated crash) returns False."""
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        (journal_dir / "pending.md").write_text("")
+
+        result = check_pending_journal(str(tmp_path))
+        assert result is False

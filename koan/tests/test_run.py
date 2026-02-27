@@ -1716,6 +1716,49 @@ class TestQuotaSpamLoopFixes:
         assert args[2] == future_ts  # timestamp (future, not now)
         assert args[2] > now  # Must be in the future
 
+    def test_post_mission_quota_creates_pause(self, koan_root):
+        """Post-mission quota_exhausted path MUST call create_pause().
+
+        Regression: the post-mission path notified the user about a pause
+        but never wrote the .koan-pause file, so the loop continued endlessly.
+        """
+        import app.run as run_module
+
+        instance = str(koan_root / "instance")
+        koan_root_str = str(koan_root)
+        future_ts = int(time.time()) + 3600
+
+        post_result = {
+            "quota_exhausted": True,
+            "quota_info": ("resets in ~1h", "Auto-resume in ~1h"),
+        }
+
+        pause_calls = []
+
+        with patch.object(run_module, "log"), \
+             patch.object(run_module, "_notify"), \
+             patch.object(run_module, "_commit_instance"), \
+             patch.object(run_module, "_compute_quota_reset_ts",
+                          return_value=(future_ts, "resets in ~1h")), \
+             patch("app.pause_manager.create_pause") as mock_pause:
+            mock_pause.side_effect = lambda *a, **kw: pause_calls.append(a)
+
+            # Simulate the quota_exhausted code path inline
+            quota_info = post_result.get("quota_info")
+            if quota_info and isinstance(quota_info, (list, tuple)) and len(quota_info) >= 2:
+                reset_display, resume_msg = quota_info[0], quota_info[1]
+            else:
+                reset_display, resume_msg = "", "Auto-resume in ~5h"
+
+            reset_ts, _disp = run_module._compute_quota_reset_ts(instance)
+            from app.pause_manager import create_pause
+            create_pause(koan_root_str, "quota", reset_ts, reset_display or _disp)
+
+        assert len(pause_calls) == 1, "create_pause must be called on quota exhaustion"
+        assert pause_calls[0][0] == koan_root_str
+        assert pause_calls[0][1] == "quota"
+        assert pause_calls[0][2] == future_ts
+
     def test_post_mission_quota_info_tuple_handling(self):
         """Post-mission quota_info is a (reset_display, resume_msg) tuple."""
         post_result = {

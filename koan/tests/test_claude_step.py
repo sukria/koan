@@ -191,6 +191,35 @@ class TestRebaseOntoTarget:
         for call in abort_calls:
             assert call[1].get("timeout", 0) > 0
 
+    @patch("app.cli_exec.subprocess.run")
+    @patch("app.claude_step._run_git")
+    def test_timeout_caught_and_logged(self, mock_git, mock_subprocess, capsys):
+        """TimeoutExpired should be caught (not just Exception) and logged."""
+        mock_git.side_effect = subprocess.TimeoutExpired("git", 60)
+        result = _rebase_onto_target("main", "/project")
+        assert result is None
+        captured = capsys.readouterr()
+        assert "Rebase onto" in captured.err
+        assert "timed out" in captured.err.lower() or "timeout" in captured.err.lower()
+
+    @patch("app.cli_exec.subprocess.run")
+    @patch("app.claude_step._run_git")
+    def test_os_error_caught_and_logged(self, mock_git, mock_subprocess, capsys):
+        """OSError (e.g. git not found) should be caught and logged."""
+        mock_git.side_effect = OSError("No such file or directory: 'git'")
+        result = _rebase_onto_target("main", "/project")
+        assert result is None
+        captured = capsys.readouterr()
+        assert "Rebase onto" in captured.err
+
+    @patch("app.cli_exec.subprocess.run")
+    @patch("app.claude_step._run_git")
+    def test_unexpected_exception_not_caught(self, mock_git, mock_subprocess):
+        """Unexpected exceptions (e.g. ValueError) should propagate, not be swallowed."""
+        mock_git.side_effect = ValueError("unexpected error")
+        with pytest.raises(ValueError, match="unexpected"):
+            _rebase_onto_target("main", "/project")
+
 
 # ---------- run_claude ----------
 

@@ -280,6 +280,29 @@ class TestCreatePendingFile:
         content = Path(path).read_text()
         assert "Mode: mission" in content
 
+    def test_uses_atomic_write(self, tmp_path):
+        """pending.md must be written atomically to prevent corruption on crash."""
+        from unittest.mock import patch
+
+        from app.loop_manager import create_pending_file
+
+        instance = str(tmp_path / "instance")
+        os.makedirs(os.path.join(instance, "journal"), exist_ok=True)
+
+        with patch("app.loop_manager.atomic_write") as mock_atomic:
+            create_pending_file(
+                instance_dir=instance,
+                project_name="koan",
+                run_num=1,
+                max_runs=20,
+                autonomous_mode="deep",
+            )
+            mock_atomic.assert_called_once()
+            # Verify it was called with the pending.md path and content
+            args = mock_atomic.call_args[0]
+            assert str(args[0]).endswith("pending.md")
+            assert "# Autonomous run" in args[1]
+
 
 # --- Test interruptible_sleep ---
 

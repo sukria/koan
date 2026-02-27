@@ -49,7 +49,8 @@ def _rebase_onto_target(base: str, project_path: str) -> Optional[str]:
                 cwd=project_path,
             )
             return remote
-        except Exception:
+        except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
+            print(f"[claude_step] Rebase onto {remote}/{base} failed: {e}", file=sys.stderr)
             subprocess.run(
                 ["git", "rebase", "--abort"],
                 stdin=subprocess.DEVNULL,
