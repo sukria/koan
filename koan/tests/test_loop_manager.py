@@ -650,6 +650,7 @@ class TestGitHubNotificationBackoff:
         self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
     ):
         import app.loop_manager as lm
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         mock_config.return_value = {}
@@ -658,7 +659,7 @@ class TestGitHubNotificationBackoff:
         mock_repos.return_value = set()
 
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([], [])):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
 
         assert result == 0
@@ -672,6 +673,7 @@ class TestGitHubNotificationBackoff:
         self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
     ):
         import app.loop_manager as lm
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         lm._consecutive_empty_checks = 3  # simulate previous backoff
@@ -683,7 +685,7 @@ class TestGitHubNotificationBackoff:
 
         fake_notif = {"id": "1", "subject": {"url": "https://api.github.com/repos/o/r/issues/1"}}
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([fake_notif], [])), \
              patch("app.github_command_handler.process_single_notification", return_value=(True, None)):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
 
@@ -698,6 +700,7 @@ class TestGitHubNotificationBackoff:
         self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
     ):
         import app.loop_manager as lm
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         mock_config.return_value = {}
@@ -707,7 +710,7 @@ class TestGitHubNotificationBackoff:
 
         # First call: succeeds, sets backoff
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([], [])):
             process_github_notifications(str(tmp_path), str(tmp_path))
 
         assert lm._consecutive_empty_checks == 1
@@ -727,6 +730,7 @@ class TestGitHubNotificationBackoff:
         self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
     ):
         import app.loop_manager as lm
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         mock_config.return_value = {}
@@ -738,7 +742,7 @@ class TestGitHubNotificationBackoff:
         for i in range(4):
             lm._last_github_check = 0  # force past throttle
             with patch("app.projects_config.load_projects_config", return_value={}), \
-                 patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+                 patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([], [])):
                 process_github_notifications(str(tmp_path), str(tmp_path))
 
         assert lm._consecutive_empty_checks == 4
@@ -768,6 +772,7 @@ class TestGitHubNotificationBackoff:
     ):
         """Notifications present but all fail to create missions — still resets backoff."""
         import app.loop_manager as lm
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         lm._consecutive_empty_checks = 5
@@ -779,7 +784,7 @@ class TestGitHubNotificationBackoff:
 
         fake_notif = {"id": "1", "subject": {"url": "https://api.github.com/repos/o/r/issues/1"}}
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([fake_notif], [])), \
              patch("app.github_command_handler.process_single_notification", return_value=(False, "error")), \
              patch("app.loop_manager._post_error_for_notification"):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
@@ -800,6 +805,127 @@ class TestGitHubNotificationBackoff:
 
         assert result == 0
         assert lm._consecutive_empty_checks == 3
+
+
+# --- Test _drain_notifications ---
+
+
+class TestDrainNotifications:
+    """Test _drain_notifications marks non-actionable notifications as read."""
+
+    @patch("app.github_notifications.mark_notification_read")
+    def test_drains_notifications_with_ids(self, mock_mark):
+        from app.loop_manager import _drain_notifications
+
+        notifications = [
+            {"id": "100", "reason": "ci_activity"},
+            {"id": "101", "reason": "review_requested"},
+            {"id": "102", "reason": "assign"},
+        ]
+        result = _drain_notifications(notifications)
+        assert result == 3
+        assert mock_mark.call_count == 3
+        mock_mark.assert_any_call("100")
+        mock_mark.assert_any_call("101")
+        mock_mark.assert_any_call("102")
+
+    @patch("app.github_notifications.mark_notification_read")
+    def test_empty_list_drains_nothing(self, mock_mark):
+        from app.loop_manager import _drain_notifications
+
+        result = _drain_notifications([])
+        assert result == 0
+        mock_mark.assert_not_called()
+
+    @patch("app.github_notifications.mark_notification_read")
+    def test_skips_notifications_without_id(self, mock_mark):
+        from app.loop_manager import _drain_notifications
+
+        notifications = [
+            {"reason": "ci_activity"},  # no id key
+            {"id": "", "reason": "assign"},  # empty id
+            {"id": "200", "reason": "review_requested"},
+        ]
+        result = _drain_notifications(notifications)
+        # Only the one with a non-empty id should be drained
+        assert result == 1
+        mock_mark.assert_called_once_with("200")
+
+    @patch("app.github_notifications.mark_notification_read")
+    def test_respects_max_drain_per_cycle(self, mock_mark):
+        from app.loop_manager import _drain_notifications, _MAX_DRAIN_PER_CYCLE
+
+        # Create more notifications than the max
+        notifications = [{"id": str(i), "reason": "ci_activity"} for i in range(50)]
+        result = _drain_notifications(notifications)
+        assert result == _MAX_DRAIN_PER_CYCLE
+        assert mock_mark.call_count == _MAX_DRAIN_PER_CYCLE
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    @patch("app.github_notifications.mark_notification_read")
+    def test_drain_called_in_process_github_notifications(
+        self, mock_mark, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        """process_github_notifications drains non-actionable notifications."""
+        from app.github_notifications import FetchResult
+        from app.loop_manager import process_github_notifications, reset_github_backoff
+
+        reset_github_backoff()
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 24}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        drain_notifs = [
+            {"id": "300", "reason": "ci_activity"},
+            {"id": "301", "reason": "review_requested"},
+        ]
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications",
+                   return_value=FetchResult([], drain_notifs)):
+            process_github_notifications(str(tmp_path), str(tmp_path))
+
+        # Should have called mark_notification_read for drain notifications
+        assert mock_mark.call_count == 2
+        mock_mark.assert_any_call("300")
+        mock_mark.assert_any_call("301")
+
+    @patch("app.loop_manager._load_github_config")
+    @patch("app.loop_manager._build_skill_registry")
+    @patch("app.loop_manager._get_known_repos_from_projects")
+    @patch("app.utils.load_config")
+    @patch("app.github_notifications.mark_notification_read")
+    def test_drain_happens_alongside_actionable_processing(
+        self, mock_mark, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path
+    ):
+        """Both actionable and drain notifications are processed in a single cycle."""
+        from app.github_notifications import FetchResult
+        from app.loop_manager import process_github_notifications, reset_github_backoff
+
+        reset_github_backoff()
+
+        mock_config.return_value = {}
+        mock_gh_config.return_value = {"bot_username": "bot", "max_age": 24}
+        mock_registry.return_value = MagicMock()
+        mock_repos.return_value = set()
+
+        actionable = [{"id": "1", "subject": {"url": ""}}]
+        drain = [{"id": "400", "reason": "ci_activity"}]
+
+        with patch("app.projects_config.load_projects_config", return_value={}), \
+             patch("app.github_notifications.fetch_unread_notifications",
+                   return_value=FetchResult(actionable, drain)), \
+             patch("app.github_command_handler.process_single_notification", return_value=(True, None)), \
+             patch("app.loop_manager._notify_mission_from_mention"):
+            result = process_github_notifications(str(tmp_path), str(tmp_path))
+
+        assert result == 1  # 1 actionable processed
+        # Drain notification should also be marked as read
+        mock_mark.assert_called_once_with("400")
 
 
 # --- Test _normalize_github_url ---
@@ -997,6 +1123,7 @@ class TestProcessNotificationsConsoleOutput:
     def test_logs_fetched_notifications(
         self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path, capsys
     ):
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         mock_config.return_value = {}
@@ -1012,7 +1139,7 @@ class TestProcessNotificationsConsoleOutput:
             "updated_at": "2026-02-19T12:00:00Z",
         }
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([fake_notif], [])), \
              patch("app.github_command_handler.process_single_notification", return_value=(True, None)), \
              patch("app.loop_manager._notify_mission_from_mention"):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
@@ -1030,6 +1157,7 @@ class TestProcessNotificationsConsoleOutput:
     def test_logs_error_notifications(
         self, mock_config, mock_repos, mock_registry, mock_gh_config, tmp_path, capsys
     ):
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         mock_config.return_value = {}
@@ -1045,7 +1173,7 @@ class TestProcessNotificationsConsoleOutput:
             "updated_at": "2026-02-19T12:00:00Z",
         }
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([fake_notif], [])), \
              patch("app.github_command_handler.process_single_notification", return_value=(False, "Permission denied")), \
              patch("app.loop_manager._post_error_for_notification"):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
@@ -1078,8 +1206,8 @@ class TestFetchNotificationsLogging:
         with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
             result = fetch_unread_notifications()
 
-        assert len(result) == 1
-        assert "skipped 3 non-mention" in caplog.text
+        assert len(result.actionable) == 1
+        assert "drain-only" in caplog.text
         assert "review_requested=2" in caplog.text
         assert "assign=1" in caplog.text
 
@@ -1097,8 +1225,8 @@ class TestFetchNotificationsLogging:
         with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
             result = fetch_unread_notifications(known)
 
-        assert len(result) == 0
-        assert "skipped 1 mentions from unknown repos" in caplog.text
+        assert len(result.actionable) == 0
+        assert "unknown repos" in caplog.text
         assert "unknown/repo" in caplog.text
 
     @patch("app.github_notifications.api")
@@ -1112,30 +1240,34 @@ class TestFetchNotificationsLogging:
 
         known = {"sukria/koan"}  # lowercase
         result = fetch_unread_notifications(known)
-        assert len(result) == 1  # Should match despite case difference
+        assert len(result.actionable) == 1  # Should match despite case difference
 
     @patch("app.github_notifications.api")
     def test_logs_api_error(self, mock_api, caplog):
         import logging
-        from app.github_notifications import fetch_unread_notifications
+        from app.github_notifications import FetchResult, fetch_unread_notifications
 
         mock_api.side_effect = RuntimeError("connection refused")
         with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
             result = fetch_unread_notifications()
 
-        assert result == []
+        assert isinstance(result, FetchResult)
+        assert result.actionable == []
+        assert result.drain == []
         assert "failed to fetch" in caplog.text
 
     @patch("app.github_notifications.api")
     def test_logs_empty_response(self, mock_api, caplog):
         import logging
-        from app.github_notifications import fetch_unread_notifications
+        from app.github_notifications import FetchResult, fetch_unread_notifications
 
         mock_api.return_value = ""
         with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
             result = fetch_unread_notifications()
 
-        assert result == []
+        assert isinstance(result, FetchResult)
+        assert result.actionable == []
+        assert result.drain == []
         assert "empty response" in caplog.text
 
 
@@ -1310,6 +1442,7 @@ class TestConfigurableCheckInterval:
     ):
         """On first call, loads check_interval_seconds from config."""
         import app.loop_manager as lm
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         config_with_interval = {"github": {"check_interval_seconds": 90}}
@@ -1319,7 +1452,7 @@ class TestConfigurableCheckInterval:
         mock_repos.return_value = set()
 
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([], [])):
             process_github_notifications(str(tmp_path), str(tmp_path))
 
         assert lm._GITHUB_CHECK_INTERVAL == 90
@@ -1339,6 +1472,7 @@ class TestConfigurableCheckInterval:
     ):
         """The interval is loaded from config only on the first call."""
         import app.loop_manager as lm
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         mock_config.return_value = {"github": {"check_interval_seconds": 120}}
@@ -1347,7 +1481,7 @@ class TestConfigurableCheckInterval:
         mock_repos.return_value = set()
 
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([], [])):
             process_github_notifications(str(tmp_path), str(tmp_path))
 
         assert lm._GITHUB_CHECK_INTERVAL == 120
@@ -1357,7 +1491,7 @@ class TestConfigurableCheckInterval:
         lm._last_github_check = 0  # force past throttle
 
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([], [])):
             process_github_notifications(str(tmp_path), str(tmp_path))
 
         # Still 120, not 30
@@ -1403,6 +1537,7 @@ class TestConfigurableMaxCheckInterval:
     ):
         """On first call, loads max_check_interval_seconds from config."""
         import app.loop_manager as lm
+        from app.github_notifications import FetchResult
         from app.loop_manager import process_github_notifications
 
         config = {"github": {"max_check_interval_seconds": 600}}
@@ -1412,7 +1547,7 @@ class TestConfigurableMaxCheckInterval:
         mock_repos.return_value = set()
 
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[]):
+             patch("app.github_notifications.fetch_unread_notifications", return_value=FetchResult([], [])):
             process_github_notifications(str(tmp_path), str(tmp_path))
 
         assert lm._GITHUB_MAX_CHECK_INTERVAL == 600

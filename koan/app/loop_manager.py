@@ -381,7 +381,7 @@ def process_github_notifications(
         projects_config = load_projects_config(koan_root)
 
         # Fetch and process notifications
-        from app.github_notifications import fetch_unread_notifications
+        from app.github_notifications import fetch_unread_notifications, mark_notification_read
         from app.github_command_handler import (
             process_single_notification,
             post_error_reply,
@@ -389,12 +389,13 @@ def process_github_notifications(
             extract_issue_number_from_notification,
         )
 
-        notifications = fetch_unread_notifications(known_repos)
+        result = fetch_unread_notifications(known_repos)
+        notifications = result.actionable
 
         if notifications:
-            _github_log(f"Fetched {len(notifications)} @mention notification(s)")
+            _github_log(f"Fetched {len(notifications)} actionable notification(s)")
         else:
-            log.debug("GitHub: no @mention notifications found")
+            log.debug("GitHub: no actionable notifications found")
 
         missions_created = 0
         for notif in notifications:
@@ -416,6 +417,14 @@ def process_github_notifications(
                 _github_log(f"Notification error for {repo}: {error[:100]}", "warning")
                 _post_error_for_notification(notif, error)
 
+        # Drain non-actionable notifications (ci_activity, review_requested,
+        # etc.) to prevent accumulation that blocks future @mention detection.
+        # When old notifications pile up on a thread, new @mentions may update
+        # the existing notification instead of creating a fresh "mention" one.
+        drained = _drain_notifications(result.drain)
+        if drained > 0:
+            log.debug("GitHub: drained %d non-actionable notification(s)", drained)
+
         # Update backoff state
         if missions_created > 0 or notifications:
             _consecutive_empty_checks = 0
@@ -433,6 +442,35 @@ def process_github_notifications(
     except Exception as e:
         log.warning("GitHub notification check failed: %s", e)
         return 0
+
+
+# Maximum non-actionable notifications to drain per check cycle.
+# Prevents API overload on first run after a long accumulation period.
+_MAX_DRAIN_PER_CYCLE = 30
+
+
+def _drain_notifications(notifications: list) -> int:
+    """Mark non-actionable notifications as read to prevent accumulation.
+
+    Non-actionable notifications (ci_activity, review_requested, state_change,
+    etc.) pile up on threads the bot owns. When they stay unread, new @mentions
+    on those threads may update the existing notification instead of creating a
+    fresh "mention"-reason notification, causing @mentions to be missed.
+
+    Rate-limited to _MAX_DRAIN_PER_CYCLE per call to avoid API overload.
+
+    Returns:
+        Number of notifications drained.
+    """
+    from app.github_notifications import mark_notification_read
+
+    drained = 0
+    for notif in notifications[:_MAX_DRAIN_PER_CYCLE]:
+        thread_id = str(notif.get("id", ""))
+        if thread_id:
+            mark_notification_read(thread_id)
+            drained += 1
+    return drained
 
 
 def _log_notification(notif: dict) -> None:

@@ -36,7 +36,7 @@ class TestFetchNotificationsLogging:
         assert "3 total unread notifications" in caplog.text
 
     @patch("app.github_notifications.api")
-    def test_logs_skipped_non_mention(self, mock_api, caplog):
+    def test_logs_drain_only_notifications(self, mock_api, caplog):
         import json
         from app.github_notifications import fetch_unread_notifications
 
@@ -46,10 +46,11 @@ class TestFetchNotificationsLogging:
         mock_api.return_value = json.dumps(notifications)
 
         with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
-            fetch_unread_notifications()
+            result = fetch_unread_notifications()
 
-        assert "skipped 1 non-mention" in caplog.text
+        assert "drain-only" in caplog.text
         assert "assign=1" in caplog.text
+        assert len(result.drain) == 1
 
     @patch("app.github_notifications.api")
     def test_logs_skipped_unknown_repo(self, mock_api, caplog):
@@ -68,7 +69,7 @@ class TestFetchNotificationsLogging:
         assert "o/unknown" in caplog.text
 
     @patch("app.github_notifications.api")
-    def test_logs_mention_count_after_filtering(self, mock_api, caplog):
+    def test_logs_actionable_count_after_filtering(self, mock_api, caplog):
         import json
         from app.github_notifications import fetch_unread_notifications
 
@@ -81,8 +82,8 @@ class TestFetchNotificationsLogging:
         with caplog.at_level(logging.DEBUG, logger="app.github_notifications"):
             result = fetch_unread_notifications()
 
-        assert len(result) == 1
-        assert "1 mention notification(s) after filtering" in caplog.text
+        assert len(result.actionable) == 1
+        assert "1 actionable + 1 drain notification(s)" in caplog.text
 
 
 # --- Tests for _fetch_and_filter_comment debug logging ---
@@ -354,6 +355,10 @@ class TestProcessNotificationsIntegration:
         from app.loop_manager import reset_github_backoff
         reset_github_backoff()
 
+    def _make_fetch_result(self, actionable, drain=None):
+        from app.github_notifications import FetchResult
+        return FetchResult(actionable, drain or [])
+
     @patch("app.loop_manager._notify_mission_from_mention")
     @patch("app.loop_manager._load_github_config")
     @patch("app.loop_manager._build_skill_registry")
@@ -375,7 +380,7 @@ class TestProcessNotificationsIntegration:
             "subject": {"url": "https://api.github.com/repos/o/r/issues/1", "title": "Bug", "type": "Issue"},
         }
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=self._make_fetch_result([fake_notif])), \
              patch("app.github_command_handler.process_single_notification", return_value=(True, None)):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
 
@@ -403,7 +408,7 @@ class TestProcessNotificationsIntegration:
             "subject": {"url": "", "title": "PR", "type": "PullRequest"},
         }
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=[fake_notif]), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=self._make_fetch_result([fake_notif])), \
              patch("app.github_command_handler.process_single_notification", return_value=(False, "err")), \
              patch("app.loop_manager._post_error_for_notification"):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
@@ -434,7 +439,7 @@ class TestProcessNotificationsIntegration:
         # First two succeed, third fails
         side_effects = [(True, None), (True, None), (False, None)]
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=notifs), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=self._make_fetch_result(notifs)), \
              patch("app.github_command_handler.process_single_notification", side_effect=side_effects):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
 
@@ -451,6 +456,10 @@ class TestProcessNotificationsDebugLogging:
     def setup_method(self):
         from app.loop_manager import reset_github_backoff
         reset_github_backoff()
+
+    def _make_fetch_result(self, actionable, drain=None):
+        from app.github_notifications import FetchResult
+        return FetchResult(actionable, drain or [])
 
     @patch("app.loop_manager._load_github_config")
     @patch("app.loop_manager._build_skill_registry")
@@ -470,7 +479,7 @@ class TestProcessNotificationsDebugLogging:
             {"id": "1", "repository": {"full_name": "o/r"}, "subject": {"url": "", "title": "T", "type": "PR"}},
         ]
         with patch("app.projects_config.load_projects_config", return_value={}), \
-             patch("app.github_notifications.fetch_unread_notifications", return_value=notifs), \
+             patch("app.github_notifications.fetch_unread_notifications", return_value=self._make_fetch_result(notifs)), \
              patch("app.github_command_handler.process_single_notification", return_value=(False, None)):
             process_github_notifications(str(tmp_path), str(tmp_path))
 

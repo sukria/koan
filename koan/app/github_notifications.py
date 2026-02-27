@@ -31,48 +31,73 @@ _processed_comments: BoundedSet = BoundedSet(maxlen=_MAX_PROCESSED_COMMENTS)
 _CODE_BLOCK_RE = re.compile(r'```.*?```|`[^`]+`', re.DOTALL)
 
 
-def fetch_unread_notifications(known_repos: Optional[Set[str]] = None) -> List[dict]:
-    """Fetch unread GitHub notifications filtered to mentions.
+# Reasons that may contain @mention commands in the latest comment.
+# "mention" is the primary signal.  "author" and "comment" notifications
+# can hide @mentions when a bot-authored thread already has an unread
+# notification — GitHub updates the existing notification instead of
+# creating a new "mention" one.
+_ACTIONABLE_REASONS = {"mention", "author", "comment"}
+
+
+class FetchResult:
+    """Result from fetch_unread_notifications.
+
+    Attributes:
+        actionable: Notifications that might contain @mention commands
+            (reasons: mention, author, comment).
+        drain: Non-actionable notifications from known repos that should
+            be marked as read to prevent accumulation.
+    """
+    __slots__ = ("actionable", "drain")
+
+    def __init__(self, actionable: List[dict], drain: List[dict]):
+        self.actionable = actionable
+        self.drain = drain
+
+
+def fetch_unread_notifications(known_repos: Optional[Set[str]] = None) -> FetchResult:
+    """Fetch unread GitHub notifications, categorized for processing.
+
+    Returns actionable notifications (may contain @mention commands) and
+    drain-only notifications (noise that should be marked as read to
+    prevent accumulation that blocks future @mention detection).
 
     Args:
         known_repos: Optional set of "owner/repo" strings to filter against.
-            If None, all mention notifications are returned.
+            If None, all notifications from any repo are included.
 
     Returns:
-        List of notification dicts from the GitHub API.
+        FetchResult with actionable and drain lists.
     """
     try:
         raw = api("notifications", extra_args=["--paginate"])
     except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
         log.debug("GitHub API: failed to fetch notifications: %s", e)
-        return []
+        return FetchResult([], [])
 
     if not raw:
         log.debug("GitHub API: empty response from notifications endpoint")
-        return []
+        return FetchResult([], [])
 
     try:
         notifications = json.loads(raw)
     except json.JSONDecodeError:
         log.debug("GitHub API: invalid JSON in notifications response")
-        return []
+        return FetchResult([], [])
 
     if not isinstance(notifications, list):
         log.debug("GitHub API: unexpected response type: %s", type(notifications).__name__)
-        return []
+        return FetchResult([], [])
 
     log.debug("GitHub API: %d total unread notifications", len(notifications))
 
     skipped_reasons: Dict[str, int] = {}
     skipped_repos: List[str] = []
-    results = []
+    actionable = []
+    drain = []
     for notif in notifications:
         reason = notif.get("reason", "?")
         repo_name = notif.get("repository", {}).get("full_name", "?")
-
-        if reason != "mention":
-            skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
-            continue
 
         # Filter by known repos if provided — normalize for comparison
         if known_repos:
@@ -81,22 +106,29 @@ def fetch_unread_notifications(known_repos: Optional[Set[str]] = None) -> List[d
                 skipped_repos.append(repo_name)
                 continue
 
-        results.append(notif)
+        if reason in _ACTIONABLE_REASONS:
+            actionable.append(notif)
+        else:
+            drain.append(notif)
+            skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
 
     if skipped_reasons:
         log.debug(
-            "GitHub: skipped %d non-mention notifications: %s",
+            "GitHub: %d drain-only notifications: %s",
             sum(skipped_reasons.values()),
             ", ".join(f"{r}={c}" for r, c in sorted(skipped_reasons.items())),
         )
     if skipped_repos:
         log.debug(
-            "GitHub: skipped %d mentions from unknown repos: %s",
+            "GitHub: skipped %d notifications from unknown repos: %s",
             len(skipped_repos), ", ".join(skipped_repos),
         )
 
-    log.debug("GitHub: %d mention notification(s) after filtering", len(results))
-    return results
+    log.debug(
+        "GitHub: %d actionable + %d drain notification(s) from known repos",
+        len(actionable), len(drain),
+    )
+    return FetchResult(actionable, drain)
 
 
 def parse_mention_command(comment_body: str, nickname: str) -> Optional[Tuple[str, str]]:
