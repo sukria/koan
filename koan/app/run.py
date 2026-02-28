@@ -24,7 +24,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import traceback
 from pathlib import Path
@@ -1840,14 +1839,24 @@ def _run_skill_mission(
     debug_log(f"[run] skill exec: cmd={' '.join(skill_cmd)}")
     debug_log(f"[run] skill exec: cwd={koan_pkg_dir} timeout={skill_timeout}s")
     stdout_lines = []
-    stderr_lines = []
     proc = None
+
+    # Create temp files for post-mission processing up front.
+    # stderr is redirected to a file instead of a pipe to eliminate
+    # deadlock risk: if a background drain thread dies (e.g.
+    # UnicodeDecodeError), the pipe fills and both processes stall.
+    fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")
+    os.close(fd_out)
+    fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
+    os.close(fd_err)
+    stderr_fh = None
     try:
+        stderr_fh = open(stderr_file, "w")
         proc = subprocess.Popen(
             skill_cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=stderr_fh,
             cwd=koan_pkg_dir,
             env=skill_env,
             text=True,
@@ -1855,15 +1864,6 @@ def _run_skill_mission(
         )
         # Register for double-tap CTRL-C termination.
         _sig.claude_proc = proc
-        # Drain stderr in a background thread to prevent deadlock.
-        # If the child fills the stderr pipe buffer (~64KB) while we
-        # block reading stdout, both processes stall indefinitely.
-        def _drain_stderr():
-            for line in proc.stderr:
-                stderr_lines.append(line.rstrip("\n"))
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
 
         # Stream stdout line-by-line, appending each to pending.md
         # so /live shows real-time progress.
@@ -1876,16 +1876,19 @@ def _run_skill_mission(
                     f.write(f"{stripped}\n")
             except OSError:
                 pass
-        # Wait for stderr thread to finish after stdout is exhausted.
-        # Use a fraction of the skill timeout — stderr should be done
-        # shortly after stdout, but avoid blocking indefinitely.
-        stderr_thread.join(timeout=min(30, skill_timeout))
-        if stderr_lines:
-            print("\n".join(stderr_lines), file=sys.stderr)
         proc.wait(timeout=skill_timeout)
         exit_code = proc.returncode
         skill_stdout = "\n".join(stdout_lines)
-        skill_stderr = "\n".join(stderr_lines)
+        # Read stderr from file after process exits.
+        stderr_fh.close()
+        stderr_fh = None
+        try:
+            with open(stderr_file) as f:
+                skill_stderr = f.read()
+        except OSError:
+            skill_stderr = ""
+        if skill_stderr.strip():
+            print(skill_stderr, file=sys.stderr)
         debug_log(
             f"[run] skill exec: exit_code={exit_code} "
             f"stdout_len={len(skill_stdout)} stderr_len={len(skill_stderr)}"
@@ -1901,7 +1904,7 @@ def _run_skill_mission(
         debug_log(f"[run] skill exec: TIMEOUT ({skill_timeout}s)")
         exit_code = 1
         skill_stdout = "\n".join(stdout_lines)
-        skill_stderr = "\n".join(stderr_lines)
+        skill_stderr = ""
     except Exception as e:
         if proc is not None:
             _kill_process_group(proc)
@@ -1909,22 +1912,19 @@ def _run_skill_mission(
         debug_log(f"[run] skill exec: EXCEPTION {e}")
         exit_code = 1
         skill_stdout = "\n".join(stdout_lines)
-        skill_stderr = "\n".join(stderr_lines)
+        skill_stderr = ""
     finally:
+        if stderr_fh is not None:
+            stderr_fh.close()
         _sig.claude_proc = None
         _reset_terminal()
         # Restore koan repo branch if it was changed by the skill.
         _restore_koan_branch(koan_root, koan_branch_before)
 
-    # Write output to temp files for post-mission processing
-    fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")
-    os.close(fd_out)
-    fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
-    os.close(fd_err)
+    # Write stdout to its temp file for post-mission processing.
+    # stderr is already in stderr_file from the subprocess redirect.
     with open(stdout_file, 'wb') as f:
         f.write(skill_stdout.encode('utf-8'))
-    with open(stderr_file, 'wb') as f:
-        f.write(skill_stderr.encode('utf-8'))
 
     try:
         from app.mission_runner import run_post_mission
