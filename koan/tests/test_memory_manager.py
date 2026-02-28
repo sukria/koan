@@ -1,6 +1,5 @@
 """Tests for memory_manager.py — scoped summary, compaction, learnings dedup, journal archival."""
 
-import os
 import pytest
 from datetime import date, timedelta
 from unittest.mock import patch
@@ -653,6 +652,54 @@ class TestCapLearnings:
         content = path.read_text()
         assert content.startswith("# Learnings")
 
+    def test_marker_not_treated_as_content_on_reparse(self, tmp_path):
+        """Regression: marker line must not accumulate on repeated cap runs.
+
+        Previously the marker was f"\\n_(oldest N entries archived)_\\n" with
+        embedded newlines. When re-parsed, the in_header guard treated the
+        marker as a content line, causing it to accumulate on every run.
+        """
+        lines = ["# Learnings", ""]
+        for i in range(30):
+            lines.append(f"- fact {i}")
+        path = self._write_learnings(tmp_path, "koan", "\n".join(lines))
+
+        # First cap — produces marker
+        removed1 = cap_learnings(str(tmp_path), "koan", max_lines=10)
+        assert removed1 == 20
+        content1 = path.read_text()
+        assert "_(oldest 20 entries archived)_" in content1
+        marker_count_1 = content1.count("_(oldest")
+
+        # Second cap on the already-capped file — marker should NOT accumulate
+        # The file now has ~10 content lines + marker + header, so it shouldn't
+        # need re-capping. But if we add more lines to force it:
+        lines2 = content1.rstrip("\n").split("\n")
+        for i in range(15):
+            lines2.append(f"- new fact {i}")
+        path.write_text("\n".join(lines2) + "\n")
+
+        removed2 = cap_learnings(str(tmp_path), "koan", max_lines=10)
+        assert removed2 > 0
+        content2 = path.read_text()
+        # Marker should appear exactly once (the new one), not accumulate
+        marker_count_2 = content2.count("_(oldest")
+        assert marker_count_2 == 1, f"Marker accumulated: found {marker_count_2} markers"
+
+    def test_marker_has_no_embedded_newlines(self, tmp_path):
+        """The archive marker line should be a clean single line."""
+        lines = ["# Learnings", ""]
+        for i in range(25):
+            lines.append(f"- fact {i}")
+        path = self._write_learnings(tmp_path, "koan", "\n".join(lines))
+
+        cap_learnings(str(tmp_path), "koan", max_lines=10)
+        content_lines = path.read_text().splitlines()
+        marker_lines = [l for l in content_lines if "oldest" in l and "archived" in l]
+        assert len(marker_lines) == 1
+        # The marker should be a clean line, not contain embedded \n
+        assert marker_lines[0].strip() == f"_(oldest 15 entries archived)_"
+
 
 # ---------------------------------------------------------------------------
 # Archive safety: write archives BEFORE deleting sources
@@ -824,35 +871,67 @@ class TestFileErrorHandling:
 
 
 # ---------------------------------------------------------------------------
-# Archive fsync safety
+# Archive atomic write safety
 # ---------------------------------------------------------------------------
 
-class TestArchiveFsync:
+class TestArchiveAtomicWrite:
 
     def _make_journal_day(self, tmp_path, date_str, project, content):
         day_dir = tmp_path / "journal" / date_str
         day_dir.mkdir(parents=True, exist_ok=True)
         (day_dir / f"{project}.md").write_text(content)
 
-    def test_archive_write_calls_fsync(self, tmp_path):
-        """Verify archive writes are fsynced for crash safety."""
+    def test_archive_creates_valid_file(self, tmp_path):
+        """Verify archive writes produce valid, complete files."""
         old_date = (date.today() - timedelta(days=35)).strftime("%Y-%m-%d")
+        old_month = old_date[:7]
         self._make_journal_day(
             tmp_path, old_date, "koan",
             "## Session 1\n\n### Work\n\nDetails.\n"
         )
 
-        fsync_calls = []
-        original_fsync = os.fsync
+        archive_journals(str(tmp_path), archive_after_days=30)
 
-        def tracking_fsync(fd):
-            fsync_calls.append(fd)
-            return original_fsync(fd)
+        archive = tmp_path / "journal" / "archives" / old_month / "koan.md"
+        assert archive.exists()
+        content = archive.read_text()
+        assert content.startswith("# Journal archive")
+        assert "Work" in content
+        # File should be complete (no partial writes)
+        assert content.endswith("\n")
 
-        with patch("app.memory_manager.os.fsync", side_effect=tracking_fsync):
-            archive_journals(str(tmp_path), archive_after_days=30)
+    def test_archive_append_preserves_existing_content(self, tmp_path):
+        """When appending to an existing archive, existing content is preserved."""
+        old_date1 = (date.today() - timedelta(days=35)).strftime("%Y-%m-%d")
+        old_date2 = (date.today() - timedelta(days=36)).strftime("%Y-%m-%d")
+        old_month = old_date1[:7]
 
-        assert len(fsync_calls) >= 1
+        # Create first journal day
+        self._make_journal_day(
+            tmp_path, old_date1, "koan",
+            "## Session 1\n\n### First work\n\nDetails.\n"
+        )
+
+        # Archive it
+        archive_journals(str(tmp_path), archive_after_days=30)
+
+        archive = tmp_path / "journal" / "archives" / old_month / "koan.md"
+        assert archive.exists()
+        first_content = archive.read_text()
+        assert "First work" in first_content
+
+        # Create second journal day
+        self._make_journal_day(
+            tmp_path, old_date2, "koan",
+            "## Session 2\n\n### Second work\n\nMore details.\n"
+        )
+
+        # Archive again — should append
+        archive_journals(str(tmp_path), archive_after_days=30)
+
+        final_content = archive.read_text()
+        assert "First work" in final_content  # original preserved
+        assert "Second work" in final_content  # new content appended
 
 
 # ---------------------------------------------------------------------------

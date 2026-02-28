@@ -14,7 +14,7 @@ CLI:
 import json
 import re
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 # PR URL: https://github.com/owner/repo/pull/123
 _PR_URL_RE = re.compile(

@@ -24,7 +24,6 @@ Commands:
     cleanup                         Run all cleanup tasks
 """
 
-import os
 import re
 import shutil
 import sys
@@ -389,12 +388,12 @@ class MemoryManager:
 
             new_lines = [l for l in lines if l not in existing]
             if new_lines:
-                with open(archive_file, "a", encoding="utf-8") as f:
-                    if not existing:
-                        f.write(f"# Journal archive — {project} — {month}\n\n")
-                    f.write("\n".join(new_lines) + "\n")
-                    f.flush()
-                    os.fsync(f.fileno())
+                if existing:
+                    existing_content = archive_file.read_text(encoding="utf-8")
+                    full_content = existing_content.rstrip("\n") + "\n" + "\n".join(new_lines) + "\n"
+                else:
+                    full_content = f"# Journal archive — {project} — {month}\n\n" + "\n".join(new_lines) + "\n"
+                atomic_write(archive_file, full_content)
 
         # Now safe to delete source files
         for path, is_old in to_delete_dirs:
@@ -459,7 +458,7 @@ class MemoryManager:
         removed = len(content_lines) - max_lines
         kept = content_lines[-max_lines:]
 
-        result = headers + [f"\n_(oldest {removed} entries archived)_\n"] + kept
+        result = headers + ["", f"_(oldest {removed} entries archived)_", ""] + kept
         atomic_write(learnings_path, "\n".join(result) + "\n")
         return removed
 

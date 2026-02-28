@@ -15,7 +15,6 @@ Multi-step pipeline for /pr command:
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 from typing import Optional, Tuple, List
 
@@ -26,7 +25,6 @@ from app.claude_step import (
     run_project_tests,
 )
 from app.github import run_gh
-from app.github_url_parser import parse_pr_url
 from app.prompts import load_prompt_or_skill
 from app.rebase_pr import fetch_pr_context
 

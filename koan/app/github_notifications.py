@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 from app.bounded_set import BoundedSet
-from app.github import api, run_gh
+from app.github import api
 
 log = logging.getLogger(__name__)
 

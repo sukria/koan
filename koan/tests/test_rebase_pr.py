@@ -9,7 +9,7 @@ import pytest
 
 from app.claude_step import _rebase_onto_target, _run_git
 from app.utils import truncate_text
-from app.pr_review import parse_pr_url
+from app.github_url_parser import parse_pr_url
 from app.rebase_pr import (
     fetch_pr_context,
     build_comment_summary,
