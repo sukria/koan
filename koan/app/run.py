@@ -33,6 +33,17 @@ from app.iteration_manager import plan_iteration
 from app.loop_manager import check_pending_missions, interruptible_sleep
 from app.pid_manager import acquire_pidfile, release_pidfile
 from app.restart_manager import check_restart, clear_restart, RESTART_EXIT_CODE
+from app.run_log import (  # noqa: F401 — re-exported for backward compat
+    _ANSI_RESET,
+    _CATEGORY_COLORS,
+    _COLORS,
+    _init_colors,
+    _reset_terminal,
+    _styled,
+    bold_cyan,
+    bold_green,
+    log,
+)
 from app.shutdown_manager import is_shutdown_requested, clear_shutdown
 from app.utils import atomic_write
 
@@ -54,94 +65,6 @@ MAX_BACKOFF_ITERATION = 300
 
 # Notification throttling: notify on first error, then every N errors.
 ERROR_NOTIFICATION_INTERVAL = 5
-
-
-# ---------------------------------------------------------------------------
-# Colored logging
-# ---------------------------------------------------------------------------
-
-_COLORS = {}
-
-# Standalone ANSI reset (no dependency on _COLORS initialization)
-_ANSI_RESET = "\033[0m"
-
-
-def _reset_terminal():
-    """Write an ANSI reset to stdout and flush, restoring default attributes.
-
-    Called on exit paths to ensure the terminal is not left with active
-    ANSI attributes (DIM, BOLD, color, etc.) after Kōan shuts down.
-    """
-    try:
-        sys.stdout.write(_ANSI_RESET)
-        sys.stdout.flush()
-    except OSError:
-        pass  # Terminal may be gone during shutdown
-
-
-def _init_colors():
-    """Initialize ANSI color codes based on TTY detection."""
-    global _COLORS
-    if os.environ.get("KOAN_FORCE_COLOR", "") or sys.stdout.isatty():
-        _COLORS = {
-            "reset": "\033[0m",
-            "bold": "\033[1m",
-            "dim": "\033[2m",
-            "red": "\033[31m",
-            "green": "\033[32m",
-            "yellow": "\033[33m",
-            "blue": "\033[34m",
-            "magenta": "\033[35m",
-            "cyan": "\033[36m",
-            "white": "\033[37m",
-        }
-    else:
-        _COLORS = {k: "" for k in [
-            "reset", "bold", "dim", "red", "green", "yellow",
-            "blue", "magenta", "cyan", "white",
-        ]}
-
-
-_CATEGORY_COLORS = {
-    "koan": "cyan",
-    "error": "bold+red",
-    "init": "blue",
-    "health": "yellow",
-    "git": "magenta",
-    "github": "bold+magenta",
-    "mission": "green",
-    "quota": "bold+yellow",
-    "pause": "dim+blue",
-    "warning": "yellow",
-    "warn": "yellow",
-}
-
-
-def log(category: str, message: str):
-    """Print a colored log message."""
-    if not _COLORS:
-        _init_colors()
-    color_spec = _CATEGORY_COLORS.get(category, "white")
-    parts = color_spec.split("+")
-    prefix = "".join(_COLORS.get(p, "") for p in parts)
-    reset = _COLORS.get("reset", "")
-    print(f"{prefix}[{category}]{reset} {message}", flush=True)
-
-
-def _styled(text: str, *styles: str) -> str:
-    """Apply ANSI styles to text. E.g. _styled("hi", "bold", "cyan")."""
-    if not _COLORS:
-        _init_colors()
-    prefix = "".join(_COLORS.get(s, "") for s in styles)
-    return f"{prefix}{text}{_COLORS.get('reset', '')}"
-
-
-def bold_cyan(text: str) -> str:
-    return _styled(text, "bold", "cyan")
-
-
-def bold_green(text: str) -> str:
-    return _styled(text, "bold", "green")
 
 
 # ---------------------------------------------------------------------------
@@ -421,210 +344,17 @@ def parse_projects() -> list:
 
 
 # ---------------------------------------------------------------------------
-# Startup sequence
+# Startup sequence (delegated to startup_manager.py)
 # ---------------------------------------------------------------------------
 
 def run_startup(koan_root: str, instance: str, projects: list):
-    """Run all startup tasks (crash recovery, health, sync, etc.)."""
-    from app.banners import print_agent_banner
-    from app.github_auth import setup_github_auth
-    from app.git_sync import GitSync
-    from app.health_check import check_and_alert
-    from app.recover import recover_missions
-    from app.utils import (
-        get_branch_prefix,
-        get_cli_binary_for_shell,
-        get_interval_seconds,
-        get_max_runs,
-        get_start_on_pause,
-    )
+    """Run all startup tasks (crash recovery, health, sync, etc.).
 
-    # Load config
-    max_runs = get_max_runs()
-    interval = get_interval_seconds()
-    branch_prefix = get_branch_prefix()
-    cli_provider = get_cli_binary_for_shell()
-
-    # Print banner
-    try:
-        print_agent_banner(f"agent loop — {cli_provider}")
-    except Exception as e:
-        log("error", f"Banner display failed: {e}")
-
-    with protected_phase("Startup checks"):
-        # Crash recovery
-        log("health", "Checking for interrupted missions...")
-        try:
-            recover_missions(instance)
-        except Exception as e:
-            log("error", f"Crash recovery failed: {e}")
-
-        # Auto-migrate env vars to projects.yaml (one-shot, idempotent)
-        try:
-            from app.projects_migration import run_migration
-            migration_msgs = run_migration(koan_root)
-            for msg in migration_msgs:
-                log("init", f"[migration] {msg}")
-        except Exception as e:
-            log("error", f"Projects migration failed: {e}")
-
-        # Auto-populate github_url in projects.yaml from git remotes
-        try:
-            from app.projects_config import ensure_github_urls
-            gh_msgs = ensure_github_urls(koan_root)
-            for msg in gh_msgs:
-                log("init", f"[github-urls] {msg}")
-        except Exception as e:
-            log("error", f"GitHub URL population failed: {e}")
-
-        # Initialize workspace + yaml merged project registry
-        try:
-            from app.projects_merged import (
-                refresh_projects, 
-                get_warnings, 
-                populate_workspace_github_urls,
-                get_yaml_project_names
-            )
-            
-            projects = refresh_projects(koan_root)
-            
-            # Count workspace projects (not in projects.yaml)
-            yaml_project_names = get_yaml_project_names(koan_root)
-            ws_count = sum(1 for name, _ in projects if name not in yaml_project_names)
-            if ws_count:
-                log("init", f"[workspace] Discovered {ws_count} project(s) from workspace/")
-            
-            # Populate github_url cache for workspace projects
-            gh_count = populate_workspace_github_urls(koan_root)
-            if gh_count:
-                log("init", f"[workspace] Cached {gh_count} github_url(s) from git remotes")
-            
-            # Log any warnings from merge
-            for warning in get_warnings():
-                log("warn", f"[workspace] {warning}")
-        except Exception as e:
-            log("error", f"Workspace discovery failed: {e}")
-
-        # Sanity checks (all modules in koan/sanity/, alphabetical order)
-        log("health", "Running sanity checks...")
-        try:
-            from sanity import run_all
-            for name, modified, changes in run_all(instance):
-                if modified:
-                    for change in changes:
-                        log("health", f"  [{name}] {change}")
-        except Exception as e:
-            log("error", f"Sanity checks failed: {e}")
-
-        # Memory cleanup
-        log("health", "Running memory cleanup...")
-        try:
-            from app.memory_manager import run_cleanup
-            run_cleanup(instance)
-        except Exception as e:
-            log("error", f"Memory cleanup failed: {e}")
-
-        # Mission history cleanup
-        try:
-            from app.mission_history import cleanup_old_entries
-            cleanup_old_entries(instance)
-        except Exception as e:
-            log("error", f"Mission history cleanup failed: {e}")
-
-        # Health check
-        log("health", "Checking Telegram bridge health...")
-        try:
-            check_and_alert(koan_root, max_age=120)
-        except Exception as e:
-            log("error", f"Health check failed: {e}")
-
-    with protected_phase("Self-reflection check"):
-        log("health", "Checking self-reflection trigger...")
-        try:
-            from app.self_reflection import (
-                should_reflect, run_reflection, save_reflection, notify_outbox,
-            )
-            inst_path = Path(instance)
-            if should_reflect(inst_path):
-                observations = run_reflection(inst_path)
-                if observations:
-                    save_reflection(inst_path, observations)
-                    notify_outbox(inst_path, observations)
-        except Exception as e:
-            log("error", f"Self-reflection check failed: {e}")
-
-    # Start on pause
-    if get_start_on_pause():
-        # Remove stale system-generated reason files (quota, max_runs) to
-        # prevent auto-resume from a previous session.  Preserve manual
-        # pauses — user explicitly requested them via /pause.
-        koan_root_path = Path(koan_root)
-        reason_file = koan_root_path / ".koan-pause-reason"
-        if reason_file.exists():
-            try:
-                first_line = reason_file.read_text().strip().splitlines()[0]
-            except (OSError, IndexError):
-                first_line = ""
-            if first_line != "manual":
-                reason_file.unlink(missing_ok=True)
-        if not (koan_root_path / ".koan-pause").exists():
-            log("pause", "start_on_pause=true in config. Entering pause mode.")
-            (koan_root_path / ".koan-pause").touch()
-
-    # Git identity
-    koan_email = os.environ.get("KOAN_EMAIL", "")
-    if koan_email:
-        os.environ["GIT_AUTHOR_NAME"] = "Kōan"
-        os.environ["GIT_AUTHOR_EMAIL"] = koan_email
-        os.environ["GIT_COMMITTER_NAME"] = "Kōan"
-        os.environ["GIT_COMMITTER_EMAIL"] = koan_email
-
-    # GitHub auth
-    if os.environ.get("GITHUB_USER"):
-        success = setup_github_auth()
-        if success:
-            log("init", f"GitHub CLI authenticated as {os.environ['GITHUB_USER']}")
-        else:
-            log("init", f"Warning: GitHub auth failed for {os.environ['GITHUB_USER']}")
-
-    # Startup notification
-    log("init", f"Starting. Max runs: {max_runs}, interval: {interval}s")
-
-    project_list = "\n".join(f"  • {n}" for n, _ in sorted(projects))
-    status_line = _build_startup_status(koan_root)
-    set_status(koan_root, status_line)
-    _notify(instance, (
-        f"Kōan starting — {max_runs} max runs, {interval}s interval.\n"
-        f"Projects:\n{project_list}\n"
-        f"Current: {projects[0][0]}.\n"
-        f"Status: {status_line}"
-    ))
-
-    with protected_phase("Git sync"):
-        log("git", "Running git sync...")
-        for name, path in projects:
-            try:
-                gs = GitSync(instance, name, path)
-                gs.sync_and_report()
-            except Exception as e:
-                log("error", f"Git sync failed for {name}: {e}")
-
-    # Daily report
-    try:
-        from app.daily_report import send_daily_report
-        send_daily_report()
-    except Exception as e:
-        log("error", f"Daily report failed: {e}")
-
-    with protected_phase("Morning ritual"):
-        log("init", "Running morning ritual...")
-        try:
-            from app.rituals import run_ritual
-            run_ritual("morning", Path(instance))
-        except Exception as e:
-            log("error", f"Morning ritual failed: {e}")
-
-    return max_runs, interval, branch_prefix
+    Delegates to app.startup_manager which decomposes the startup
+    into independently testable steps.
+    """
+    from app.startup_manager import run_startup as _run_startup
+    return _run_startup(koan_root, instance, projects)
 
 
 # ---------------------------------------------------------------------------

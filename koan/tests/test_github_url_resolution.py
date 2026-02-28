@@ -859,11 +859,12 @@ class TestStartupEnsureGithubUrls:
     """Tests that run_startup calls ensure_github_urls."""
 
     def test_ensure_called_in_startup(self):
-        """Verify the ensure_github_urls call exists in run_startup source."""
+        """Verify the ensure_github_urls call exists in startup source."""
         import inspect
-        from app import run
+        from app import startup_manager
 
-        source = inspect.getsource(run.run_startup)
+        # run_startup delegates to startup_manager — check canonical source
+        source = inspect.getsource(startup_manager.populate_github_urls)
         assert "ensure_github_urls" in source
         assert "github-urls" in source
 

@@ -77,12 +77,12 @@ class TestLog:
     def test_force_color_env_enables_colors(self, capsys, monkeypatch):
         """KOAN_FORCE_COLOR=1 enables ANSI colors even without TTY."""
         monkeypatch.setenv("KOAN_FORCE_COLOR", "1")
-        from app.run import _init_colors, _COLORS
-        # Force re-init
-        import app.run as run_mod
-        run_mod._COLORS = {}
+        from app.run_log import _init_colors, _COLORS
+        # Force re-init — target canonical module (run_log owns _COLORS)
+        import app.run_log as log_mod
+        log_mod._COLORS = {}
         _init_colors()
-        colors = run_mod._COLORS
+        colors = log_mod._COLORS
         assert colors.get("reset") == "\033[0m"
         assert colors.get("red") == "\033[31m"
 
