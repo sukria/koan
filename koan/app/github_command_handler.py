@@ -236,6 +236,9 @@ def _fetch_and_filter_comment(notification: dict, bot_username: str, max_age_hou
     comment = get_comment_from_notification(notification)
     if not comment:
         log.debug("GitHub: skipping notification %s from %s — no comment body found", thread_id, repo_name)
+        # Mark as read to prevent this notification from persisting forever
+        # and absorbing future @mentions on the same thread.
+        mark_notification_read(str(notification.get("id", "")))
         return None
 
     comment_author = comment.get("user", {}).get("login", "?")

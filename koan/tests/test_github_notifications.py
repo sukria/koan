@@ -11,6 +11,7 @@ from app.github_notifications import (
     FetchResult,
     _processed_comments,
     _reactions_endpoint,
+    _search_comments_for_mention,
     add_reaction,
     api_url_to_web_url,
     check_already_processed,
@@ -99,7 +100,7 @@ class TestFetchUnreadNotifications:
     def test_returns_actionable_reasons(self, mock_api):
         notifications = [
             {"reason": "mention", "repository": {"full_name": "owner/repo"}},
-            {"reason": "review_requested", "repository": {"full_name": "owner/repo"}},
+            {"reason": "ci_activity", "repository": {"full_name": "owner/repo"}},
             {"reason": "mention", "repository": {"full_name": "other/repo"}},
         ]
         mock_api.return_value = json.dumps(notifications)
@@ -185,17 +186,43 @@ class TestFetchUnreadNotifications:
         assert result.drain[0]["reason"] == "ci_activity"
 
     @patch("app.github_notifications.api")
-    def test_review_requested_in_drain(self, mock_api):
-        """Notifications with reason=review_requested should appear in drain."""
+    def test_review_requested_in_actionable(self, mock_api):
+        """Notifications with reason=review_requested should appear in actionable."""
         notifications = [
             {"reason": "review_requested", "repository": {"full_name": "owner/repo"}},
         ]
         mock_api.return_value = json.dumps(notifications)
 
         result = fetch_unread_notifications()
-        assert result.actionable == []
-        assert len(result.drain) == 1
-        assert result.drain[0]["reason"] == "review_requested"
+        assert len(result.actionable) == 1
+        assert result.actionable[0]["reason"] == "review_requested"
+        assert result.drain == []
+
+    @patch("app.github_notifications.api")
+    def test_team_mention_in_actionable(self, mock_api):
+        """Notifications with reason=team_mention should appear in actionable."""
+        notifications = [
+            {"reason": "team_mention", "repository": {"full_name": "owner/repo"}},
+        ]
+        mock_api.return_value = json.dumps(notifications)
+
+        result = fetch_unread_notifications()
+        assert len(result.actionable) == 1
+        assert result.actionable[0]["reason"] == "team_mention"
+        assert result.drain == []
+
+    @patch("app.github_notifications.api")
+    def test_subscribed_in_actionable(self, mock_api):
+        """Notifications with reason=subscribed should appear in actionable."""
+        notifications = [
+            {"reason": "subscribed", "repository": {"full_name": "owner/repo"}},
+        ]
+        mock_api.return_value = json.dumps(notifications)
+
+        result = fetch_unread_notifications()
+        assert len(result.actionable) == 1
+        assert result.actionable[0]["reason"] == "subscribed"
+        assert result.drain == []
 
     @patch("app.github_notifications.api")
     def test_mixed_reasons_categorized_correctly(self, mock_api):
@@ -204,17 +231,22 @@ class TestFetchUnreadNotifications:
             {"reason": "mention", "repository": {"full_name": "o/r"}},
             {"reason": "author", "repository": {"full_name": "o/r"}},
             {"reason": "comment", "repository": {"full_name": "o/r"}},
-            {"reason": "ci_activity", "repository": {"full_name": "o/r"}},
             {"reason": "review_requested", "repository": {"full_name": "o/r"}},
+            {"reason": "subscribed", "repository": {"full_name": "o/r"}},
+            {"reason": "team_mention", "repository": {"full_name": "o/r"}},
+            {"reason": "ci_activity", "repository": {"full_name": "o/r"}},
             {"reason": "assign", "repository": {"full_name": "o/r"}},
         ]
         mock_api.return_value = json.dumps(notifications)
 
         result = fetch_unread_notifications()
-        assert len(result.actionable) == 3  # mention, author, comment
-        assert len(result.drain) == 3  # ci_activity, review_requested, assign
+        assert len(result.actionable) == 6
+        assert len(result.drain) == 2  # ci_activity, assign
         actionable_reasons = {n["reason"] for n in result.actionable}
-        assert actionable_reasons == {"mention", "author", "comment"}
+        assert actionable_reasons == {
+            "mention", "author", "comment",
+            "review_requested", "subscribed", "team_mention",
+        }
 
     @patch("app.github_notifications.api")
     def test_unknown_repo_skipped_entirely(self, mock_api):
@@ -706,7 +738,7 @@ class TestFindMentionInThread:
 
     @patch("app.github_notifications.api")
     def test_works_with_issues_url(self, mock_api):
-        """Should work for issue threads, not just pull requests."""
+        """Should work for issue threads — only issue comments searched (no PR review comments)."""
         notif = {
             "subject": {
                 "url": "https://api.github.com/repos/owner/repo/issues/42",
@@ -716,6 +748,114 @@ class TestFindMentionInThread:
 
         result = find_mention_in_thread(notif, "bot")
         assert result is None
-        # Verify correct endpoint was called
+        # Only issue comments endpoint called (no PR review comments for issues)
+        assert mock_api.call_count == 1
         call_args = mock_api.call_args[0][0]
         assert "repos/owner/repo/issues/42/comments" in call_args
+
+    @patch("app.github_notifications.check_already_processed", return_value=False)
+    @patch("app.github_notifications.api")
+    def test_searches_pr_review_comments(self, mock_api, mock_processed, notification):
+        """Should search PR review comments when issue comments have no @mention."""
+        issue_comments = [
+            {"id": 100, "url": "u/100", "body": "just a fix", "user": {"login": "alice"}},
+        ]
+        review_comments = [
+            {"id": 500, "url": "u/500", "body": "@Koan-Bot rebase", "user": {"login": "alice"}},
+        ]
+        # First call = issue comments (no mention), second = PR review comments (has mention)
+        mock_api.side_effect = [json.dumps(issue_comments), json.dumps(review_comments)]
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is not None
+        assert result["id"] == 500
+        # Verify both endpoints were called
+        assert mock_api.call_count == 2
+        calls = [c[0][0] for c in mock_api.call_args_list]
+        assert "issues/208/comments" in calls[0]
+        assert "pulls/208/comments" in calls[1]
+
+    @patch("app.github_notifications.check_already_processed", return_value=False)
+    @patch("app.github_notifications.api")
+    def test_issue_comments_checked_before_review_comments(self, mock_api, mock_processed, notification):
+        """Should prefer issue comment @mention over PR review comment @mention."""
+        issue_comments = [
+            {"id": 200, "url": "u/200", "body": "@Koan-Bot fix", "user": {"login": "alice"}},
+        ]
+        # PR review comments should not even be fetched
+        mock_api.return_value = json.dumps(issue_comments)
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is not None
+        assert result["id"] == 200
+        # Only issue comments endpoint called
+        assert mock_api.call_count == 1
+
+    @patch("app.github_notifications.api")
+    def test_issue_url_skips_review_comments(self, mock_api):
+        """Issues (not PRs) should not search PR review comments endpoint."""
+        notif = {
+            "subject": {
+                "url": "https://api.github.com/repos/owner/repo/issues/10",
+            },
+        }
+        mock_api.return_value = json.dumps([])
+
+        find_mention_in_thread(notif, "bot")
+        assert mock_api.call_count == 1
+        assert "issues/10/comments" in mock_api.call_args[0][0]
+
+    @patch("app.github_notifications.api")
+    def test_pr_review_comments_api_error_handled(self, mock_api, notification):
+        """API error on PR review comments should not crash, returns None."""
+        mock_api.side_effect = [json.dumps([]), RuntimeError("API error")]
+
+        result = find_mention_in_thread(notification, "Koan-Bot")
+        assert result is None
+
+
+class TestSearchCommentsForMention:
+    """Tests for _search_comments_for_mention helper."""
+
+    @patch("app.github_notifications.check_already_processed", return_value=False)
+    def test_finds_mention(self, mock_processed):
+        comments = [
+            {"id": 1, "url": "u/1", "body": "@bot rebase", "user": {"login": "alice"}},
+        ]
+        result = _search_comments_for_mention(comments, "bot", "owner", "repo")
+        assert result is not None
+        assert result["id"] == 1
+
+    def test_skips_bot_comments(self):
+        comments = [
+            {"id": 1, "url": "u/1", "body": "@bot rebase", "user": {"login": "bot"}},
+        ]
+        result = _search_comments_for_mention(comments, "bot", "owner", "repo")
+        assert result is None
+
+    @patch("app.github_notifications.check_already_processed", return_value=True)
+    def test_skips_processed_comments(self, mock_processed):
+        comments = [
+            {"id": 1, "url": "u/1", "body": "@bot rebase", "user": {"login": "alice"}},
+        ]
+        result = _search_comments_for_mention(comments, "bot", "owner", "repo")
+        assert result is None
+
+    def test_skips_comments_without_mention(self):
+        comments = [
+            {"id": 1, "url": "u/1", "body": "just a comment", "user": {"login": "alice"}},
+        ]
+        result = _search_comments_for_mention(comments, "bot", "owner", "repo")
+        assert result is None
+
+    def test_empty_list(self):
+        result = _search_comments_for_mention([], "bot", "owner", "repo")
+        assert result is None
+
+    @patch("app.github_notifications.check_already_processed", return_value=False)
+    def test_case_insensitive(self, mock_processed):
+        comments = [
+            {"id": 1, "url": "u/1", "body": "@BOT rebase", "user": {"login": "alice"}},
+        ]
+        result = _search_comments_for_mention(comments, "bot", "owner", "repo")
+        assert result is not None

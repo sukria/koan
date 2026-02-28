@@ -1116,11 +1116,15 @@ class TestFetchAndFilterComment:
         assert result is None
         mock_read.assert_called_once_with("7777")
 
+    @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.is_notification_stale", return_value=False)
     @patch("app.github_command_handler.get_comment_from_notification", return_value=None)
-    def test_no_comment_returns_none(self, mock_comment, mock_stale, notification):
+    def test_no_comment_returns_none_and_marks_read(self, mock_comment, mock_stale, mock_read, notification):
+        """When comment can't be fetched, mark notification as read to prevent
+        it from persisting and absorbing future @mentions on the same thread."""
         result = _fetch_and_filter_comment(notification, "bot", max_age_hours=24)
         assert result is None
+        mock_read.assert_called_once_with("7777")
 
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.find_mention_in_thread", return_value=None)

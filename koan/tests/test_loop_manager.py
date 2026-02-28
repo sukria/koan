@@ -1197,8 +1197,8 @@ class TestFetchNotificationsLogging:
         from app.github_notifications import fetch_unread_notifications
 
         mock_api.return_value = json.dumps([
-            {"reason": "review_requested", "repository": {"full_name": "a/b"}},
-            {"reason": "review_requested", "repository": {"full_name": "c/d"}},
+            {"reason": "ci_activity", "repository": {"full_name": "a/b"}},
+            {"reason": "ci_activity", "repository": {"full_name": "c/d"}},
             {"reason": "assign", "repository": {"full_name": "e/f"}},
             {"reason": "mention", "repository": {"full_name": "sukria/koan"}},
         ])
@@ -1208,7 +1208,7 @@ class TestFetchNotificationsLogging:
 
         assert len(result.actionable) == 1
         assert "drain-only" in caplog.text
-        assert "review_requested=2" in caplog.text
+        assert "ci_activity=2" in caplog.text
         assert "assign=1" in caplog.text
 
     @patch("app.github_notifications.api")
