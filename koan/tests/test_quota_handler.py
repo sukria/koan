@@ -173,6 +173,35 @@ class TestExtractResetInfoCopilot:
         result = extract_reset_info(text)
         assert "resets in 15m" == result
 
+    def test_extracts_try_again_in_90_minutes(self):
+        """Regression: 90 minutes was truncated to '1h' instead of '1h 30m'."""
+        from app.quota_handler import extract_reset_info
+
+        text = "Rate limited. try again in 90 minutes"
+        result = extract_reset_info(text)
+        assert result == "resets in 1h 30m"
+
+    def test_extracts_try_again_in_65_minutes(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "try again in 65 minutes"
+        result = extract_reset_info(text)
+        assert result == "resets in 1h 5m"
+
+    def test_extracts_try_again_in_120_minutes(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "try again in 120 minutes"
+        result = extract_reset_info(text)
+        assert result == "resets in 2h"
+
+    def test_extracts_try_again_in_60_minutes(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "try again in 60 minutes"
+        result = extract_reset_info(text)
+        assert result == "resets in 1h"
+
     def test_extracts_try_again_in_hours(self):
         from app.quota_handler import extract_reset_info
 

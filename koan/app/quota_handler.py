@@ -100,7 +100,7 @@ def extract_reset_info(text: str) -> str:
             value = int(retry_match.group(2))
             unit = retry_match.group(3).lower()
             if unit.startswith("minute"):
-                return f"resets in {value * 60 // 3600}h" if value >= 60 else f"resets in {value}m"
+                return f"resets in {_seconds_to_human(value * 60)}"
             elif unit.startswith("hour"):
                 return f"resets in {value}h"
             else:
