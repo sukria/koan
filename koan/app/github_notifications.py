@@ -36,7 +36,16 @@ _CODE_BLOCK_RE = re.compile(r'```.*?```|`[^`]+`', re.DOTALL)
 # can hide @mentions when a bot-authored thread already has an unread
 # notification — GitHub updates the existing notification instead of
 # creating a new "mention" one.
-_ACTIONABLE_REASONS = {"mention", "author", "comment"}
+# "review_requested" — review requests can include @mentions in the
+# associated comment; the notification reason stays review_requested.
+# "team_mention" — @team mentions that the bot is part of.
+# "subscribed" — when the bot watches a repo, @mentions on threads with
+# existing unread notifications may keep the subscribed reason instead
+# of updating to mention (GitHub API race condition / caching).
+_ACTIONABLE_REASONS = {
+    "mention", "author", "comment",
+    "review_requested", "team_mention", "subscribed",
+}
 
 
 class FetchResult:
@@ -215,52 +224,20 @@ def get_comment_from_notification(notification: dict) -> Optional[dict]:
         return None
 
 
-def find_mention_in_thread(
-    notification: dict,
+def _search_comments_for_mention(
+    comments: list,
     bot_username: str,
+    owner: str,
+    repo: str,
 ) -> Optional[dict]:
-    """Search a PR/issue thread for an unprocessed @mention comment.
+    """Search a list of comments for an unprocessed @mention of the bot.
 
-    Fallback for when latest_comment_url points to a bot comment (self-mention
-    race condition). Fetches recent comments on the thread and finds the first
-    unprocessed @mention of the bot.
-
-    Args:
-        notification: A notification dict from the GitHub API.
-        bot_username: The bot's GitHub username.
+    Shared helper for find_mention_in_thread — avoids duplicating the
+    filter/dedup logic across issue comments and PR review comments.
 
     Returns:
-        The comment dict containing the @mention, or None if not found.
+        The first unprocessed comment containing an @mention, or None.
     """
-    subject_url = notification.get("subject", {}).get("url", "")
-    if not subject_url:
-        return None
-
-    # Extract owner/repo/number from subject URL
-    # e.g. https://api.github.com/repos/cpanel/Test-MockFile/pulls/208
-    match = re.match(
-        r'https://api\.github\.com/repos/([^/]+)/([^/]+)/(?:pulls|issues)/(\d+)',
-        subject_url,
-    )
-    if not match:
-        return None
-
-    owner, repo, number = match.groups()
-
-    # Fetch recent comments (newest first, limited to 30 to control API cost)
-    endpoint = (
-        f"repos/{owner}/{repo}/issues/{number}/comments"
-        "?per_page=30&sort=created&direction=desc"
-    )
-    try:
-        raw = api(endpoint)
-        comments = json.loads(raw) if raw else []
-    except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
-        return None
-
-    if not isinstance(comments, list):
-        return None
-
     bot_lower = f"@{bot_username}".lower()
 
     for comment in comments:
@@ -288,6 +265,79 @@ def find_mention_in_thread(
             comment.get("user", {}).get("login", "?"),
         )
         return comment
+
+    return None
+
+
+def find_mention_in_thread(
+    notification: dict,
+    bot_username: str,
+) -> Optional[dict]:
+    """Search a PR/issue thread for an unprocessed @mention comment.
+
+    Fallback for when latest_comment_url points to a bot comment (self-mention
+    race condition). Fetches recent comments on the thread and finds the first
+    unprocessed @mention of the bot.
+
+    Searches both issue comments and PR review comments (inline code comments),
+    since @mentions can appear in either location.
+
+    Args:
+        notification: A notification dict from the GitHub API.
+        bot_username: The bot's GitHub username.
+
+    Returns:
+        The comment dict containing the @mention, or None if not found.
+    """
+    subject_url = notification.get("subject", {}).get("url", "")
+    if not subject_url:
+        return None
+
+    # Extract owner/repo/number and type from subject URL
+    # e.g. https://api.github.com/repos/cpanel/Test-MockFile/pulls/208
+    match = re.match(
+        r'https://api\.github\.com/repos/([^/]+)/([^/]+)/(pulls|issues)/(\d+)',
+        subject_url,
+    )
+    if not match:
+        return None
+
+    owner, repo, subject_type, number = match.groups()
+
+    # 1. Search issue comments (the main comment thread on PRs and issues)
+    issue_endpoint = (
+        f"repos/{owner}/{repo}/issues/{number}/comments"
+        "?per_page=30&sort=created&direction=desc"
+    )
+    try:
+        raw = api(issue_endpoint)
+        comments = json.loads(raw) if raw else []
+    except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        comments = []
+
+    if isinstance(comments, list):
+        result = _search_comments_for_mention(comments, bot_username, owner, repo)
+        if result:
+            return result
+
+    # 2. For PRs, also search review comments (inline code comments)
+    if subject_type == "pulls":
+        review_endpoint = (
+            f"repos/{owner}/{repo}/pulls/{number}/comments"
+            "?per_page=30&sort=created&direction=desc"
+        )
+        try:
+            raw = api(review_endpoint)
+            review_comments = json.loads(raw) if raw else []
+        except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            review_comments = []
+
+        if isinstance(review_comments, list):
+            result = _search_comments_for_mention(
+                review_comments, bot_username, owner, repo,
+            )
+            if result:
+                return result
 
     return None
 
