@@ -2781,15 +2781,25 @@ class TestRestoreKoanBranch:
 class TestRunSkillMissionEnv:
     """Tests that _run_skill_mission sets PYTHONPATH and restores branches."""
 
-    def _make_mock_popen(self, returncode=0, stdout_lines=None, stderr_lines=None):
-        """Create a mock Popen instance that simulates line-by-line output."""
+    def _make_mock_popen(self, returncode=0, stdout_lines=None, stderr_content=""):
+        """Create a mock Popen that writes stderr to the file handle passed by caller.
+
+        Production code redirects stderr to a temp file (not a pipe), so the
+        mock must write through the file handle it receives in ``kwargs['stderr']``.
+        """
         mock_proc = MagicMock()
         mock_proc.returncode = returncode
         mock_proc.stdout = iter(stdout_lines or [])
-        mock_proc.stderr = iter(
-            [f"{line}\n" for line in stderr_lines] if stderr_lines else []
-        )
         mock_proc.wait.return_value = returncode
+        mock_proc._stderr_content = stderr_content
+
+        def _side_effect(*args, **kwargs):
+            stderr_fh = kwargs.get("stderr")
+            if stderr_fh and stderr_content and hasattr(stderr_fh, "write"):
+                stderr_fh.write(stderr_content)
+            return mock_proc
+
+        mock_proc._side_effect = _side_effect
         return mock_proc
 
     def test_passes_pythonpath_in_env(self, tmp_path):
@@ -2803,7 +2813,7 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc) as mock_popen, \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect) as mock_popen, \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -2835,7 +2845,7 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen()
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main") as mock_get, \
              patch("app.run._restore_koan_branch") as mock_restore, \
              patch("app.run._reset_terminal"), \
@@ -2867,7 +2877,7 @@ class TestRunSkillMissionEnv:
         # First call (with timeout) raises, second call (after kill) returns 0
         mock_proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 3600), 0]
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch") as mock_restore, \
              patch("app.run._reset_terminal"), \
@@ -2897,7 +2907,6 @@ class TestRunSkillMissionEnv:
 
         mock_proc = MagicMock()
         mock_proc.stdout = iter(["line1\n"])
-        mock_proc.stderr = iter([])
         mock_proc.wait.side_effect = ValueError("unexpected error")
         mock_proc.returncode = None
         mock_proc.pid = 12345
@@ -2926,8 +2935,8 @@ class TestRunSkillMissionEnv:
         mock_kill.assert_called_once_with(mock_proc)
         assert result == 1  # exit code should be failure
 
-    def test_restores_branch_even_on_exception(self, tmp_path):
-        """Branch is restored even when subprocess raises an exception."""
+    def test_restores_branch_even_on_popen_exception(self, tmp_path):
+        """Branch is restored even when Popen raises an exception."""
         from app.run import _run_skill_mission
         koan_root = str(tmp_path)
         instance = str(tmp_path / "instance")
@@ -2971,7 +2980,7 @@ class TestRunSkillMissionEnv:
             stdout_lines=["Step 1: fetching PR\n", "Step 2: rebasing\n", "Done.\n"],
         )
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -3027,7 +3036,7 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -3061,8 +3070,8 @@ class TestRunSkillMissionEnv:
         # Check that create_pending_file was reachable — the journal dir exists
         assert journal_dir.exists()
 
-    def test_stderr_drained_in_parallel(self, tmp_path):
-        """_run_skill_mission drains stderr in a thread to prevent deadlock."""
+    def test_stderr_redirected_to_file(self, tmp_path):
+        """_run_skill_mission redirects stderr to a file (not PIPE) to prevent deadlock."""
         from app.run import _run_skill_mission
         koan_root = str(tmp_path)
         instance = str(tmp_path / "instance")
@@ -3072,10 +3081,10 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen(
             stdout_lines=["output\n"],
-            stderr_lines=["warning: something happened", "error: detail"],
+            stderr_content="warning: something happened\nerror: detail\n",
         )
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect) as mock_popen, \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -3091,8 +3100,10 @@ class TestRunSkillMissionEnv:
                 autonomous_mode="implement",
             )
 
-        # The function should complete without deadlock;
-        # reaching this assertion proves the parallel drain works.
+        # Verify Popen received a file handle (not PIPE) for stderr
+        call_kwargs = mock_popen.call_args[1]
+        assert call_kwargs["stderr"] is not subprocess.PIPE
+        assert hasattr(call_kwargs["stderr"], "write")  # file-like object
 
     def test_no_stderr_still_works(self, tmp_path):
         """_run_skill_mission handles empty stderr without hanging."""
@@ -3105,7 +3116,7 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -3131,16 +3142,12 @@ class TestRunSkillMissionEnv:
         (tmp_path / "koan").mkdir()
 
         mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
-        captured_proc = []
 
-        original_popen = patch("app.run.subprocess.Popen", return_value=mock_proc)
-
-        with original_popen, \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
              patch("app.mission_runner.run_post_mission"):
-            # Intercept the Popen return to check _sig during execution
             _sig.claude_proc = None
             _run_skill_mission(
                 skill_cmd=["python3", "--help"],
@@ -3170,7 +3177,7 @@ class TestRunSkillMissionEnv:
         mock_proc.poll.return_value = None
         mock_proc.pid = 77777
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -3202,7 +3209,7 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -3233,7 +3240,7 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -3266,7 +3273,7 @@ class TestRunSkillMissionEnv:
         mock_proc.poll.return_value = None
         mock_proc.pid = 88888
 
-        with patch("app.run.subprocess.Popen", return_value=mock_proc), \
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
@@ -3286,6 +3293,102 @@ class TestRunSkillMissionEnv:
 
         mock_getpgid.assert_called_with(88888)
         mock_killpg.assert_any_call(88888, signal.SIGTERM)
+
+    def test_stderr_file_content_passed_to_post_mission(self, tmp_path):
+        """Stderr content written by subprocess is available in the stderr temp file."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        stderr_text = "WARNING: deprecated API\nERROR: retry failed\n"
+        mock_proc = self._make_mock_popen(
+            stdout_lines=["ok\n"],
+            stderr_content=stderr_text,
+        )
+
+        captured_stderr_path = []
+
+        def _capture_post_mission(**kwargs):
+            # Read the stderr file that was passed to post-mission
+            stderr_file = kwargs.get("stderr_file", "")
+            if stderr_file:
+                with open(stderr_file) as f:
+                    captured_stderr_path.append(f.read())
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission", side_effect=_capture_post_mission):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/test stderr-file",
+                autonomous_mode="implement",
+            )
+
+        assert len(captured_stderr_path) == 1
+        assert "WARNING: deprecated API" in captured_stderr_path[0]
+        assert "ERROR: retry failed" in captured_stderr_path[0]
+
+    def test_stderr_file_closed_on_exception(self, tmp_path):
+        """The stderr file handle is closed even when Popen raises."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        call_count = {"n": 0}
+        original_open = open
+
+        def _tracking_open(*args, **kwargs):
+            fh = original_open(*args, **kwargs)
+            if len(args) >= 1 and "koan-err-" in str(args[0]):
+                call_count["n"] += 1
+            return fh
+
+        with patch("app.run.subprocess.Popen", side_effect=OSError("spawn failed")), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"), \
+             patch("builtins.open", side_effect=_tracking_open):
+            result = _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/test cleanup",
+                autonomous_mode="implement",
+            )
+
+        # Should return failure exit code
+        assert result == 1
+
+    def test_no_threading_import_needed(self):
+        """Verify run.py no longer imports threading (deadlock fix removed the need)."""
+        import ast
+        from pathlib import Path
+
+        run_path = Path(__file__).parent.parent / "app" / "run.py"
+        tree = ast.parse(run_path.read_text())
+        imports = [
+            node.names[0].name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+        ]
+        assert "threading" not in imports
 
 
 # ---------------------------------------------------------------------------
