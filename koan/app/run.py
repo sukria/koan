@@ -994,8 +994,8 @@ def _handle_contemplative(
             session_info=f"Run {run_num}/{max_runs} on {project_name}. Mode: {plan['autonomous_mode']}.",
         )
         fd_out, stdout_file = tempfile.mkstemp(prefix="koan-contemp-out-")
-        fd_err, stderr_file = tempfile.mkstemp(prefix="koan-contemp-err-")
         os.close(fd_out)
+        fd_err, stderr_file = tempfile.mkstemp(prefix="koan-contemp-err-")
         os.close(fd_err)
         try:
             run_claude_task(
@@ -1462,8 +1462,8 @@ def _run_iteration(
 
     mission_start = int(time.time())
     fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")
-    fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
     os.close(fd_out)
+    fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
     os.close(fd_err)
     claude_exit = 1  # default to failure; overwritten on successful execution
     try:
@@ -1918,13 +1918,13 @@ def _run_skill_mission(
 
     # Write output to temp files for post-mission processing
     fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")
+    os.close(fd_out)
     fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
-    try:
-        os.write(fd_out, skill_stdout.encode('utf-8'))
-        os.write(fd_err, skill_stderr.encode('utf-8'))
-    finally:
-        os.close(fd_out)
-        os.close(fd_err)
+    os.close(fd_err)
+    with open(stdout_file, 'wb') as f:
+        f.write(skill_stdout.encode('utf-8'))
+    with open(stderr_file, 'wb') as f:
+        f.write(skill_stderr.encode('utf-8'))
 
     try:
         from app.mission_runner import run_post_mission
