@@ -525,11 +525,15 @@ class TestHandleResume:
 
     @patch("app.command_handlers.send_telegram")
     def test_corrupt_quota_file(self, mock_send, tmp_path):
+        """Corrupt timestamp in legacy quota file should degrade gracefully.
+        With the fix, the invalid timestamp defaults to 0 (epoch), which
+        means hours_since_pause is huge → treated as 'likely reset'."""
         quota_file = tmp_path / ".koan-quota-reset"
         quota_file.write_text("garbage\nnot-a-number")
         with patch("app.command_handlers.KOAN_ROOT", tmp_path):
             handle_resume()
-        assert "Error" in mock_send.call_args[0][0]
+        # paused_at defaults to 0 → huge hours_since_pause → likely reset
+        assert "Quota likely reset" in mock_send.call_args[0][0]
 
 
 # ---------------------------------------------------------------------------

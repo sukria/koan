@@ -480,10 +480,10 @@ def handle_resume():
 
         if pause_reason_file.exists():
             lines = pause_reason_file.read_text().strip().split("\n")
-            reason = lines[0] if lines else "manual"
-            if len(lines) > 1:
+            reason = lines[0].strip() if lines else "manual"
+            if len(lines) > 1 and lines[1].strip():
                 try:
-                    reset_timestamp = int(lines[1])
+                    reset_timestamp = int(lines[1].strip())
                 except ValueError:
                     pass
             if len(lines) > 2:
@@ -527,7 +527,12 @@ def handle_resume():
     try:
         lines = quota_file.read_text().strip().split("\n")
         reset_info = lines[0] if lines else "unknown time"
-        paused_at = int(lines[1]) if len(lines) > 1 else 0
+        paused_at = 0
+        if len(lines) > 1 and lines[1].strip():
+            try:
+                paused_at = int(lines[1].strip())
+            except ValueError:
+                pass
 
         hours_since_pause = (time.time() - paused_at) / 3600
         likely_reset = hours_since_pause >= 2
@@ -537,7 +542,7 @@ def handle_resume():
             send_telegram(f"▶️ Quota likely reset ({reset_info}, paused {hours_since_pause:.1f}h ago). Restart with: make run")
         else:
             send_telegram(f"⏳ Quota not reset yet ({reset_info}). Paused {hours_since_pause:.1f}h ago. Check back later.")
-    except Exception as e:
+    except (OSError, ValueError) as e:
         log("error", f"Error checking quota reset: {e}")
         send_telegram("⚠️ Error checking quota. /status or check manually.")
 
