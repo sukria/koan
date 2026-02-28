@@ -282,6 +282,188 @@ class TestCleanReply:
         assert _clean_reply(text) == text
 
 
+class TestCleanReplyEdgeCases:
+    """Additional edge cases for _clean_reply."""
+
+    def test_only_noise_lines_returns_empty(self):
+        text = "Error: Reached max turns (1)\nError: Reached max turns (5)"
+        assert _clean_reply(text) == ""
+
+    def test_empty_string(self):
+        assert _clean_reply("") == ""
+
+    def test_multiline_with_noise_in_middle(self):
+        text = "Good line\nError: Reached max turns (1)\nAnother good line"
+        result = _clean_reply(text)
+        assert "Good line" in result
+        assert "Another good line" in result
+        assert "max turns" not in result
+
+
+# ---------------------------------------------------------------------------
+# extract_mention_text — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestExtractMentionTextEdgeCases:
+    """Additional edge cases for mention extraction."""
+
+    def test_mention_after_code_block(self):
+        """Mention text after a code block should be extracted."""
+        body = "```python\nfoo()\n```\n@bot what do you think?"
+        result = extract_mention_text(body, "bot")
+        assert result == "what do you think?"
+
+    def test_multiple_mentions_takes_first(self):
+        """Multiple @mentions should extract from the first one."""
+        body = "@bot first question\n@bot second question"
+        result = extract_mention_text(body, "bot")
+        # With DOTALL, captures from first @bot to end
+        assert "first question" in result
+
+    def test_mention_with_regex_special_chars_in_nick(self):
+        """Nicknames with regex special chars should be escaped properly."""
+        body = "@bot.name what about this?"
+        result = extract_mention_text(body, "bot.name")
+        assert result == "what about this?"
+
+    def test_mention_with_parentheses_in_nick(self):
+        """Nickname with parentheses should be regex-safe."""
+        result = extract_mention_text("@bot(1) hello", "bot(1)")
+        assert result == "hello"
+
+
+# ---------------------------------------------------------------------------
+# fetch_thread_context — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestFetchThreadContextEdgeCases:
+    """Additional edge cases for thread context fetching."""
+
+    @patch("app.github_reply.api")
+    def test_null_api_response(self, mock_api):
+        """None response from API should return defaults."""
+        mock_api.side_effect = [None, None]
+        ctx = fetch_thread_context("owner", "repo", "42")
+        assert ctx["title"] == ""
+        assert ctx["comments"] == []
+
+    @patch("app.github_reply.api")
+    def test_comments_not_a_list(self, mock_api):
+        """If comments API returns non-list JSON, should handle gracefully."""
+        mock_api.side_effect = [
+            json.dumps({"title": "T", "body": "B", "pull_request": None}),
+            json.dumps({"error": "not a list"}),
+        ]
+        ctx = fetch_thread_context("owner", "repo", "42")
+        assert ctx["comments"] == []
+
+    @patch("app.github_reply.api")
+    def test_pr_files_not_a_list(self, mock_api):
+        """If PR files API returns non-list JSON, diff_summary should be empty."""
+        mock_api.side_effect = [
+            json.dumps({"title": "T", "body": "B", "pull_request": {"url": "..."}}),
+            json.dumps([]),
+            json.dumps({"error": "not a list"}),
+        ]
+        ctx = fetch_thread_context("owner", "repo", "42")
+        assert ctx["diff_summary"] == ""
+
+    @patch("app.github_reply.api")
+    def test_pr_with_many_files_capped_at_30(self, mock_api):
+        """PR file list should be capped at 30 entries."""
+        files = [
+            {"filename": f"file{i}.py", "status": "modified", "additions": 1, "deletions": 0}
+            for i in range(50)
+        ]
+        mock_api.side_effect = [
+            json.dumps({"title": "T", "body": "B", "pull_request": {"url": "..."}}),
+            json.dumps([]),
+            json.dumps(files),
+        ]
+        ctx = fetch_thread_context("owner", "repo", "42")
+        # Count lines in diff_summary
+        lines = ctx["diff_summary"].strip().split("\n")
+        assert len(lines) == 30
+
+    @patch("app.github_reply.api")
+    def test_comment_body_truncated(self, mock_api):
+        """Individual comment bodies should be truncated."""
+        long_body = "x" * 1000
+        mock_api.side_effect = [
+            json.dumps({"title": "T", "body": "B", "pull_request": None}),
+            json.dumps([{"author": "user", "body": long_body}]),
+        ]
+        ctx = fetch_thread_context("owner", "repo", "42")
+        assert len(ctx["comments"][0]["body"]) < len(long_body)
+
+
+# ---------------------------------------------------------------------------
+# generate_reply — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateReplyEdgeCases:
+    """Additional edge cases for reply generation."""
+
+    @patch("app.github_reply.load_prompt", return_value="prompt")
+    @patch("app.github_reply.run_command", return_value=None)
+    def test_none_reply_returns_none(self, mock_run, mock_prompt):
+        """run_command returning None should return None."""
+        result = generate_reply(
+            "q", {"title": "", "body": "", "comments": [], "is_pr": False, "diff_summary": ""},
+            "o", "r", "1", "a", "/tmp",
+        )
+        assert result is None
+
+    @patch("app.github_reply.load_prompt", return_value="prompt")
+    @patch("app.github_reply.run_command",
+           return_value="Good reply\nError: Reached max turns (1)")
+    def test_reply_with_noise_is_cleaned(self, mock_run, mock_prompt):
+        """Reply containing CLI noise should be cleaned."""
+        result = generate_reply(
+            "q", {"title": "", "body": "", "comments": [], "is_pr": False, "diff_summary": ""},
+            "o", "r", "1", "a", "/tmp",
+        )
+        assert result == "Good reply"
+        assert "max turns" not in result
+
+
+# ---------------------------------------------------------------------------
+# build_reply_prompt — edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestBuildReplyPromptEdgeCases:
+    """Edge cases for prompt building."""
+
+    @patch("app.github_reply.load_prompt")
+    def test_empty_comments_produces_empty_comments_text(self, mock_load):
+        """No comments should result in empty COMMENTS field."""
+        mock_load.return_value = "prompt"
+        thread_context = {
+            "title": "T", "body": "", "comments": [],
+            "is_pr": False, "diff_summary": "",
+        }
+        build_reply_prompt("q", thread_context, "o", "r", "1", "alice")
+        assert mock_load.call_args[1]["COMMENTS"] == ""
+
+    @patch("app.github_reply.load_prompt")
+    def test_missing_context_keys_use_defaults(self, mock_load):
+        """Thread context with missing keys should use empty defaults."""
+        mock_load.return_value = "prompt"
+        # Minimal context — some keys missing
+        thread_context = {}
+        build_reply_prompt("q", thread_context, "o", "r", "1", "alice")
+        call_kwargs = mock_load.call_args[1]
+        assert call_kwargs["KIND"] == "issue"
+        assert call_kwargs["TITLE"] == ""
+        assert call_kwargs["BODY"] == ""
+        assert call_kwargs["COMMENTS"] == ""
+        assert call_kwargs["DIFF_SUMMARY"] == ""
+
+
 class TestTruncateText:
     def test_short_text_unchanged(self):
         from app.utils import truncate_text

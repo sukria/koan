@@ -930,3 +930,394 @@ class TestPauseUsesPauseManager:
         handle_command("/pause")
         mock_send.assert_called_once()
         assert "Already paused" in mock_send.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# Test: handle_resume — corrupt and edge-case pause files
+# ---------------------------------------------------------------------------
+
+class TestHandleResumeEdgeCases:
+    """Tests for handle_resume with corrupt or unusual file contents."""
+
+    @patch("app.command_handlers._reset_session_counters")
+    def test_resume_quota_with_empty_timestamp_line(
+        self, mock_reset, patch_bridge_state, mock_send
+    ):
+        """Pause-reason file with empty second line should not crash."""
+        from app.command_handlers import handle_resume
+        (patch_bridge_state / ".koan-pause").write_text("PAUSE")
+        (patch_bridge_state / ".koan-pause-reason").write_text("quota\n\nresets at 10am")
+        handle_resume()
+        # Should handle gracefully — empty line means no timestamp
+        assert not (patch_bridge_state / ".koan-pause").exists()
+        mock_send.assert_called_once()
+
+    @patch("app.command_handlers._reset_session_counters")
+    def test_resume_quota_with_garbage_timestamp(
+        self, mock_reset, patch_bridge_state, mock_send
+    ):
+        """Pause-reason file with non-numeric timestamp should not crash."""
+        from app.command_handlers import handle_resume
+        (patch_bridge_state / ".koan-pause").write_text("PAUSE")
+        (patch_bridge_state / ".koan-pause-reason").write_text("quota\nnot-a-number\nresets")
+        handle_resume()
+        assert not (patch_bridge_state / ".koan-pause").exists()
+        mock_send.assert_called_once()
+        # No timestamp → treat as expired → should say "Quota should be reset"
+        assert "Quota should be reset" in mock_send.call_args[0][0]
+
+    def test_resume_with_whitespace_in_reason_file(self, patch_bridge_state, mock_send):
+        """Reason file with extra whitespace should still parse correctly."""
+        from app.command_handlers import handle_resume
+        (patch_bridge_state / ".koan-pause").write_text("PAUSE")
+        (patch_bridge_state / ".koan-pause-reason").write_text("  manual  \n  \n")
+        handle_resume()
+        assert not (patch_bridge_state / ".koan-pause").exists()
+        mock_send.assert_called_once()
+        assert "Unpaused" in mock_send.call_args[0][0]
+
+    def test_resume_with_only_reason_no_timestamp(self, patch_bridge_state, mock_send):
+        """Reason file with just the reason, no timestamp line."""
+        from app.command_handlers import handle_resume
+        (patch_bridge_state / ".koan-pause").write_text("PAUSE")
+        (patch_bridge_state / ".koan-pause-reason").write_text("manual")
+        handle_resume()
+        assert not (patch_bridge_state / ".koan-pause").exists()
+        mock_send.assert_called_once()
+        assert "Unpaused" in mock_send.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# Test: handle_resume — legacy .koan-quota-reset path
+# ---------------------------------------------------------------------------
+
+class TestHandleResumeLegacy:
+    """Tests for the legacy .koan-quota-reset resume path."""
+
+    def test_legacy_quota_likely_reset(self, patch_bridge_state, mock_send):
+        """Legacy quota file with old timestamp → likely reset."""
+        from app.command_handlers import handle_resume
+        old_ts = int(time.time()) - 10000  # ~2.8 hours ago
+        (patch_bridge_state / ".koan-quota-reset").write_text(
+            f"resets at 10am\n{old_ts}"
+        )
+        handle_resume()
+        assert not (patch_bridge_state / ".koan-quota-reset").exists()
+        mock_send.assert_called_once()
+        assert "Quota likely reset" in mock_send.call_args[0][0]
+
+    def test_legacy_quota_not_yet_reset(self, patch_bridge_state, mock_send):
+        """Legacy quota file with recent timestamp → not yet reset."""
+        from app.command_handlers import handle_resume
+        recent_ts = int(time.time()) - 1800  # 30 minutes ago
+        (patch_bridge_state / ".koan-quota-reset").write_text(
+            f"resets at 10am\n{recent_ts}"
+        )
+        handle_resume()
+        # File should still exist
+        assert (patch_bridge_state / ".koan-quota-reset").exists()
+        mock_send.assert_called_once()
+        assert "not reset yet" in mock_send.call_args[0][0]
+
+    def test_legacy_quota_with_corrupt_timestamp(self, patch_bridge_state, mock_send):
+        """Legacy quota file with non-numeric timestamp should not crash."""
+        from app.command_handlers import handle_resume
+        (patch_bridge_state / ".koan-quota-reset").write_text(
+            "resets at 10am\nnot-a-number"
+        )
+        handle_resume()
+        mock_send.assert_called_once()
+        # paused_at defaults to 0 → hours_since_pause is huge → likely_reset
+        assert "Quota likely reset" in mock_send.call_args[0][0]
+
+    def test_legacy_quota_with_empty_timestamp(self, patch_bridge_state, mock_send):
+        """Legacy quota file with empty second line should not crash."""
+        from app.command_handlers import handle_resume
+        (patch_bridge_state / ".koan-quota-reset").write_text("resets at 10am\n")
+        handle_resume()
+        mock_send.assert_called_once()
+        # paused_at defaults to 0 → likely_reset
+        assert "Quota likely reset" in mock_send.call_args[0][0]
+
+    def test_legacy_quota_single_line(self, patch_bridge_state, mock_send):
+        """Legacy quota file with only reset info, no timestamp."""
+        from app.command_handlers import handle_resume
+        (patch_bridge_state / ".koan-quota-reset").write_text("resets at 10am")
+        handle_resume()
+        mock_send.assert_called_once()
+        # paused_at defaults to 0 → likely_reset
+        assert "Quota likely reset" in mock_send.call_args[0][0]
+
+    def test_legacy_quota_file_read_error(self, patch_bridge_state, mock_send):
+        """Unreadable legacy quota file should not crash."""
+        from app.command_handlers import handle_resume
+        quota_file = patch_bridge_state / ".koan-quota-reset"
+        quota_file.mkdir()  # A directory, not a file → read_text() raises
+        handle_resume()
+        mock_send.assert_called_once()
+        assert "Error" in mock_send.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# Test: handle_mission — auto-detect project from text
+# ---------------------------------------------------------------------------
+
+class TestHandleMissionAutoDetect:
+    """Tests for handle_mission auto-detecting project from first word."""
+
+    @patch("app.command_handlers.insert_pending_mission")
+    @patch("app.command_handlers.detect_project_from_text",
+           return_value=("koan", "fix the login bug"))
+    @patch("app.command_handlers._parse_project", return_value=(None, "koan fix the login bug"))
+    def test_auto_detect_project_from_first_word(
+        self, mock_parse, mock_detect, mock_insert, patch_bridge_state, mock_send
+    ):
+        """'koan fix the login bug' auto-detects project 'koan'."""
+        from app.command_handlers import handle_mission
+        handle_mission("koan fix the login bug")
+        entry = mock_insert.call_args[0][1]
+        assert "[project:koan]" in entry
+        assert "fix the login bug" in entry
+        assert "project: koan" in mock_send.call_args[0][0]
+
+    @patch("app.command_handlers.insert_pending_mission")
+    @patch("app.command_handlers.detect_project_from_text",
+           return_value=(None, "fix something random"))
+    @patch("app.command_handlers._parse_project", return_value=(None, "fix something random"))
+    def test_no_auto_detect_when_first_word_not_project(
+        self, mock_parse, mock_detect, mock_insert, patch_bridge_state, mock_send
+    ):
+        """When first word isn't a known project, no project tag added."""
+        from app.command_handlers import handle_mission
+        handle_mission("fix something random")
+        entry = mock_insert.call_args[0][1]
+        assert "[project:" not in entry
+
+    @patch("app.command_handlers.insert_pending_mission")
+    @patch("app.command_handlers.detect_project_from_text")
+    @patch("app.command_handlers._parse_project",
+           return_value=("backend", "fix it"))
+    def test_explicit_project_tag_takes_priority(
+        self, mock_parse, mock_detect, mock_insert, patch_bridge_state, mock_send
+    ):
+        """Explicit [project:X] tag takes priority — auto-detect not called."""
+        from app.command_handlers import handle_mission
+        handle_mission("[project:backend] fix it")
+        mock_detect.assert_not_called()
+        entry = mock_insert.call_args[0][1]
+        assert "[project:backend]" in entry
+
+
+# ---------------------------------------------------------------------------
+# Test: handle_command — edge cases
+# ---------------------------------------------------------------------------
+
+class TestHandleCommandEdgeCases:
+    """Edge cases for the main handle_command dispatch."""
+
+    def test_slash_only_sends_unknown(self, patch_bridge_state, mock_send, mock_registry):
+        """Just '/' should report unknown command, not crash."""
+        from app.command_handlers import handle_command
+        handle_command("/")
+        mock_send.assert_called_once()
+        assert "Unknown command" in mock_send.call_args[0][0]
+
+    def test_command_with_extra_whitespace(self, patch_bridge_state, mock_send):
+        """'/stop  ' (trailing spaces) should still match /stop."""
+        from app.command_handlers import handle_command
+        handle_command("/stop  ")
+        assert (patch_bridge_state / ".koan-stop").exists()
+
+    def test_command_case_insensitive(self, patch_bridge_state, mock_send):
+        """'/STOP' should match /stop."""
+        from app.command_handlers import handle_command
+        handle_command("/STOP")
+        assert (patch_bridge_state / ".koan-stop").exists()
+
+    def test_help_with_slash_prefix(self, patch_bridge_state, mock_send, mock_registry):
+        """/help /mission should look up 'mission', stripping the extra /."""
+        from app.command_handlers import handle_command
+        handle_command("/help /mission")
+        mock_registry.find_by_command.assert_called_with("mission")
+
+
+# ---------------------------------------------------------------------------
+# Test: _dispatch_skill — worker with no callback
+# ---------------------------------------------------------------------------
+
+class TestDispatchSkillWorkerNoCallback:
+    """Tests for worker skill dispatch when callback is not set."""
+
+    def test_worker_skill_without_callback_does_nothing(
+        self, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Worker skill with _run_in_worker_cb=None should silently skip."""
+        from app.command_handlers import _dispatch_skill, set_callbacks
+        from app.skills import Skill
+        import app.command_handlers as mod
+
+        skill = MagicMock(spec=Skill)
+        skill.worker = True
+        skill.cli_skill = None
+        skill.audience = "bridge"
+
+        # Set worker callback to None
+        old_cb = mod._run_in_worker_cb
+        mod._run_in_worker_cb = None
+        try:
+            with patch("app.command_handlers.execute_skill", return_value="result"):
+                _dispatch_skill(skill, "sparring", "")
+            # Should not crash, and should not send anything
+            mock_send.assert_not_called()
+        finally:
+            mod._run_in_worker_cb = old_cb
+
+
+# ---------------------------------------------------------------------------
+# Test: _handle_help_command — detailed help with aliases and usage
+# ---------------------------------------------------------------------------
+
+class TestHandleHelpCommandDetail:
+    """Tests for /help <command> with various skill configurations."""
+
+    def test_help_shows_aliases(self, patch_bridge_state, mock_send, mock_registry):
+        """Help for a command with aliases should list them."""
+        from app.command_handlers import _handle_help_command
+        from app.skills import Skill, SkillCommand
+
+        skill = MagicMock(spec=Skill)
+        cmd = SkillCommand(
+            name="cancel",
+            description="Cancel a mission",
+            aliases=["remove", "clear"],
+            usage="/cancel [number|keyword]",
+        )
+        skill.commands = [cmd]
+        skill.description = "Cancel"
+        mock_registry.find_by_command.return_value = skill
+
+        _handle_help_command("cancel")
+        msg = mock_send.call_args[0][0]
+        assert "/cancel" in msg
+        assert "remove" in msg
+        assert "clear" in msg
+        assert "/cancel [number|keyword]" in msg
+
+    def test_help_shows_no_usage_defined(self, patch_bridge_state, mock_send, mock_registry):
+        """Help for a command without usage should say 'No usage defined.'."""
+        from app.command_handlers import _handle_help_command
+        from app.skills import Skill, SkillCommand
+
+        skill = MagicMock(spec=Skill)
+        cmd = SkillCommand(name="ping", description="Check status")
+        skill.commands = [cmd]
+        skill.description = "Ping"
+        mock_registry.find_by_command.return_value = skill
+
+        _handle_help_command("ping")
+        msg = mock_send.call_args[0][0]
+        assert "No usage defined" in msg
+
+    def test_help_unknown_command(self, patch_bridge_state, mock_send, mock_registry):
+        """/help nonexistent should report unknown."""
+        from app.command_handlers import _handle_help_command
+        mock_registry.find_by_command.return_value = None
+        _handle_help_command("nonexistent")
+        msg = mock_send.call_args[0][0]
+        assert "Unknown command" in msg
+
+    def test_help_matches_by_alias(self, patch_bridge_state, mock_send, mock_registry):
+        """Help for an alias should still find the right command."""
+        from app.command_handlers import _handle_help_command
+        from app.skills import Skill, SkillCommand
+
+        skill = MagicMock(spec=Skill)
+        cmd = SkillCommand(
+            name="cancel",
+            description="Cancel a mission",
+            aliases=["remove"],
+        )
+        skill.commands = [cmd]
+        skill.description = "Cancel"
+        mock_registry.find_by_command.return_value = skill
+
+        _handle_help_command("remove")
+        msg = mock_send.call_args[0][0]
+        assert "/cancel" in msg
+        assert "Cancel a mission" in msg
+
+
+# ---------------------------------------------------------------------------
+# Test: _queue_cli_skill_mission — edge cases
+# ---------------------------------------------------------------------------
+
+class TestQueueCliSkillMissionEdgeCases:
+    """Edge cases for cli_skill mission queuing."""
+
+    @patch("app.command_handlers.insert_pending_mission")
+    def test_queue_with_empty_args(
+        self, mock_insert, patch_bridge_state, mock_send, mock_registry
+    ):
+        """CLI skill with no args should queue just the command."""
+        from app.command_handlers import _queue_cli_skill_mission
+        from app.skills import Skill, SkillCommand
+
+        skill = Skill(
+            name="deploy",
+            scope="ops",
+            description="Deploy",
+            audience="agent",
+            cli_skill="deploy-tool",
+            commands=[SkillCommand(name="deploy", description="Deploy")],
+        )
+
+        _queue_cli_skill_mission(skill, "")
+        entry = mock_insert.call_args[0][1]
+        assert entry == "- /ops.deploy"
+        assert "[project:" not in entry
+
+    @patch("app.command_handlers.insert_pending_mission")
+    @patch("app.utils.get_known_projects", return_value=[])
+    def test_queue_with_no_known_projects(
+        self, mock_projects, mock_insert, patch_bridge_state, mock_send, mock_registry
+    ):
+        """When no projects are configured, first word is treated as args."""
+        from app.command_handlers import _queue_cli_skill_mission
+        from app.skills import Skill, SkillCommand
+
+        skill = Skill(
+            name="check",
+            scope="ops",
+            description="Check",
+            audience="agent",
+            cli_skill="check-tool",
+            commands=[SkillCommand(name="check", description="Check")],
+        )
+
+        _queue_cli_skill_mission(skill, "myarg something")
+        entry = mock_insert.call_args[0][1]
+        assert "/ops.check myarg something" in entry
+        assert "[project:" not in entry
+
+    @patch("app.command_handlers.insert_pending_mission")
+    def test_queue_truncates_long_args_in_ack(
+        self, mock_insert, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Acknowledgment message truncates very long args."""
+        from app.command_handlers import _queue_cli_skill_mission
+        from app.skills import Skill, SkillCommand
+
+        skill = Skill(
+            name="plan",
+            scope="core",
+            description="Plan",
+            audience="agent",
+            cli_skill="plan-tool",
+            commands=[SkillCommand(name="plan", description="Plan")],
+        )
+
+        long_args = "x" * 1000
+        _queue_cli_skill_mission(skill, long_args)
+        msg = mock_send.call_args[0][0]
+        # The koan_cmd[:500] truncation should apply
+        assert len(msg) < 1500
