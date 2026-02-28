@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kōan — An autonomous AI agent that works while you sleep</title>
+  <meta name="description" content="Koan is an autonomous AI agent that works on your codebase while you sleep. Open source, MIT licensed, supports Claude, Copilot, and more.">
+  <meta name="keywords" content="AI agent, autonomous coding, Claude, open source, developer tools, code review, automated rebase, GitHub integration">
+  <meta name="author" content="Anantys">
+  <meta property="og:title" content="Koan - An autonomous AI agent that works while you sleep">
+  <meta property="og:description" content="An autonomous AI coding agent. Open source, extensible, supports multiple LLMs. Works on PRs, reviews code, and runs security scans while you sleep.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://github.com/sukria/koan">
+  <meta property="og:image" content="avatar.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Koan - Autonomous AI Agent">
+  <meta name="twitter:description" content="An autonomous AI coding agent that works while you sleep. Open source, MIT licensed.">
+  <link rel="icon" type="image/png" href="avatar.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #0a0e0a;
+      --deep: #0c1210;
+      --card: #131f1a;
+      --border: rgba(0,229,195,0.11);
+      --accent: #00e5c3;
+      --accent2: #00b894;
+      --accent3: #4ade80;
+      --text: #e8f5f0;
+      --muted: #6b9688;
+      --glow: rgba(0,229,195,0.22);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--ink);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 1rem;
+      line-height: 1.7;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+    h1,h2,h3,h4,h5 { font-family: 'Syne', sans-serif; line-height: 1.12; }
+    code { font-family: 'JetBrains Mono', monospace; }
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.032'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 0; opacity: 0.55;
+    }
+
+    /* ──────────────── NAVBAR ──────────────── */
+    .navbar {
+      background: rgba(10,14,10,0.88);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 1000;
+      transition: background 0.3s;
+    }
+    .navbar.scrolled { background: rgba(10,14,10,0.98); }
+    .navbar-inner {
+      display: flex; align-items: stretch; height: 60px;
+      max-width: 1280px; margin: 0 auto; padding: 0 1.5rem;
+    }
+    .navbar-brand {
+      font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.45rem;
+      color: var(--text) !important; display: flex; align-items: center; gap: 0.6rem;
+      text-decoration: none; margin-right: 2rem; flex-shrink: 0;
+    }
+    .brand-k {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; color: #fff; font-weight: 800;
+      box-shadow: 0 0 18px rgba(0,229,195,0.5);
+      animation: glow-brand 3s ease-in-out infinite alternate;
+    }
+    @keyframes glow-brand {
+      from { box-shadow: 0 0 10px rgba(0,229,195,0.4); }
+      to { box-shadow: 0 0 22px rgba(0,184,148,0.6); }
+    }
+    .nav-tabs-area {
+      display: flex; align-items: stretch; flex: 1; gap: 0;
+    }
+    .nav-tab {
+      display: flex; align-items: center; gap: 0.4rem;
+      padding: 0 1.05rem; font-size: 0.855rem; font-weight: 500;
+      color: var(--muted); cursor: pointer;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+      white-space: nowrap; height: 100%; letter-spacing: 0.01em;
+    }
+    .nav-tab i { font-size: 0.78rem; }
+    .nav-tab:hover { color: var(--text); }
+    .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .nav-right {
+      display: flex; align-items: center; gap: 0.7rem; margin-left: auto;
+    }
+    .btn-gh {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+      color: var(--text); font-size: 0.82rem; font-weight: 600;
+      padding: 0.38rem 0.95rem; border-radius: 7px; text-decoration: none;
+      transition: background 0.2s;
+    }
+    .btn-gh:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .btn-star {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      border: none; color: #fff; font-size: 0.82rem; font-weight: 700;
+      padding: 0.4rem 1.05rem; border-radius: 7px; text-decoration: none;
+      transition: opacity 0.2s, transform 0.15s;
+    }
+    .btn-star:hover { opacity: 0.87; transform: translateY(-1px); color: #fff; }
+    .nav-burger {
+      display: none; background: none; border: none;
+      color: var(--text); font-size: 1.2rem; margin-left: auto;
+      padding: 0 0.4rem; cursor: pointer;
+    }
+    .nav-mobile {
+      display: none; flex-direction: column;
+      background: var(--deep); border-top: 1px solid var(--border);
+      padding: 0.75rem 1.5rem 1.25rem;
+    }
+    .nav-mobile.open { display: flex; }
+    .nav-mobile-tab {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.6rem 0; font-size: 0.9rem; font-weight: 500; color: var(--muted);
+      cursor: pointer; background: none; border: none;
+      border-bottom: 1px solid var(--border); text-align: left;
+      transition: color 0.2s;
+    }
+    .nav-mobile-tab:last-of-type { border-bottom: none; }
+    .nav-mobile-tab.active, .nav-mobile-tab:hover { color: var(--accent); }
+    @media (max-width: 900px) {
+      .nav-tabs-area, .nav-right { display: none; }
+      .nav-burger { display: flex; align-items: center; }
+    }
+
+    /* ──────────────── PAGE SYSTEM ──────────────── */
+    .page { display: none; animation: pg-in 0.3s ease both; }
+    .page.active { display: block; }
+    @keyframes pg-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+
+    /* ──────────────── SHARED ──────────────── */
+    .section-label {
+      display: inline-block; font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--accent); margin-bottom: 0.65rem;
+    }
+    .section-title {
+      font-size: clamp(1.75rem, 3.5vw, 2.75rem);
+      font-weight: 800; letter-spacing: -0.02em; margin-bottom: 0.9rem;
+    }
+    .section-desc { color: var(--muted); font-size: 1.02rem; max-width: 550px; }
+    .page-header {
+      background: var(--deep); border-bottom: 1px solid var(--border);
+      padding: 3.5rem 0 2.75rem;
+    }
+    section { padding: 4.5rem 0; position: relative; }
+    .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.5s ease, transform 0.5s ease; }
+    .reveal.visible { opacity: 1; transform: none; }
+    .tag-badge {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      font-size: 0.7rem; font-weight: 700; padding: 0.18rem 0.6rem;
+      border-radius: 4px; letter-spacing: 0.04em;
+    }
+    .tag-open { background: rgba(0,229,195,0.1); color: var(--accent3); border: 1px solid rgba(0,229,195,0.18); }
+    .tag-free { background: rgba(0,184,148,0.1); color: var(--accent2); border: 1px solid rgba(0,184,148,0.18); }
+
+    /* ──────────────── BUTTONS ──────────────── */
+    .btn-primary-cta {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      color: #fff; border: none; border-radius: 9px;
+      font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.92rem;
+      padding: 0.82rem 1.9rem; text-decoration: none;
+      transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;
+    }
+    .btn-primary-cta:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,229,195,0.4); color: #fff; }
+    .btn-ghost-cta {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      background: transparent; color: var(--text); border: 1px solid var(--border);
+      border-radius: 9px; font-family: 'Syne', sans-serif; font-weight: 600; font-size: 0.92rem;
+      padding: 0.82rem 1.9rem; text-decoration: none;
+      transition: border-color 0.2s, background 0.2s; cursor: pointer;
+    }
+    .btn-ghost-cta:hover { border-color: rgba(0,229,195,0.4); background: rgba(0,229,195,0.06); color: var(--text); }
+
+    /* ──────────────── HOME HERO ──────────────── */
+    .hero {
+      min-height: calc(100vh - 60px); display: flex; align-items: center;
+      position: relative; overflow: hidden; padding: 5rem 0 4rem;
+    }
+    .hero-bg {
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 65% 55% at 62% 38%, rgba(0,229,195,0.17) 0%, transparent 65%),
+        radial-gradient(ellipse 45% 45% at 18% 78%, rgba(0,184,148,0.13) 0%, transparent 60%),
+        radial-gradient(ellipse 35% 35% at 82% 12%, rgba(74,222,128,0.07) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .hero-grid {
+      position: absolute; inset: 0;
+      background-image: linear-gradient(rgba(0,229,195,0.033) 1px, transparent 1px), linear-gradient(90deg, rgba(0,229,195,0.033) 1px, transparent 1px);
+      background-size: 56px 56px;
+      mask-image: radial-gradient(ellipse 85% 85% at 50% 50%, black 20%, transparent 100%);
+      pointer-events: none;
+    }
+    .hero-eyebrow {
+      display: inline-flex; align-items: center; gap: 0.55rem;
+      background: rgba(0,229,195,0.08); border: 1px solid rgba(0,229,195,0.22);
+      border-radius: 50px; padding: 0.3rem 0.95rem;
+      font-size: 0.76rem; font-weight: 700; color: var(--accent);
+      letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 1.6rem;
+    }
+    .eyebrow-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 8px var(--accent);
+      animation: pdot 2s ease-in-out infinite;
+    }
+    @keyframes pdot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.35;transform:scale(0.6)} }
+    .hero h1 {
+      font-size: clamp(3rem, 5.5vw, 5rem); font-weight: 800;
+      letter-spacing: -0.03em; line-height: 1.0; margin-bottom: 0.45rem;
+    }
+    .koan-word {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 55%, var(--accent3) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .hero-tagline {
+      font-family: 'Syne', sans-serif; font-size: clamp(1rem, 2vw, 1.25rem);
+      font-weight: 600; color: var(--text); margin-bottom: 0.65rem; line-height: 1.4;
+    }
+    .hero-sub {
+      font-size: 0.98rem; color: var(--muted); max-width: 490px;
+      margin-bottom: 2.25rem; font-weight: 300; line-height: 1.78;
+    }
+    .hero-sub strong { color: var(--text); font-weight: 500; }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 0.8rem; }
+    .stats-row { display: flex; gap: 2.25rem; margin-top: 2.75rem; flex-wrap: wrap; }
+    .stat-item { display: flex; flex-direction: column; }
+    .stat-num {
+      font-family: 'Syne', sans-serif; font-size: 1.65rem; font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .stat-label { font-size: 0.74rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+
+    /* Avatar */
+    .hero-avatar-wrap {
+      position: relative; display: flex;
+      justify-content: center; align-items: center; height: 480px;
+    }
+    .avatar-ring {
+      position: absolute; border-radius: 50%; border: 1px solid;
+      animation: spin-ring linear infinite;
+    }
+    .avatar-ring:nth-child(1){width:310px;height:310px;border-color:rgba(0,229,195,0.14);animation-duration:22s;}
+    .avatar-ring:nth-child(2){width:395px;height:395px;border-color:rgba(0,184,148,0.09);animation-duration:35s;animation-direction:reverse;}
+    .avatar-ring:nth-child(3){width:475px;height:475px;border-color:rgba(74,222,128,0.06);animation-duration:50s;}
+    @keyframes spin-ring{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+    .avatar-ring::after{
+      content:'';position:absolute;width:9px;height:9px;border-radius:50%;
+      background:var(--accent);top:-4.5px;left:50%;transform:translateX(-50%);
+      box-shadow:0 0 12px var(--accent);
+    }
+    .avatar-ring:nth-child(2)::after{background:var(--accent2);box-shadow:0 0 12px var(--accent2);}
+    .avatar-ring:nth-child(3)::after{background:var(--accent3);box-shadow:0 0 12px var(--accent3);}
+    .hero-avatar-img {
+      width: 205px; height: 205px; border-radius: 50%; object-fit: cover;
+      border: 3px solid rgba(0,229,195,0.28);
+      box-shadow: 0 0 0 10px rgba(0,229,195,0.05), 0 0 65px rgba(0,184,148,0.38), 0 22px 60px rgba(0,0,0,0.55);
+      position: relative; z-index: 2;
+    }
+    .avatar-badge {
+      position: absolute; background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 0.48rem 0.82rem;
+      font-size: 0.77rem; font-weight: 600;
+      display: flex; align-items: center; gap: 0.4rem; z-index: 3;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4); white-space: nowrap;
+      animation: float-b 4s ease-in-out infinite alternate;
+    }
+    .avatar-badge:nth-child(5){top:14%;left:-7%;animation-delay:0s;}
+    .avatar-badge:nth-child(6){top:22%;right:-10%;animation-delay:1.3s;}
+    .avatar-badge:nth-child(7){bottom:22%;left:-5%;animation-delay:0.8s;}
+    .avatar-badge:nth-child(8){bottom:14%;right:-8%;animation-delay:2s;}
+    @keyframes float-b{from{transform:translateY(0)}to{transform:translateY(-7px)}}
+
+    /* LLM band */
+    .llm-band {
+      background: var(--deep); border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border); padding: 1.35rem 0; overflow: hidden;
+    }
+    .llm-track {
+      display: flex; gap: 2.25rem; align-items: center;
+      animation: marquee 28s linear infinite; white-space: nowrap;
+    }
+    @keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+    .llm-chip {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+      border-radius: 50px; padding: 0.4rem 1.05rem;
+      font-weight: 600; font-size: 0.83rem; color: var(--muted); flex-shrink: 0;
+    }
+
+    /* Home value props */
+    .vp-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 2rem 1.75rem; text-align: center;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .vp-card:hover { border-color: rgba(0,229,195,0.25); transform: translateY(-3px); }
+    .vp-emoji { font-size: 2.25rem; margin-bottom: 0.75rem; }
+    .vp-card h4 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .vp-card p { font-size: 0.86rem; color: var(--muted); margin: 0; }
+
+    /* OSS CTA */
+    .oss-section {
+      background: linear-gradient(135deg, #0c1210 0%, #080b0a 100%);
+      position: relative; overflow: hidden; padding: 5rem 0;
+    }
+    .oss-section::before {
+      content:'';position:absolute;inset:0;
+      background:radial-gradient(ellipse 55% 55% at 50% 50%, rgba(0,229,195,0.15) 0%, transparent 70%);
+      pointer-events:none;
+    }
+    .cta-box {
+      background: rgba(255,255,255,0.025); border: 1px solid rgba(0,229,195,0.17);
+      border-radius: 22px; padding: 3.75rem 3rem; text-align: center; position: relative; z-index: 1;
+    }
+    .cta-box h2 { font-size: clamp(1.85rem, 3.5vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 0.9rem; }
+    .cta-box p { color: var(--muted); font-size: 1rem; max-width: 470px; margin: 0 auto 2.25rem; }
+
+    /* ──────────────── FEATURES ──────────────── */
+    .feature-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 1.85rem 1.65rem; height: 100%;
+      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+      position: relative; overflow: hidden;
+    }
+    .feature-card::before {
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(0,229,195,0.05) 0%,transparent 60%);
+      opacity:0;transition:opacity 0.25s;
+    }
+    .feature-card:hover{border-color:rgba(0,229,195,0.3);transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,0.38);}
+    .feature-card:hover::before{opacity:1;}
+    .f-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;margin-bottom:1.05rem;}
+    .ic-blue{background:rgba(0,229,195,0.1);color:var(--accent);}
+    .ic-purple{background:rgba(0,184,148,0.1);color:var(--accent2);}
+    .ic-teal{background:rgba(74,222,128,0.1);color:var(--accent3);}
+    .ic-amber{background:rgba(74,222,128,0.08);color:#4ade80;}
+    .ic-rose{background:rgba(0,184,148,0.08);color:#00b894;}
+    .ic-indigo{background:rgba(0,229,195,0.08);color:#00e5c3;}
+    .feature-card h4{font-size:0.98rem;font-weight:700;margin-bottom:0.5rem;color:var(--text);}
+    .feature-card p{font-size:0.86rem;color:var(--muted);margin:0;}
+
+    /* ──────────────── COMMANDS ──────────────── */
+    .cmd-terminal{background:#060a08;border:1px solid var(--border);border-radius:14px;overflow:hidden;font-family:'JetBrains Mono',monospace;}
+    .terminal-header{background:#0a0f1c;padding:0.68rem 1.15rem;display:flex;align-items:center;gap:0.42rem;border-bottom:1px solid var(--border);}
+    .t-dot{width:11px;height:11px;border-radius:50%;}
+    .t-dot.red{background:#ff5f57}.t-dot.yellow{background:#febc2e}.t-dot.green{background:#28c840}
+    .terminal-title{font-size:0.72rem;color:var(--muted);margin:0 auto;}
+    .terminal-body{padding:1.5rem;}
+    .cmd-line{display:flex;align-items:flex-start;gap:0.9rem;padding:0.58rem 0;border-bottom:1px solid rgba(255,255,255,0.04);}
+    .cmd-line:last-child{border-bottom:none;}
+    .cmd-prompt{color:var(--accent3);font-size:0.82rem;white-space:nowrap;padding-top:0.1rem;font-weight:700;flex-shrink:0;}
+    .cmd-text{font-size:0.82rem;color:var(--text);line-height:1.5;}
+    .cmd-comment{font-size:0.74rem;color:var(--muted);margin-top:0.16rem;}
+    .cmd-label{display:inline-block;font-size:0.67rem;font-weight:700;padding:0.1rem 0.45rem;border-radius:4px;margin-left:0.42rem;vertical-align:middle;letter-spacing:0.04em;}
+    .l-fix{background:rgba(0,184,148,0.13);color:#00b894;}
+    .l-review{background:rgba(0,229,195,0.13);color:var(--accent);}
+    .l-plan{background:rgba(74,222,128,0.13);color:#4ade80;}
+    .l-search{background:rgba(74,222,128,0.13);color:var(--accent3);}
+    .l-rebase{background:rgba(0,184,148,0.13);color:var(--accent2);}
+
+    .flow-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.4rem;display:flex;align-items:flex-start;gap:0.9rem;transition:border-color 0.2s;}
+    .flow-card:hover{border-color:rgba(0,229,195,0.22);}
+    .flow-num{width:34px;height:34px;border-radius:8px;background:rgba(0,229,195,0.1);color:var(--accent);display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-weight:800;font-size:0.88rem;flex-shrink:0;}
+    .flow-card h5{font-size:0.93rem;font-weight:700;margin-bottom:0.28rem;}
+    .flow-card p{font-size:0.83rem;color:var(--muted);margin:0;}
+
+    /* ──────────────── SKILLS ──────────────── */
+    .skill-cat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.65rem;height:100%;transition:border-color 0.2s;}
+    .skill-cat:hover{border-color:rgba(0,229,195,0.27);}
+    .sk-header{display:flex;align-items:center;gap:0.7rem;margin-bottom:1.15rem;}
+    .sk-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.05rem;flex-shrink:0;}
+    .sk-header h4{font-size:0.93rem;font-weight:700;margin:0;}
+    .sk-list{display:flex;flex-direction:column;gap:0.42rem;}
+    .sk-item{display:flex;align-items:center;gap:0.55rem;font-size:0.84rem;color:var(--muted);padding:0.4rem 0.6rem;background:rgba(255,255,255,0.022);border-radius:7px;border:1px solid transparent;transition:border-color 0.18s,color 0.18s;}
+    .sk-item:hover{border-color:var(--border);color:var(--text);}
+    .sk-item i{font-size:0.78rem;color:var(--accent3);flex-shrink:0;}
+
+    /* ──────────────── INTEGRATIONS ──────────────── */
+    .int-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:2.15rem 1.65rem;text-align:center;transition:border-color 0.25s,box-shadow 0.25s,transform 0.25s;}
+    .int-card:hover{border-color:rgba(0,229,195,0.32);box-shadow:0 12px 36px rgba(0,229,195,0.12);transform:translateY(-4px);}
+    .int-icon{font-size:2.5rem;margin-bottom:0.9rem;}
+    .int-card h4{font-size:1.02rem;font-weight:700;margin-bottom:0.42rem;}
+    .int-card p{font-size:0.83rem;color:var(--muted);margin:0;}
+
+    /* Deep search */
+    .ds-visual{background:var(--deep);border:1px solid var(--border);border-radius:14px;padding:1.65rem;}
+    .scan-line{height:2px;background:linear-gradient(90deg,transparent,var(--accent3),transparent);width:100%;margin-bottom:1.15rem;animation:scan 3.2s ease-in-out infinite;}
+    @keyframes scan{0%,100%{opacity:0;transform:scaleX(0.2)}50%{opacity:1;transform:scaleX(1)}}
+    .bug-item{display:flex;align-items:center;gap:0.8rem;padding:0.62rem 0.72rem;background:rgba(255,255,255,0.022);border-radius:8px;margin-bottom:0.46rem;border-left:3px solid;font-size:0.82rem;}
+    .bug-item.critical{border-color:#fb7185}.bug-item.warning{border-color:#fbbf24}.bug-item.info{border-color:var(--accent)}
+    .bug-sev{font-size:0.67rem;font-weight:700;padding:0.1rem 0.42rem;border-radius:4px;flex-shrink:0;}
+    .bug-item.critical .bug-sev{background:rgba(251,113,133,0.13);color:#fb7185;}
+    .bug-item.warning .bug-sev{background:rgba(251,191,36,0.13);color:#fbbf24;}
+    .bug-item.info .bug-sev{background:rgba(0,229,195,0.13);color:var(--accent);}
+
+    /* ──────────────── CONFIG ──────────────── */
+    .cfg-block{background:#060a08;border:1px solid var(--border);border-radius:14px;padding:1.65rem;font-family:'JetBrains Mono',monospace;font-size:0.8rem;line-height:1.9;}
+    .cfg-key{color:var(--accent)}.cfg-val{color:var(--accent3)}.cfg-str{color:#a5d6a7}.cfg-comment{color:#3a6652}.cfg-bool{color:var(--accent2)}.cfg-section{color:#fbbf24;font-weight:700;}
+    .doc-link{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.4rem;display:flex;align-items:flex-start;gap:0.9rem;text-decoration:none;color:var(--text);transition:border-color 0.2s,transform 0.2s;}
+    .doc-link:hover{border-color:rgba(0,229,195,0.28);transform:translateY(-2px);color:var(--text);}
+    .dl-icon{width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;}
+    .doc-link h5{font-size:0.93rem;font-weight:700;margin-bottom:0.28rem;}
+    .doc-link p{font-size:0.81rem;color:var(--muted);margin:0;}
+    .doc-link .dl-arr{margin-left:auto;color:var(--muted);font-size:0.82rem;align-self:center;flex-shrink:0;}
+
+    /* ──────────────── FOOTER ──────────────── */
+    footer{background:var(--deep);border-top:1px solid var(--border);padding:3rem 0 2rem;}
+    .footer-brand{font-family:'Syne',sans-serif;font-weight:800;font-size:1.22rem;color:var(--text);display:flex;align-items:center;gap:0.5rem;margin-bottom:0.65rem;text-decoration:none;}
+    .footer-desc{font-size:0.82rem;color:var(--muted);max-width:265px;}
+    .footer-heading{font-family:'Syne',sans-serif;font-weight:700;font-size:0.74rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.85rem;}
+    .footer-link{display:block;font-size:0.85rem;color:var(--muted);text-decoration:none;margin-bottom:0.42rem;transition:color 0.2s;}
+    .footer-link:hover{color:var(--text);}
+    .footer-bottom{border-top:1px solid var(--border);padding-top:1.35rem;margin-top:2.25rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;}
+    .footer-copy{font-size:0.77rem;color:var(--muted);}
+    .social-links{display:flex;gap:0.55rem;}
+    .social-link{width:32px;height:32px;border-radius:7px;background:rgba(255,255,255,0.04);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);text-decoration:none;font-size:0.86rem;transition:background 0.2s,color 0.2s,border-color 0.2s;}
+    .social-link:hover{background:rgba(0,229,195,0.1);color:var(--accent);border-color:var(--accent);}
+
+    @media (max-width: 768px) {
+      .hero{min-height:auto;padding:3.5rem 0 3rem;}
+      .hero-avatar-wrap{height:340px;margin-top:2.5rem;}
+      .avatar-ring:nth-child(1){width:210px;height:210px;}
+      .avatar-ring:nth-child(2){width:270px;height:270px;}
+      .avatar-ring:nth-child(3){width:330px;height:330px;}
+      .hero-avatar-img{width:145px;height:145px;}
+      .avatar-badge{display:none;}
+      .cta-box{padding:2.5rem 1.5rem;}
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════ NAVBAR ══════════════════════════ -->
+<nav class="navbar" id="mainNav">
+  <div class="navbar-inner">
+    <a class="navbar-brand" href="#" onclick="showPage('home');return false;">
+      <div class="brand-k">公</div>
+      Kōan
+    </a>
+    <div class="nav-tabs-area">
+      <button class="nav-tab active" data-page="home" onclick="showPage('home')"><i class="fas fa-house"></i> Home</button>
+      <button class="nav-tab" data-page="features" onclick="showPage('features')"><i class="fas fa-sparkles"></i> Features</button>
+      <button class="nav-tab" data-page="commands" onclick="showPage('commands')"><i class="fas fa-terminal"></i> Commands</button>
+      <button class="nav-tab" data-page="skills" onclick="showPage('skills')"><i class="fas fa-puzzle-piece"></i> Skills</button>
+      <button class="nav-tab" data-page="integrations" onclick="showPage('integrations')"><i class="fas fa-plug"></i> Integrations</button>
+      <button class="nav-tab" data-page="config" onclick="showPage('config')"><i class="fas fa-book-open"></i> Docs</button>
+    </div>
+    <div class="nav-right">
+      <a href="https://github.com/sukria/koan" target="_blank" class="btn-gh"><i class="fab fa-github"></i> GitHub</a>
+      <a href="https://github.com/sukria/koan/stargazers" target="_blank" class="btn-star"><i class="fas fa-star"></i> Star</a>
+    </div>
+    <button class="nav-burger" onclick="toggleMobile()" id="burgerBtn"><i class="fas fa-bars"></i></button>
+  </div>
+  <div class="nav-mobile" id="mobileMenu">
+    <button class="nav-mobile-tab active" data-page="home" onclick="showPage('home');closeMobile()"><i class="fas fa-house"></i> Home</button>
+    <button class="nav-mobile-tab" data-page="features" onclick="showPage('features');closeMobile()"><i class="fas fa-sparkles"></i> Features</button>
+    <button class="nav-mobile-tab" data-page="commands" onclick="showPage('commands');closeMobile()"><i class="fas fa-terminal"></i> Commands</button>
+    <button class="nav-mobile-tab" data-page="skills" onclick="showPage('skills');closeMobile()"><i class="fas fa-puzzle-piece"></i> Skills</button>
+    <button class="nav-mobile-tab" data-page="integrations" onclick="showPage('integrations');closeMobile()"><i class="fas fa-plug"></i> Integrations</button>
+    <button class="nav-mobile-tab" data-page="config" onclick="showPage('config');closeMobile()"><i class="fas fa-book-open"></i> Docs</button>
+    <div class="d-flex gap-2 mt-3">
+      <a href="https://github.com/sukria/koan" target="_blank" class="btn-gh flex-fill justify-content-center"><i class="fab fa-github"></i> GitHub</a>
+      <a href="https://github.com/sukria/koan/stargazers" target="_blank" class="btn-star flex-fill justify-content-center"><i class="fas fa-star"></i> Star</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: HOME
+══════════════════════════════════════════════════════ -->
+<div id="page-home" class="page active">
+  <section class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-grid"></div>
+    <div class="container" style="position:relative;z-index:1;">
+      <div class="row align-items-center g-4">
+        <div class="col-lg-6">
+          <div class="hero-eyebrow"><div class="eyebrow-dot"></div> Open Source · MIT License</div>
+          <h1>Meet <span class="koan-word">Kōan</span></h1>
+          <p class="hero-tagline">An autonomous AI agent that works while you sleep.</p>
+          <p class="hero-sub">Turns idle <strong>Claude Max quota</strong> into code reviews, bug fixes, and strategic insights — right inside your GitHub workflow. No babysitting required.</p>
+          <div class="cta-row">
+            <button class="btn-primary-cta" onclick="showPage('commands')"><i class="fas fa-rocket"></i> See it in action</button>
+            <a href="https://github.com/sukria/koan" target="_blank" class="btn-ghost-cta"><i class="fab fa-github"></i> View on GitHub</a>
+          </div>
+          <div class="stats-row">
+            <div class="stat-item"><span class="stat-num">3+</span><span class="stat-label">LLM Providers</span></div>
+            <div class="stat-item"><span class="stat-num">15+</span><span class="stat-label">Built-in Skills</span></div>
+            <div class="stat-item"><span class="stat-num">100%</span><span class="stat-label">Open Source</span></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="hero-avatar-wrap">
+            <div class="avatar-ring"></div>
+            <div class="avatar-ring"></div>
+            <div class="avatar-ring"></div>
+            <img src="avatar.png" alt="Kōan" class="hero-avatar-img" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=koan&backgroundColor=0c1210'" />
+            <div class="avatar-badge"><i class="fas fa-brain" style="color:var(--accent)"></i> Claude Max</div>
+            <div class="avatar-badge"><i class="fas fa-code-branch" style="color:var(--accent3)"></i> Auto Rebase</div>
+            <div class="avatar-badge"><i class="fas fa-shield-halved" style="color:var(--accent2)"></i> Security Scan</div>
+            <div class="avatar-badge"><i class="fab fa-docker" style="color:#2496ED"></i> Docker Ready</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="llm-band">
+    <div class="container-fluid px-0">
+      <div class="llm-track">
+        <span class="llm-chip"><i class="fas fa-brain"></i> Claude (Anthropic)</span>
+        <span class="llm-chip"><i class="fab fa-microsoft"></i> GitHub Copilot</span>
+        <span class="llm-chip">🦙 OpenLLaMA</span>
+        <span class="llm-chip"><i class="fab fa-docker"></i> Docker Native</span>
+        <span class="llm-chip"><i class="fab fa-telegram"></i> Telegram</span>
+        <span class="llm-chip"><i class="fab fa-slack"></i> Slack</span>
+        <span class="llm-chip"><i class="fas fa-shield-halved"></i> Security Scanner</span>
+        <span class="llm-chip"><i class="fas fa-code-branch"></i> Auto Rebase</span>
+        <span class="llm-chip"><i class="fas fa-magnifying-glass-code"></i> Deep Search</span>
+        <span class="llm-chip"><i class="fas fa-wand-magic-sparkles"></i> Auto Fix</span>
+        <span class="llm-chip"><i class="fas fa-brain"></i> Claude (Anthropic)</span>
+        <span class="llm-chip"><i class="fab fa-microsoft"></i> GitHub Copilot</span>
+        <span class="llm-chip">🦙 OpenLLaMA</span>
+        <span class="llm-chip"><i class="fab fa-docker"></i> Docker Native</span>
+        <span class="llm-chip"><i class="fab fa-telegram"></i> Telegram</span>
+        <span class="llm-chip"><i class="fab fa-slack"></i> Slack</span>
+        <span class="llm-chip"><i class="fas fa-shield-halved"></i> Security Scanner</span>
+        <span class="llm-chip"><i class="fas fa-code-branch"></i> Auto Rebase</span>
+        <span class="llm-chip"><i class="fas fa-magnifying-glass-code"></i> Deep Search</span>
+        <span class="llm-chip"><i class="fas fa-wand-magic-sparkles"></i> Auto Fix</span>
+      </div>
+    </div>
+  </div>
+
+  <section style="background:var(--deep);padding:4rem 0;">
+    <div class="container">
+      <div class="row g-4">
+        <div class="col-md-4 reveal">
+          <div class="vp-card">
+            <div class="vp-emoji">🌙</div>
+            <h4>Works While You Sleep</h4>
+            <p>Deploy once. Kōan monitors your repos 24/7, autonomously handling PRs, CI failures, and code reviews overnight.</p>
+          </div>
+        </div>
+        <div class="col-md-4 reveal">
+          <div class="vp-card">
+            <div class="vp-emoji">⚡</div>
+            <h4>Zero Wasted Quota</h4>
+            <p>Your Claude Max subscription runs at full capacity. Every idle token becomes a code fix, review, or architectural insight.</p>
+          </div>
+        </div>
+        <div class="col-md-4 reveal">
+          <div class="vp-card">
+            <div class="vp-emoji">🧩</div>
+            <h4>A Soul of Its Own</h4>
+            <p>Give your bot a name, avatar, and personality. Kōan isn't just a tool — it's a teammate with a distinct voice.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="oss-section">
+    <div class="container">
+      <div class="cta-box reveal">
+        <span class="section-label">Open Source</span>
+        <h2>Free. Open. Forever.</h2>
+        <p>MIT licensed and community-driven. Fork it, extend it, make it yours.</p>
+        <div class="d-flex flex-wrap gap-3 justify-content-center">
+          <a href="https://github.com/sukria/koan" target="_blank" class="btn-primary-cta"><i class="fab fa-github"></i> View on GitHub</a>
+          <a href="https://github.com/sukria/koan/fork" target="_blank" class="btn-ghost-cta" style="color:var(--text)"><i class="fas fa-code-fork"></i> Fork & Contribute</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="container">
+      <div class="row g-4">
+        <div class="col-lg-4">
+          <a href="#" class="footer-brand" onclick="showPage('home');return false;"><div class="brand-k" style="width:26px;height:26px;font-size:0.8rem;">公</div>Kōan</a>
+          <p class="footer-desc">An autonomous AI agent that works while you sleep. Open source, MIT licensed.</p>
+        </div>
+        <div class="col-lg-2 col-6">
+          <div class="footer-heading">Navigate</div>
+          <a href="#" class="footer-link" onclick="showPage('features');return false;">Features</a>
+          <a href="#" class="footer-link" onclick="showPage('commands');return false;">Commands</a>
+          <a href="#" class="footer-link" onclick="showPage('skills');return false;">Skills</a>
+          <a href="#" class="footer-link" onclick="showPage('config');return false;">Docs</a>
+        </div>
+        <div class="col-lg-2 col-6">
+          <div class="footer-heading">Integrations</div>
+          <a href="#" class="footer-link" onclick="showPage('integrations');return false;">GitHub</a>
+          <a href="#" class="footer-link" onclick="showPage('integrations');return false;">Telegram</a>
+          <a href="#" class="footer-link" onclick="showPage('integrations');return false;">Slack</a>
+          <a href="#" class="footer-link" onclick="showPage('integrations');return false;">Docker</a>
+        </div>
+        <div class="col-lg-2 col-6">
+          <div class="footer-heading">LLMs</div>
+          <a href="#" class="footer-link">Claude</a>
+          <a href="#" class="footer-link">Copilot</a>
+          <a href="#" class="footer-link">OpenLLaMA</a>
+        </div>
+        <div class="col-lg-2 col-6">
+          <div class="footer-heading">Resources</div>
+          <a href="https://github.com/sukria/koan#readme" target="_blank" class="footer-link">Documentation</a>
+          <a href="https://github.com/sukria/koan/releases" target="_blank" class="footer-link">Changelog</a>
+          <a href="https://github.com/sukria/koan/issues" target="_blank" class="footer-link">Issues</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span class="footer-copy">
+  © 2026 Koan · MIT License · Powered by <a href="https://anantys.com" target="_blank" style="color:var(--accent);text-decoration:none;">Anantys</a>
+  · <a href="https://github.com/sukria" target="_blank" style="color:var(--muted);text-decoration:none;">@sukria</a>
+  · <a href="https://github.com/atoomic" target="_blank" style="color:var(--muted);text-decoration:none;">@atoomic</a>
+</span>
+        <div class="social-links">
+          <a href="https://github.com/sukria/koan" target="_blank" class="social-link"><i class="fab fa-github"></i></a>
+          <a href="#" class="social-link"><i class="fab fa-telegram"></i></a>
+          <a href="#" class="social-link"><i class="fab fa-slack"></i></a>
+          <a href="#" class="social-link"><i class="fab fa-twitter"></i></a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: FEATURES
+══════════════════════════════════════════════════════ -->
+<div id="page-features" class="page">
+  <div class="page-header">
+    <div class="container reveal">
+      <span class="section-label">Capabilities</span>
+      <h2 class="section-title">Everything Kōan can do</h2>
+      <p class="section-desc">From automated PR reviews to deep bug hunting — a complete autonomous engineering companion.</p>
+    </div>
+  </div>
+  <section>
+    <div class="container">
+      <div class="row g-4">
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-blue"><i class="fas fa-brain"></i></div><h4>Multiple LLM Support</h4><p>Switch between Claude, GitHub Copilot, and OpenLLaMA. Choose the right model for each task — speed, accuracy, or cost.</p></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-purple"><i class="fas fa-wand-magic-sparkles"></i></div><h4>Auto Fix & Plan</h4><p>Kōan automatically proposes fixes, generates action plans, and commits them directly to your PRs without lifting a finger.</p></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-teal"><i class="fas fa-code-pull-request"></i></div><h4>GitHub Integration</h4><p>Trigger workflows with natural language: <code style="color:var(--accent3);font-size:0.79rem">@koan fix</code>, <code style="color:var(--accent3);font-size:0.79rem">@koan review</code>, <code style="color:var(--accent3);font-size:0.79rem">@koan rebase</code> — right inside your PR.</p></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-amber"><i class="fas fa-magnifying-glass-code"></i></div><h4>Deep Search Mode</h4><p>Investigates your entire codebase to pinpoint real bugs. AI-driven, context-aware, multi-hop reasoning across files.</p></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-rose"><i class="fab fa-docker"></i></div><h4>Docker First</h4><p>Full containerization support. Deploy anywhere with a single command — local, cloud, or CI/CD pipelines out of the box.</p></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-indigo"><i class="fas fa-puzzle-piece"></i></div><h4>Extensible Skills</h4><p>Drop in skill modules to add capabilities. 15+ built-in, or write your own with a simple, documented Skills API.</p></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-teal"><i class="fab fa-telegram"></i></div><h4>Telegram & Slack</h4><p>Real-time notifications and command triggers through your team's Telegram or Slack channels.</p></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-blue"><i class="fas fa-sliders"></i></div><h4>Easy Configuration</h4><p>A single YAML file defines everything — LLM provider, API keys, skills, and notifications. Up in under 5 minutes.</p></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="feature-card"><div class="f-icon ic-purple"><i class="fas fa-fingerprint"></i></div><h4>Personal Identity & Soul</h4><p>Set a name, avatar, and personality tone. Kōan adapts its communication style — a teammate, not just a script.</p></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: COMMANDS
+══════════════════════════════════════════════════════ -->
+<div id="page-commands" class="page">
+  <div class="page-header">
+    <div class="container reveal">
+      <span class="section-label">GitHub Commands</span>
+      <h2 class="section-title">Talk to Kōan<br>like a teammate</h2>
+      <p class="section-desc">Comment on any PR or issue. Kōan understands your intent and takes autonomous action instantly.</p>
+      <div class="mt-3 d-flex gap-2 flex-wrap">
+        <span class="tag-badge tag-open"><i class="fas fa-circle-check"></i> Autonomous</span>
+        <span class="tag-badge tag-free"><i class="fas fa-wand-magic-sparkles"></i> AI-Powered</span>
+      </div>
+    </div>
+  </div>
+  <section>
+    <div class="container">
+      <div class="row g-5">
+        <div class="col-lg-7 reveal">
+          <div class="cmd-terminal">
+            <div class="terminal-header">
+              <div class="t-dot red"></div><div class="t-dot yellow"></div><div class="t-dot green"></div>
+              <span class="terminal-title">github-pr-comment · PR #247</span>
+            </div>
+            <div class="terminal-body">
+              <div class="cmd-line"><span class="cmd-prompt">@koan</span><div><div class="cmd-text">rebase <span class="cmd-label l-rebase">REBASE</span></div><div class="cmd-comment">Rebases branch onto main and resolves simple conflicts automatically</div></div></div>
+              <div class="cmd-line"><span class="cmd-prompt">@koan</span><div><div class="cmd-text">fix <span class="cmd-label l-fix">FIX</span></div><div class="cmd-comment">Analyzes failing tests & CI errors, patches the code, pushes a commit</div></div></div>
+              <div class="cmd-line"><span class="cmd-prompt">@koan</span><div><div class="cmd-text">review <span class="cmd-label l-review">REVIEW</span></div><div class="cmd-comment">Deep review: logic, security, performance, style — with inline comments</div></div></div>
+              <div class="cmd-line"><span class="cmd-prompt">@koan</span><div><div class="cmd-text">plan <span class="cmd-label l-plan">PLAN</span></div><div class="cmd-comment">Breaks down the issue into a step-by-step implementation plan</div></div></div>
+              <div class="cmd-line"><span class="cmd-prompt">@koan</span><div><div class="cmd-text">search "memory leak in worker pool" <span class="cmd-label l-search">DEEP SEARCH</span></div><div class="cmd-comment">Crawls codebase to find root cause and related code paths</div></div></div>
+              <div class="cmd-line"><span class="cmd-prompt">@koan</span><div><div class="cmd-text">investigate --security <span class="cmd-label l-search">INVESTIGATE</span></div><div class="cmd-comment">Full security audit: SQL injection, auth bypasses, exposed secrets</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <h3 style="font-size:1.2rem;font-weight:700;margin-bottom:1.3rem;" class="reveal">How it works</h3>
+          <div class="d-flex flex-column gap-3">
+            <div class="flow-card reveal"><div class="flow-num">1</div><div><h5>Comment on a PR or Issue</h5><p>Drop any <code style="color:var(--accent3);font-size:0.8rem">@koan &lt;command&gt;</code> in GitHub. No app to install, no UI to open.</p></div></div>
+            <div class="flow-card reveal"><div class="flow-num">2</div><div><h5>Kōan picks it up instantly</h5><p>The webhook fires, your chosen LLM analyzes the full context — code, history, CI logs, and intent.</p></div></div>
+            <div class="flow-card reveal"><div class="flow-num">3</div><div><h5>Action committed, result posted</h5><p>Changes are committed directly to the branch. Results are posted as a structured GitHub comment.</p></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: SKILLS
+══════════════════════════════════════════════════════ -->
+<div id="page-skills" class="page">
+  <div class="page-header">
+    <div class="container reveal">
+      <span class="section-label">Built-in Skills</span>
+      <h2 class="section-title">Powerful skills,<br>ready out of the box</h2>
+      <p class="section-desc">Every skill is a modular capability. Drop in, configure, and compose as needed.</p>
+    </div>
+  </div>
+  <section>
+    <div class="container">
+      <div class="row g-4">
+        <div class="col-lg-4 col-md-6 reveal"><div class="skill-cat"><div class="sk-header"><div class="sk-icon ic-rose"><i class="fas fa-shield-halved"></i></div><h4>Security</h4></div><div class="sk-list"><div class="sk-item"><i class="fas fa-check"></i>OWASP Security Audit</div><div class="sk-item"><i class="fas fa-check"></i>Secrets Scanner</div><div class="sk-item"><i class="fas fa-check"></i>SQL Injection Detector</div><div class="sk-item"><i class="fas fa-check"></i>Auth Flow Reviewer</div></div></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="skill-cat"><div class="sk-header"><div class="sk-icon ic-blue"><i class="fas fa-code"></i></div><h4>Code Quality</h4></div><div class="sk-list"><div class="sk-item"><i class="fas fa-check"></i>Deep Code Review</div><div class="sk-item"><i class="fas fa-check"></i>Performance Analyzer</div><div class="sk-item"><i class="fas fa-check"></i>SQL Query Reviewer</div><div class="sk-item"><i class="fas fa-check"></i>PR Checklist Generator</div></div></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="skill-cat"><div class="sk-header"><div class="sk-icon ic-teal"><i class="fas fa-vial"></i></div><h4>Testing</h4></div><div class="sk-list"><div class="sk-item"><i class="fas fa-check"></i>Test Generator</div><div class="sk-item"><i class="fas fa-check"></i>Coverage Analyzer</div><div class="sk-item"><i class="fas fa-check"></i>Regression Finder</div><div class="sk-item"><i class="fas fa-check"></i>Mock Generator</div></div></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="skill-cat"><div class="sk-header"><div class="sk-icon ic-amber"><i class="fas fa-code-branch"></i></div><h4>Git & Workflow</h4></div><div class="sk-list"><div class="sk-item"><i class="fas fa-check"></i>Auto Rebase</div><div class="sk-item"><i class="fas fa-check"></i>Commit Message Writer</div><div class="sk-item"><i class="fas fa-check"></i>Dependency Updater</div><div class="sk-item"><i class="fas fa-check"></i>Changelog Generator</div></div></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="skill-cat"><div class="sk-header"><div class="sk-icon ic-purple"><i class="fas fa-book"></i></div><h4>Documentation</h4></div><div class="sk-list"><div class="sk-item"><i class="fas fa-check"></i>Docs Writer</div><div class="sk-item"><i class="fas fa-check"></i>Architecture Diagram</div><div class="sk-item"><i class="fas fa-check"></i>API Docs Generator</div><div class="sk-item"><i class="fas fa-check"></i>README Updater</div></div></div></div>
+        <div class="col-lg-4 col-md-6 reveal"><div class="skill-cat"><div class="sk-header"><div class="sk-icon ic-indigo"><i class="fas fa-plus-circle"></i></div><h4>Custom Skills</h4></div><div class="sk-list"><div class="sk-item"><i class="fas fa-check"></i>Simple Skills API</div><div class="sk-item"><i class="fas fa-check"></i>Composable &amp; chainable</div><div class="sk-item"><i class="fas fa-check"></i>Typed config schema</div><div class="sk-item"><i class="fas fa-check"></i>Community registry</div></div></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: INTEGRATIONS
+══════════════════════════════════════════════════════ -->
+<div id="page-integrations" class="page">
+  <div class="page-header">
+    <div class="container reveal">
+      <span class="section-label">Integrations</span>
+      <h2 class="section-title">Works where<br>your team works</h2>
+      <p class="section-desc">Native integrations with GitHub, Slack, Telegram, and Docker — no middleware, no glue code.</p>
+    </div>
+  </div>
+  <section>
+    <div class="container">
+      <div class="row g-4 mb-5">
+        <div class="col-lg-3 col-md-6 reveal"><div class="int-card"><div class="int-icon"><i class="fab fa-github" style="color:var(--text)"></i></div><h4>GitHub</h4><p>Native PR comments, issue tracking, webhook events, and Actions pipeline integration</p></div></div>
+        <div class="col-lg-3 col-md-6 reveal"><div class="int-card"><div class="int-icon"><i class="fab fa-telegram" style="color:#2CA5E0"></i></div><h4>Telegram</h4><p>Command your bot and receive real-time alerts through Telegram bot API</p></div></div>
+        <div class="col-lg-3 col-md-6 reveal"><div class="int-card"><div class="int-icon"><i class="fab fa-slack" style="color:#e91e8c"></i></div><h4>Slack</h4><p>Channel notifications, slash commands, approval workflows and interactive messages</p></div></div>
+        <div class="col-lg-3 col-md-6 reveal"><div class="int-card"><div class="int-icon"><i class="fab fa-docker" style="color:#2496ED"></i></div><h4>Docker</h4><p>Full containerization — deploy anywhere with <code style="font-size:0.78rem">docker run koan/koan</code></p></div></div>
+      </div>
+      <!-- Deep Search -->
+      <div style="border-top:1px solid var(--border);padding-top:4rem;">
+        <div class="row align-items-center g-5">
+          <div class="col-lg-6 reveal">
+            <span class="section-label">Deep Search & Investigation</span>
+            <h2 class="section-title">Find the bugs<br>humans miss</h2>
+            <p class="section-desc">Multi-step reasoning across your codebase — tracing call graphs, following data flows, surfacing vulnerabilities static analyzers can't detect.</p>
+            <ul class="mt-4" style="list-style:none;padding:0;display:flex;flex-direction:column;gap:0.6rem;">
+              <li style="display:flex;align-items:center;gap:0.7rem;font-size:0.9rem;color:var(--muted);"><i class="fas fa-check-circle" style="color:var(--accent3);flex-shrink:0;"></i>Cross-file dependency tracing</li>
+              <li style="display:flex;align-items:center;gap:0.7rem;font-size:0.9rem;color:var(--muted);"><i class="fas fa-check-circle" style="color:var(--accent3);flex-shrink:0;"></i>Security vulnerability detection (OWASP Top 10)</li>
+              <li style="display:flex;align-items:center;gap:0.7rem;font-size:0.9rem;color:var(--muted);"><i class="fas fa-check-circle" style="color:var(--accent3);flex-shrink:0;"></i>Automatic patch generation with explanation</li>
+              <li style="display:flex;align-items:center;gap:0.7rem;font-size:0.9rem;color:var(--muted);"><i class="fas fa-check-circle" style="color:var(--accent3);flex-shrink:0;"></i>Context-aware false-positive filtering</li>
+            </ul>
+          </div>
+          <div class="col-lg-6 reveal">
+            <div class="ds-visual">
+              <div class="scan-line"></div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:0.76rem;color:var(--muted);margin-bottom:1rem;">
+                <span style="color:var(--accent3)">▶</span> Scanning <span style="color:var(--text)">src/</span> (1,247 files) · deep mode
+              </div>
+              <div class="bug-item critical"><span class="bug-sev">CRITICAL</span><div><div style="font-size:0.81rem;color:var(--text)">SQL injection in <code style="color:#fb7185">UserRepository.php:142</code></div><div style="font-size:0.73rem;color:var(--muted)">Unsanitized user input passed to raw query</div></div></div>
+              <div class="bug-item warning"><span class="bug-sev">HIGH</span><div><div style="font-size:0.81rem;color:var(--text)">Memory leak in <code style="color:#fbbf24">WorkerPool.js:89</code></div><div style="font-size:0.73rem;color:var(--muted)">Event listener never removed on worker exit</div></div></div>
+              <div class="bug-item info"><span class="bug-sev">MEDIUM</span><div><div style="font-size:0.81rem;color:var(--text)">Missing rate limit on <code style="color:var(--accent)">POST /api/auth/login</code></div><div style="font-size:0.73rem;color:var(--muted)">Brute force attack surface exposed</div></div></div>
+              <div class="bug-item info"><span class="bug-sev">LOW</span><div><div style="font-size:0.81rem;color:var(--text)">Deprecated API in <code style="color:var(--accent)">utils/crypto.ts:34</code></div><div style="font-size:0.73rem;color:var(--muted)">MD5 hashing should be replaced with SHA-256</div></div></div>
+              <div style="margin-top:1rem;font-size:0.76rem;color:var(--muted);font-family:'JetBrains Mono',monospace;"><i class="fas fa-circle-check" style="color:var(--accent3)"></i> Analysis complete · 4 issues · <span style="color:var(--accent3)">Fix plan ready</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     PAGE: DOCS
+══════════════════════════════════════════════════════ -->
+<div id="page-config" class="page">
+  <div class="page-header">
+    <div class="container reveal">
+      <span class="section-label">Documentation</span>
+      <h2 class="section-title">Up in minutes,<br>not hours</h2>
+      <p class="section-desc">A single config file sets everything up. Clean YAML, readable at a glance.</p>
+    </div>
+  </div>
+  <section>
+    <div class="container">
+      <div class="row g-5 align-items-start">
+        <div class="col-lg-6 reveal">
+          <div class="cfg-block"><span class="cfg-comment"># koan.yaml — complete configuration</span>
+<br>
+<span class="cfg-section">[bot]</span>
+<span class="cfg-key">name</span>      = <span class="cfg-str">"Kōan"</span>
+<span class="cfg-key">avatar</span>    = <span class="cfg-str">"https://yourbot.dev/avatar.png"</span>
+<span class="cfg-key">persona</span>   = <span class="cfg-str">"precise, insightful, quietly witty"</span>
+<br>
+<span class="cfg-section">[llm]</span>
+<span class="cfg-key">provider</span>  = <span class="cfg-str">"claude"</span>   <span class="cfg-comment"># claude | copilot | openllama</span>
+<span class="cfg-key">model</span>     = <span class="cfg-str">"claude-opus-4-5"</span>
+<span class="cfg-key">api_key</span>   = <span class="cfg-str">"$ANTHROPIC_API_KEY"</span>
+<br>
+<span class="cfg-section">[skills]</span>
+<span class="cfg-key">enabled</span>   = <span class="cfg-val">["security","review","test-gen","docs"]</span>
+<span class="cfg-key">custom_path</span> = <span class="cfg-str">"./my-skills"</span>
+<br>
+<span class="cfg-section">[integrations]</span>
+<span class="cfg-key">telegram</span>  = <span class="cfg-bool">true</span>
+<span class="cfg-key">telegram_token</span> = <span class="cfg-str">"$TELEGRAM_TOKEN"</span>
+<span class="cfg-key">slack</span>     = <span class="cfg-bool">true</span>
+<span class="cfg-key">slack_webhook</span> = <span class="cfg-str">"$SLACK_WEBHOOK_URL"</span>
+<br>
+<span class="cfg-section">[docker]</span>
+<span class="cfg-key">image</span>     = <span class="cfg-str">"ghcr.io/yourorg/koan:latest"</span>
+<br>
+<span class="cfg-section">[github]</span>
+<span class="cfg-key">webhook_secret</span> = <span class="cfg-str">"$GH_WEBHOOK_SECRET"</span>
+<span class="cfg-key">token</span>     = <span class="cfg-str">"$GITHUB_TOKEN"</span></div>
+        </div>
+        <div class="col-lg-6">
+          <h3 style="font-size:1.18rem;font-weight:700;margin-bottom:1.2rem;" class="reveal">Quick links</h3>
+          <div class="d-flex flex-column gap-3">
+            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-blue"><i class="fas fa-rocket"></i></div><div><h5>Getting Started</h5><p>Install Kōan, configure your first bot, and run your first command in 5 minutes</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-purple"><i class="fas fa-puzzle-piece"></i></div><div><h5>Writing Custom Skills</h5><p>Build skills with the Skills API and share them with the community</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-teal"><i class="fab fa-docker"></i></div><div><h5>Docker Deployment</h5><p>Production-ready Docker setup with compose examples and env vars</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-amber"><i class="fas fa-shield-halved"></i></div><div><h5>Security &amp; Secrets</h5><p>How Kōan handles API keys, webhook secrets, and least-privilege GitHub access</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-indigo"><i class="fas fa-code-fork"></i></div><div><h5>Contributing</h5><p>Contribution guide, code of conduct, and how to propose new core features</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+<script>
+  const VALID_PAGES = ['home','features','commands','skills','integrations','config'];
+
+  function showPage(id) {
+    if (!VALID_PAGES.includes(id)) return;
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + id).classList.add('active');
+    document.querySelectorAll('.nav-tab, .nav-mobile-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.page === id);
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(triggerReveals, 60);
+    history.replaceState(null, '', '#' + id);
+  }
+
+  function toggleMobile() {
+    document.getElementById('mobileMenu').classList.toggle('open');
+  }
+  function closeMobile() {
+    document.getElementById('mobileMenu').classList.remove('open');
+  }
+
+  function triggerReveals() {
+    const els = document.querySelectorAll('.page.active .reveal:not(.visible)');
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach((e, i) => {
+        if (e.isIntersecting) {
+          setTimeout(() => e.target.classList.add('visible'), i * 52);
+          obs.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.08 });
+    els.forEach(el => obs.observe(el));
+  }
+
+  window.addEventListener('scroll', () => {
+    document.getElementById('mainNav').classList.toggle('scrolled', window.scrollY > 38);
+  });
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const hash = location.hash.replace('#', '');
+    if (hash && VALID_PAGES.includes(hash)) showPage(hash);
+    else triggerReveals();
+  });
+</script>
+</body>
+</html>
