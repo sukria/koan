@@ -589,7 +589,7 @@ class TestHandlerCleanFormat:
             lambda repo, owner=None: "/workspace/koan",
         )
         monkeypatch.setattr(
-            "app.pr_review.parse_pr_url",
+            "app.github_url_parser.parse_pr_url",
             lambda url: ("sukria", "koan", "42"),
         )
 
@@ -679,7 +679,7 @@ class TestHandlerCleanFormat:
             lambda repo, owner=None: "/workspace/koan",
         )
         monkeypatch.setattr(
-            "app.pr_review.parse_pr_url",
+            "app.github_url_parser.parse_pr_url",
             lambda url: ("sukria", "koan", "42"),
         )
 

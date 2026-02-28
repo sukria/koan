@@ -415,7 +415,7 @@ def main(argv=None):
     import argparse
     import sys
 
-    from app.pr_review import parse_pr_url as _parse_url
+    from app.github_url_parser import parse_pr_url as _parse_url
 
     parser = argparse.ArgumentParser(
         description="Rebase a GitHub PR onto its target branch."

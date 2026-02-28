@@ -16,7 +16,7 @@ Integration points:
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 # Work type categories — ordered by specificity (most specific first)
 _CATEGORY_PATTERNS = [

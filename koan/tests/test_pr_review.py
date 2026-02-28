@@ -17,8 +17,8 @@ from app.claude_step import (
 )
 from app.github import run_gh
 from app.claude_step import run_project_tests
+from app.github_url_parser import parse_pr_url
 from app.pr_review import (
-    parse_pr_url,
     fetch_pr_context,
     build_pr_prompt,
     build_refactor_prompt,
@@ -125,19 +125,19 @@ class TestRunGhIntegration:
 # ---------------------------------------------------------------------------
 
 class TestRunGit:
-    @patch("app.pr_review.subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_success(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="ok\n")
         result = _run_git(["git", "status"])
         assert result == "ok"
 
-    @patch("app.pr_review.subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_failure_raises(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="error")
         with pytest.raises(RuntimeError, match="git failed"):
             _run_git(["git", "checkout", "nope"])
 
-    @patch("app.pr_review.subprocess.run")
+    @patch("app.claude_step.subprocess.run")
     def test_cwd_passed(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         _run_git(["git", "status"], cwd="/tmp/test")

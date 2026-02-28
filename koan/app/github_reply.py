@@ -15,7 +15,7 @@ Flow:
 import json
 import logging
 import re
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from app.cli_provider import run_command
 from app.github import api
