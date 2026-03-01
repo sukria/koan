@@ -42,7 +42,7 @@ def build_review_prompt(context: dict, skill_dir: Optional[Path] = None) -> str:
     )
 
 
-def _run_claude_review(prompt: str, project_path: str, timeout: int = 300) -> str:
+def _run_claude_review(prompt: str, project_path: str, timeout: int = 600) -> str:
     """Run Claude CLI with read-only tools and return the output text.
 
     Args:
