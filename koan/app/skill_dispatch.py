@@ -45,6 +45,7 @@ _SKILL_RUNNERS = {
     "fix": "skills.core.fix.fix_runner",
     "rebase": "app.rebase_pr",
     "recreate": "app.recreate_pr",
+    "review": "app.review_runner",
     "ai": "app.ai_runner",
     "check": "app.check_runner",
     "claudemd": "app.claudemd_refresh",
@@ -195,6 +196,7 @@ def build_skill_command(
         "fix": lambda: _build_implement_cmd(base_cmd, args, project_path),
         "rebase": lambda: _build_pr_url_cmd(base_cmd, args, project_path),
         "recreate": lambda: _build_pr_url_cmd(base_cmd, args, project_path),
+        "review": lambda: _build_pr_url_cmd(base_cmd, args, project_path),
         "ai": lambda: _build_ai_cmd(base_cmd, project_name, project_path, instance_dir),
         "check": lambda: _build_check_cmd(base_cmd, args, instance_dir, koan_root),
         "claudemd": lambda: _build_claudemd_cmd(base_cmd, project_name, project_path),
@@ -336,7 +338,7 @@ def validate_skill_args(command: str, args: str) -> Optional[str]:
     if command not in _SKILL_RUNNERS:
         return None
 
-    if command in ("rebase", "recreate"):
+    if command in ("rebase", "recreate", "review"):
         if not _PR_URL_RE.search(args):
             return (
                 f"/{command} requires a PR URL "

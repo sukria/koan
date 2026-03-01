@@ -25,6 +25,7 @@ import pytest
 CLI_RUNNER_MODULES = [
     "app.recreate_pr",
     "app.rebase_pr",
+    "app.review_runner",
     "app.plan_runner",
     "app.ai_runner",
     "app.claudemd_refresh",
