@@ -7,113 +7,13 @@ import pytest
 
 from app.ai_runner import (
     run_exploration,
-    _gather_git_activity,
-    _gather_project_structure,
-    _get_missions_context,
     _clean_response,
     main,
 )
 
 
 # ---------------------------------------------------------------------------
-# _gather_git_activity
-# ---------------------------------------------------------------------------
-
-class TestGatherGitActivity:
-    @patch("app.git_sync.run_git")
-    def test_includes_recent_commits(self, mock_git):
-        mock_git.return_value = "abc1234 fix login\ndef5678 add tests"
-        result = _gather_git_activity("/tmp")
-        assert "fix login" in result
-
-    @patch("app.git_sync.run_git", return_value="")
-    def test_handles_empty_output(self, mock_git):
-        result = _gather_git_activity("/tmp")
-        assert "No git activity" in result
-
-    @patch("app.git_sync.run_git")
-    def test_includes_branches(self, mock_git):
-        mock_git.return_value = "origin/main\norigin/feature-x"
-        result = _gather_git_activity("/tmp")
-        assert "origin/main" in result
-
-    @patch("app.git_sync.run_git", return_value="")
-    def test_git_failure_returns_no_activity(self, mock_git):
-        result = _gather_git_activity("/tmp")
-        assert "No git activity" in result
-
-
-# ---------------------------------------------------------------------------
-# _gather_project_structure
-# ---------------------------------------------------------------------------
-
-class TestGatherProjectStructure:
-    def test_lists_dirs_and_files(self, tmp_path):
-        (tmp_path / "src").mkdir()
-        (tmp_path / "tests").mkdir()
-        (tmp_path / "README.md").write_text("hello")
-        (tmp_path / ".hidden").write_text("skip")
-
-        result = _gather_project_structure(str(tmp_path))
-        assert "src/" in result
-        assert "tests/" in result
-        assert "README.md" in result
-        assert ".hidden" not in result
-
-    def test_handles_nonexistent_path(self):
-        result = _gather_project_structure("/nonexistent/path")
-        assert "unavailable" in result.lower()
-
-    def test_skips_hidden_dirs(self, tmp_path):
-        (tmp_path / ".git").mkdir()
-        (tmp_path / "src").mkdir()
-        result = _gather_project_structure(str(tmp_path))
-        assert ".git" not in result
-        assert "src/" in result
-
-
-# ---------------------------------------------------------------------------
-# _get_missions_context
-# ---------------------------------------------------------------------------
-
-class TestGetMissionsContext:
-    def test_returns_in_progress_and_pending(self, tmp_path):
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text(
-            "# Missions\n\n## Pending\n\n- pending task\n\n"
-            "## In Progress\n\n- active task\n\n## Done\n"
-        )
-        result = _get_missions_context(tmp_path)
-        assert "active task" in result
-        assert "pending task" in result
-
-    def test_returns_no_active_when_empty(self, tmp_path):
-        missions_file = tmp_path / "missions.md"
-        missions_file.write_text(
-            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
-        )
-        result = _get_missions_context(tmp_path)
-        assert "No active" in result
-
-    def test_handles_missing_file(self, tmp_path):
-        result = _get_missions_context(tmp_path)
-        assert "No active" in result
-
-    def test_limits_entries(self, tmp_path):
-        """Should limit to 5 entries per section."""
-        missions_file = tmp_path / "missions.md"
-        pending = "\n".join(f"- task {i}" for i in range(10))
-        missions_file.write_text(
-            f"# Missions\n\n## Pending\n\n{pending}\n\n"
-            "## In Progress\n\n## Done\n"
-        )
-        result = _get_missions_context(tmp_path)
-        assert "task 4" in result
-        assert "task 5" not in result
-
-
-# ---------------------------------------------------------------------------
-# _clean_response
+# _clean_response (delegates to text_utils.clean_cli_response)
 # ---------------------------------------------------------------------------
 
 class TestCleanResponse:
@@ -213,9 +113,9 @@ class TestRunCommand:
 
 class TestRunExploration:
     @patch("app.cli_provider.run_command", return_value="Found 3 issues")
-    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
-    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
-    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner.gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner.gather_git_activity", return_value="Recent commits: abc")
     @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_success_returns_true(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
@@ -230,9 +130,9 @@ class TestRunExploration:
         assert "completed" in summary.lower()
 
     @patch("app.cli_provider.run_command", return_value="Found 3 issues")
-    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
-    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
-    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner.gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner.gather_git_activity", return_value="Recent commits: abc")
     @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_notifies_start_and_result(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
@@ -250,9 +150,9 @@ class TestRunExploration:
         assert "myapp" in notify.call_args_list[1][0][0]
 
     @patch("app.cli_provider.run_command", side_effect=RuntimeError("quota exceeded"))
-    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
-    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
-    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner.gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner.gather_git_activity", return_value="Recent commits: abc")
     @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_failure_returns_false(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
@@ -267,9 +167,9 @@ class TestRunExploration:
         assert "failed" in summary.lower()
 
     @patch("app.cli_provider.run_command", return_value="")
-    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
-    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
-    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner.gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner.gather_git_activity", return_value="Recent commits: abc")
     @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_empty_result_returns_false(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
@@ -284,9 +184,9 @@ class TestRunExploration:
         assert "empty" in summary.lower()
 
     @patch("app.cli_provider.run_command", return_value="Found 3 issues")
-    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
-    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
-    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner.gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner.gather_git_activity", return_value="Recent commits: abc")
     @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_loads_prompt_from_skill_dir(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
@@ -303,9 +203,9 @@ class TestRunExploration:
         assert mock_prompt.call_args[0][1] == "ai-explore"
 
     @patch("app.cli_provider.run_command", return_value="Found 3 issues")
-    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
-    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
-    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner.gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner.gather_git_activity", return_value="Recent commits: abc")
     @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_prompt_substitutions(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
@@ -324,9 +224,9 @@ class TestRunExploration:
         assert "MISSIONS_CONTEXT" in kwargs
 
     @patch("app.cli_provider.run_command", return_value="x" * 3000)
-    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
-    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
-    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner.gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner.gather_git_activity", return_value="Recent commits: abc")
     @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_truncates_telegram_output(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,
@@ -341,9 +241,9 @@ class TestRunExploration:
         assert len(result_msg) <= 2100  # header + 2000 content
 
     @patch("app.cli_provider.run_command", return_value="Found issues")
-    @patch("app.ai_runner._get_missions_context", return_value="No active missions.")
-    @patch("app.ai_runner._gather_project_structure", return_value="Directories: src/")
-    @patch("app.ai_runner._gather_git_activity", return_value="Recent commits: abc")
+    @patch("app.ai_runner.get_missions_context", return_value="No active missions.")
+    @patch("app.ai_runner.gather_project_structure", return_value="Directories: src/")
+    @patch("app.ai_runner.gather_git_activity", return_value="Recent commits: abc")
     @patch("app.ai_runner.load_skill_prompt", return_value="Explore myapp")
     def test_max_turns_is_10(
         self, mock_prompt, mock_git, mock_struct, mock_missions, mock_claude,

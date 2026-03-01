@@ -13,6 +13,11 @@ CLI:
 from pathlib import Path
 from typing import Optional, Tuple
 
+from app.project_explorer import (
+    gather_git_activity,
+    gather_project_structure,
+    get_missions_context,
+)
 from app.prompts import load_skill_prompt
 
 
@@ -38,9 +43,9 @@ def run_exploration(
     notify_fn(f"Exploring {project_name}...")
 
     # Gather context
-    git_activity = _gather_git_activity(project_path)
-    project_structure = _gather_project_structure(project_path)
-    missions_context = _get_missions_context(Path(instance_dir))
+    git_activity = gather_git_activity(project_path)
+    project_structure = gather_project_structure(project_path)
+    missions_context = get_missions_context(Path(instance_dir))
 
     # Build prompt from skill template
     if skill_dir is None:
@@ -76,75 +81,6 @@ def run_exploration(
     notify_fn(f"AI exploration of {project_name}:\n\n{cleaned}")
 
     return True, f"Exploration of {project_name} completed."
-
-
-def _gather_git_activity(project_path: str) -> str:
-    """Gather recent git activity for a project."""
-    from app.git_sync import run_git
-
-    parts = []
-
-    commits = run_git(project_path, "log", "--oneline", "-15", "--no-merges")
-    if commits:
-        parts.append("Recent commits:\n" + commits)
-
-    branches_out = run_git(
-        project_path, "branch", "-r", "--sort=-committerdate",
-        "--format=%(refname:short)",
-    )
-    if branches_out:
-        branches = branches_out.split("\n")[:10]
-        parts.append("Active branches:\n" + "\n".join(branches))
-
-    diff_stat = run_git(project_path, "diff", "--stat", "HEAD~10", "HEAD")
-    if diff_stat:
-        parts.append("Recent changes:\n" + diff_stat)
-
-    return "\n\n".join(parts) if parts else "No git activity available."
-
-
-def _gather_project_structure(project_path: str) -> str:
-    """Gather top-level project structure."""
-    try:
-        p = Path(project_path)
-        entries = sorted(p.iterdir())
-        dirs = [
-            e.name + "/"
-            for e in entries
-            if e.is_dir() and not e.name.startswith(".")
-        ]
-        files = [
-            e.name
-            for e in entries
-            if e.is_file() and not e.name.startswith(".")
-        ]
-        parts = []
-        if dirs:
-            parts.append("Directories: " + ", ".join(dirs[:20]))
-        if files:
-            parts.append("Files: " + ", ".join(files[:20]))
-        return "\n".join(parts)
-    except OSError:
-        return "Structure unavailable."
-
-
-def _get_missions_context(instance_dir: Path) -> str:
-    """Get current missions context for the prompt."""
-    missions_file = instance_dir / "missions.md"
-    if not missions_file.exists():
-        return "No active missions."
-
-    from app.missions import parse_sections
-
-    sections = parse_sections(missions_file.read_text())
-    in_progress = sections.get("in_progress", [])
-    pending = sections.get("pending", [])
-    parts = []
-    if in_progress:
-        parts.append("In progress:\n" + "\n".join(in_progress[:5]))
-    if pending:
-        parts.append("Pending:\n" + "\n".join(pending[:5]))
-    return "\n".join(parts) if parts else "No active missions."
 
 
 def _clean_response(text: str) -> str:
