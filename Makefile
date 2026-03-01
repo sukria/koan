@@ -107,8 +107,8 @@ logs:
 		echo "No log files found. Start Kōan first with 'make start'."; \
 		exit 1; \
 	fi
-	@echo "→ Watching Kōan logs (Ctrl-C to stop watching — Kōan keeps running)"
-	@tail -F logs/run.log logs/awake.log logs/ollama.log 2>/dev/null
+	@echo "→ Watching Kōan logs + live progress (Ctrl-C to stop watching — Kōan keeps running)"
+	@tail -F logs/run.log logs/awake.log logs/ollama.log instance/journal/pending.md 2>/dev/null
 
 install:
 	@echo "→ Starting Kōan Setup Wizard..."
