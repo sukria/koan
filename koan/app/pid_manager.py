@@ -49,10 +49,10 @@ def _open_log_file(koan_root: Path, process_name: str):
     backups (.log.1 → .log.2, etc.) and compressing old ones with gzip.
 
     Returns an open file handle suitable for subprocess stdout/stderr.
-    
-    IMPORTANT: Caller is responsible for closing the returned file handle.
-    The file handle should remain open for the lifetime of the subprocess
-    and be closed when the subprocess exits or is killed.
+
+    The caller should close the handle after passing it to Popen.
+    The child process inherits the file descriptor via fork, so
+    closing the parent's copy is safe and prevents fd leaks.
     """
     from app.log_rotation import rotate_log, get_log_config
     
@@ -364,6 +364,8 @@ def start_ollama(koan_root: Path, verify_timeout: float = OLLAMA_VERIFY_TIMEOUT)
             return True, f"ollama serve started (PID {proc.pid})"
         time.sleep(0.3)
 
+    # Clean up stale PID file — process is dead, don't leave phantom PIDs
+    release_pid(koan_root, "ollama")
     return False, "ollama launched but exited immediately — check ollama logs"
 
 

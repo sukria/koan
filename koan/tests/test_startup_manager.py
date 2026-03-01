@@ -553,3 +553,46 @@ class TestRunStartup:
         mock_memory.assert_called_once()
         out = capsys.readouterr().out
         assert "Sanity checks failed" in out
+
+    @patch("app.startup_manager.run_morning_ritual")
+    @patch("app.startup_manager.run_daily_report")
+    @patch("app.startup_manager.run_git_sync")
+    @patch("app.run._notify")
+    @patch("app.run._build_startup_status", return_value="Active")
+    @patch("app.run.set_status")
+    @patch("app.startup_manager.setup_github_auth")
+    @patch("app.startup_manager.setup_git_identity")
+    @patch("app.startup_manager.handle_start_on_pause")
+    @patch("app.startup_manager.check_self_reflection")
+    @patch("app.startup_manager.check_health")
+    @patch("app.startup_manager.cleanup_mission_history")
+    @patch("app.startup_manager.cleanup_memory")
+    @patch("app.startup_manager.run_sanity_checks")
+    @patch("app.startup_manager.discover_workspace", return_value=[])
+    @patch("app.startup_manager.populate_github_urls")
+    @patch("app.startup_manager.run_migrations")
+    @patch("app.startup_manager.recover_crashed_missions")
+    @patch("app.banners.print_agent_banner")
+    @patch("app.utils.get_branch_prefix", return_value="koan/")
+    @patch("app.utils.get_cli_binary_for_shell", return_value="claude")
+    @patch("app.utils.get_interval_seconds", return_value=60)
+    @patch("app.utils.get_max_runs", return_value=10)
+    def test_handles_empty_projects_after_workspace_discovery(
+        self,
+        mock_max_runs, mock_interval, mock_cli, mock_prefix,
+        mock_banner,
+        mock_recover, mock_migrate, mock_gh_urls, mock_workspace,
+        mock_sanity, mock_memory, mock_history, mock_health,
+        mock_reflection, mock_pause, mock_git_id, mock_gh_auth,
+        mock_set_status, mock_build_status, mock_notify,
+        mock_git_sync, mock_daily, mock_ritual,
+    ):
+        """If workspace discovery empties the project list, startup should
+        not crash with IndexError on projects[0][0]."""
+        from app.startup_manager import run_startup
+        # Should not raise IndexError
+        result = run_startup("/tmp/koan", "/tmp/koan/instance", [("proj1", "/p1")])
+        assert result == (10, 60, "koan/")
+        # Verify notification was sent with "none" as current project
+        call_args = mock_notify.call_args[0]
+        assert "Current: none" in call_args[1]

@@ -583,13 +583,19 @@ def interruptible_sleep(
         if _check_signal_file(koan_root, ".koan-shutdown"):
             return "shutdown"
 
-        # Check GitHub notifications (throttled to once per 60s)
+        # Check GitHub notifications (throttled to once per 60s).
+        # Track wall time: API calls can be slow and should count toward elapsed.
+        t0 = time.monotonic()
         if process_github_notifications(koan_root, instance_dir) > 0:
             return "mission"
+        elapsed += time.monotonic() - t0
 
         # Sleep for the smaller of check_interval and remaining time
         # to avoid overshooting the requested interval.
-        sleep_time = min(check_interval, interval - elapsed)
+        remaining = interval - elapsed
+        if remaining <= 0:
+            break
+        sleep_time = min(check_interval, remaining)
         time.sleep(sleep_time)
         elapsed += sleep_time
 
