@@ -4087,3 +4087,161 @@ class TestMainLoopCountIncrement:
         assert counts_seen == [0, 0, 1, 1, 1, 2], (
             f"Expected count pattern [0,0,1,1,1,2], got: {counts_seen}"
         )
+
+# ---------------------------------------------------------------------------
+# Contemplative commit gap fix
+# ---------------------------------------------------------------------------
+
+class TestHandleContemplativeCommit:
+    """Tests that _handle_contemplative commits instance after session."""
+
+    @patch("app.run._commit_instance")
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.check_pending_missions", return_value=False)
+    @patch("app.run.run_claude_task", return_value=0)
+    @patch("app.run._notify")
+    @patch("app.run.log")
+    @patch("app.run.set_status")
+    def test_commit_called_after_contemplative(
+        self, mock_status, mock_log, mock_notify, mock_task,
+        mock_pending, mock_sleep, mock_commit,
+    ):
+        """_handle_contemplative calls _commit_instance after session."""
+        from app.run import _handle_contemplative
+
+        plan = {
+            "project_name": "test-proj",
+            "autonomous_mode": "deep",
+        }
+        with patch("app.contemplative_runner.build_contemplative_command", return_value=["echo", "ok"]):
+            _handle_contemplative(plan, 1, 5, "/tmp/koan", "/tmp/koan/instance", 60)
+
+        mock_commit.assert_called_once_with("/tmp/koan/instance")
+
+    @patch("app.run._commit_instance")
+    @patch("app.run.check_pending_missions", return_value=True)
+    @patch("app.run.run_claude_task", side_effect=RuntimeError("boom"))
+    @patch("app.run._notify")
+    @patch("app.run.log")
+    @patch("app.run.set_status")
+    def test_commit_called_even_on_error(
+        self, mock_status, mock_log, mock_notify, mock_task,
+        mock_pending, mock_commit,
+    ):
+        """_commit_instance is called even when contemplative session errors."""
+        from app.run import _handle_contemplative
+
+        plan = {
+            "project_name": "test-proj",
+            "autonomous_mode": "deep",
+        }
+        with patch("app.contemplative_runner.build_contemplative_command", return_value=["echo", "ok"]):
+            _handle_contemplative(plan, 1, 5, "/tmp/koan", "/tmp/koan/instance", 60)
+
+        mock_commit.assert_called_once_with("/tmp/koan/instance")
+
+    @patch("app.run._commit_instance")
+    @patch("app.run.check_pending_missions", return_value=True)
+    @patch("app.run.run_claude_task", side_effect=RuntimeError("boom"))
+    @patch("app.run._notify")
+    @patch("app.run.log")
+    @patch("app.run.set_status")
+    def test_contemplative_error_includes_traceback(
+        self, mock_status, mock_log, mock_notify, mock_task,
+        mock_pending, mock_commit,
+    ):
+        """Contemplative error logging includes traceback."""
+        from app.run import _handle_contemplative
+
+        plan = {
+            "project_name": "test-proj",
+            "autonomous_mode": "deep",
+        }
+        with patch("app.contemplative_runner.build_contemplative_command", return_value=["echo", "ok"]):
+            _handle_contemplative(plan, 1, 5, "/tmp/koan", "/tmp/koan/instance", 60)
+
+        # Find the error log call
+        error_calls = [c for c in mock_log.call_args_list if c[0][0] == "error"]
+        assert len(error_calls) >= 1
+        error_msg = error_calls[0][0][1]
+        assert "boom" in error_msg
+        assert "Traceback" in error_msg
+
+
+# ---------------------------------------------------------------------------
+# Wait/pause commit gap fix
+# ---------------------------------------------------------------------------
+
+class TestHandleWaitPauseCommit:
+    """Tests that _handle_wait_pause commits instance before pausing."""
+
+    @patch("app.run._notify")
+    @patch("app.run._commit_instance")
+    @patch("app.pause_manager.create_pause")
+    @patch("app.run._compute_quota_reset_ts", return_value=(9999, "soon"))
+    @patch("app.run.log")
+    def test_commit_called_before_pause(
+        self, mock_log, mock_reset, mock_pause, mock_commit, mock_notify,
+    ):
+        """_handle_wait_pause calls _commit_instance before creating pause."""
+        from app.run import _handle_wait_pause
+
+        plan = {
+            "project_name": "test-proj",
+            "decision_reason": "Budget exhausted",
+            "display_lines": [],
+        }
+        with patch("app.send_retrospective.create_retrospective"):
+            _handle_wait_pause(plan, 5, "/tmp/koan", "/tmp/koan/instance")
+
+        mock_commit.assert_called_once_with("/tmp/koan/instance")
+
+    @patch("app.run._notify")
+    @patch("app.run._commit_instance")
+    @patch("app.pause_manager.create_pause")
+    @patch("app.run._compute_quota_reset_ts", return_value=(9999, "soon"))
+    @patch("app.run.log")
+    def test_commit_before_pause_ordering(
+        self, mock_log, mock_reset, mock_pause, mock_commit, mock_notify,
+    ):
+        """_commit_instance is called BEFORE create_pause."""
+        from app.run import _handle_wait_pause
+
+        call_order = []
+        mock_commit.side_effect = lambda *a: call_order.append("commit")
+        mock_pause.side_effect = lambda *a, **kw: call_order.append("pause")
+
+        plan = {
+            "project_name": "test-proj",
+            "decision_reason": "Budget exhausted",
+            "display_lines": [],
+        }
+        with patch("app.send_retrospective.create_retrospective"):
+            _handle_wait_pause(plan, 5, "/tmp/koan", "/tmp/koan/instance")
+
+        assert call_order == ["commit", "pause"]
+
+    @patch("app.run._notify")
+    @patch("app.run._commit_instance")
+    @patch("app.pause_manager.create_pause")
+    @patch("app.run._compute_quota_reset_ts", return_value=(9999, "soon"))
+    @patch("app.run.log")
+    def test_retrospective_error_includes_traceback(
+        self, mock_log, mock_reset, mock_pause, mock_commit, mock_notify,
+    ):
+        """Retrospective error logging includes traceback."""
+        from app.run import _handle_wait_pause
+
+        plan = {
+            "project_name": "test-proj",
+            "decision_reason": "Budget exhausted",
+            "display_lines": [],
+        }
+        with patch("app.send_retrospective.create_retrospective", side_effect=RuntimeError("retro failed")):
+            _handle_wait_pause(plan, 5, "/tmp/koan", "/tmp/koan/instance")
+
+        error_calls = [c for c in mock_log.call_args_list if c[0][0] == "error"]
+        assert len(error_calls) >= 1
+        error_msg = error_calls[0][0][1]
+        assert "retro failed" in error_msg
+        assert "Traceback" in error_msg
