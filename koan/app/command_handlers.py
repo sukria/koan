@@ -155,7 +155,7 @@ def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
             return
         def _run_skill():
             result = execute_skill(skill, ctx)
-            if result:
+            if result is not None:
                 send_telegram(result)
         _run_in_worker_cb(_run_skill)
         return
@@ -170,14 +170,16 @@ def _queue_cli_skill_mission(skill: Skill, args: str):
     """Queue a cli_skill mission for the runner to execute via the CLI provider."""
     from app.utils import get_known_projects
 
-    # Try to extract project from the first word of args
+    # Try to extract project from the first word of args (case-insensitive,
+    # matching detect_project_from_text() behavior in utils.py).
     project = None
     mission_args = args
     words = args.split(None, 1)
     if words:
-        known = {name for name, _ in get_known_projects()}
-        if words[0] in known:
-            project = words[0]
+        known_map = {name.lower(): name for name, _ in get_known_projects()}
+        matched = known_map.get(words[0].lower())
+        if matched:
+            project = matched
             mission_args = words[1] if len(words) > 1 else ""
 
     # Reconstruct the Kōan scoped command

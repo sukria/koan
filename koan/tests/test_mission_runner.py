@@ -1602,13 +1602,14 @@ class TestRunPostMissionOrdering:
         assert args[2] == "implement"
 
     @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner._read_pending_content", return_value="did stuff")
     @patch("app.quota_handler.handle_quota_exhaustion",
            return_value=("resets 10am", "Auto-resume"))
     @patch("app.mission_runner.update_usage", return_value=True)
-    def test_session_outcome_not_recorded_on_quota_exhaustion(
-        self, mock_usage, mock_quota, mock_record, tmp_path
+    def test_session_outcome_recorded_on_quota_exhaustion(
+        self, mock_usage, mock_quota, mock_read_pending, mock_record, tmp_path
     ):
-        """When quota is exhausted, early return means no outcome recording."""
+        """Quota exhaustion still records session outcome before early return."""
         from app.mission_runner import run_post_mission
 
         instance_dir = str(tmp_path / "instance")
@@ -1622,11 +1623,16 @@ class TestRunPostMissionOrdering:
             exit_code=0,
             stdout_file="/tmp/out.json",
             stderr_file="/tmp/err.txt",
+            autonomous_mode="implement",
         )
 
         assert result["quota_exhausted"] is True
-        # Quota exhaustion causes early return — no outcome recording
-        mock_record.assert_not_called()
+        # Quota exhaustion must still record outcome (prevents staleness bias)
+        mock_record.assert_called_once()
+        args = mock_record.call_args[0]
+        assert args[0] == instance_dir
+        assert args[1] == "koan"
+        assert args[2] == "implement"
 
     @patch("app.mission_runner._record_session_outcome")
     @patch("app.mission_runner.check_auto_merge", return_value=None)

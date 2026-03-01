@@ -381,6 +381,21 @@ def run_post_mission(
     if quota_result is not None:
         result["quota_exhausted"] = True
         result["quota_info"] = quota_result
+        # Record session outcome BEFORE early return so the session tracker
+        # doesn't lose visibility on quota-limited sessions (which biases
+        # staleness calculations toward "stale" for productive projects).
+        if start_time > 0:
+            duration_minutes = (int(datetime.now().timestamp()) - start_time) // 60
+        else:
+            duration_minutes = 0
+        pending_content = _read_pending_content(instance_dir)
+        if not pending_content.strip():
+            pending_content = _read_stdout_summary(stdout_file)
+        _record_session_outcome(
+            instance_dir, project_name, autonomous_mode,
+            duration_minutes, pending_content,
+            mission_title=mission_title,
+        )
         return result  # Early return — no further processing on quota exhaustion
 
     # 3. Archive pending.md if agent didn't clean up

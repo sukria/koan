@@ -623,6 +623,32 @@ class TestCliSkillDispatch:
         assert "project: myproject" in mock_send.call_args[0][0]
 
     @patch("app.command_handlers.insert_pending_mission")
+    def test_cli_skill_agent_extracts_project_case_insensitive(
+        self, mock_insert, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Project matching is case-insensitive (e.g. 'KOAN' matches project 'koan')."""
+        from app.command_handlers import _queue_cli_skill_mission
+        from app.skills import Skill, SkillCommand
+        from unittest.mock import patch as _patch
+
+        skill = Skill(
+            name="plan",
+            scope="core",
+            description="Plan",
+            audience="agent",
+            cli_skill="plan-tool",
+            commands=[SkillCommand(name="plan", description="Plan")],
+        )
+
+        with _patch("app.utils.get_known_projects", return_value=[("koan", "/path/koan")]):
+            _queue_cli_skill_mission(skill, "KOAN fix the login bug")
+
+        entry = mock_insert.call_args[0][1]
+        # Must use the canonical name "koan", not "KOAN"
+        assert "[project:koan]" in entry
+        assert "/core.plan fix the login bug" in entry
+
+    @patch("app.command_handlers.insert_pending_mission")
     def test_cli_skill_without_agent_audience_executes_inline(
         self, mock_insert, patch_bridge_state, mock_send, mock_registry
     ):
@@ -1170,6 +1196,33 @@ class TestDispatchSkillWorkerNoCallback:
             # Should send an error message instead of silently dropping
             mock_send.assert_called_once()
             assert "worker thread not available" in mock_send.call_args[0][0]
+        finally:
+            mod._run_in_worker_cb = old_cb
+
+    def test_worker_skill_sends_empty_string_result(
+        self, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Worker skill returning empty string '' should still send it (not drop)."""
+        from app.command_handlers import _dispatch_skill
+        from app.skills import Skill
+        import app.command_handlers as mod
+
+        skill = MagicMock(spec=Skill)
+        skill.worker = True
+        skill.cli_skill = None
+        skill.audience = "bridge"
+
+        # Use a real function as worker callback that runs immediately
+        def run_immediately(fn):
+            fn()
+
+        old_cb = mod._run_in_worker_cb
+        mod._run_in_worker_cb = run_immediately
+        try:
+            with patch("app.command_handlers.execute_skill", return_value=""):
+                _dispatch_skill(skill, "check", "")
+            # Empty string is a valid result — must be sent, not dropped
+            mock_send.assert_called_once_with("")
         finally:
             mod._run_in_worker_cb = old_cb
 
