@@ -39,7 +39,7 @@ class TestGetCurrentBranch:
     def test_returns_stripped_branch(self, mock):
         assert get_current_branch("/p") == "feature/xyz"
 
-    @patch(f"{_M}.run_git_strict", side_effect=Exception("not a repo"))
+    @patch(f"{_M}.run_git_strict", side_effect=RuntimeError("not a repo"))
     def test_fallback_to_main(self, mock):
         assert get_current_branch("/p") == "main"
 
@@ -71,7 +71,7 @@ class TestGetCommitSubjects:
     def test_blank_lines_filtered(self, mock):
         assert get_commit_subjects("/p") == []
 
-    @patch(f"{_M}.run_git_strict", side_effect=Exception("err"))
+    @patch(f"{_M}.run_git_strict", side_effect=RuntimeError("err"))
     def test_error_returns_empty(self, mock):
         assert get_commit_subjects("/p") == []
 
@@ -85,7 +85,7 @@ class TestGetForkOwner:
     def test_returns_stripped(self, mock):
         assert get_fork_owner("/p") == "myuser"
 
-    @patch(f"{_M}.run_gh", side_effect=Exception("gh not found"))
+    @patch(f"{_M}.run_gh", side_effect=RuntimeError("gh not found"))
     def test_error_returns_empty(self, mock):
         assert get_fork_owner("/p") == ""
 

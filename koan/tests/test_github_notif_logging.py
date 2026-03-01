@@ -356,7 +356,7 @@ class TestNotifyMissionFromMention:
         msg = mock_send.call_args[0][0]
         assert "https://github.com/owner/repo/issues/7" in msg
 
-    @patch("app.notify.send_telegram", side_effect=Exception("network error"))
+    @patch("app.notify.send_telegram", side_effect=OSError("network error"))
     def test_handles_send_failure_gracefully(self, mock_send, caplog):
         from app.loop_manager import _notify_mission_from_mention
 
