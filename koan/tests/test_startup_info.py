@@ -77,7 +77,7 @@ class TestGetSkillsSummary:
         with patch("app.skills.build_registry") as mock_reg:
             registry = mock_reg.return_value
             registry.list_by_scope.return_value = [None] * 29
-            registry.all_skills.return_value = [None] * 32
+            registry.list_all.return_value = [None] * 32
             result = _get_skills_summary(Path("/tmp"), Path("/tmp/instance"))
             assert "29 core + 3 extra" in result
 

@@ -91,7 +91,7 @@ def _get_skills_summary(koan_root: Path, instance: Path) -> str:
             extra_dirs.append(instance_skills)
         registry = build_registry(extra_dirs)
         core = len(registry.list_by_scope("core"))
-        total = len(registry.all_skills())
+        total = len(registry.list_all())
         extra = total - core
         if extra > 0:
             return f"{core} core + {extra} extra"
