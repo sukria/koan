@@ -10,12 +10,15 @@ from app.github_command_handler import (
     _error_replies,
     _extract_url_from_context,
     _fetch_and_filter_comment,
+    _handle_help_command,
     _notify_github_question,
     _notify_github_reply,
+    _post_help_reply,
     _try_reply,
     _validate_and_parse_command,
     build_mission_from_command,
     extract_issue_number_from_notification,
+    format_help_list_message,
     format_help_message,
     get_github_enabled_commands,
     get_github_enabled_commands_with_descriptions,
@@ -1811,3 +1814,332 @@ class TestValidateCommandEdgeCases:
     def test_empty_registry(self):
         reg = SkillRegistry()
         assert validate_command("rebase", reg) is None
+
+
+# ---------------------------------------------------------------------------
+# format_help_list_message — clean help (no "Unknown command" prefix)
+# ---------------------------------------------------------------------------
+
+
+class TestFormatHelpListMessage:
+    def test_does_not_contain_unknown_command(self, registry):
+        msg = format_help_list_message(registry, "koanbot")
+        assert "Unknown command" not in msg
+
+    def test_lists_available_commands(self, registry):
+        msg = format_help_list_message(registry, "koanbot")
+        assert "`@koanbot rebase`" in msg
+        assert "`@koanbot implement`" in msg
+
+    def test_includes_help_entry(self, registry):
+        msg = format_help_list_message(registry, "koanbot")
+        assert "`@koanbot help`" in msg
+
+    def test_includes_usage_line(self, registry):
+        msg = format_help_list_message(registry, "koanbot")
+        assert "Usage:" in msg
+        assert "`@koanbot <command>`" in msg
+
+    def test_starts_with_friendly_intro(self, registry):
+        msg = format_help_list_message(registry, "koanbot")
+        assert msg.startswith("Here are the commands I support:")
+
+    def test_empty_registry(self):
+        reg = SkillRegistry()
+        msg = format_help_list_message(reg, "koanbot")
+        assert "help" in msg
+        assert "Usage:" in msg
+
+
+# ---------------------------------------------------------------------------
+# _post_help_reply
+# ---------------------------------------------------------------------------
+
+
+class TestPostHelpReply:
+    @patch("app.github.api")
+    def test_posts_comment(self, mock_api):
+        result = _post_help_reply("owner", "repo", "42", "Help text here")
+        assert result is True
+        mock_api.assert_called_once()
+        call_args = mock_api.call_args
+        assert "repos/owner/repo/issues/42/comments" in call_args[0][0]
+        extra_args = call_args[1].get("extra_args", [])
+        body_arg = [a for a in extra_args if a.startswith("body=")]
+        assert body_arg
+        assert "Help text here" in body_arg[0]
+
+    @patch("app.github.api", side_effect=RuntimeError("API error"))
+    def test_api_failure_returns_false(self, mock_api):
+        result = _post_help_reply("owner", "repo", "42", "Help text")
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# _handle_help_command
+# ---------------------------------------------------------------------------
+
+
+class TestHandleHelpCommand:
+    @pytest.fixture
+    def help_notification(self):
+        return {
+            "id": "55555",
+            "subject": {
+                "url": "https://api.github.com/repos/sukria/koan/pulls/42",
+            },
+            "repository": {"full_name": "sukria/koan"},
+        }
+
+    @pytest.fixture
+    def help_comment(self):
+        return {
+            "id": 77777,
+            "body": "@koanbot help",
+            "user": {"login": "alice"},
+            "url": "https://api.github.com/repos/sukria/koan/issues/comments/77777",
+        }
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler._post_help_reply", return_value=True)
+    def test_posts_help_and_reacts(
+        self, mock_post, mock_react, mock_read,
+        help_notification, help_comment, registry,
+    ):
+        result = _handle_help_command(
+            help_notification, help_comment, registry, "koanbot",
+            "sukria", "koan",
+        )
+        assert result is True
+        mock_post.assert_called_once()
+        # Help message should list commands
+        help_text = mock_post.call_args[0][3]
+        assert "rebase" in help_text
+        assert "implement" in help_text
+        # Reaction should use eyes emoji
+        mock_react.assert_called_once()
+        assert mock_react.call_args[1].get("emoji") == "eyes"
+        # Notification marked as read
+        mock_read.assert_called_once_with("55555")
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler._post_help_reply", return_value=False)
+    def test_post_failure_returns_false(
+        self, mock_post, mock_read,
+        help_notification, help_comment, registry,
+    ):
+        result = _handle_help_command(
+            help_notification, help_comment, registry, "koanbot",
+            "sukria", "koan",
+        )
+        assert result is False
+        mock_read.assert_called_once()
+
+    @patch("app.github_command_handler.mark_notification_read")
+    def test_no_issue_number_returns_false(self, mock_read, help_comment, registry):
+        notif = {"id": "55555", "subject": {}}
+        result = _handle_help_command(
+            notif, help_comment, registry, "koanbot", "sukria", "koan",
+        )
+        assert result is False
+        mock_read.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# process_single_notification — help command integration
+# ---------------------------------------------------------------------------
+
+
+class TestProcessNotificationHelpCommand:
+    """Integration tests for the built-in help command in process_single_notification."""
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler._post_help_reply", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_help_command_posts_reply(
+        self, mock_resolve, mock_get_comment, mock_stale, mock_self,
+        mock_processed, mock_post, mock_react, mock_read,
+        registry, sample_notification,
+    ):
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 99999,
+            "body": "@testbot help",
+            "user": {"login": "alice"},
+            "url": "https://api.github.com/repos/sukria/koan/issues/comments/99999",
+        }
+        config = {"github": {"nickname": "testbot"}}
+
+        success, error = process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+        # Help does not create a mission, so success=False, error=None
+        assert success is False
+        assert error is None
+        # Help reply was posted
+        mock_post.assert_called_once()
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler._post_help_reply", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_help_command_does_not_queue_mission(
+        self, mock_resolve, mock_get_comment, mock_stale, mock_self,
+        mock_processed, mock_post, mock_react, mock_read,
+        registry, sample_notification,
+    ):
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 99999,
+            "body": "@testbot help",
+            "user": {"login": "alice"},
+            "url": "https://api.github.com/repos/sukria/koan/issues/comments/99999",
+        }
+        config = {"github": {"nickname": "testbot"}}
+
+        with patch("app.utils.insert_pending_mission") as mock_insert:
+            process_single_notification(
+                sample_notification, registry, config, None, "testbot",
+            )
+            mock_insert.assert_not_called()
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler._post_help_reply", return_value=False)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    def test_help_post_failure_still_no_error(
+        self, mock_resolve, mock_get_comment, mock_stale, mock_self,
+        mock_processed, mock_post, mock_read,
+        registry, sample_notification,
+    ):
+        """Even if help reply fails to post, no error is returned to avoid error reply."""
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 99999,
+            "body": "@testbot help",
+            "user": {"login": "alice"},
+            "url": "https://api.github.com/repos/sukria/koan/issues/comments/99999",
+        }
+        config = {"github": {"nickname": "testbot"}}
+
+        success, error = process_single_notification(
+            sample_notification, registry, config, None, "testbot",
+        )
+        assert success is False
+        assert error is None
+
+
+# ---------------------------------------------------------------------------
+# process_single_notification — plan command via github_enabled
+# ---------------------------------------------------------------------------
+
+
+class TestProcessNotificationPlanCommand:
+    """Test that plan works as a github_enabled command via @mention."""
+
+    @pytest.fixture
+    def plan_registry(self):
+        """Registry with plan skill github_enabled."""
+        plan_skill = Skill(
+            name="plan",
+            scope="core",
+            description="Plan an idea or iterate on an existing GitHub issue",
+            github_enabled=True,
+            github_context_aware=True,
+            commands=[SkillCommand(name="plan", description="Plan an idea or iterate on an existing GitHub issue")],
+        )
+        reg = SkillRegistry()
+        reg._register(plan_skill)
+        return reg
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_plan_queues_mission_with_url(
+        self, mock_insert, mock_resolve, mock_get_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, plan_registry, tmp_path,
+    ):
+        notif = {
+            "id": "44444",
+            "subject": {
+                "url": "https://api.github.com/repos/sukria/koan/issues/100",
+            },
+            "repository": {"full_name": "sukria/koan"},
+        }
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 88888,
+            "body": "@testbot plan",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            success, error = process_single_notification(
+                notif, plan_registry, config, None, "testbot",
+            )
+
+        assert success is True
+        assert error is None
+        mock_insert.assert_called_once()
+        mission = mock_insert.call_args[0][1]
+        assert "/plan" in mission
+        assert "https://github.com/sukria/koan/issues/100" in mission
+
+    @patch("app.github_command_handler.mark_notification_read")
+    @patch("app.github_command_handler.add_reaction", return_value=True)
+    @patch("app.github_command_handler.check_user_permission", return_value=True)
+    @patch("app.github_command_handler.check_already_processed", return_value=False)
+    @patch("app.github_command_handler.is_self_mention", return_value=False)
+    @patch("app.github_command_handler.is_notification_stale", return_value=False)
+    @patch("app.github_command_handler.get_comment_from_notification")
+    @patch("app.github_command_handler.resolve_project_from_notification")
+    @patch("app.utils.insert_pending_mission")
+    def test_plan_includes_context(
+        self, mock_insert, mock_resolve, mock_get_comment,
+        mock_stale, mock_self, mock_processed, mock_perm,
+        mock_react, mock_read, plan_registry, tmp_path,
+    ):
+        notif = {
+            "id": "44444",
+            "subject": {
+                "url": "https://api.github.com/repos/sukria/koan/issues/100",
+            },
+            "repository": {"full_name": "sukria/koan"},
+        }
+        mock_resolve.return_value = ("koan", "sukria", "koan")
+        mock_get_comment.return_value = {
+            "id": 88888,
+            "body": "@testbot plan focus on auth module",
+            "user": {"login": "alice"},
+        }
+        config = {"github": {"nickname": "testbot", "authorized_users": ["*"]}}
+
+        with patch.dict("os.environ", {"KOAN_ROOT": str(tmp_path)}):
+            success, error = process_single_notification(
+                notif, plan_registry, config, None, "testbot",
+            )
+
+        assert success is True
+        mission = mock_insert.call_args[0][1]
+        assert "focus on auth module" in mission

@@ -124,6 +124,109 @@ def format_help_message(
     return "\n".join(lines)
 
 
+def format_help_list_message(
+    registry: SkillRegistry,
+    bot_username: str,
+) -> str:
+    """Build a clean help message listing available GitHub commands.
+
+    Unlike format_help_message, this does NOT prefix with "Unknown command".
+    Used when the user explicitly asks for help via ``@bot help``.
+
+    Args:
+        registry: Skills registry.
+        bot_username: The bot's GitHub username (for usage examples).
+
+    Returns:
+        A formatted markdown help message for GitHub comments.
+    """
+    commands = get_github_enabled_commands_with_descriptions(registry)
+
+    lines = ["Here are the commands I support:\n"]
+    for name, description in commands:
+        lines.append(f"- `@{bot_username} {name}` — {description}")
+
+    lines.append(f"- `@{bot_username} help` — Show this help message")
+    lines.append(f"\nUsage: `@{bot_username} <command>` in any PR or issue comment.")
+    return "\n".join(lines)
+
+
+def _post_help_reply(
+    owner: str,
+    repo: str,
+    issue_number: str,
+    help_message: str,
+) -> bool:
+    """Post a help reply to a GitHub issue/PR comment thread.
+
+    Args:
+        owner: Repository owner.
+        repo: Repository name.
+        issue_number: Issue or PR number.
+        help_message: The help message body.
+
+    Returns:
+        True if posted successfully.
+    """
+    from app.github import api
+
+    try:
+        api(
+            f"repos/{owner}/{repo}/issues/{issue_number}/comments",
+            method="POST",
+            extra_args=["-f", f"body={help_message}"],
+        )
+        return True
+    except RuntimeError:
+        log.warning("GitHub: failed to post help reply on %s/%s#%s", owner, repo, issue_number)
+        return False
+
+
+def _handle_help_command(
+    notification: dict,
+    comment: dict,
+    registry: SkillRegistry,
+    bot_username: str,
+    owner: str,
+    repo: str,
+) -> bool:
+    """Handle the built-in 'help' command — reply with available commands list.
+
+    Posts a help comment, reacts with 👍, and marks notification as read.
+
+    Args:
+        notification: Notification dict.
+        comment: Comment dict.
+        registry: Skills registry.
+        bot_username: Bot's GitHub username.
+        owner: Repository owner.
+        repo: Repository name.
+
+    Returns:
+        True if help was posted successfully.
+    """
+    issue_number = extract_issue_number_from_notification(notification)
+    if not issue_number:
+        log.debug("GitHub help: could not extract issue number")
+        mark_notification_read(str(notification.get("id", "")))
+        return False
+
+    help_msg = format_help_list_message(registry, bot_username)
+    if not _post_help_reply(owner, repo, issue_number, help_msg):
+        mark_notification_read(str(notification.get("id", "")))
+        return False
+
+    # React and mark as read
+    comment_id = str(comment.get("id", ""))
+    comment_api_url = comment.get("url", "")
+    add_reaction(owner, repo, comment_id, emoji="eyes",
+                 comment_api_url=comment_api_url)
+    mark_notification_read(str(notification.get("id", "")))
+
+    log.info("GitHub: posted help reply on %s/%s#%s", owner, repo, issue_number)
+    return True
+
+
 def _extract_url_from_context(context: str) -> Optional[Tuple[str, str]]:
     """Extract URL from context text if present.
     
@@ -479,6 +582,13 @@ def process_single_notification(
 
     # If command_name is None, already processed or no valid mention
     if command_name is None:
+        return False, None
+
+    # Built-in "help" command — reply with available commands list
+    if skill is None and command_name == "help":
+        _handle_help_command(
+            notification, comment, registry, bot_username, owner, repo,
+        )
         return False, None
 
     # If skill is None but we have a command_name, it's an invalid command

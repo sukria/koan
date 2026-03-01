@@ -821,6 +821,14 @@ class TestGitHubFields:
         assert skill is not None
         assert skill.github_enabled is True
 
+    def test_plan_skill_github_enabled(self):
+        """Plan core skill should have github_enabled=true."""
+        registry = build_registry()
+        skill = registry.get("core", "plan")
+        assert skill is not None
+        assert skill.github_enabled is True
+        assert skill.github_context_aware is True
+
 
 # ---------------------------------------------------------------------------
 # Audience field
