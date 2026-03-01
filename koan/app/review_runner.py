@@ -78,7 +78,12 @@ def _extract_review_body(raw_output: str) -> str:
     Tries to find markdown-structured review content. Falls back to the
     full output if no structure is detected.
     """
-    # Look for the structured review starting with ## Summary
+    # Look for the new format: ## PR Review — ...
+    match = re.search(r'(## PR Review\b.*)', raw_output, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    # Legacy format: ## Summary
     match = re.search(r'(## Summary\b.*)', raw_output, re.DOTALL)
     if match:
         return match.group(1).strip()
@@ -99,7 +104,11 @@ def _post_review_comment(
     if len(review_text) > max_len:
         review_text = review_text[:max_len] + "\n\n_(Review truncated)_"
 
-    body = f"## Code Review\n\n{review_text}\n\n---\n_Automated review by Kōan_"
+    # If body already starts with a ## heading, don't add another
+    if review_text.startswith("## "):
+        body = f"{review_text}\n\n---\n_Automated review by Kōan_"
+    else:
+        body = f"## Code Review\n\n{review_text}\n\n---\n_Automated review by Kōan_"
 
     try:
         run_gh(
