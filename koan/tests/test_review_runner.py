@@ -79,16 +79,38 @@ class TestBuildReviewPrompt:
 # ---------------------------------------------------------------------------
 
 class TestExtractReviewBody:
-    def test_extracts_structured_review(self):
-        """Extracts from ## Summary onward."""
+    def test_extracts_new_format(self):
+        """Extracts from ## PR Review onward (new format)."""
+        raw = (
+            "Some preamble\n\n"
+            "## PR Review — Fix auth bypass\n\n"
+            "Good PR. One blocking issue.\n\n"
+            "### 🔴 Blocking\n\n**1. Missing check** (`auth.py`)\n"
+        )
+        result = _extract_review_body(raw)
+        assert result.startswith("## PR Review")
+        assert "Fix auth bypass" in result
+        assert "preamble" not in result
+
+    def test_extracts_legacy_format(self):
+        """Extracts from ## Summary onward (legacy format)."""
         raw = "Some preamble\n\n## Summary\nLooks good.\n\n## Issues\nNone."
         result = _extract_review_body(raw)
         assert result.startswith("## Summary")
         assert "Looks good." in result
         assert "preamble" not in result
 
+    def test_prefers_new_format_over_legacy(self):
+        """When both formats present, prefers ## PR Review."""
+        raw = (
+            "## PR Review — Title\nSummary here.\n\n"
+            "## Summary\nLegacy section."
+        )
+        result = _extract_review_body(raw)
+        assert result.startswith("## PR Review")
+
     def test_fallback_to_full_output(self):
-        """When no ## Summary found, returns full text."""
+        """When no structured format found, returns full text."""
         raw = "This is a freeform review. Code is fine."
         result = _extract_review_body(raw)
         assert result == raw
@@ -99,9 +121,9 @@ class TestExtractReviewBody:
 
     def test_whitespace_stripped(self):
         """Leading/trailing whitespace is removed."""
-        raw = "  \n## Summary\nClean code.\n  "
+        raw = "  \n## PR Review — Test\nClean code.\n  "
         result = _extract_review_body(raw)
-        assert result.startswith("## Summary")
+        assert result.startswith("## PR Review")
         assert not result.endswith(" ")
 
 
@@ -141,6 +163,25 @@ class TestPostReviewComment:
         assert len(body) < 65000
         assert "truncated" in body.lower()
 
+    @patch("app.review_runner.run_gh")
+    def test_no_double_heading_for_structured_review(self, mock_gh):
+        """Reviews starting with ## don't get an extra ## Code Review header."""
+        review = "## PR Review — Fix auth\n\nLGTM"
+        _post_review_comment("owner", "repo", "42", review)
+        call_args = mock_gh.call_args[0]
+        body = [a for a in call_args if isinstance(a, str) and "LGTM" in a][0]
+        assert "## Code Review" not in body
+        assert body.startswith("## PR Review")
+
+    @patch("app.review_runner.run_gh")
+    def test_legacy_review_gets_heading(self, mock_gh):
+        """Reviews without ## heading get wrapped with ## Code Review."""
+        review = "Looks good, no issues found."
+        _post_review_comment("owner", "repo", "42", review)
+        call_args = mock_gh.call_args[0]
+        body = [a for a in call_args if isinstance(a, str) and "Looks good" in a][0]
+        assert "## Code Review" in body
+
 
 # ---------------------------------------------------------------------------
 # run_review (integration, mocked externals)
@@ -155,7 +196,11 @@ class TestRunReview:
     ):
         """Full review pipeline: fetch -> claude -> post comment."""
         mock_fetch.return_value = pr_context
-        mock_claude.return_value = "## Summary\nLGTM\n\n## Verdict\nAPPROVE"
+        mock_claude.return_value = (
+            "## PR Review — Fix auth bypass\n\n"
+            "Solid fix. No issues found.\n\n---\n\n"
+            "### Summary\n\nMerge-ready."
+        )
         mock_notify = MagicMock()
 
         success, summary = run_review(
@@ -227,7 +272,7 @@ class TestRunReview:
     ):
         """Handles comment posting failure."""
         mock_fetch.return_value = pr_context
-        mock_claude.return_value = "## Summary\nGood code"
+        mock_claude.return_value = "## PR Review — Fix auth bypass\n\nGood code"
         mock_notify = MagicMock()
 
         success, summary = run_review(
