@@ -179,7 +179,7 @@ class TestRefreshUsage:
 
     def test_handles_refresh_error_gracefully(self, tmp_path):
         """Errors in refresh don't crash the iteration."""
-        with patch("app.usage_estimator.cmd_refresh", side_effect=Exception("boom")):
+        with patch("app.usage_estimator.cmd_refresh", side_effect=OSError("boom")):
             # Should not raise
             _refresh_usage(tmp_path / "state", tmp_path / "usage.md", count=1)
 
@@ -217,7 +217,7 @@ class TestGetUsageDecision:
         result = _get_usage_decision(usage_md, 5, PROJECTS_STR)
         assert result["mode"] == "wait"
 
-    @patch("app.usage_tracker.UsageTracker", side_effect=Exception("tracker crash"))
+    @patch("app.usage_tracker.UsageTracker", side_effect=ValueError("tracker crash"))
     def test_tracker_error_falls_back_to_review_mode(self, mock_tracker, tmp_path):
         """When the usage tracker crashes, fallback to 'review' (read-only) not 'implement'."""
         usage_md = tmp_path / "usage.md"
@@ -254,7 +254,7 @@ class TestInjectRecurring:
 
     def test_handles_error_gracefully(self, instance_dir):
         (instance_dir / "recurring.json").write_text("{}")
-        with patch("app.recurring.check_and_inject", side_effect=Exception("boom")):
+        with patch("app.recurring.check_and_inject", side_effect=OSError("boom")):
             result = _inject_recurring(instance_dir)
             assert result == []
 
@@ -305,7 +305,7 @@ class TestFallbackMissionExtract:
         assert project is None
         assert title is None
 
-    @patch("app.pick_mission.fallback_extract", side_effect=Exception("boom"))
+    @patch("app.pick_mission.fallback_extract", side_effect=OSError("boom"))
     def test_handles_import_error(self, mock_extract, tmp_path):
         """Returns (None, None) on exception from fallback_extract."""
         inst = tmp_path / "instance"
@@ -414,7 +414,7 @@ class TestPickMission:
         assert project is None
         assert title is None
 
-    @patch("app.pick_mission.pick_mission", side_effect=Exception("boom"))
+    @patch("app.pick_mission.pick_mission", side_effect=OSError("boom"))
     def test_handles_error_gracefully(self, mock_pick):
         project, title = _pick_mission(Path("/instance"), PROJECTS_STR, 1, "deep", "")
         assert project is None

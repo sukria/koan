@@ -48,7 +48,7 @@ def _refresh_usage(usage_state: Path, usage_md: Path, count: int):
     try:
         from app.usage_estimator import cmd_refresh
         cmd_refresh(usage_state, usage_md)
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Usage refresh error: {e}")
 
 
@@ -88,7 +88,7 @@ def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
             "project_idx": project_idx,
             "display_lines": display_lines,
         }
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Usage tracker error: {e}")
         return {
             "mode": "review",
@@ -113,7 +113,7 @@ def _inject_recurring(instance_dir: Path):
         from app.recurring import check_and_inject
         missions_path = instance_dir / "missions.md"
         return check_and_inject(recurring_path, missions_path)
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Recurring injection error: {e}")
         return []
 
@@ -151,7 +151,7 @@ def _fallback_mission_extract(instance_dir: Path, projects_str: str,
             return project, title
 
         _log_iteration("error", "Direct fallback also failed to extract a mission")
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Fallback mission extract failed: {e}")
     return None, None
 
@@ -177,7 +177,7 @@ def _pick_mission(instance_dir: Path, projects_str: str, run_num: int,
         return _fallback_mission_extract(
             instance_dir, projects_str,
             "Mission picker returned nothing but")
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Mission picker error: {e}")
         return _fallback_mission_extract(
             instance_dir, projects_str,
@@ -264,7 +264,7 @@ def _check_focus(koan_root: str):
     try:
         from app.focus_manager import check_focus
         return check_focus(koan_root)
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Focus check failed: {e}")
         return None
 
@@ -297,7 +297,7 @@ def _select_random_exploration_project(
         try:
             from app.session_tracker import get_project_freshness
             weights = get_project_freshness(instance_dir, projects)
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             _log_iteration("error", f"Freshness lookup failed: {e}")
 
     # Filter out last project when possible
@@ -348,7 +348,7 @@ def _filter_exploration_projects(
 
     try:
         config = load_projects_config(koan_root)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"[iteration_manager] Could not load projects config: {e}", file=sys.stderr)
         return FilterResult(projects=projects, pr_limited=[])
 
@@ -414,7 +414,7 @@ def _check_schedule():
     try:
         from app.schedule_manager import get_current_schedule
         return get_current_schedule()
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Schedule check failed: {e}")
         return None
 
@@ -524,7 +524,7 @@ def plan_iteration(
                     f"{decision_reason} (capped from {original_mode}: "
                     f"outside deep_hours schedule)"
                 )
-    except Exception as e:
+    except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Schedule mode cap check failed: {e}")
 
     # Step 3: Inject recurring missions
@@ -619,7 +619,7 @@ def plan_iteration(
         try:
             from app.utils import get_contemplative_chance
             contemplative_chance = get_contemplative_chance()
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             _log_iteration("error", f"Contemplative chance load error: {e}")
             contemplative_chance = 10
 
@@ -635,7 +635,7 @@ def plan_iteration(
 
                 try:
                     focus_remaining = focus_state.remaining_display()
-                except Exception as e:
+                except (ValueError, OSError) as e:
                     _log_iteration("error", f"Focus state display error: {e}")
                     focus_remaining = "unknown"
 
