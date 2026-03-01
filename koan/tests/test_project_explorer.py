@@ -110,6 +110,19 @@ class TestGatherGitActivity:
         assert "Active branches:" in result
         assert "Recent changes:" in result
 
+    @patch("app.project_explorer.run_git")
+    def test_diffstat_uses_log_not_head_ref(self, mock_git):
+        """Recent changes section uses 'git log --stat' not 'HEAD~10'
+        to avoid failures on repos with fewer than 10 commits."""
+        mock_git.return_value = "some data"
+        gather_git_activity("/tmp")
+        # Check the third call (diffstat) uses "log" not "diff"
+        calls = mock_git.call_args_list
+        diffstat_call = calls[2]  # Third call is the diff/stat call
+        args = diffstat_call[0]   # Positional args
+        assert "log" in args, f"Expected 'log' in diffstat args, got {args}"
+        assert "HEAD~10" not in str(args), "Should not reference HEAD~10"
+
 
 # ---------------------------------------------------------------------------
 # gather_project_structure

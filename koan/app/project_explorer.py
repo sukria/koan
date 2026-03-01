@@ -44,7 +44,9 @@ def gather_git_activity(project_path: str) -> str:
         branches = branches_out.split("\n")[:10]
         parts.append("Active branches:\n" + "\n".join(branches))
 
-    diff_stat = run_git(project_path, "diff", "--stat", "HEAD~10", "HEAD")
+    # Use diffstat from the log instead of HEAD~10 which fails on repos
+    # with fewer than 10 commits.
+    diff_stat = run_git(project_path, "log", "--stat", "--format=", "-10")
     if diff_stat:
         parts.append("Recent changes:\n" + diff_stat)
 

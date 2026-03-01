@@ -563,6 +563,23 @@ def plan_iteration(
         # No mission — autonomous mode
         mission_title = ""
 
+        # Short-circuit: WAIT mode means budget is exhausted — skip
+        # exploration filtering entirely to avoid wasted gh API calls.
+        if autonomous_mode == "wait":
+            focus_area = resolve_focus_area(autonomous_mode, has_mission=False)
+            return _make_result(
+                action="wait_pause",
+                project_name=projects[0][0] if projects else "default",
+                project_path=projects[0][1] if projects else "",
+                autonomous_mode=autonomous_mode,
+                focus_area=focus_area,
+                available_pct=available_pct,
+                decision_reason=decision_reason,
+                display_lines=display_lines,
+                recurring_injected=recurring_injected,
+                schedule_mode=schedule_state.mode if schedule_state else "normal",
+            )
+
         # Filter to exploration-enabled projects only
         filter_result = _filter_exploration_projects(projects, koan_root)
         exploration_projects = filter_result.projects
