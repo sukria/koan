@@ -499,9 +499,11 @@ def append_to_outbox(outbox_path: Path, content: str):
     """
     with open(outbox_path, "a", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
-        f.write(content)
-        f.flush()
-        fcntl.flock(f, fcntl.LOCK_UN)
+        try:
+            f.write(content)
+            f.flush()
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------

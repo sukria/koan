@@ -713,7 +713,7 @@ def _notify_github_question(
             f"{owner}/{repo}#{issue_number}: {short}"
         )
     except Exception as e:
-        log.debug("Failed to send GitHub question notification: %s", e)
+        log.warning("Failed to send GitHub question notification: %s", e)
 
 
 def _notify_github_reply(
@@ -728,7 +728,7 @@ def _notify_github_reply(
             f"{owner}/{repo}#{issue_number}: {short}"
         )
     except Exception as e:
-        log.debug("Failed to send GitHub reply notification: %s", e)
+        log.warning("Failed to send GitHub reply notification: %s", e)
 
 
 def extract_issue_number_from_notification(notification: dict) -> Optional[str]:
