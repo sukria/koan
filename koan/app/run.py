@@ -632,7 +632,7 @@ def main_loop():
 
             # --- Iteration body (exception-protected) ---
             try:
-                _run_iteration(
+                productive = _run_iteration(
                     koan_root=koan_root,
                     instance=instance,
                     projects=projects,
@@ -642,7 +642,8 @@ def main_loop():
                     git_sync_interval=git_sync_interval,
                 )
                 consecutive_errors = 0
-                count += 1
+                if productive:
+                    count += 1
             except KeyboardInterrupt:
                 raise
             except SystemExit:
@@ -961,12 +962,17 @@ def _run_iteration(
     Called from main_loop() within a try/except block that catches
     unexpected exceptions without killing the process.
 
+    Returns:
+        True if this was a productive iteration (mission, autonomous, or
+        contemplative session that consumed API budget).  False for idle
+        iterations (wait states, errors, dedup skips, preflight failures).
+        The caller only increments ``count`` on productive iterations so
+        that ``max_runs`` reflects actual work done, not loop cycles.
+
     Exceptions:
         KeyboardInterrupt: Propagates to caller (user abort)
         SystemExit: Propagates to caller (restart signal)
         Exception: Caught by caller for recovery
-
-    Note: Count is incremented by the caller on success.
     """
     run_num = count + 1
     set_status(koan_root, f"Run {run_num}/{max_runs} — preparing")
@@ -1040,11 +1046,11 @@ def _run_iteration(
             _commit_instance(instance)
         else:
             _notify(instance, f"⚠️ Iteration error: {error_msg}")
-        return
+        return False  # error handling — not productive
 
     if action == "contemplative":
         _handle_contemplative(plan, run_num, max_runs, koan_root, instance, interval)
-        return
+        return True  # contemplative sessions consume API budget
 
     # Idle wait actions — all follow the same sleep-and-check pattern
     _IDLE_WAIT_CONFIG = {
@@ -1073,16 +1079,16 @@ def _run_iteration(
             wake = interruptible_sleep(interval, koan_root, instance)
         if wake == "mission":
             log("koan", f"New mission detected during {action} — waking up")
-        return
+        return False  # idle wait — not productive
 
     if action == "wait_pause":
         _handle_wait_pause(plan, count, koan_root, instance)
-        return
+        return False  # budget exhausted — not productive
 
     # --- Pre-flight quota check ---
     if action in ("mission", "autonomous"):
         if _run_preflight_check(plan, koan_root, instance, count):
-            return
+            return False  # quota exhausted pre-flight — not productive
 
     # --- Execute mission or autonomous run ---
     mission_title = plan["mission_title"]
@@ -1099,7 +1105,7 @@ def _run_iteration(
                 _update_mission_in_file(instance, mission_title, failed=True)
                 _notify(instance, f"⚠️ Mission failed 3+ times, moved to Failed: {mission_title[:60]}")
                 _commit_instance(instance)
-                return
+                return False  # dedup skip — not productive
         except (OSError, ValueError) as e:
             log("error", f"Dedup guard error: {e}")
 
@@ -1139,7 +1145,7 @@ def _run_iteration(
             instance, run_num, max_runs, autonomous_mode, interval,
         )
         if handled:
-            return
+            return True  # skill dispatch — productive
 
     # Lifecycle notification
     if mission_title:
@@ -1279,7 +1285,7 @@ def _run_iteration(
                     f"⚠️ Claude quota exhausted. {reset_display}\n\n"
                     f"Kōan paused after {count} runs. {resume_msg} or use /resume to restart manually."
                 ))
-                return
+                return True  # ran Claude before quota hit — productive
         except Exception as e:
             log("error", f"Post-mission processing error: {e}")
     finally:
@@ -1324,10 +1330,12 @@ def _run_iteration(
             f"⏸️ Kōan paused: {max_runs} runs completed. "
             "Auto-resume in 5h or use /resume to restart."
         ))
-        return
+        return True  # completed final productive run
 
     # Sleep between runs (skip if pending missions)
     _sleep_between_runs(koan_root, instance, interval, run_num, max_runs)
+
+    return True  # productive iteration completed
 
 
 # ---------------------------------------------------------------------------
