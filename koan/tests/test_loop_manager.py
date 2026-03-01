@@ -845,7 +845,7 @@ class TestGitHubNotificationBackoff:
 
         lm._consecutive_empty_checks = 3
 
-        with patch("app.utils.load_config", side_effect=RuntimeError("boom")):
+        with patch("app.utils.load_config", side_effect=OSError("boom")):
             result = process_github_notifications(str(tmp_path), str(tmp_path))
 
         assert result == 0

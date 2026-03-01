@@ -145,7 +145,7 @@ class TestGetCurrentBranch:
     def test_returns_branch(self, mock_git):
         assert get_current_branch("/path") == "koan.atoomic/fix-issue-42"
 
-    @patch(f"{_PR_MODULE}.run_git_strict", side_effect=Exception("fail"))
+    @patch(f"{_PR_MODULE}.run_git_strict", side_effect=RuntimeError("fail"))
     def test_fallback_on_error(self, mock_git):
         assert get_current_branch("/path") == "main"
 
@@ -164,7 +164,7 @@ class TestGetCommitSubjects:
     def test_empty_on_no_commits(self, mock_git):
         assert get_commit_subjects("/path") == []
 
-    @patch(f"{_PR_MODULE}.run_git_strict", side_effect=Exception("fail"))
+    @patch(f"{_PR_MODULE}.run_git_strict", side_effect=RuntimeError("fail"))
     def test_empty_on_error(self, mock_git):
         assert get_commit_subjects("/path") == []
 
@@ -178,7 +178,7 @@ class TestGetForkOwner:
     def test_returns_owner(self, mock_gh):
         assert get_fork_owner("/path") == "atoomic"
 
-    @patch(f"{_PR_MODULE}.run_gh", side_effect=Exception("fail"))
+    @patch(f"{_PR_MODULE}.run_gh", side_effect=RuntimeError("fail"))
     def test_empty_on_error(self, mock_gh):
         assert get_fork_owner("/path") == ""
 

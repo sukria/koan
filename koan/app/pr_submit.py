@@ -7,6 +7,7 @@ fork detection, PR creation, issue comment).
 
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import List, Optional
 
@@ -29,7 +30,7 @@ def get_current_branch(project_path: str) -> str:
             "rev-parse", "--abbrev-ref", "HEAD",
             cwd=project_path,
         ).strip()
-    except Exception as e:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         logger.debug("Branch detection failed, defaulting to main: %s", e)
         return "main"
 
@@ -42,7 +43,7 @@ def get_commit_subjects(project_path: str, base_branch: str = "main") -> List[st
             cwd=project_path,
         )
         return [s for s in output.strip().splitlines() if s.strip()]
-    except Exception as e:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         logger.debug("Failed to get commit subjects: %s", e)
         return []
 
@@ -54,7 +55,7 @@ def get_fork_owner(project_path: str) -> str:
             "repo", "view", "--json", "owner", "--jq", ".owner.login",
             cwd=project_path, timeout=15,
         ).strip()
-    except Exception as e:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         logger.debug("Failed to get fork owner: %s", e)
         return ""
 
@@ -138,7 +139,7 @@ def submit_draft_pr(
         if existing:
             logger.info("PR already exists: %s", existing)
             return existing
-    except Exception as e:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         logger.debug("No existing PR found (or check failed): %s", e)
 
     # Verify we have commits to submit
@@ -154,7 +155,7 @@ def submit_draft_pr(
             "push", "-u", "origin", branch,
             cwd=project_path, timeout=120,
         )
-    except Exception as e:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         logger.warning("Failed to push branch: %s", e)
         return None
 
@@ -176,7 +177,7 @@ def submit_draft_pr(
 
     try:
         pr_url = pr_create(**pr_kwargs)
-    except Exception as e:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         logger.warning("Failed to create PR: %s", e)
         return None
 
@@ -189,7 +190,7 @@ def submit_draft_pr(
                 "--body", f"Draft PR submitted: {pr_url}",
                 cwd=project_path, timeout=15,
             )
-        except Exception as e:
+        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
             logger.debug("Failed to comment on issue: %s", e)
 
     return pr_url

@@ -19,6 +19,7 @@ import argparse
 import logging
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -349,7 +350,7 @@ def process_github_notifications(
             _GITHUB_CHECK_INTERVAL = get_github_check_interval(cfg)
             _GITHUB_MAX_CHECK_INTERVAL = get_github_max_check_interval(cfg)
             _github_interval_loaded = True
-        except Exception as e:
+        except (ImportError, OSError, ValueError) as e:
             log.debug("Could not load github check interval from config: %s", e)
 
     now = time.time()
@@ -439,7 +440,7 @@ def process_github_notifications(
 
         return missions_created
 
-    except Exception as e:
+    except (ImportError, OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
         log.warning("GitHub notification check failed: %s", e)
         return 0
 
@@ -503,7 +504,7 @@ def _notify_mission_from_mention(notif: dict) -> None:
         if thread_url:
             msg += f"\n{thread_url}"
         send_telegram(msg)
-    except Exception as e:
+    except (ImportError, OSError) as e:
         log.debug("Failed to send notification message: %s", e)
 
 
@@ -532,7 +533,7 @@ def _post_error_for_notification(notif: dict, error: str) -> None:
             if comment_id:
                 post_error_reply(owner, repo, issue_num, comment_id, error,
                                  comment_api_url=comment_api_url)
-    except Exception as e:
+    except (ImportError, OSError, RuntimeError, subprocess.SubprocessError) as e:
         print(f"[loop_manager] Error posting reply to GitHub: {e}", file=sys.stderr)
 
 
@@ -551,7 +552,7 @@ def check_pending_missions(instance_dir: str) -> bool:
         return count_pending(content) > 0
     except FileNotFoundError:
         return False
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"[loop_manager] Error reading missions.md: {e}", file=sys.stderr)
         return False
 
