@@ -2806,6 +2806,18 @@ class TestRestoreKoanBranch:
 class TestRunSkillMissionEnv:
     """Tests that _run_skill_mission sets PYTHONPATH and restores branches."""
 
+    class _ClosableIter:
+        """Iterator with close() to mimic subprocess.PIPE stdout."""
+        def __init__(self, lines):
+            self._iter = iter(lines or [])
+            self.closed = False
+        def __iter__(self):
+            return self._iter
+        def __next__(self):
+            return next(self._iter)
+        def close(self):
+            self.closed = True
+
     def _make_mock_popen(self, returncode=0, stdout_lines=None, stderr_content=""):
         """Create a mock Popen that writes stderr to the file handle passed by caller.
 
@@ -2814,7 +2826,7 @@ class TestRunSkillMissionEnv:
         """
         mock_proc = MagicMock()
         mock_proc.returncode = returncode
-        mock_proc.stdout = iter(stdout_lines or [])
+        mock_proc.stdout = self._ClosableIter(stdout_lines)
         mock_proc.wait.return_value = returncode
         mock_proc._stderr_content = stderr_content
 
@@ -2931,7 +2943,7 @@ class TestRunSkillMissionEnv:
         (tmp_path / "koan").mkdir()
 
         mock_proc = MagicMock()
-        mock_proc.stdout = iter(["line1\n"])
+        mock_proc.stdout = self._ClosableIter(["line1\n"])
         mock_proc.wait.side_effect = ValueError("unexpected error")
         mock_proc.returncode = None
         mock_proc.pid = 12345
@@ -3224,7 +3236,7 @@ class TestRunSkillMissionEnv:
         assert _sig.claude_proc is None
 
     def test_uses_configurable_skill_timeout(self, tmp_path):
-        """_run_skill_mission uses get_skill_timeout() for proc.wait()."""
+        """_run_skill_mission uses get_skill_timeout() for threading.Timer."""
         from app.run import _run_skill_mission
         koan_root = str(tmp_path)
         instance = str(tmp_path / "instance")
@@ -3234,11 +3246,13 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
 
+        mock_timer = MagicMock()
         with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
              patch("app.config.get_skill_timeout", return_value=7200), \
+             patch("app.run.threading.Timer", return_value=mock_timer) as mock_timer_cls, \
              patch("app.mission_runner.run_post_mission"):
             _run_skill_mission(
                 skill_cmd=["python3", "--help"],
@@ -3251,8 +3265,11 @@ class TestRunSkillMissionEnv:
                 autonomous_mode="implement",
             )
 
-        # proc.wait() should be called with the configurable timeout (7200s)
-        mock_proc.wait.assert_called_once_with(timeout=7200)
+        # threading.Timer should be created with the configurable timeout (7200s)
+        mock_timer_cls.assert_called_once()
+        assert mock_timer_cls.call_args[0][0] == 7200
+        mock_timer.start.assert_called_once()
+        mock_timer.cancel.assert_called_once()
 
     def test_skill_timeout_default_is_3600(self, tmp_path):
         """Default skill timeout should be 3600s (60 minutes)."""
@@ -3265,10 +3282,12 @@ class TestRunSkillMissionEnv:
 
         mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
 
+        mock_timer = MagicMock()
         with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
              patch("app.run._get_koan_branch", return_value="main"), \
              patch("app.run._restore_koan_branch"), \
              patch("app.run._reset_terminal"), \
+             patch("app.run.threading.Timer", return_value=mock_timer) as mock_timer_cls, \
              patch("app.mission_runner.run_post_mission"):
             _run_skill_mission(
                 skill_cmd=["python3", "--help"],
@@ -3282,7 +3301,8 @@ class TestRunSkillMissionEnv:
             )
 
         # Default timeout from get_skill_timeout() is 3600s
-        mock_proc.wait.assert_called_once_with(timeout=3600)
+        mock_timer_cls.assert_called_once()
+        assert mock_timer_cls.call_args[0][0] == 3600
 
     def test_timeout_uses_kill_process_group(self, tmp_path):
         """Timeout path kills the whole process group, not just the leader."""
@@ -3401,8 +3421,8 @@ class TestRunSkillMissionEnv:
         # Should return failure exit code
         assert result == 1
 
-    def test_no_threading_import_needed(self):
-        """Verify run.py no longer imports threading (deadlock fix removed the need)."""
+    def test_threading_imported_for_timeout(self):
+        """Verify run.py imports threading (used for wall-clock timeout enforcement)."""
         import ast
         from pathlib import Path
 
@@ -3413,7 +3433,7 @@ class TestRunSkillMissionEnv:
             for node in ast.walk(tree)
             if isinstance(node, ast.Import)
         ]
-        assert "threading" not in imports
+        assert "threading" in imports
 
 
 # ---------------------------------------------------------------------------
@@ -3813,6 +3833,237 @@ class TestRunSkillMissionCleanup(TestRunSkillMissionEnv):
 
         assert exit_code == 1
         mock_cleanup.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: proc.stdout fd leak + wall-clock timeout enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestSkillMissionStdoutClose(TestRunSkillMissionEnv):
+    """Verify proc.stdout is closed in the finally block (fd leak fix)."""
+
+    def test_stdout_closed_on_success(self, tmp_path):
+        """proc.stdout.close() is called after normal execution."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        assert mock_proc.stdout.closed
+
+    def test_stdout_closed_on_timeout(self, tmp_path):
+        """proc.stdout.close() is called even when subprocess times out."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen()
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired("cmd", 30)
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run._kill_process_group"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        assert mock_proc.stdout.closed
+
+    def test_stdout_closed_on_exception(self, tmp_path):
+        """proc.stdout.close() is called even when an exception occurs."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen()
+        mock_proc.wait.side_effect = RuntimeError("boom")
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run._kill_process_group"), \
+             patch("app.run.log"), \
+             patch("app.mission_runner.run_post_mission"):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        assert mock_proc.stdout.closed
+
+
+class TestSkillMissionWallClockTimeout(TestRunSkillMissionEnv):
+    """Verify wall-clock timeout is enforced during stdout streaming."""
+
+    def test_timer_started_and_cancelled_on_success(self, tmp_path):
+        """Timer is started for timeout and cancelled on normal completion."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
+        mock_timer = MagicMock()
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.threading.Timer", return_value=mock_timer) as mock_timer_cls, \
+             patch("app.mission_runner.run_post_mission"):
+            exit_code = _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        assert exit_code == 0
+        mock_timer_cls.assert_called_once()
+        mock_timer.start.assert_called_once()
+        mock_timer.cancel.assert_called_once()
+
+    def test_timer_triggers_timeout_expired(self, tmp_path):
+        """When timer fires (sets event), TimeoutExpired is raised and handled."""
+        import threading
+        from app.run import _run_skill_mission
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(stdout_lines=["ok\n"])
+
+        # Simulate the timer having fired by making the Event pre-set
+        real_event = threading.Event()
+        real_event.set()
+
+        def fake_timer(interval, func):
+            """Return a mock timer; the event was already set."""
+            timer = MagicMock()
+            # Simulate: cancel is a no-op (timer already fired)
+            return timer
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.threading.Event", return_value=real_event), \
+             patch("app.run.threading.Timer", side_effect=fake_timer), \
+             patch("app.run._kill_process_group"), \
+             patch("app.mission_runner.run_post_mission"):
+            exit_code = _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        # Timeout fires → exit_code = 1
+        assert exit_code == 1
+
+    def test_timer_cancelled_even_on_exception(self, tmp_path):
+        """Timer is cancelled in the finally block even when stdout loop raises."""
+        from app.run import _run_skill_mission
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        # Create a mock whose stdout iteration raises an exception.
+        # __iter__ is looked up on the type (not instance), so we need
+        # a custom class to override it.
+        class _ExplodingStdout:
+            closed = False
+            def __iter__(self):
+                raise RuntimeError("stdout read error")
+            def close(self):
+                self.closed = True
+
+        mock_proc = self._make_mock_popen()
+        mock_proc.stdout = _ExplodingStdout()
+
+        mock_timer = MagicMock()
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run.threading.Timer", return_value=mock_timer), \
+             patch("app.run._kill_process_group"), \
+             patch("app.run.log"), \
+             patch("app.mission_runner.run_post_mission"):
+            exit_code = _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        # Timer must be cancelled even though iteration raised
+        mock_timer.cancel.assert_called_once()
+        assert exit_code == 1
 
 
 class TestUpdateMissionInFile:
