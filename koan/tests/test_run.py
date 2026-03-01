@@ -860,8 +860,8 @@ class TestCommitInstance:
 
     @patch("app.run.subprocess.run")
     @patch("app.run.log")
-    def test_push_falls_back_to_main_on_rev_parse_failure(self, mock_log, mock_run):
-        """Falls back to 'main' when rev-parse fails."""
+    def test_skips_push_on_rev_parse_failure(self, mock_log, mock_run):
+        """Skips push when rev-parse fails (no branch detected)."""
         from app.run import _commit_instance
 
         def side_effect(cmd, **kwargs):
@@ -881,8 +881,33 @@ class TestCommitInstance:
         _commit_instance("/fake/instance", "test")
 
         push_calls = [c for c in mock_run.call_args_list if c[0][0][1] == "push"]
-        assert len(push_calls) == 1
-        assert "main" in push_calls[0][0][0]
+        assert len(push_calls) == 0
+        mock_log.assert_any_call("error", "Skipping push: detached HEAD or unknown branch")
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.log")
+    def test_skips_push_on_detached_head(self, mock_log, mock_run):
+        """Skips push when rev-parse returns 'HEAD' (detached)."""
+        from app.run import _commit_instance
+
+        def side_effect(cmd, **kwargs):
+            if cmd[1] == "add":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "diff":
+                return MagicMock(returncode=1)
+            elif cmd[1] == "commit":
+                return MagicMock(returncode=0)
+            elif cmd[1] == "rev-parse":
+                return MagicMock(returncode=0, stdout=b"HEAD\n")
+            elif cmd[1] == "push":
+                return MagicMock(returncode=0)
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = side_effect
+        _commit_instance("/fake/instance", "test")
+
+        push_calls = [c for c in mock_run.call_args_list if c[0][0][1] == "push"]
+        assert len(push_calls) == 0
 
 
 class TestReadCurrentProject:

@@ -149,12 +149,15 @@ def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
 
     # Worker thread for blocking skills (calls Claude or external services)
     if skill.worker:
+        if not _run_in_worker_cb:
+            log("error", f"Worker callback not set — cannot run skill '{command_name}'")
+            send_telegram(f"Cannot run /{command_name} — worker thread not available.")
+            return
         def _run_skill():
             result = execute_skill(skill, ctx)
             if result:
                 send_telegram(result)
-        if _run_in_worker_cb:
-            _run_in_worker_cb(_run_skill)
+        _run_in_worker_cb(_run_skill)
         return
 
     # Standard skill execution

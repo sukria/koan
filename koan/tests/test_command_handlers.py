@@ -1148,10 +1148,10 @@ class TestHandleCommandEdgeCases:
 class TestDispatchSkillWorkerNoCallback:
     """Tests for worker skill dispatch when callback is not set."""
 
-    def test_worker_skill_without_callback_does_nothing(
+    def test_worker_skill_without_callback_sends_error(
         self, patch_bridge_state, mock_send, mock_registry
     ):
-        """Worker skill with _run_in_worker_cb=None should silently skip."""
+        """Worker skill with _run_in_worker_cb=None should notify user."""
         from app.command_handlers import _dispatch_skill, set_callbacks
         from app.skills import Skill
         import app.command_handlers as mod
@@ -1167,8 +1167,9 @@ class TestDispatchSkillWorkerNoCallback:
         try:
             with patch("app.command_handlers.execute_skill", return_value="result"):
                 _dispatch_skill(skill, "sparring", "")
-            # Should not crash, and should not send anything
-            mock_send.assert_not_called()
+            # Should send an error message instead of silently dropping
+            mock_send.assert_called_once()
+            assert "worker thread not available" in mock_send.call_args[0][0]
         finally:
             mod._run_in_worker_cb = old_cb
 

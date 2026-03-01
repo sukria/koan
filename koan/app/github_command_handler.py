@@ -236,8 +236,9 @@ def _extract_url_from_context(context: str) -> Optional[Tuple[str, str]]:
     Returns:
         Tuple of (url, remaining_context) or None if no URL found
     """
+    # Require /pull/N or /issues/N path — bare repo URLs must not match
     url_match = re.search(
-        r'https?://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:/[a-z]+/\d+)?',
+        r'https?://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/(?:pull|issues)/\d+',
         context,
     )
     if not url_match:

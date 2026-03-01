@@ -467,9 +467,10 @@ def _commit_instance(instance: str, message: str = ""):
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=instance, capture_output=True, timeout=5,
         )
-        branch = branch_result.stdout.decode().strip() if branch_result.returncode == 0 else "main"
+        branch = branch_result.stdout.decode().strip() if branch_result.returncode == 0 else ""
         if not branch or branch == "HEAD":
-            branch = "main"
+            log("error", "Skipping push: detached HEAD or unknown branch")
+            return
 
         push_result = subprocess.run(
             ["git", "push", "origin", branch],

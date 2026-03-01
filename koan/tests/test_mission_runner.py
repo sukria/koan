@@ -640,8 +640,8 @@ class TestCommitInstance:
         assert push_call[0] == (str(tmp_path), "push", "origin", "develop")
 
     @patch("app.git_sync.run_git")
-    def test_push_falls_back_to_main_on_empty_branch(self, mock_git, tmp_path):
-        """If rev-parse returns empty, push to 'main' as fallback."""
+    def test_skips_push_on_empty_branch(self, mock_git, tmp_path):
+        """If rev-parse returns empty, skip push instead of pushing to main."""
         from app.mission_runner import commit_instance
 
         mock_git.side_effect = [
@@ -649,13 +649,28 @@ class TestCommitInstance:
             "changes",   # git diff --cached --name-only
             "",          # git commit
             "",          # git rev-parse --abbrev-ref HEAD (empty)
-            "",          # git push origin main
         ]
 
         result = commit_instance(str(tmp_path))
         assert result is True
-        push_call = mock_git.call_args_list[4]
-        assert push_call[0] == (str(tmp_path), "push", "origin", "main")
+        # Should NOT have called push (only 4 git calls, not 5)
+        assert mock_git.call_count == 4
+
+    @patch("app.git_sync.run_git")
+    def test_skips_push_on_detached_head(self, mock_git, tmp_path):
+        """If rev-parse returns 'HEAD' (detached), skip push."""
+        from app.mission_runner import commit_instance
+
+        mock_git.side_effect = [
+            "",          # git add -A
+            "changes",   # git diff --cached --name-only
+            "",          # git commit
+            "HEAD",      # git rev-parse --abbrev-ref HEAD (detached)
+        ]
+
+        result = commit_instance(str(tmp_path))
+        assert result is True
+        assert mock_git.call_count == 4
 
     @patch("app.git_sync.run_git")
     def test_returns_false_on_push_failure(self, mock_git, tmp_path):
