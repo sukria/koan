@@ -534,6 +534,51 @@ class TestInterruptibleSleep:
         assert result == "mission"
         assert len(sleep_calls) == 0
 
+    def test_github_check_time_counts_toward_elapsed(self, tmp_path):
+        """Slow GitHub API calls should count toward elapsed time,
+        preventing the sleep loop from running longer than the interval."""
+        from app.loop_manager import interruptible_sleep
+
+        koan_root = str(tmp_path / "root")
+        instance = str(tmp_path / "instance")
+        os.makedirs(koan_root, exist_ok=True)
+        os.makedirs(instance, exist_ok=True)
+
+        call_count = [0]
+        clock = [100.0]
+
+        def mock_monotonic():
+            return clock[0]
+
+        def slow_github_check(*args, **kwargs):
+            """Simulate a GitHub API call that takes 5s of wall time."""
+            call_count[0] += 1
+            clock[0] += 5.0  # Advance clock by 5s during the call
+            return 0
+
+        def tracking_sleep(secs):
+            clock[0] += secs  # Advance clock during sleep too
+
+        with patch("app.loop_manager.time.sleep", side_effect=tracking_sleep), \
+             patch("app.loop_manager.time.monotonic", side_effect=mock_monotonic), \
+             patch("app.loop_manager.process_github_notifications", side_effect=slow_github_check):
+            result = interruptible_sleep(
+                interval=10,
+                koan_root=koan_root,
+                instance_dir=instance,
+                check_interval=3,
+            )
+
+        assert result == "timeout"
+        # With 10s interval and 5s per GitHub check + 3s check_interval:
+        # Iteration 1: github=5s elapsed, sleep=3s → elapsed=8s
+        # Iteration 2: github=5s elapsed → elapsed=13s, breaks (remaining ≤ 0)
+        # So github should be called exactly 2 times, not more.
+        assert call_count[0] == 2, (
+            f"GitHub check called {call_count[0]} times — "
+            "elapsed should include API call time"
+        )
+
 
 # --- Test internal helpers ---
 

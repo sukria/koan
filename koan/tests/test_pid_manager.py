@@ -1022,6 +1022,20 @@ class TestStartOllama:
         assert ok is False
         assert "exited immediately" in msg
 
+    def test_cleans_up_pid_file_when_process_exits_immediately(self, tmp_path):
+        """When ollama dies right after launch, the PID file must be removed."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 54321
+
+        with patch("app.pid_manager.shutil.which", return_value="/usr/local/bin/ollama"), \
+             patch("app.pid_manager.subprocess.Popen", return_value=mock_proc), \
+             patch("app.pid_manager._is_process_alive", return_value=False):
+            ok, msg = start_ollama(tmp_path, verify_timeout=0.5)
+
+        assert ok is False
+        pidfile = tmp_path / ".koan-pid-ollama"
+        assert not pidfile.exists(), "Stale PID file should be removed after failed launch"
+
 
 # ---------------------------------------------------------------------------
 # start_awake

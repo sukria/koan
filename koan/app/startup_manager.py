@@ -267,12 +267,13 @@ def run_startup(koan_root: str, instance: str, projects: list):
     from app.run import set_status, _build_startup_status, _notify
 
     project_list = "\n".join(f"  • {n}" for n, _ in sorted(projects))
+    current_project = projects[0][0] if projects else "none"
     status_line = _build_startup_status(koan_root)
     set_status(koan_root, status_line)
     _notify(instance, (
         f"Kōan starting — {max_runs} max runs, {interval}s interval.\n"
         f"Projects:\n{project_list}\n"
-        f"Current: {projects[0][0]}.\n"
+        f"Current: {current_project}.\n"
         f"Status: {status_line}"
     ))
 

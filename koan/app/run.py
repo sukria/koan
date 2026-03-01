@@ -584,9 +584,10 @@ def main_loop():
     signal.signal(signal.SIGINT, _on_sigint)
 
     # Initialize project state
-    atomic_write(Path(koan_root, ".koan-project"), projects[0][0])
-    os.environ["KOAN_CURRENT_PROJECT"] = projects[0][0]
-    os.environ["KOAN_CURRENT_PROJECT_PATH"] = projects[0][1]
+    if projects:
+        atomic_write(Path(koan_root, ".koan-project"), projects[0][0])
+        os.environ["KOAN_CURRENT_PROJECT"] = projects[0][0]
+        os.environ["KOAN_CURRENT_PROJECT_PATH"] = projects[0][1]
 
     count = 0
     consecutive_errors = 0
