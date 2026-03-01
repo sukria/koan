@@ -3859,3 +3859,436 @@ class TestUpdateMissionInFile:
         content = missions.read_text()
         # Mission should still be in In Progress (not moved)
         assert "/scope.myskill do something" in content.split("## In Progress")[1].split("##")[0]
+
+
+# ---------------------------------------------------------------------------
+# Test: _run_iteration() — full execution paths
+# ---------------------------------------------------------------------------
+
+class TestRunIterationPaths:
+    """Tests for _run_iteration() covering the main execution paths.
+
+    The function is the core of the agent loop (~380 lines). These tests
+    cover the paths NOT already tested by TestRunIterationErrorAction,
+    TestRunIterationGitHubPreCheck, TestRunIterationProjectRefresh,
+    and TestIdleWaitConfig.
+
+    Uses `_patched_iteration()` context manager to avoid fragile
+    15-decorator stacks where parameter ordering causes subtle bugs.
+    """
+
+    def _make_plan(self, action, **overrides):
+        """Build a minimal iteration plan dict."""
+        plan = {
+            "action": action,
+            "project_name": "testproj",
+            "project_path": "/tmp/testproj",
+            "autonomous_mode": "implement",
+            "available_pct": 50,
+            "display_lines": ["Line 1"],
+            "mission_title": "",
+            "focus_area": "General",
+            "decision_reason": "Test",
+            "recurring_injected": [],
+        }
+        plan.update(overrides)
+        return plan
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _patched_iteration(self, tmp_path, plan, **overrides):
+        """Context manager that patches all dependencies of _run_iteration.
+
+        Yields a dict of named mocks for assertion. Caller can override
+        any mock via keyword arguments (e.g. run_claude_task=MagicMock(...)).
+        """
+        from app.git_prep import PrepResult
+
+        defaults = {
+            "plan_iteration": MagicMock(return_value=plan),
+            "run_claude_task": MagicMock(return_value=0),
+            "_run_preflight_check": MagicMock(return_value=False),
+            "_handle_skill_dispatch": MagicMock(
+                return_value=(False, plan.get("mission_title", ""))
+            ),
+            "_start_mission_in_file": MagicMock(),
+            "_finalize_mission": MagicMock(),
+            "_notify": MagicMock(),
+            "_notify_mission_end": MagicMock(),
+            "_commit_instance": MagicMock(),
+            "_sleep_between_runs": MagicMock(),
+            "_cleanup_temp": MagicMock(),
+            "_reset_terminal": MagicMock(),
+            "prepare_project_branch": MagicMock(
+                return_value=PrepResult(success=True)
+            ),
+            "build_agent_prompt": MagicMock(return_value="test prompt"),
+            "create_pending_file": MagicMock(),
+            "build_mission_command": MagicMock(return_value=["echo", "ok"]),
+            "run_post_mission": MagicMock(return_value={}),
+            "parse_claude_output": MagicMock(return_value="output text"),
+        }
+        defaults.update(overrides)
+
+        patch_map = {
+            "plan_iteration": "app.run.plan_iteration",
+            "run_claude_task": "app.run.run_claude_task",
+            "_run_preflight_check": "app.run._run_preflight_check",
+            "_handle_skill_dispatch": "app.run._handle_skill_dispatch",
+            "_start_mission_in_file": "app.run._start_mission_in_file",
+            "_finalize_mission": "app.run._finalize_mission",
+            "_notify": "app.run._notify",
+            "_notify_mission_end": "app.run._notify_mission_end",
+            "_commit_instance": "app.run._commit_instance",
+            "_sleep_between_runs": "app.run._sleep_between_runs",
+            "_cleanup_temp": "app.run._cleanup_temp",
+            "_reset_terminal": "app.run_log._reset_terminal",
+            "prepare_project_branch": "app.git_prep.prepare_project_branch",
+            "build_agent_prompt": "app.prompt_builder.build_agent_prompt",
+            "create_pending_file": "app.loop_manager.create_pending_file",
+            "build_mission_command": "app.mission_runner.build_mission_command",
+            "run_post_mission": "app.mission_runner.run_post_mission",
+            "parse_claude_output": "app.mission_runner.parse_claude_output",
+        }
+
+        instance = str(Path(tmp_path) / "instance")
+        os.makedirs(instance, exist_ok=True)
+
+        patches = {}
+        started = []
+        try:
+            for name, target in patch_map.items():
+                mock_obj = defaults[name]
+                p = patch(target, mock_obj)
+                started.append(p)
+                patches[name] = p.start()
+            yield patches
+        finally:
+            for p in started:
+                p.stop()
+
+    def _call(self, tmp_path, **kwargs):
+        """Call _run_iteration with defaults."""
+        from app.run import _run_iteration
+        instance = str(Path(tmp_path) / "instance")
+        defaults = dict(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("testproj", str(tmp_path))],
+            count=0,
+            max_runs=10,
+            interval=30,
+            git_sync_interval=5,
+        )
+        defaults.update(kwargs)
+        return _run_iteration(**defaults)
+
+    # --- Contemplative path ---
+
+    @patch("app.run._handle_contemplative")
+    @patch("app.run.plan_iteration")
+    def test_contemplative_action_delegates(self, mock_plan, mock_contemp, tmp_path):
+        """action=contemplative delegates to _handle_contemplative and returns."""
+        mock_plan.return_value = self._make_plan("contemplative")
+        instance = str(Path(tmp_path) / "instance")
+        os.makedirs(instance, exist_ok=True)
+        self._call(tmp_path)
+        mock_contemp.assert_called_once()
+
+    # --- Wait pause path ---
+
+    @patch("app.run._handle_wait_pause")
+    @patch("app.run.plan_iteration")
+    def test_wait_pause_action_delegates(self, mock_plan, mock_wait, tmp_path):
+        """action=wait_pause delegates to _handle_wait_pause and returns."""
+        mock_plan.return_value = self._make_plan("wait_pause")
+        instance = str(Path(tmp_path) / "instance")
+        os.makedirs(instance, exist_ok=True)
+        self._call(tmp_path)
+        mock_wait.assert_called_once()
+
+    # --- Pre-flight failure ---
+
+    def test_preflight_failure_aborts_iteration(self, tmp_path):
+        """When _run_preflight_check returns True, iteration aborts before execution."""
+        plan = self._make_plan("mission", mission_title="do work")
+        with self._patched_iteration(
+            tmp_path, plan,
+            _run_preflight_check=MagicMock(return_value=True),
+        ) as mocks:
+            self._call(tmp_path)
+            mocks["run_claude_task"].assert_not_called()
+            mocks["_run_preflight_check"].assert_called_once()
+
+    # --- Dedup guard ---
+
+    def test_dedup_guard_skips_repeated_mission(self, tmp_path):
+        """Missions attempted 3+ times are moved to Failed."""
+        plan = self._make_plan("mission", mission_title="flaky task")
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            with patch("app.mission_history.should_skip_mission", return_value=True):
+                self._call(tmp_path)
+            mocks["run_claude_task"].assert_not_called()
+            # Check _update_mission_in_file was called (via _notify for the "3+" message)
+            notify_calls = [str(c) for c in mocks["_notify"].call_args_list]
+            assert any("3+" in c for c in notify_calls)
+
+    # --- Full mission success ---
+
+    def test_mission_success_flow(self, tmp_path):
+        """Full mission success: git prep -> start -> execute -> finalize -> notify."""
+        plan = self._make_plan(
+            "mission", mission_title="build feature X",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            self._call(tmp_path)
+            mocks["_start_mission_in_file"].assert_called_once()
+            mocks["_handle_skill_dispatch"].assert_called_once()
+            mocks["run_claude_task"].assert_called_once()
+            mocks["_finalize_mission"].assert_called_once_with(
+                str(tmp_path / "instance"), "build feature X", "testproj", 0,
+            )
+            mocks["_notify_mission_end"].assert_called_once()
+            mocks["_commit_instance"].assert_called()
+
+    # --- Full mission failure (exit code 1) ---
+
+    def test_mission_failure_still_finalizes(self, tmp_path):
+        """Mission failure (exit 1): finalize with failure code, still notify."""
+        plan = self._make_plan(
+            "mission", mission_title="failing task",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(
+            tmp_path, plan,
+            run_claude_task=MagicMock(return_value=1),
+        ) as mocks:
+            self._call(tmp_path)
+            mocks["_finalize_mission"].assert_called_once_with(
+                str(tmp_path / "instance"), "failing task", "testproj", 1,
+            )
+            mocks["_notify_mission_end"].assert_called_once()
+
+    # --- Autonomous execution (no mission title) ---
+
+    def test_autonomous_execution_skips_mission_lifecycle(self, tmp_path):
+        """Autonomous run: no mission title -> skip start/finalize, still execute."""
+        plan = self._make_plan("autonomous", project_path=str(tmp_path))
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            self._call(tmp_path)
+            mocks["run_claude_task"].assert_called_once()
+            # No mission lifecycle calls (no title → no start/finalize)
+            mocks["_start_mission_in_file"].assert_not_called()
+            mocks["_finalize_mission"].assert_not_called()
+            # Should notify autonomous mode
+            notify_args = [str(c) for c in mocks["_notify"].call_args_list]
+            assert any("Autonomous" in a for a in notify_args)
+
+    # --- Post-mission quota exhaustion ---
+
+    def test_post_mission_quota_exhaustion_creates_pause(self, tmp_path):
+        """When post-mission detects quota exhaustion, pause is created."""
+        plan = self._make_plan(
+            "mission", mission_title="some task",
+            project_path=str(tmp_path),
+        )
+        mock_post = MagicMock(return_value={
+            "quota_exhausted": True,
+            "quota_info": ("Resets at 10am PT", "Auto-resume in ~5h"),
+        })
+        with self._patched_iteration(
+            tmp_path, plan,
+            run_post_mission=mock_post,
+        ) as mocks:
+            with patch("app.run._compute_quota_reset_ts", return_value=(0, "reset at 10am")):
+                with patch("app.pause_manager.create_pause") as mock_pause:
+                    self._call(tmp_path)
+                    mock_pause.assert_called_once()
+                    assert mock_pause.call_args[0][1] == "quota"
+            # Quota notification sent
+            notify_calls = [str(c) for c in mocks["_notify"].call_args_list]
+            assert any("quota" in c.lower() for c in notify_calls)
+            # Sleep should NOT be called (early return after pause)
+            mocks["_sleep_between_runs"].assert_not_called()
+
+    # --- Max runs reached ---
+
+    def test_max_runs_triggers_pause(self, tmp_path):
+        """Last run (count+1 >= max_runs) triggers evening ritual and pause."""
+        plan = self._make_plan(
+            "mission", mission_title="last task",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            with patch("app.rituals.run_ritual") as mock_ritual:
+                with patch("app.pause_manager.create_pause") as mock_pause:
+                    self._call(tmp_path, count=9, max_runs=10)
+                    mock_ritual.assert_called_once_with(
+                        "evening", Path(tmp_path / "instance")
+                    )
+                    mock_pause.assert_called_once_with(str(tmp_path), "max_runs")
+            mocks["_sleep_between_runs"].assert_not_called()
+            notify_calls = [str(c) for c in mocks["_notify"].call_args_list]
+            assert any("paused" in c.lower() for c in notify_calls)
+
+    # --- Periodic git sync ---
+
+    def test_periodic_git_sync_triggered(self, tmp_path):
+        """Git sync runs when (count+1) % git_sync_interval == 0."""
+        plan = self._make_plan(
+            "mission", mission_title="sync test",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            with patch("app.git_sync.GitSync") as mock_gs:
+                mock_gs_instance = MagicMock()
+                mock_gs.return_value = mock_gs_instance
+                # count=4, git_sync_interval=5 → (4+1) % 5 == 0 → sync
+                self._call(
+                    tmp_path, count=4, git_sync_interval=5,
+                    projects=[("testproj", str(tmp_path))],
+                )
+                mock_gs.assert_called()
+                mock_gs_instance.sync_and_report.assert_called()
+
+    def test_git_sync_not_triggered_off_interval(self, tmp_path):
+        """Git sync does NOT run when (count+1) % git_sync_interval != 0."""
+        plan = self._make_plan(
+            "mission", mission_title="no sync test",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            with patch("app.git_sync.GitSync") as mock_gs:
+                # count=2, git_sync_interval=5 → (2+1) % 5 == 3 → no sync
+                self._call(
+                    tmp_path, count=2, git_sync_interval=5,
+                    projects=[("testproj", str(tmp_path))],
+                )
+                mock_gs.assert_not_called()
+
+    # --- Skill dispatch handled ---
+
+    def test_skill_dispatch_handled_skips_claude(self, tmp_path):
+        """When _handle_skill_dispatch returns handled=True, Claude is not called."""
+        plan = self._make_plan(
+            "mission", mission_title="/review pr",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(
+            tmp_path, plan,
+            _handle_skill_dispatch=MagicMock(return_value=(True, "/review pr")),
+        ) as mocks:
+            self._call(tmp_path)
+            mocks["_handle_skill_dispatch"].assert_called_once()
+            mocks["run_claude_task"].assert_not_called()
+
+    # --- Git prep failure is non-blocking ---
+
+    def test_git_prep_failure_does_not_block_execution(self, tmp_path):
+        """Git prep failure is logged but execution continues."""
+        plan = self._make_plan(
+            "mission", mission_title="work",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(
+            tmp_path, plan,
+            prepare_project_branch=MagicMock(side_effect=RuntimeError("git broken")),
+        ) as mocks:
+            self._call(tmp_path)
+            mocks["run_claude_task"].assert_called_once()
+
+    # --- Temp file cleanup on exception ---
+
+    def test_temp_files_cleaned_up_on_exception(self, tmp_path):
+        """Temp files are removed even when run_claude_task raises."""
+        plan = self._make_plan(
+            "mission", mission_title="crashing task",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(
+            tmp_path, plan,
+            run_claude_task=MagicMock(side_effect=RuntimeError("crash")),
+        ) as mocks:
+            # RuntimeError from run_claude_task propagates (no catch in the outer try)
+            with pytest.raises(RuntimeError, match="crash"):
+                self._call(tmp_path)
+            mocks["_cleanup_temp"].assert_called_once()
+
+    # --- original_mission_title preserved for finalize ---
+
+    def test_finalize_uses_original_title_not_translated(self, tmp_path):
+        """_finalize_mission uses the original mission title, not a skill-translated one."""
+        original_title = "/scope.tool do stuff"
+        translated_title = "/my-tool do stuff"
+        plan = self._make_plan(
+            "mission", mission_title=original_title,
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(
+            tmp_path, plan,
+            _handle_skill_dispatch=MagicMock(return_value=(False, translated_title)),
+        ) as mocks:
+            self._call(tmp_path)
+            mocks["_finalize_mission"].assert_called_once_with(
+                str(tmp_path / "instance"), original_title, "testproj", 0,
+            )
+
+    # --- Post-mission error is caught ---
+
+    def test_post_mission_error_does_not_crash(self, tmp_path):
+        """Post-mission errors are caught and don't crash the iteration."""
+        plan = self._make_plan(
+            "mission", mission_title="task",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(
+            tmp_path, plan,
+            run_post_mission=MagicMock(side_effect=RuntimeError("post-mission crash")),
+        ) as mocks:
+            self._call(tmp_path)
+            mocks["_finalize_mission"].assert_called_once()
+            mocks["_notify_mission_end"].assert_called_once()
+
+    # --- Evening ritual failure is non-fatal ---
+
+    def test_evening_ritual_failure_still_pauses(self, tmp_path):
+        """If evening ritual crashes, pause is still created at max runs."""
+        plan = self._make_plan(
+            "mission", mission_title="last one",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            with patch("app.rituals.run_ritual", side_effect=RuntimeError("ritual broken")):
+                with patch("app.pause_manager.create_pause") as mock_pause:
+                    self._call(tmp_path, count=9, max_runs=10)
+                    mock_pause.assert_called_once_with(str(tmp_path), "max_runs")
+
+    # --- Dedup guard error is non-fatal ---
+
+    def test_dedup_guard_error_does_not_block(self, tmp_path):
+        """OSError in dedup guard is caught, execution continues."""
+        plan = self._make_plan(
+            "mission", mission_title="task",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            with patch("app.mission_history.should_skip_mission", side_effect=OSError("disk error")):
+                self._call(tmp_path)
+            mocks["run_claude_task"].assert_called_once()
+
+    # --- Project state written to env and file ---
+
+    def test_project_state_written(self, tmp_path):
+        """Project name is written to .koan-project and env vars."""
+        plan = self._make_plan(
+            "mission", mission_title="task",
+            project_path=str(tmp_path),
+        )
+        with self._patched_iteration(tmp_path, plan) as mocks:
+            self._call(tmp_path)
+            project_file = Path(tmp_path) / ".koan-project"
+            assert project_file.exists()
+            assert project_file.read_text().strip() == "testproj"
+            assert os.environ.get("KOAN_CURRENT_PROJECT") == "testproj"
