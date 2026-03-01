@@ -300,7 +300,7 @@ def run_pr_review(
                 failure_label="",
                 actions_log=[],  # discard — we log based on retest below
                 max_turns=15,
-                timeout=300,
+                timeout=600,
             )
 
             # Re-run tests to confirm
