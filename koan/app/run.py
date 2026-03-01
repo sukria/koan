@@ -1654,10 +1654,13 @@ def _run_skill_mission(
 
     # Write stdout to its temp file for post-mission processing.
     # stderr is already in stderr_file from the subprocess redirect.
-    with open(stdout_file, 'wb') as f:
-        f.write(skill_stdout.encode('utf-8'))
-
+    # Wrap in try/finally so temp files are cleaned up even if the write
+    # or post-mission processing raises an unexpected exception (consistent
+    # with the contemplative and regular mission paths).
     try:
+        with open(stdout_file, 'wb') as f:
+            f.write(skill_stdout.encode('utf-8'))
+
         from app.mission_runner import run_post_mission
         run_post_mission(
             instance_dir=instance,
@@ -1673,8 +1676,8 @@ def _run_skill_mission(
         )
     except Exception as e:
         log("error", f"Post-mission error: {e}")
-
-    _cleanup_temp(stdout_file, stderr_file)
+    finally:
+        _cleanup_temp(stdout_file, stderr_file)
     duration = int(time.time()) - mission_start
     debug_log(f"[run] skill exec: done in {duration}s, exit_code={exit_code}")
     return exit_code

@@ -21,7 +21,7 @@ Reply flow (when reply_enabled=true and command not recognized):
 
 import logging
 import re
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 from app.bounded_set import BoundedSet
 from app.github_config import (
