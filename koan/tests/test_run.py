@@ -3635,6 +3635,161 @@ class TestSkillDispatchExceptionFinalization(TestRunSkillMissionEnv):
         assert mock_finalize.call_args[0][3] == 0  # exit_code=0 on success
 
 
+# ---------------------------------------------------------------------------
+# Bug fix: _run_skill_mission temp file cleanup must use try/finally
+# ---------------------------------------------------------------------------
+
+
+class TestRunSkillMissionCleanup(TestRunSkillMissionEnv):
+    """Verify temp files are always cleaned up in _run_skill_mission.
+
+    The post-mission block (write stdout, run_post_mission, cleanup) was
+    previously not wrapped in try/finally.  If open() or run_post_mission()
+    raised an unexpected exception, temp files would leak.  These tests
+    verify the fix: _cleanup_temp runs even on failure.
+    """
+
+    def test_temp_files_cleaned_on_post_mission_error(self, tmp_path):
+        """Temp files are removed even when run_post_mission raises."""
+        from app.run import _run_skill_mission
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(returncode=0, stdout_lines=["ok\n"])
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission",
+                   side_effect=RuntimeError("post-mission crash")), \
+             patch("app.run._cleanup_temp") as mock_cleanup:
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        # _cleanup_temp must be called even though run_post_mission raised
+        mock_cleanup.assert_called_once()
+
+    def test_temp_files_cleaned_on_stdout_write_error(self, tmp_path):
+        """Temp files are removed even when writing stdout to file fails."""
+        from app.run import _run_skill_mission
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(returncode=0, stdout_lines=["ok\n"])
+
+        # Make open() fail for the stdout write by patching the built-in
+        original_open = open
+
+        def _failing_open(path, mode='r', *args, **kwargs):
+            if isinstance(path, str) and 'koan-out-' in path and 'wb' in str(mode):
+                raise OSError("disk full")
+            return original_open(path, mode, *args, **kwargs)
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"), \
+             patch("app.run._cleanup_temp") as mock_cleanup, \
+             patch("builtins.open", side_effect=_failing_open):
+            _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        # _cleanup_temp must be called even though open() raised
+        mock_cleanup.assert_called_once()
+
+    def test_temp_files_cleaned_on_successful_run(self, tmp_path):
+        """Temp files are cleaned up on normal successful execution."""
+        from app.run import _run_skill_mission
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen(returncode=0, stdout_lines=["done\n"])
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.mission_runner.run_post_mission"), \
+             patch("app.run._cleanup_temp") as mock_cleanup:
+            exit_code = _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        assert exit_code == 0
+        mock_cleanup.assert_called_once()
+
+    def test_temp_files_cleaned_on_timeout(self, tmp_path):
+        """Temp files are cleaned up when subprocess times out."""
+        from app.run import _run_skill_mission
+
+        koan_root = str(tmp_path)
+        instance = str(tmp_path / "instance")
+        (tmp_path / "instance").mkdir()
+        (tmp_path / "instance" / "journal").mkdir(parents=True)
+        (tmp_path / "koan").mkdir()
+
+        mock_proc = self._make_mock_popen()
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired("cmd", 3600)
+
+        with patch("app.run.subprocess.Popen", side_effect=mock_proc._side_effect), \
+             patch("app.run._get_koan_branch", return_value="main"), \
+             patch("app.run._restore_koan_branch"), \
+             patch("app.run._reset_terminal"), \
+             patch("app.run._kill_process_group"), \
+             patch("app.mission_runner.run_post_mission"), \
+             patch("app.run._cleanup_temp") as mock_cleanup:
+            exit_code = _run_skill_mission(
+                skill_cmd=["python3", "--help"],
+                koan_root=koan_root,
+                instance=instance,
+                project_name="test",
+                project_path=str(tmp_path),
+                run_num=1,
+                mission_title="/plan test",
+                autonomous_mode="implement",
+            )
+
+        assert exit_code == 1
+        mock_cleanup.assert_called_once()
+
+
 class TestUpdateMissionInFile:
     """Test _update_mission_in_file needle matching."""
 

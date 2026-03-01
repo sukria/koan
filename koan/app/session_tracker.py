@@ -18,7 +18,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 
 # Maximum entries to keep in session_outcomes.json (rolling window)

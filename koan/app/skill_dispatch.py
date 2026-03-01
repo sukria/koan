@@ -20,7 +20,6 @@ Scoped skills:
     /namespace.skill <args>             -> resolved via skill registry
 """
 
-import os
 import re
 import sys
 from pathlib import Path
