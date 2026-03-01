@@ -444,9 +444,12 @@ def commit_instance(instance_dir: str) -> bool:
         now = datetime.now().strftime("%Y-%m-%d-%H:%M")
         run_git(instance_dir, "commit", "-m", f"koan: {now}")
 
-        # Push to the current branch (not hard-coded "main")
+        # Push to the current branch — skip if HEAD is detached
         branch = run_git(instance_dir, "rev-parse", "--abbrev-ref", "HEAD")
-        run_git(instance_dir, "push", "origin", branch or "main")
+        if not branch or branch == "HEAD":
+            print("[mission_runner] Skipping push: detached HEAD", file=sys.stderr)
+            return True
+        run_git(instance_dir, "push", "origin", branch)
         return True
     except Exception as e:
         print(f"[mission_runner] Instance commit failed: {e}", file=sys.stderr)

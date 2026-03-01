@@ -984,12 +984,10 @@ class TestExtractUrlFromContext:
         url, _ = result
         assert not url.endswith("]")
 
-    def test_repo_url_without_path(self):
-        """Repo root URL should be extracted."""
+    def test_repo_url_without_path_ignored(self):
+        """Bare repo URL (no /pull/N or /issues/N) should NOT be extracted."""
         result = _extract_url_from_context("check https://github.com/owner/repo")
-        assert result is not None
-        url, _ = result
-        assert url == "https://github.com/owner/repo"
+        assert result is None
 
     def test_no_url_returns_none(self):
         result = _extract_url_from_context("just some text without urls")
@@ -1569,6 +1567,30 @@ class TestExtractUrlFromContextEdgeCases:
         assert result is not None
         url, _ = result
         assert url == "https://github.com/org/my_repo/issues/3"
+
+    def test_bare_repo_url_with_extra_text_ignored(self):
+        """Bare repo URL with surrounding text should NOT match."""
+        result = _extract_url_from_context(
+            "check https://github.com/other/repo for reference"
+        )
+        assert result is None
+
+    def test_repo_url_with_tree_path_ignored(self):
+        """Repo URL with /tree/ or /blob/ path should NOT match."""
+        result = _extract_url_from_context(
+            "see https://github.com/owner/repo/tree/main/src"
+        )
+        assert result is None
+
+    def test_pull_url_still_matches(self):
+        """PR URL should still be extracted correctly."""
+        result = _extract_url_from_context(
+            "rebase https://github.com/owner/repo/pull/42 please"
+        )
+        assert result is not None
+        url, remaining = result
+        assert url == "https://github.com/owner/repo/pull/42"
+        assert remaining == "rebase please"
 
 
 # ---------------------------------------------------------------------------
