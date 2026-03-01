@@ -320,6 +320,42 @@ class TestNotifyMissionFromMention:
         assert "Fix important bug" in msg
         assert "pullrequest" in msg
 
+    @patch("app.notify.send_telegram")
+    def test_includes_thread_url_from_subject(self, mock_send):
+        from app.loop_manager import _notify_mission_from_mention
+
+        mock_send.return_value = True
+        notif = {
+            "repository": {"full_name": "owner/repo"},
+            "subject": {
+                "title": "Fix important bug",
+                "type": "PullRequest",
+                "url": "https://api.github.com/repos/owner/repo/pulls/99",
+            },
+        }
+        _notify_mission_from_mention(notif)
+
+        msg = mock_send.call_args[0][0]
+        assert "https://github.com/owner/repo/pull/99" in msg
+
+    @patch("app.notify.send_telegram")
+    def test_issue_url_included(self, mock_send):
+        from app.loop_manager import _notify_mission_from_mention
+
+        mock_send.return_value = True
+        notif = {
+            "repository": {"full_name": "owner/repo"},
+            "subject": {
+                "title": "Bug report",
+                "type": "Issue",
+                "url": "https://api.github.com/repos/owner/repo/issues/7",
+            },
+        }
+        _notify_mission_from_mention(notif)
+
+        msg = mock_send.call_args[0][0]
+        assert "https://github.com/owner/repo/issues/7" in msg
+
     @patch("app.notify.send_telegram", side_effect=Exception("network error"))
     def test_handles_send_failure_gracefully(self, mock_send, caplog):
         from app.loop_manager import _notify_mission_from_mention
