@@ -596,3 +596,51 @@ class TestRunStartup:
         # Verify notification was sent with "none" as current project
         call_args = mock_notify.call_args[0]
         assert "Current: none" in call_args[1]
+
+    @patch("app.startup_manager.run_morning_ritual")
+    @patch("app.startup_manager.run_daily_report")
+    @patch("app.startup_manager.run_git_sync")
+    @patch("app.run._notify")
+    @patch("app.run._build_startup_status", return_value="Active")
+    @patch("app.run.set_status")
+    @patch("app.startup_manager.setup_github_auth", side_effect=Exception("auth boom"))
+    @patch("app.startup_manager.setup_git_identity", side_effect=Exception("git id boom"))
+    @patch("app.startup_manager.handle_start_on_pause", side_effect=Exception("pause boom"))
+    @patch("app.startup_manager.check_self_reflection")
+    @patch("app.startup_manager.check_health")
+    @patch("app.startup_manager.cleanup_mission_history")
+    @patch("app.startup_manager.cleanup_memory")
+    @patch("app.startup_manager.run_sanity_checks")
+    @patch("app.startup_manager.discover_workspace", return_value=[("proj1", "/p1")])
+    @patch("app.startup_manager.populate_github_urls")
+    @patch("app.startup_manager.run_migrations")
+    @patch("app.startup_manager.recover_crashed_missions")
+    @patch("app.banners.print_agent_banner")
+    @patch("app.utils.get_branch_prefix", return_value="koan/")
+    @patch("app.utils.get_cli_binary_for_shell", return_value="claude")
+    @patch("app.utils.get_interval_seconds", return_value=60)
+    @patch("app.utils.get_max_runs", return_value=10)
+    def test_pause_git_auth_failures_dont_crash(
+        self,
+        mock_max_runs, mock_interval, mock_cli, mock_prefix,
+        mock_banner,
+        mock_recover, mock_migrate, mock_gh_urls, mock_workspace,
+        mock_sanity, mock_memory, mock_history, mock_health,
+        mock_reflection, mock_pause, mock_git_id, mock_gh_auth,
+        mock_set_status, mock_build_status, mock_notify,
+        mock_git_sync, mock_daily, mock_ritual,
+        capsys,
+    ):
+        """handle_start_on_pause, setup_git_identity, and setup_github_auth
+        failures must not crash startup — they are wrapped in _safe_run."""
+        from app.startup_manager import run_startup
+        result = run_startup("/tmp/koan", "/tmp/koan/instance", [("proj1", "/p1")])
+        assert result == (10, 60, "koan/")
+        # All three failed but startup still completed
+        out = capsys.readouterr().out
+        assert "Start on pause failed" in out
+        assert "Git identity failed" in out
+        assert "GitHub auth failed" in out
+        # Later steps still ran
+        mock_git_sync.assert_called_once()
+        mock_notify.assert_called_once()

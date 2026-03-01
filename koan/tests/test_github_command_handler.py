@@ -344,6 +344,21 @@ class TestPostErrorReply:
         assert result is True
         assert "123:Test error" in _error_replies
 
+    @patch("app.github_command_handler.add_reaction", return_value=False)
+    @patch("app.github.api")
+    def test_reaction_false_allows_retry(self, mock_api, mock_react):
+        """If add_reaction returns False (not exception), error key must NOT
+        be added to dedup cache — allowing retry on next poll."""
+        mock_api.return_value = ""
+        result = post_error_reply("owner", "repo", "42", "123", "Test error")
+        assert result is True  # Comment was posted successfully
+        # Reaction failed silently — error should NOT be in dedup cache
+        assert "123:Test error" not in _error_replies
+        # Second call should attempt to post again (not deduplicated)
+        result2 = post_error_reply("owner", "repo", "42", "123", "Test error")
+        assert result2 is True
+        assert mock_api.call_count == 2
+
 
 class TestProcessSingleNotification:
     """Integration-style tests for the full notification processing pipeline."""

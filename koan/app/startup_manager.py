@@ -254,11 +254,11 @@ def run_startup(koan_root: str, instance: str, projects: list):
         _safe_run("Self-reflection check", check_self_reflection, instance)
 
     # Start on pause
-    handle_start_on_pause(koan_root)
+    _safe_run("Start on pause", handle_start_on_pause, koan_root)
 
     # Git identity and GitHub auth
-    setup_git_identity()
-    setup_github_auth()
+    _safe_run("Git identity", setup_git_identity)
+    _safe_run("GitHub auth", setup_github_auth)
 
     # Startup notification
     log("init", f"Starting. Max runs: {max_runs}, interval: {interval}s")
