@@ -2040,6 +2040,7 @@ class TestMainLoopResilience:
             # Second call: create stop file to end loop
             (koan_root / ".koan-stop").touch()
             (koan_root / ".koan-project").write_text("test")
+            return True  # productive iteration
 
         mock_iteration.side_effect = iteration_side_effect
 
@@ -2078,12 +2079,13 @@ class TestMainLoopResilience:
                 raise RuntimeError("second error")
             if call_count[0] == 3:
                 # Success — this resets consecutive_errors to 0
-                return
+                return True  # productive
             if call_count[0] == 4:
                 raise RuntimeError("third error after reset")
             # 5th call: stop
             (koan_root / ".koan-stop").touch()
             (koan_root / ".koan-project").write_text("test")
+            return True  # productive
 
         mock_iteration.side_effect = iteration_side_effect
 
@@ -3859,3 +3861,229 @@ class TestUpdateMissionInFile:
         content = missions.read_text()
         # Mission should still be in In Progress (not moved)
         assert "/scope.myskill do something" in content.split("## In Progress")[1].split("##")[0]
+
+
+# ---------------------------------------------------------------------------
+# Test: _run_iteration returns productive/idle boolean
+# ---------------------------------------------------------------------------
+
+class TestRunIterationProductiveReturn:
+    """_run_iteration returns True for productive runs, False for idle ones.
+
+    This is critical: main_loop only increments count (and thus run_num /
+    max_runs tracking) when _run_iteration returns True.  Idle iterations
+    (wait states, errors, dedup skips) must return False so they don't
+    inflate the run counter and cause premature max_runs pause.
+    """
+
+    def _make_plan(self, action, **overrides):
+        plan = {
+            "action": action,
+            "project_name": "koan",
+            "project_path": "/tmp/koan",
+            "autonomous_mode": "implement",
+            "available_pct": 50,
+            "display_lines": [],
+            "mission_title": "",
+            "focus_area": "",
+            "decision_reason": "",
+            "recurring_injected": [],
+        }
+        plan.update(overrides)
+        return plan
+
+    def _run(self, tmp_path, mock_plan, action, **plan_overrides):
+        from app.run import _run_iteration
+        mock_plan.return_value = self._make_plan(action, **plan_overrides)
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance, exist_ok=True)
+        (tmp_path / ".koan-project").write_text("koan")
+        return _run_iteration(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("koan", "/tmp/koan")],
+            count=0, max_runs=10, interval=60, git_sync_interval=5,
+        )
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_focus_wait_returns_false(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        result = self._run(tmp_path, mock_plan, "focus_wait", focus_remaining="2h")
+        assert result is False
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_schedule_wait_returns_false(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        result = self._run(tmp_path, mock_plan, "schedule_wait")
+        assert result is False
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_exploration_wait_returns_false(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        result = self._run(tmp_path, mock_plan, "exploration_wait")
+        assert result is False
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_pr_limit_wait_returns_false(self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path):
+        result = self._run(tmp_path, mock_plan, "pr_limit_wait")
+        assert result is False
+
+    @patch("app.run._handle_wait_pause")
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_wait_pause_returns_false(self, mock_plan, mock_log, mock_status, mock_handle, tmp_path):
+        result = self._run(tmp_path, mock_plan, "wait_pause")
+        assert result is False
+
+    @patch("app.run._commit_instance")
+    @patch("app.run._update_mission_in_file")
+    @patch("app.run._notify")
+    @patch("app.run.plan_iteration")
+    def test_error_action_returns_false(self, mock_plan, mock_notify, mock_update, mock_commit, tmp_path):
+        result = self._run(tmp_path, mock_plan, "error",
+                           error="Unknown project", mission_title="do stuff")
+        assert result is False
+
+    @patch("app.run._handle_contemplative")
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_contemplative_returns_true(self, mock_plan, mock_log, mock_status, mock_contemp, tmp_path):
+        result = self._run(tmp_path, mock_plan, "contemplative")
+        assert result is True
+
+
+class TestMainLoopCountIncrement:
+    """main_loop only increments count when _run_iteration returns True.
+
+    This prevents idle iterations (wait states) from inflating the run
+    counter and causing premature max_runs pause.
+    """
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
+    @patch("app.run._run_iteration")
+    def test_count_not_incremented_on_idle_iteration(
+        self, mock_iteration, mock_release, mock_acquire,
+        mock_startup, mock_subproc, koan_root,
+    ):
+        """When _run_iteration returns False, count stays the same."""
+        from app.run import main_loop
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+        (koan_root / ".koan-project").write_text("test")
+
+        call_count = [0]
+        counts_seen = []
+
+        def iteration_side_effect(**kwargs):
+            call_count[0] += 1
+            counts_seen.append(kwargs["count"])
+            if call_count[0] <= 3:
+                return False  # idle iterations
+            # 4th call: stop
+            (koan_root / ".koan-stop").touch()
+            (koan_root / ".koan-project").write_text("test")
+            return True  # productive
+
+        mock_iteration.side_effect = iteration_side_effect
+
+        with patch("app.run._notify"):
+            main_loop()
+
+        # count should NOT have incremented during the 3 idle iterations
+        # All 4 calls should see count=0 for the first 3 (idle),
+        # then count=0 for the 4th (productive, but not yet incremented)
+        assert counts_seen[:3] == [0, 0, 0], (
+            f"Idle iterations should not increment count, got: {counts_seen}"
+        )
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
+    @patch("app.run._run_iteration")
+    def test_count_incremented_on_productive_iteration(
+        self, mock_iteration, mock_release, mock_acquire,
+        mock_startup, mock_subproc, koan_root,
+    ):
+        """When _run_iteration returns True, count increments."""
+        from app.run import main_loop
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+        (koan_root / ".koan-project").write_text("test")
+
+        call_count = [0]
+        counts_seen = []
+
+        def iteration_side_effect(**kwargs):
+            call_count[0] += 1
+            counts_seen.append(kwargs["count"])
+            if call_count[0] >= 4:
+                (koan_root / ".koan-stop").touch()
+                (koan_root / ".koan-project").write_text("test")
+            return True  # all productive
+
+        mock_iteration.side_effect = iteration_side_effect
+
+        with patch("app.run._notify"):
+            main_loop()
+
+        # count should increment after each productive iteration
+        assert counts_seen == [0, 1, 2, 3], (
+            f"Productive iterations should increment count, got: {counts_seen}"
+        )
+
+    @patch("app.run.subprocess.run")
+    @patch("app.run.run_startup", return_value=(5, 10, "koan/"))
+    @patch("app.run.acquire_pidfile")
+    @patch("app.run.release_pidfile")
+    @patch("app.run._run_iteration")
+    def test_mixed_idle_and_productive_count(
+        self, mock_iteration, mock_release, mock_acquire,
+        mock_startup, mock_subproc, koan_root,
+    ):
+        """Mixed idle/productive iterations: count only advances on productive ones."""
+        from app.run import main_loop
+
+        os.environ["KOAN_ROOT"] = str(koan_root)
+        os.environ["KOAN_PROJECTS"] = f"test:{koan_root}"
+        (koan_root / ".koan-project").write_text("test")
+
+        call_count = [0]
+        counts_seen = []
+        # Pattern: idle, productive, idle, idle, productive, stop
+        pattern = [False, True, False, False, True]
+
+        def iteration_side_effect(**kwargs):
+            call_count[0] += 1
+            counts_seen.append(kwargs["count"])
+            if call_count[0] > len(pattern):
+                (koan_root / ".koan-stop").touch()
+                (koan_root / ".koan-project").write_text("test")
+                return True
+            return pattern[call_count[0] - 1]
+
+        mock_iteration.side_effect = iteration_side_effect
+
+        with patch("app.run._notify"):
+            main_loop()
+
+        # idle(0), productive(0)→inc, idle(1), idle(1), productive(1)→inc, stop(2)
+        assert counts_seen == [0, 0, 1, 1, 1, 2], (
+            f"Expected count pattern [0,0,1,1,1,2], got: {counts_seen}"
+        )
