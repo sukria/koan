@@ -1467,6 +1467,34 @@ class TestNotifyMissionFromMention:
         assert "sukria/koan" in msg
         assert "Fix auth bug" in msg
 
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_includes_thread_url(self, mock_send):
+        from app.loop_manager import _notify_mission_from_mention
+
+        notif = {
+            "repository": {"full_name": "sukria/koan"},
+            "subject": {
+                "title": "Fix auth bug",
+                "type": "PullRequest",
+                "url": "https://api.github.com/repos/sukria/koan/pulls/42",
+            },
+        }
+        _notify_mission_from_mention(notif)
+        msg = mock_send.call_args[0][0]
+        assert "https://github.com/sukria/koan/pull/42" in msg
+
+    @patch("app.notify.send_telegram", return_value=True)
+    def test_no_url_when_subject_url_missing(self, mock_send):
+        from app.loop_manager import _notify_mission_from_mention
+
+        notif = {
+            "repository": {"full_name": "sukria/koan"},
+            "subject": {"title": "Fix auth bug", "type": "PullRequest"},
+        }
+        _notify_mission_from_mention(notif)
+        msg = mock_send.call_args[0][0]
+        assert "https://" not in msg
+
 
 # --- Test configurable check interval ---
 

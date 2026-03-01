@@ -489,13 +489,20 @@ def _notify_mission_from_mention(notif: dict) -> None:
     """Send a message to the communication layer when a GitHub @mention creates a mission."""
     try:
         from app.notify import send_telegram
+        from app.github_notifications import api_url_to_web_url
+
         repo_name = notif.get("repository", {}).get("full_name", "?")
         subject_title = notif.get("subject", {}).get("title", "?")
         subject_type = notif.get("subject", {}).get("type", "?").lower()
-        send_telegram(
+        subject_api_url = notif.get("subject", {}).get("url", "")
+        thread_url = api_url_to_web_url(subject_api_url) if subject_api_url else ""
+        msg = (
             f"📬 GitHub @mention → mission queued\n"
             f"{repo_name} ({subject_type}): {subject_title}"
         )
+        if thread_url:
+            msg += f"\n{thread_url}"
+        send_telegram(msg)
     except Exception as e:
         log.debug("Failed to send notification message: %s", e)
 
