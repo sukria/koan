@@ -739,8 +739,13 @@ def _handle_contemplative(
     except KeyboardInterrupt:
         raise
     except Exception as e:
-        log("error", f"Contemplative error: {e}")
+        log("error", f"Contemplative error: {e}\n{traceback.format_exc()}")
     log("pause", "Contemplative session ended.")
+
+    # Commit any journal/memory changes from the contemplative session.
+    # Without this, writings are lost if the agent crashes before the
+    # next successful iteration commits.
+    _commit_instance(instance)
 
     if check_pending_missions(instance):
         log("koan", "Pending missions found after contemplation — skipping sleep")
@@ -769,7 +774,11 @@ def _handle_wait_pause(
         from app.send_retrospective import create_retrospective
         create_retrospective(Path(instance), project_name)
     except Exception as e:
-        log("error", f"Retrospective sending failed: {e}")
+        log("error", f"Retrospective sending failed: {e}\n{traceback.format_exc()}")
+
+    # Commit retrospective before entering pause — otherwise these
+    # journal/memory writes are lost if the machine reboots while paused.
+    _commit_instance(instance)
 
     reset_ts, reset_display = _compute_quota_reset_ts(instance)
     from app.pause_manager import create_pause
@@ -896,7 +905,7 @@ def _handle_skill_dispatch(
             _finalize_mission(instance, mission_title, project_name, 1)
             raise
         except Exception as e:
-            log("error", f"Skill dispatch exception: {e}")
+            log("error", f"Skill dispatch exception: {e}\n{traceback.format_exc()}")
 
         _notify_mission_end(
             instance, project_name, run_num, max_runs,
@@ -1128,7 +1137,7 @@ def _run_iteration(
         else:
             log("git", f"Ready on {prep.base_branch} from {prep.remote_used}")
     except Exception as e:
-        log("error", f"Git prep error for {project_name}: {e}")
+        log("error", f"Git prep error for {project_name}: {e}\n{traceback.format_exc()}")
 
     # --- Mark mission as In Progress ---
     # Save the original title before skill dispatch may translate it.
@@ -1287,7 +1296,7 @@ def _run_iteration(
                 ))
                 return True  # ran Claude before quota hit — productive
         except Exception as e:
-            log("error", f"Post-mission processing error: {e}")
+            log("error", f"Post-mission processing error: {e}\n{traceback.format_exc()}")
     finally:
         _cleanup_temp(stdout_file, stderr_file)
 
@@ -1648,7 +1657,7 @@ def _run_skill_mission(
     except Exception as e:
         if proc is not None:
             _kill_process_group(proc)
-        log("error", f"Skill runner failed: {e}")
+        log("error", f"Skill runner failed: {e}\n{traceback.format_exc()}")
         debug_log(f"[run] skill exec: EXCEPTION {e}")
         exit_code = 1
         skill_stdout = "\n".join(stdout_lines)
