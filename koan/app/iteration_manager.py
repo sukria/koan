@@ -379,24 +379,39 @@ def _filter_exploration_projects(
             filtered.append((name, path))
             continue
 
-        # Resolve github_url from project config
+        # Collect all github URLs for this project (primary + extras)
         project_cfg = config.get("projects", {}).get(name, {}) or {}
-        github_url = project_cfg.get("github_url", "")
-        if not github_url:
+        urls_to_check = set()
+        primary_url = project_cfg.get("github_url", "")
+        if primary_url:
+            urls_to_check.add(primary_url)
+        for url in project_cfg.get("github_urls", []):
+            if url:
+                urls_to_check.add(url)
+
+        if not urls_to_check:
             _log_iteration("debug",
                 f"Project '{name}' has max_open_prs={limit} but no github_url — skipping PR check")
             filtered.append((name, path))
             continue
 
-        open_count = cached_count_open_prs(github_url, author)
-        if open_count < 0:
-            # Error — fail-open, include project
+        # Sum open PRs across all repos (PRs on fork vs upstream are distinct)
+        total_open = 0
+        any_error = True  # assume error until we get a valid count
+        for url in urls_to_check:
+            count = cached_count_open_prs(url, author)
+            if count >= 0:
+                total_open += count
+                any_error = False
+
+        if any_error:
+            # All URLs errored — fail-open, include project
             filtered.append((name, path))
             continue
 
-        if open_count >= limit:
+        if total_open >= limit:
             _log_iteration("koan",
-                f"Project '{name}' at PR limit ({open_count}/{limit}) — excluding from exploration")
+                f"Project '{name}' at PR limit ({total_open}/{limit}) — excluding from exploration")
             pr_limited.append(name)
         else:
             filtered.append((name, path))

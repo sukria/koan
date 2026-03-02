@@ -1339,6 +1339,138 @@ projects:
         assert result.projects == []
         assert result.pr_limited == ["koan"]
 
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs")
+    def test_github_urls_checked_for_pr_count(self, mock_count, mock_user, koan_root):
+        """PRs are counted across all github_urls, not just primary github_url."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 5
+    github_urls:
+    - owner/koan
+    - upstream/koan
+""")
+        # Fork has 1, upstream has 6 → total 7, over limit of 5
+        mock_count.side_effect = lambda repo, author, **kw: (
+            1 if repo == "owner/koan" else 6
+        )
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert result.projects == []
+        assert result.pr_limited == ["koan"]
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs")
+    def test_github_urls_under_limit_included(self, mock_count, mock_user, koan_root):
+        """PRs summed across github_urls under limit → project included."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 10
+    github_urls:
+    - owner/koan
+    - upstream/koan
+""")
+        # Fork has 2, upstream has 3 → total 5, under limit of 10
+        mock_count.side_effect = lambda repo, author, **kw: (
+            2 if repo == "owner/koan" else 3
+        )
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert len(result.projects) == 1
+        assert result.pr_limited == []
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs")
+    def test_github_urls_only_no_primary(self, mock_count, mock_user, koan_root):
+        """Only github_urls present (no github_url) → still checks PRs."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    max_open_prs: 3
+    github_urls:
+    - upstream/koan
+""")
+        mock_count.return_value = 5
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert result.projects == []
+        assert result.pr_limited == ["koan"]
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs")
+    def test_github_urls_partial_error_uses_valid_counts(self, mock_count, mock_user, koan_root):
+        """One URL errors (-1), another returns valid count → uses valid count."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 3
+    github_urls:
+    - owner/koan
+    - upstream/koan
+""")
+        # Fork errors, upstream has 5
+        mock_count.side_effect = lambda repo, author, **kw: (
+            -1 if repo == "owner/koan" else 5
+        )
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert result.projects == []
+        assert result.pr_limited == ["koan"]
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs", return_value=-1)
+    def test_github_urls_all_errors_fails_open(self, mock_count, mock_user, koan_root):
+        """All github_urls return errors → fail-open, project included."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 3
+    github_urls:
+    - owner/koan
+    - upstream/koan
+""")
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert len(result.projects) == 1
+        assert result.pr_limited == []
+
+    @patch("app.github.get_gh_username", return_value="koan-bot")
+    @patch("app.github.count_open_prs")
+    def test_github_urls_deduped(self, mock_count, mock_user, koan_root):
+        """Duplicate URLs in github_url + github_urls are deduplicated."""
+        (koan_root / "projects.yaml").write_text("""
+projects:
+  koan:
+    path: /path/to/koan
+    github_url: owner/koan
+    max_open_prs: 5
+    github_urls:
+    - owner/koan
+""")
+        mock_count.return_value = 3
+        result = _filter_exploration_projects(
+            [("koan", "/path/to/koan")], str(koan_root),
+        )
+        assert len(result.projects) == 1
+        # Should only be called once due to dedup (set)
+        assert mock_count.call_count == 1
+
 
 # === Tests: plan_iteration with exploration flag ===
 
