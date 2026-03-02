@@ -1175,6 +1175,97 @@ class TestDispatchSkillWorkerNoCallback:
 
 
 # ---------------------------------------------------------------------------
+# Test: _dispatch_skill — worker exception handling
+# ---------------------------------------------------------------------------
+
+class TestDispatchSkillWorkerExceptionHandling:
+    """Tests for worker skill exception handling in _dispatch_skill."""
+
+    def test_worker_skill_exception_is_logged(
+        self, patch_bridge_state, mock_send, mock_registry
+    ):
+        """Worker skill that raises should log and notify the user."""
+        from app.command_handlers import _dispatch_skill, set_callbacks
+        from app.skills import Skill
+
+        skill = MagicMock(spec=Skill)
+        skill.worker = True
+        skill.cli_skill = None
+        skill.audience = "bridge"
+
+        # Capture the closure and run it synchronously
+        captured_fn = None
+        def capture_worker(fn):
+            nonlocal captured_fn
+            captured_fn = fn
+        set_callbacks(handle_chat=MagicMock(), run_in_worker=capture_worker)
+
+        # Patch execute_skill for the full lifetime (closure captures module-level ref)
+        with patch("app.command_handlers.execute_skill", side_effect=RuntimeError("skill crashed")), \
+             patch("app.command_handlers.log") as mock_log:
+            _dispatch_skill(skill, "sparring", "")
+            assert captured_fn is not None
+            captured_fn()
+            mock_log.assert_any_call("error", "Worker skill 'sparring' failed: skill crashed")
+        # Should also notify user via Telegram
+        assert any("sparring" in str(c) and "failed" in str(c) for c in mock_send.call_args_list)
+
+    def test_worker_skill_exception_notification_failure(
+        self, patch_bridge_state, mock_send, mock_registry
+    ):
+        """If notification also fails after worker exception, don't crash."""
+        from app.command_handlers import _dispatch_skill, set_callbacks
+        from app.skills import Skill
+
+        skill = MagicMock(spec=Skill)
+        skill.worker = True
+        skill.cli_skill = None
+        skill.audience = "bridge"
+
+        captured_fn = None
+        def capture_worker(fn):
+            nonlocal captured_fn
+            captured_fn = fn
+        set_callbacks(handle_chat=MagicMock(), run_in_worker=capture_worker)
+
+        # Make send_telegram also fail
+        mock_send.side_effect = ConnectionError("network down")
+        with patch("app.command_handlers.execute_skill", side_effect=ValueError("bad")), \
+             patch("app.command_handlers.log"):
+            _dispatch_skill(skill, "review", "")
+            assert captured_fn is not None
+            # Should not raise despite double failure
+            captured_fn()
+
+    def test_worker_skill_send_telegram_exception(
+        self, patch_bridge_state, mock_send, mock_registry
+    ):
+        """If send_telegram raises in worker (after execute_skill succeeds), catch it."""
+        from app.command_handlers import _dispatch_skill, set_callbacks
+        from app.skills import Skill
+
+        skill = MagicMock(spec=Skill)
+        skill.worker = True
+        skill.cli_skill = None
+        skill.audience = "bridge"
+
+        captured_fn = None
+        def capture_worker(fn):
+            nonlocal captured_fn
+            captured_fn = fn
+        set_callbacks(handle_chat=MagicMock(), run_in_worker=capture_worker)
+
+        # send_telegram will raise on the first call (sending result)
+        mock_send.side_effect = ConnectionError("send failed")
+        with patch("app.command_handlers.execute_skill", return_value="result text"), \
+             patch("app.command_handlers.log") as mock_log:
+            _dispatch_skill(skill, "magic", "")
+            assert captured_fn is not None
+            captured_fn()
+            mock_log.assert_any_call("error", "Worker skill 'magic' failed: send failed")
+
+
+# ---------------------------------------------------------------------------
 # Test: _handle_help_command — detailed help with aliases and usage
 # ---------------------------------------------------------------------------
 
