@@ -121,7 +121,7 @@ class TelegramProvider(MessagingProvider):
             data = resp.json()
             raw_updates = data.get("result", [])
         except (requests.RequestException, ValueError) as e:
-            # Network error or JSON parse error - return empty to retry next poll
+            print(f"[telegram] poll_updates error: {e}", file=sys.stderr)
             return []
 
         updates: List[Update] = []
