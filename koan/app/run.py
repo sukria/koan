@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -1607,16 +1608,36 @@ def _run_skill_mission(
 
         # Stream stdout line-by-line, appending each to pending.md
         # so /live shows real-time progress.
-        for line in proc.stdout:
-            stripped = line.rstrip("\n")
-            stdout_lines.append(stripped)
-            print(stripped)
-            try:
-                with open(pending_path, "a") as f:
-                    f.write(f"{stripped}\n")
-            except OSError:
-                pass
-        proc.wait(timeout=skill_timeout)
+        #
+        # Wall-clock timeout enforcement: proc.wait(timeout=...) only
+        # fires AFTER the stdout loop finishes, so a process that keeps
+        # stdout open (e.g. leaked child fd) would block forever.  A
+        # background timer kills the process group after the deadline,
+        # causing the stdout loop to exit.
+        _timeout_event = threading.Event()
+
+        def _on_skill_timeout():
+            _timeout_event.set()
+            _kill_process_group(proc)
+
+        _timer = threading.Timer(skill_timeout, _on_skill_timeout)
+        _timer.daemon = True
+        _timer.start()
+        try:
+            for line in proc.stdout:
+                stripped = line.rstrip("\n")
+                stdout_lines.append(stripped)
+                print(stripped)
+                try:
+                    with open(pending_path, "a") as f:
+                        f.write(f"{stripped}\n")
+                except OSError:
+                    pass
+        finally:
+            _timer.cancel()
+        if _timeout_event.is_set():
+            raise subprocess.TimeoutExpired(skill_cmd, skill_timeout)
+        proc.wait(timeout=30)
         exit_code = proc.returncode
         skill_stdout = "\n".join(stdout_lines)
         # Read stderr from file after process exits.
@@ -1654,6 +1675,11 @@ def _run_skill_mission(
         skill_stdout = "\n".join(stdout_lines)
         skill_stderr = ""
     finally:
+        if proc is not None and proc.stdout is not None:
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
         if stderr_fh is not None:
             stderr_fh.close()
         _sig.claude_proc = None
