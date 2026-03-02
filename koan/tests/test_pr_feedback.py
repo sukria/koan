@@ -327,6 +327,53 @@ class TestFetchMergedPrs:
         result = fetch_merged_prs("/fake/path")
         assert result == []
 
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    @patch("subprocess.run")
+    def test_filters_by_days_cutoff(self, mock_run, _prefix):
+        """PRs merged before the days cutoff are excluded."""
+        mock_run.return_value = _mock_gh_success([
+            {
+                "number": 1,
+                "title": "fix: recent",
+                "createdAt": "2026-02-25T10:00:00Z",
+                "mergedAt": "2026-02-26T10:00:00Z",
+                "headRefName": "koan/fix-recent",
+            },
+            {
+                "number": 2,
+                "title": "fix: old",
+                "createdAt": "2025-01-01T10:00:00Z",
+                "mergedAt": "2025-01-02T10:00:00Z",
+                "headRefName": "koan/fix-old",
+            },
+        ])
+
+        result = fetch_merged_prs("/fake/path", days=30)
+        # Only the recent PR should be included
+        assert len(result) == 1
+        assert result[0]["number"] == 1
+
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    @patch("subprocess.run")
+    def test_days_parameter_respected(self, mock_run, _prefix):
+        """Different days values produce different filtering."""
+        mock_run.return_value = _mock_gh_success([{
+            "number": 1,
+            "title": "fix: something",
+            "createdAt": "2026-02-25T10:00:00Z",
+            "mergedAt": "2026-02-26T10:00:00Z",
+            "headRefName": "koan/fix-something",
+        }])
+
+        # With days=365 — should include PRs within the last year
+        result = fetch_merged_prs("/fake/path", days=365)
+        assert len(result) == 1
+
+        # With days=0 — only PRs merged today
+        result = fetch_merged_prs("/fake/path", days=0)
+        # The PR from Feb 26 is far in the past, so should be excluded
+        assert len(result) == 0
+
 
 # ─── fetch_open_prs ──────────────────────────────────────────────────────
 

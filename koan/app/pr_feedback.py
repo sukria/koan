@@ -15,7 +15,7 @@ Integration points:
 
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 # Work type categories — ordered by specificity (most specific first)
@@ -153,6 +153,9 @@ def fetch_merged_prs(
         print(f"[pr_feedback] JSON parse failed for merged PRs: {e}", file=sys.stderr)
         return []
 
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+
     results = []
     for pr in prs:
         branch = pr.get("headRefName", "")
@@ -164,6 +167,10 @@ def fetch_merged_prs(
         merged = _parse_iso_datetime(pr.get("mergedAt", ""))
 
         if not created or not merged:
+            continue
+
+        # Filter by merge date — skip PRs merged before the cutoff
+        if merged < cutoff:
             continue
 
         hours = _hours_between(created, merged)

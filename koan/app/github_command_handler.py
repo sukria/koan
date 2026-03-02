@@ -691,11 +691,12 @@ def post_error_reply(
             extra_args=["-f", f"body={body}"],
         )
 
-        # Add reaction to mark as processed
-        add_reaction(owner, repo, comment_id,
-                     comment_api_url=comment_api_url)
-        # Mark as sent only after both comment and reaction succeed
-        _error_replies.add(error_key)
+        # Add reaction to mark as processed — only suppress future
+        # retries if the reaction was actually placed.
+        reacted = add_reaction(owner, repo, comment_id,
+                               comment_api_url=comment_api_url)
+        if reacted:
+            _error_replies.add(error_key)
         return True
     except RuntimeError:
         return False
