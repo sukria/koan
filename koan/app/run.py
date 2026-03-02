@@ -896,7 +896,7 @@ def _handle_skill_dispatch(
             _finalize_mission(instance, mission_title, project_name, 1)
             raise
         except Exception as e:
-            log("error", f"Skill dispatch exception: {e}")
+            log("error", f"Skill dispatch exception: {e}\n{traceback.format_exc()}")
 
         _notify_mission_end(
             instance, project_name, run_num, max_runs,
@@ -1606,16 +1606,25 @@ def _run_skill_mission(
         _sig.claude_proc = proc
 
         # Stream stdout line-by-line, appending each to pending.md
-        # so /live shows real-time progress.
+        # so /live shows real-time progress.  Open the file handle once
+        # to avoid repeated open/close race with archive_pending.
+        pending_fh = None
+        try:
+            pending_fh = open(pending_path, "a")
+        except OSError as e:
+            debug_log(f"[run] cannot open pending.md for streaming: {e}")
         for line in proc.stdout:
             stripped = line.rstrip("\n")
             stdout_lines.append(stripped)
             print(stripped)
-            try:
-                with open(pending_path, "a") as f:
-                    f.write(f"{stripped}\n")
-            except OSError:
-                pass
+            if pending_fh is not None:
+                try:
+                    pending_fh.write(f"{stripped}\n")
+                    pending_fh.flush()
+                except OSError:
+                    pending_fh = None
+        if pending_fh is not None:
+            pending_fh.close()
         proc.wait(timeout=skill_timeout)
         exit_code = proc.returncode
         skill_stdout = "\n".join(stdout_lines)
@@ -1656,6 +1665,11 @@ def _run_skill_mission(
     finally:
         if stderr_fh is not None:
             stderr_fh.close()
+        if proc is not None and proc.stdout is not None and hasattr(proc.stdout, "close"):
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
         _sig.claude_proc = None
         _reset_terminal()
         # Restore koan repo branch if it was changed by the skill.
