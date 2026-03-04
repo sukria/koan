@@ -27,10 +27,13 @@ SKILL.md format:
 """
 
 import importlib.util
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+_log = logging.getLogger(__name__)
 
 # Valid audience values for skills.
 # - "bridge": Telegram-only (process control, quick checks)
@@ -406,6 +409,7 @@ def _execute_handler(skill: Skill, ctx: SkillContext) -> Optional[str]:
 
         return handle_fn(ctx)
     except Exception as e:
+        _log.error("Skill handler %s failed: %s", skill.qualified_name, e, exc_info=True)
         return f"Skill error ({skill.qualified_name}): {e}"
 
 
