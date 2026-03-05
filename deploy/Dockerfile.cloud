@@ -24,7 +24,8 @@ RUN pip install --no-cache-dir -r /app/koan/requirements.txt \
        google-auth>=2.29.0 \
        google-api-python-client>=2.130.0 \
        google-apps-chat>=0.1.0 \
-       numpy>=1.26.0
+       numpy>=1.26.0 \
+       sqlite-vec>=0.1.1
 
 # Application code
 COPY koan/ /app/koan/

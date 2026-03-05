@@ -115,29 +115,79 @@ def _extract_dependencies(file_contents: dict[str, str]) -> list[str]:
 
 # ── GitHub API helpers ───────────────────────────────────────────────
 
-def _gh_api(path: str) -> str | None:
-    """Call GitHub API via gh CLI, return stdout or None."""
+import os as _os
+import shutil as _shutil
+
+_GH_CLI_AVAILABLE: bool | None = None
+
+
+def _has_gh_cli() -> bool:
+    """Check if gh CLI is available (cached)."""
+    global _GH_CLI_AVAILABLE
+    if _GH_CLI_AVAILABLE is None:
+        _GH_CLI_AVAILABLE = _shutil.which("gh") is not None
+    return _GH_CLI_AVAILABLE
+
+
+def _github_api_request(path: str, accept: str = "application/vnd.github+json") -> str | None:
+    """Call GitHub API using requests + GITHUB_TOKEN env var."""
+    import requests as req
+
+    token = _os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        logger.warning("GITHUB_TOKEN not set, cannot call GitHub API via requests")
+        return None
+
     try:
-        result = subprocess.run(
-            ["gh", "api", path],
-            capture_output=True, text=True, timeout=15,
+        resp = req.get(
+            f"https://api.github.com/{path}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": accept,
+            },
+            timeout=15,
         )
-        return result.stdout if result.returncode == 0 else None
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        if resp.status_code == 200:
+            return resp.text
+        logger.warning("GitHub API %s returned %d", path, resp.status_code)
+        return None
+    except Exception as e:
+        logger.error("GitHub API request failed for %s: %s", path, e)
         return None
 
 
+def _gh_api(path: str) -> str | None:
+    """Call GitHub API via gh CLI, fallback to requests + GITHUB_TOKEN."""
+    if _has_gh_cli():
+        try:
+            result = subprocess.run(
+                ["gh", "api", path],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode == 0:
+                return result.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+    return _github_api_request(path)
+
+
 def _fetch_github_file(org: str, repo_name: str, path: str) -> str:
-    """Fetch a file from GitHub using gh CLI."""
-    try:
-        result = subprocess.run(
-            ["gh", "api", f"repos/{org}/{repo_name}/contents/{path}",
-             "-H", "Accept: application/vnd.github.raw+json"],
-            capture_output=True, text=True, timeout=15,
-        )
-        return result.stdout if result.returncode == 0 else ""
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
+    """Fetch a file from GitHub using gh CLI, fallback to requests + GITHUB_TOKEN."""
+    api_path = f"repos/{org}/{repo_name}/contents/{path}"
+    raw_accept = "application/vnd.github.raw+json"
+
+    if _has_gh_cli():
+        try:
+            result = subprocess.run(
+                ["gh", "api", api_path, "-H", f"Accept: {raw_accept}"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode == 0:
+                return result.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    return _github_api_request(api_path, accept=raw_accept) or ""
 
 
 def _fetch_github_repo_data(org: str, repo_name: str) -> tuple[str, str, list[dict]]:
@@ -157,7 +207,7 @@ def _fetch_github_repo_data(org: str, repo_name: str) -> tuple[str, str, list[di
     readme = _fetch_github_file(org, repo_name, "README.md")
 
     tree = []
-    raw_tree = _gh_api(f"repos/{org}/{repo_name}/git/trees/{default_branch}")
+    raw_tree = _gh_api(f"repos/{org}/{repo_name}/git/trees/{default_branch}?recursive=1")
     if raw_tree:
         try:
             tree = json.loads(raw_tree).get("tree", [])

@@ -14,6 +14,11 @@ from datetime import date, datetime, timezone
 
 from flask import Flask, jsonify, request
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+)
+
 from app.health import health_bp
 from app.utils import INSTANCE_DIR
 from app.watcher.webhook_handler import register_webhooks

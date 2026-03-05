@@ -16,8 +16,8 @@ STATUS_ICONS = {
 }
 
 
-def truncate_for_gchat(text: str, max_chars: int = 3000) -> str:
-    """Truncate text for Google Chat limits (32KB total payload)."""
+def truncate_for_gchat(text: str, max_chars: int = 4000) -> str:
+    """Truncate text for Google Chat limits (32KB total payload, ~4K usable)."""
     if len(text) <= max_chars:
         return text
     return text[:max_chars - 30] + "\n\n[résultat tronqué]"

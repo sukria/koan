@@ -315,7 +315,11 @@ def _execute_command(command: ChatCommand) -> tuple[str, str]:
     if result is None:
         result = "Commande exécutée (pas de sortie)."
 
-    return result, "success"
+    # Handlers can return (text, cards_list) for rich formatting
+    if isinstance(result, tuple) and len(result) == 2:
+        return result[0], "success", result[1]
+
+    return result, "success", None
 
 
 def dispatch(command: ChatCommand, send_fn=None) -> ChatResponse:
@@ -385,11 +389,11 @@ def dispatch(command: ChatCommand, send_fn=None) -> ChatResponse:
         ack_message_name = send_fn(ack_resp)
 
     # Execute skill
-    result_text, status = _execute_command(command)
+    result_text, status, custom_cards = _execute_command(command)
     elapsed = int((time.monotonic() - start) * 1000)
     log_chat_audit(command, status, elapsed)
 
-    cards = build_command_response_card(command.skill_name, result_text, status)
+    cards = custom_cards or build_command_response_card(command.skill_name, result_text, status)
 
     if ack_message_name:
         return ChatResponse(

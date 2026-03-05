@@ -194,6 +194,7 @@ def _embed_voyage_direct(text: str, model: str) -> list[float] | None:
 
     api_key = os.environ.get("VOYAGE_API_KEY", "")
     if not api_key:
+        logger.warning("VOYAGE_API_KEY not set, cannot generate embeddings")
         return None
 
     try:
@@ -211,9 +212,11 @@ def _embed_voyage_direct(text: str, model: str) -> list[float] | None:
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["data"][0]["embedding"]
+        embedding = data["data"][0]["embedding"]
+        logger.debug("Voyage direct embedding OK (%d dims)", len(embedding))
+        return embedding
     except Exception as e:
-        logger.error("Voyage direct embedding failed: %s", e)
+        logger.error("Voyage direct embedding failed (model=%s, text_len=%d): %s", model, len(text), e)
         return None
 
 

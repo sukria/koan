@@ -646,16 +646,10 @@ def send_to_gchat(title: str, body: str, thread_key: Optional[str] = None) -> bo
         }]
     }
 
-    params = {}
-    if thread_key:
-        params["threadKey"] = thread_key
-        params["messageReplyOption"] = "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+    # Threading désactivé — toutes les notifications dans le fil principal
 
     try:
         url = webhook_url
-        if params:
-            url += "&" if "?" in url else "?"
-            url += "&".join(f"{k}={v}" for k, v in params.items())
         resp = requests.post(url, json=card, timeout=10)
         if resp.status_code == 429:
             time.sleep(2)

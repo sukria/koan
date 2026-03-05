@@ -72,9 +72,7 @@ def send_notification(text: str, thread_key: str | None = None,
         payload["text"] = text
     if cards:
         payload["cardsV2"] = cards
-    if thread_key:
-        payload["thread"] = {"threadKey": thread_key}
-        url += "&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+    # Threading désactivé — toutes les notifications dans le fil principal
 
     # Use circuit breaker for Google Chat calls
     try:
@@ -90,6 +88,7 @@ def send_notification(text: str, thread_key: str | None = None,
             else:
                 resp = requests.post(url, json=payload, timeout=10)
             if resp.status_code == 200:
+                logger.info("Notification sent (thread=%s)", thread_key or "none")
                 return True
             elif resp.status_code == 429:
                 retry_after = int(resp.headers.get("Retry-After", 2))

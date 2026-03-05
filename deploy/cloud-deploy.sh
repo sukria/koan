@@ -229,6 +229,7 @@ cmd_secrets() {
         "LITELLM_MASTER_KEY:litellm-master-key"
         "LITELLM_SALT_KEY:litellm-salt-key"
         "LITELLM_DB_PASSWORD:litellm-db-password"
+        "GITHUB_TOKEN:github-token"
     )
 
     for entry in "${secrets[@]}"; do
@@ -325,6 +326,7 @@ cmd_receiver() {
         --update-secrets="VOYAGE_API_KEY=voyage-api-key:latest" \
         --update-secrets="LITELLM_MASTER_KEY=litellm-master-key:latest" \
         --update-secrets="GITLAB_TOKEN=gitlab-token:latest" \
+        --update-secrets="GITHUB_TOKEN=github-token:latest" \
         --update-secrets="/etc/secrets/chat-sa-key.json=chat-sa-key:latest" \
         --set-env-vars="KOAN_ROOT=/app,PYTHONPATH=/app/koan,GOOGLE_APPLICATION_CREDENTIALS=/etc/secrets/chat-sa-key.json,INSTANCE_DATA_DIR=/data,GCP_PROJECT_ID=${PROJECT}" \
         --no-cpu-throttling \
