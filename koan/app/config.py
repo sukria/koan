@@ -177,6 +177,16 @@ def get_start_on_pause() -> bool:
     return bool(config.get("start_on_pause", False))
 
 
+def get_skip_permissions() -> bool:
+    """Check if skip_permissions is enabled in config.yaml.
+
+    When True, ``--dangerously-skip-permissions`` is added to Claude CLI
+    invocations — required for MCP tools to work in autonomous mode.
+    """
+    config = _load_config()
+    return bool(config.get("skip_permissions", False))
+
+
 def get_debug_enabled() -> bool:
     """Check if debug mode is enabled in config.yaml.
 

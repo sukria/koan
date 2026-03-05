@@ -101,6 +101,13 @@ class CLIProvider:
         """
         return []
 
+    def build_permission_args(self, skip_permissions: bool = False) -> List[str]:
+        """Build args for permission skipping.
+
+        Base implementation returns empty — only Claude provider supports this.
+        """
+        return []
+
     def build_command(
         self,
         prompt: str,
@@ -112,12 +119,14 @@ class CLIProvider:
         max_turns: int = 0,
         mcp_configs: Optional[List[str]] = None,
         plugin_dirs: Optional[List[str]] = None,
+        skip_permissions: bool = False,
     ) -> List[str]:
         """Build a complete CLI command from generic parameters.
 
         Returns a list of strings suitable for subprocess.run().
         """
         cmd = [self.binary()]
+        cmd.extend(self.build_permission_args(skip_permissions))
         cmd.extend(self.build_prompt_args(prompt))
         cmd.extend(self.build_tool_args(allowed_tools, disallowed_tools))
         cmd.extend(self.build_model_args(model, fallback))

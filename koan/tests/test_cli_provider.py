@@ -165,6 +165,22 @@ class TestClaudeProvider:
         assert "--fallback-model" in result
         assert "--disallowedTools" in result
 
+    def test_build_permission_args_true(self):
+        assert self.provider.build_permission_args(True) == ["--dangerously-skip-permissions"]
+
+    def test_build_permission_args_false(self):
+        assert self.provider.build_permission_args(False) == []
+
+    def test_build_command_with_skip_permissions(self):
+        cmd = self.provider.build_command(prompt="hello", skip_permissions=True)
+        assert cmd[0] == "claude"
+        assert "--dangerously-skip-permissions" in cmd
+        assert cmd.index("--dangerously-skip-permissions") < cmd.index("-p")
+
+    def test_build_command_without_skip_permissions(self):
+        cmd = self.provider.build_command(prompt="hello", skip_permissions=False)
+        assert "--dangerously-skip-permissions" not in cmd
+
 
 # ---------------------------------------------------------------------------
 # CopilotProvider
@@ -537,6 +553,24 @@ class TestConvenienceFunctions:
         # Copilot doesn't support --json or --max-turns
         assert "--json" not in cmd
         assert "--max-turns" not in cmd
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.config._load_config", return_value={"skip_permissions": True})
+    def test_build_full_command_skip_permissions_enabled(self, _mock_config):
+        cmd = build_full_command(prompt="hello")
+        assert "--dangerously-skip-permissions" in cmd
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.config._load_config", return_value={"skip_permissions": False})
+    def test_build_full_command_skip_permissions_disabled(self, _mock_config):
+        cmd = build_full_command(prompt="hello")
+        assert "--dangerously-skip-permissions" not in cmd
+
+    @patch.dict("os.environ", {"KOAN_CLI_PROVIDER": "claude"})
+    @patch("app.config._load_config", return_value={})
+    def test_build_full_command_skip_permissions_default(self, _mock_config):
+        cmd = build_full_command(prompt="hello")
+        assert "--dangerously-skip-permissions" not in cmd
 
 
 # ---------------------------------------------------------------------------

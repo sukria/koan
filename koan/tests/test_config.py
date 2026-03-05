@@ -130,6 +130,29 @@ class TestGetStartOnPause:
             assert get_start_on_pause() is True
 
 
+# --- get_skip_permissions ---
+
+
+class TestGetSkipPermissions:
+    def test_default_false(self):
+        from app.config import get_skip_permissions
+
+        with _mock_config({}):
+            assert get_skip_permissions() is False
+
+    def test_enabled(self):
+        from app.config import get_skip_permissions
+
+        with _mock_config({"skip_permissions": True}):
+            assert get_skip_permissions() is True
+
+    def test_explicit_false(self):
+        from app.config import get_skip_permissions
+
+        with _mock_config({"skip_permissions": False}):
+            assert get_skip_permissions() is False
+
+
 # --- get_debug_enabled ---
 
 

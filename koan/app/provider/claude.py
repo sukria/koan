@@ -14,6 +14,11 @@ class ClaudeProvider(CLIProvider):
     def binary(self) -> str:
         return "claude"
 
+    def build_permission_args(self, skip_permissions: bool = False) -> List[str]:
+        if skip_permissions:
+            return ["--dangerously-skip-permissions"]
+        return []
+
     def build_prompt_args(self, prompt: str) -> List[str]:
         return ["-p", prompt]
 
