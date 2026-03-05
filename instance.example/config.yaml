@@ -89,6 +89,10 @@ tools:
 # Can also be set via KOAN_CLI_PROVIDER env var (overrides this)
 cli_provider: "claude"
 
+# Skip permission prompts — required for MCP tools to work in autonomous mode.
+# Only enable this if you understand the security implications.
+# skip_permissions: false
+
 # Local LLM configuration (used when cli_provider: "local")
 # Connects to any OpenAI-compatible API server:
 #   - Ollama:     http://localhost:11434/v1

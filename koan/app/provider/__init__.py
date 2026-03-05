@@ -168,7 +168,12 @@ def build_full_command(
 
     This is the high-level API: pass generic parameters, get back a
     provider-specific command list ready for subprocess.run().
+
+    Automatically reads ``skip_permissions`` from config.yaml so all
+    callers get the flag without needing changes.
     """
+    from app.config import get_skip_permissions
+
     return get_provider().build_command(
         prompt=prompt,
         allowed_tools=allowed_tools,
@@ -179,6 +184,7 @@ def build_full_command(
         max_turns=max_turns,
         mcp_configs=mcp_configs,
         plugin_dirs=plugin_dirs,
+        skip_permissions=get_skip_permissions(),
     )
 
 
