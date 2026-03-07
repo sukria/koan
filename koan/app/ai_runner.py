@@ -94,17 +94,29 @@ def run_exploration(
 def _extract_missions(text: str, project_name: str) -> list:
     """Extract MISSION: lines from Claude output.
 
-    Returns a list of formatted mission entries ready for missions.md.
+    Sanitizes each description to match the missions.md convention:
+    ``- [project:<name>] <description>``
+
+    Handles common Claude output quirks:
+    - Leading ``- `` bullet prefix
+    - Duplicate ``[project:name]`` tags (prompt says not to, but LLMs…)
     """
     import re
+
+    tag_re = re.compile(r"^\[project:[^\]]+\]\s*", re.IGNORECASE)
 
     missions = []
     for line in text.splitlines():
         match = re.match(r"^MISSION:\s*(.+)$", line.strip())
         if match:
-            description = match.group(1).strip()
-            if description:
-                missions.append(f"- [project:{project_name}] {description}")
+            desc = match.group(1).strip()
+            # Strip leading bullet if Claude added one
+            desc = re.sub(r"^-\s+", "", desc)
+            # Strip duplicate project tag if Claude added one despite prompt
+            desc = tag_re.sub("", desc)
+            desc = desc.strip()
+            if desc:
+                missions.append(f"- [project:{project_name}] {desc}")
     return missions
 
 

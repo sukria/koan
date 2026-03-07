@@ -57,6 +57,6 @@ MISSION: Extract duplicated date formatting code from 3 controllers into a share
 Rules for MISSION lines:
 - One line per idea, no multi-line descriptions
 - Be specific: mention file names, function names, or patterns you found
-- Don't include project tags — they will be added automatically
+- Just the description text — no bullet prefix (`- `), no `[project:name]` tag (added automatically)
 - Don't include effort estimates in the MISSION line (keep those in the report above)
 - Only output ideas you're confident are worth implementing

@@ -311,6 +311,28 @@ class TestExtractMissions:
         assert len(missions) == 1
         assert "Actual task" in missions[0]
 
+    def test_strips_duplicate_project_tag(self):
+        text = "MISSION: [project:myapp] Fix the bug"
+        missions = _extract_missions(text, "myapp")
+        assert len(missions) == 1
+        assert missions[0] == "- [project:myapp] Fix the bug"
+
+    def test_strips_different_project_tag(self):
+        """Claude might hallucinate a different project tag — replace it."""
+        text = "MISSION: [project:wrong] Fix the bug"
+        missions = _extract_missions(text, "myapp")
+        assert missions[0] == "- [project:myapp] Fix the bug"
+
+    def test_strips_leading_bullet(self):
+        text = "MISSION: - Fix the bug"
+        missions = _extract_missions(text, "myapp")
+        assert missions[0] == "- [project:myapp] Fix the bug"
+
+    def test_strips_bullet_and_tag_combined(self):
+        text = "MISSION: - [project:myapp] Fix the bug"
+        missions = _extract_missions(text, "myapp")
+        assert missions[0] == "- [project:myapp] Fix the bug"
+
 
 # ---------------------------------------------------------------------------
 # _strip_mission_lines
