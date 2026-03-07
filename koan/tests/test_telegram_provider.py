@@ -254,11 +254,30 @@ class TestPollUpdates:
     def test_network_error(self, mock_get, provider):
         assert provider.poll_updates() == []
 
+    @patch("app.messaging.telegram.requests.get",
+           side_effect=requests.RequestException("connection refused"))
+    def test_network_error_logs_to_stderr(self, mock_get, provider, capsys):
+        """Network errors must be logged to stderr, not silently swallowed."""
+        provider.poll_updates()
+        captured = capsys.readouterr()
+        assert "poll_updates error" in captured.err
+        assert "connection refused" in captured.err
+
     @patch("app.messaging.telegram.requests.get")
     def test_json_error(self, mock_get, provider):
         mock_get.return_value = MagicMock()
         mock_get.return_value.json.side_effect = ValueError("bad")
         assert provider.poll_updates() == []
+
+    @patch("app.messaging.telegram.requests.get")
+    def test_json_error_logs_to_stderr(self, mock_get, provider, capsys):
+        """JSON parse errors must be logged to stderr, not silently swallowed."""
+        mock_get.return_value = MagicMock()
+        mock_get.return_value.json.side_effect = ValueError("invalid json")
+        provider.poll_updates()
+        captured = capsys.readouterr()
+        assert "poll_updates error" in captured.err
+        assert "invalid json" in captured.err
 
     @patch("app.messaging.telegram.requests.get")
     def test_update_without_message(self, mock_get, provider):

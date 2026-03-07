@@ -154,10 +154,17 @@ def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
             send_telegram(f"Cannot run /{command_name} — worker thread not available.")
             return
         def _run_skill():
-            with TypingIndicator():
-                result = execute_skill(skill, ctx)
-            if result is not None:
-                send_telegram(result)
+            try:
+                with TypingIndicator():
+                    result = execute_skill(skill, ctx)
+                if result is not None:
+                    send_telegram(result)
+            except Exception as e:
+                log("error", f"Worker skill '{command_name}' failed: {e}")
+                try:
+                    send_telegram(f"/{command_name} failed: {type(e).__name__}: {e}")
+                except Exception as notify_err:
+                    log("error", f"Failed to notify user about '{command_name}' error: {notify_err}")
         _run_in_worker_cb(_run_skill)
         return
 
