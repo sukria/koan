@@ -85,15 +85,31 @@ class TestSendRaw:
         )
         assert provider._send_raw("test") is False
 
+    @patch("app.retry.time.sleep")
     @patch("app.messaging.telegram.requests.post",
            side_effect=requests.RequestException("network"))
-    def test_network_error(self, mock_post, provider):
+    def test_network_error(self, mock_post, mock_sleep, provider):
         assert provider._send_raw("test") is False
+        # Retried 3 times (2 sleeps)
+        assert mock_sleep.call_count == 2
 
+    @patch("app.retry.time.sleep")
     @patch("app.messaging.telegram.requests.post",
            side_effect=ValueError("bad json"))
-    def test_json_error(self, mock_post, provider):
+    def test_json_error(self, mock_post, mock_sleep, provider):
         assert provider._send_raw("test") is False
+
+    @patch("app.retry.time.sleep")
+    @patch("app.messaging.telegram.requests.post")
+    def test_retry_on_network_then_success(self, mock_post, mock_sleep, provider):
+        """_send_raw retries on transient network error and succeeds."""
+        mock_post.side_effect = [
+            requests.ConnectionError("reset"),
+            MagicMock(json=lambda: {"ok": True}),
+        ]
+        assert provider._send_raw("test") is True
+        assert mock_post.call_count == 2
+        mock_sleep.assert_called_once_with(1)
 
     def test_not_configured(self):
         p = TelegramProvider()

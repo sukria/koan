@@ -223,13 +223,32 @@ class TestDirectSend:
         with patch("requests.post", return_value=mock_resp):
             assert _direct_send("hello") is False
 
+    @patch("app.retry.time.sleep")
     @patch("app.notify.load_dotenv")
-    def test_request_exception_returns_false(self, mock_dotenv, monkeypatch):
-        import requests
+    def test_request_exception_returns_false(self, mock_dotenv, mock_sleep, monkeypatch):
+        import requests as req_lib
         monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
         monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
-        with patch("requests.post", side_effect=requests.RequestException("timeout")):
+        with patch("requests.post", side_effect=req_lib.RequestException("timeout")):
             assert _direct_send("hello") is False
+        # Retried 3 times before giving up
+        assert mock_sleep.call_count == 2
+
+    @patch("app.retry.time.sleep")
+    @patch("app.notify.load_dotenv")
+    def test_retry_on_network_error_then_success(self, mock_dotenv, mock_sleep, monkeypatch):
+        """_direct_send retries on network error and succeeds on second attempt."""
+        import requests as req_lib
+        monkeypatch.setenv("KOAN_TELEGRAM_TOKEN", "tok")
+        monkeypatch.setenv("KOAN_TELEGRAM_CHAT_ID", "123")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        with patch("requests.post", side_effect=[
+            req_lib.ConnectionError("reset"),
+            mock_resp,
+        ]):
+            assert _direct_send("hello") is True
+        mock_sleep.assert_called_once_with(1)
 
     @patch("app.notify.load_dotenv")
     def test_chunking_long_message(self, mock_dotenv, monkeypatch):

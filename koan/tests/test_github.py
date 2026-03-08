@@ -51,11 +51,48 @@ class TestRunGh:
         with pytest.raises(RuntimeError, match="auth required"):
             run_gh("api", "repos/o/r")
 
+    @patch("app.retry.time.sleep")
     @patch("app.github.subprocess.run")
-    def test_timeout_propagates(self, mock_run):
+    def test_timeout_propagates(self, mock_run, mock_sleep):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="gh", timeout=5)
         with pytest.raises(subprocess.TimeoutExpired):
             run_gh("pr", "view", "1", timeout=5)
+
+    @patch("app.retry.time.sleep")
+    @patch("app.github.subprocess.run")
+    def test_retries_on_transient_network_error(self, mock_run, mock_sleep):
+        """Transient network errors trigger retry with backoff."""
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stderr="connection reset by peer"),
+            MagicMock(returncode=0, stdout="ok\n"),
+        ]
+        assert run_gh("pr", "view", "1") == "ok"
+        assert mock_run.call_count == 2
+        mock_sleep.assert_called_once_with(1)
+
+    @patch("app.retry.time.sleep")
+    @patch("app.github.subprocess.run")
+    def test_no_retry_on_permanent_error(self, mock_run, mock_sleep):
+        """Permanent errors (not found, auth) propagate immediately."""
+        mock_run.return_value = MagicMock(returncode=1, stderr="not found")
+        with pytest.raises(RuntimeError, match="not found"):
+            run_gh("pr", "view", "999")
+        assert mock_run.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @patch("app.retry.time.sleep")
+    @patch("app.github.subprocess.run")
+    def test_retries_exhausted_raises(self, mock_run, mock_sleep):
+        """After all retry attempts, the last error is raised."""
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stderr="connection timed out"),
+            MagicMock(returncode=1, stderr="connection timed out"),
+            MagicMock(returncode=1, stderr="connection timed out"),
+        ]
+        with pytest.raises(RuntimeError, match="connection timed out"):
+            run_gh("api", "repos/o/r")
+        assert mock_run.call_count == 3
+        assert mock_sleep.call_count == 2
 
 
 # ---------------------------------------------------------------------------
