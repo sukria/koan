@@ -18,6 +18,7 @@ from app.awake import (
     handle_message,
     flush_outbox,
     _requeue_outbox,
+    _write_outbox_failed,
     _format_outbox_message,
     _clean_chat_response,
     _run_in_worker,
@@ -954,6 +955,67 @@ class TestRequeueOutbox:
         with patch("app.awake.OUTBOX_FILE", outbox):
             _requeue_outbox("Recovered message")
         assert "Recovered message" in outbox.read_text()
+
+
+# ---------------------------------------------------------------------------
+# _write_outbox_failed
+# ---------------------------------------------------------------------------
+
+
+class TestWriteOutboxFailed:
+    def test_writes_content_to_failed_file(self, tmp_path):
+        outbox = tmp_path / "outbox.md"
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _write_outbox_failed("Lost message", OSError("disk full"))
+        failed = tmp_path / "outbox-failed.md"
+        assert failed.exists()
+        content = failed.read_text()
+        assert "Lost message" in content
+        assert "disk full" in content
+
+    def test_appends_to_existing_failed_file(self, tmp_path):
+        outbox = tmp_path / "outbox.md"
+        failed = tmp_path / "outbox-failed.md"
+        failed.write_text("<!-- previous entry -->\nOld content\n")
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _write_outbox_failed("New lost message", OSError("perm denied"))
+        content = failed.read_text()
+        assert "Old content" in content
+        assert "New lost message" in content
+
+    def test_includes_timestamp_comment(self, tmp_path):
+        outbox = tmp_path / "outbox.md"
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _write_outbox_failed("Msg", ValueError("oops"))
+        failed = tmp_path / "outbox-failed.md"
+        content = failed.read_text()
+        assert content.startswith("<!-- lost ")
+        assert "oops" in content
+
+    def test_requeue_calls_fallback_on_write_error(self, tmp_path):
+        """_requeue_outbox should call _write_outbox_failed when outbox write fails."""
+        # Use a path that cannot be written to
+        bad_outbox = tmp_path / "no-such-dir" / "outbox.md"
+        with patch("app.awake.OUTBOX_FILE", bad_outbox), \
+             patch("app.awake._write_outbox_failed") as mock_fallback:
+            _requeue_outbox("Important message")
+        mock_fallback.assert_called_once()
+        args = mock_fallback.call_args[0]
+        assert args[0] == "Important message"
+        assert isinstance(args[1], Exception)
+
+    def test_fallback_failure_logs_content_snippet(self, tmp_path):
+        """If even the fallback file can't be written, log the content."""
+        outbox = tmp_path / "outbox.md"
+        bad_failed_dir = tmp_path / "no-such-dir" / "outbox-failed.md"
+        # Make OUTBOX_FILE point to a dir that doesn't exist for the parent
+        with patch("app.awake.OUTBOX_FILE", bad_failed_dir), \
+             patch("app.awake.log") as mock_log:
+            _write_outbox_failed("Critical data", OSError("boom"))
+        # Should log the content snippet
+        mock_log.assert_called()
+        logged = str(mock_log.call_args_list[-1])
+        assert "Critical data" in logged
 
 
 # ---------------------------------------------------------------------------
