@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 from app.claude_step import (
     _build_pr_prompt,
     _get_current_branch,
+    _get_diffstat,
     _push_with_pr_fallback,
     _run_git,
     _safe_checkout,
@@ -165,6 +166,9 @@ def run_recreate(
     elif test_result["details"] != "command not found":
         actions_log.append(f"Tests: {test_result['details']} (non-blocking)")
 
+    # -- Step 4b: Collect diffstat before push ---------------------------------
+    diffstat = _get_diffstat(f"{upstream_remote}/{base}", project_path)
+
     # -- Step 5: Push the result -----------------------------------------------
     notify_fn(f"Pushing `{work_branch}`...")
     push_result = _push_recreated(
@@ -184,6 +188,7 @@ def run_recreate(
     comment_body = _build_recreate_comment(
         pr_number, work_branch, base, actions_log, context,
         new_pr_url=push_result.get("new_pr_url"),
+        diffstat=diffstat,
     )
 
     try:
@@ -300,33 +305,52 @@ def _build_recreate_comment(
     actions_log: List[str],
     context: dict,
     new_pr_url: Optional[str] = None,
+    diffstat: str = "",
 ) -> str:
     """Build a markdown comment summarizing the recreation."""
     title = context.get("title", f"PR #{pr_number}")
 
+    # Filter out mechanical steps for cleaner output
+    meaningful_actions = [
+        a for a in actions_log
+        if not a.startswith(f"Read PR #{pr_number}:")
+        and not a.startswith("Read PR comments")
+        and not a.startswith("Commented on")
+    ]
     actions_md = "\n".join(
-        f"- {a}" for a in actions_log
-    ) if actions_log else "- No changes needed"
+        f"- {a}" for a in meaningful_actions
+    ) if meaningful_actions else "- Reimplemented from scratch"
 
-    comment = (
-        f"## Recreated: {title}\n\n"
-        f"The original branch `{branch}` had diverged too far from `{base}` "
-        f"for a clean rebase. The feature has been **reimplemented from scratch** "
-        f"on top of current `{base}`.\n\n"
+    parts = [f"## Recreated: {title}\n"]
+    parts.append(
+        f"Branch `{branch}` diverged too far from `{base}` for a clean rebase — "
+        f"reimplemented from scratch.\n"
     )
 
     if new_pr_url:
-        comment += f"New PR: {new_pr_url}\n\n"
+        parts.append(f"**New PR**: {new_pr_url}\n")
     else:
-        comment += f"Branch `{branch}` has been force-pushed with the recreation.\n\n"
+        parts.append(f"Branch `{branch}` force-pushed with the recreation.\n")
 
-    comment += (
-        f"### Actions\n\n"
-        f"{actions_md}\n\n"
-        f"---\n"
-        f"_Automated by Kōan_"
-    )
-    return comment
+    if diffstat:
+        parts.append(f"**Diff**: {diffstat}\n")
+
+    # Extract test result from actions for prominent display
+    test_actions = [a for a in actions_log if a.startswith("Tests")]
+    if test_actions:
+        parts.append(f"**{test_actions[0]}**\n")
+        # Remove from actions_md to avoid duplication
+        meaningful_actions = [
+            a for a in meaningful_actions if not a.startswith("Tests")
+        ]
+        actions_md = "\n".join(
+            f"- {a}" for a in meaningful_actions
+        ) if meaningful_actions else "- Reimplemented from scratch"
+
+    parts.append(f"### Actions\n\n{actions_md}\n")
+    parts.append("---\n_Automated by Kōan_")
+
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------

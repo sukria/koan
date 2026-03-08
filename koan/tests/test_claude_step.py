@@ -587,6 +587,37 @@ class TestSafeCheckout:
         _safe_checkout("main", "/project")  # Should not raise
 
 
+# ---------- _get_diffstat ----------
+
+
+class TestGetDiffstat:
+    """Tests for _get_diffstat helper."""
+
+    @patch("app.claude_step._run_git")
+    def test_returns_summary_line(self, mock_git):
+        from app.claude_step import _get_diffstat
+        mock_git.return_value = (
+            " file1.py | 10 ++++---\n"
+            " file2.py |  3 ++\n"
+            " 2 files changed, 9 insertions(+), 4 deletions(-)"
+        )
+        result = _get_diffstat("origin/main", "/project")
+        assert "2 files changed" in result
+        assert "9 insertions" in result
+
+    @patch("app.claude_step._run_git", side_effect=Exception("bad ref"))
+    def test_returns_empty_on_failure(self, mock_git):
+        from app.claude_step import _get_diffstat
+        result = _get_diffstat("origin/main", "/project")
+        assert result == ""
+
+    @patch("app.claude_step._run_git", return_value="")
+    def test_returns_empty_for_no_diff(self, mock_git):
+        from app.claude_step import _get_diffstat
+        result = _get_diffstat("origin/main", "/project")
+        assert result == ""
+
+
 # ---------- _is_permission_error ----------
 
 
