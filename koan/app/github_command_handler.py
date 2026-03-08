@@ -51,6 +51,25 @@ _MAX_TRACKED_ENTRIES = 10000
 _error_replies: BoundedSet = BoundedSet(maxlen=_MAX_TRACKED_ENTRIES)
 
 
+def _quarantine_github_mission(text: str, reason: str, author: str):
+    """Write a flagged GitHub mission to the quarantine file."""
+    import os
+    from datetime import datetime
+    from pathlib import Path
+
+    koan_root = os.environ.get("KOAN_ROOT", "")
+    if not koan_root:
+        return
+    quarantine_path = Path(koan_root) / "instance" / "missions-quarantine.md"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry = f"- 🛡️ [{timestamp}] (github/@{author}) {reason}: {text[:500]}\n"
+    try:
+        with open(quarantine_path, "a") as f:
+            f.write(entry)
+    except OSError:
+        log.warning("GitHub: failed to write quarantine entry: %s", reason)
+
+
 def validate_command(command_name: str, registry: SkillRegistry) -> Optional[object]:
     """Check if a command maps to a skill with github_enabled.
 
@@ -631,6 +650,26 @@ def process_single_notification(
         )
         mark_notification_read(str(notification.get("id", "")))
         return False, "Permission denied. Only users with write access can trigger bot commands."
+
+    # Scan context text for prompt injection (free-form text is the attack vector)
+    if context and context.strip():
+        from app.prompt_guard import scan_mission_text
+        from app.config import get_prompt_guard_config
+
+        guard_config = get_prompt_guard_config()
+        if guard_config["enabled"]:
+            guard_result = scan_mission_text(context)
+            if guard_result.blocked:
+                log.warning(
+                    "GitHub: prompt guard flagged @%s context: %s | %s",
+                    comment_author, guard_result.reason, context[:100],
+                )
+                _quarantine_github_mission(
+                    context, guard_result.reason, comment_author,
+                )
+                if guard_config["block_mode"]:
+                    mark_notification_read(str(notification.get("id", "")))
+                    return False, f"Mission blocked by prompt guard: {guard_result.reason}"
 
     # Build and insert mission BEFORE reacting (so crash doesn't lose command)
     mission_entry = build_mission_from_command(

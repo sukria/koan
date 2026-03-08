@@ -160,6 +160,13 @@ usage:
 #   - github: override authorized_users for GitHub @mention commands
 # See projects.example.yaml for documentation and examples.
 
+# Prompt injection guard — scans incoming missions for suspicious patterns
+# Detects instruction overrides, role confusion, secret extraction, shell injection.
+# Complements outbox_scanner (output defense) with input-side defense.
+# prompt_guard:
+#   enabled: true          # Master switch (default: true)
+#   block_mode: false      # false = warn + quarantine, true = reject mission entirely
+
 # GitHub notification-driven commands
 # Enable Kōan to respond to @mentions in GitHub PR/issue comments.
 # When a user posts "@nickname rebase" in a PR comment, Kōan reacts with 👍,

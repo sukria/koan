@@ -440,3 +440,18 @@ def get_auto_merge_config(config: dict, project_name: str) -> dict:
         "strategy": global_cfg.get("strategy", "squash"),
         "rules": global_cfg.get("rules", []),
     }
+
+
+def get_prompt_guard_config() -> dict:
+    """Get prompt guard configuration.
+
+    Returns:
+        Dict with keys: enabled (bool), block_mode (bool).
+        Defaults: enabled=True, block_mode=False (warn only).
+    """
+    config = _load_config()
+    guard_cfg = config.get("prompt_guard", {})
+    return {
+        "enabled": guard_cfg.get("enabled", True),
+        "block_mode": guard_cfg.get("block_mode", False),
+    }

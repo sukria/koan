@@ -594,6 +594,20 @@ def _handle_start():
         send_telegram(f"❌ {msg}")
 
 
+def _quarantine_mission(text: str, reason: str, source: str = "unknown"):
+    """Write a blocked/flagged mission to the quarantine file for human review."""
+    from datetime import datetime
+
+    quarantine_path = INSTANCE_DIR / "missions-quarantine.md"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry = f"- 🛡️ [{timestamp}] ({source}) {reason}: {text[:500]}\n"
+    try:
+        with open(quarantine_path, "a") as f:
+            f.write(entry)
+    except OSError:
+        log("guard", f"Failed to write quarantine entry: {reason}")
+
+
 def handle_mission(text: str):
     """Append to missions.md with optional project tag."""
     from app.missions import extract_now_flag
@@ -615,6 +629,28 @@ def handle_mission(text: str):
         mission_text = mission_text[8:].strip()
     elif mission_text.lower().startswith("mission :"):
         mission_text = mission_text[9:].strip()
+
+    # Scan for prompt injection before queuing
+    from app.prompt_guard import scan_mission_text
+    from app.config import get_prompt_guard_config
+
+    guard_config = get_prompt_guard_config()
+    if guard_config["enabled"]:
+        guard_result = scan_mission_text(mission_text)
+        if guard_result.blocked:
+            if guard_config["block_mode"]:
+                send_telegram(
+                    f"🛡️ Mission blocked — suspicious content detected: {guard_result.reason}"
+                )
+                log("guard", f"BLOCKED mission: {guard_result.reason} | {mission_text[:100]}")
+                _quarantine_mission(mission_text, guard_result.reason, source="telegram")
+                return
+            else:
+                send_telegram(
+                    f"⚠️ Warning — mission queued but flagged: {guard_result.reason}"
+                )
+                log("guard", f"WARNING mission: {guard_result.reason} | {mission_text[:100]}")
+                _quarantine_mission(mission_text, guard_result.reason, source="telegram")
 
     # Format mission entry with project tag if specified
     if project:
