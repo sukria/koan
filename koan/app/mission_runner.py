@@ -437,11 +437,12 @@ def run_post_mission(
     return result
 
 
-def commit_instance(instance_dir: str) -> bool:
+def commit_instance(instance_dir: str, message: str = "") -> bool:
     """Commit and push instance directory changes.
 
     Args:
         instance_dir: Path to instance directory.
+        message: Custom commit message.  Falls back to timestamped default.
 
     Returns:
         True if a commit was created.
@@ -456,18 +457,19 @@ def commit_instance(instance_dir: str) -> bool:
         if not status:
             return False  # No changes
 
-        now = datetime.now().strftime("%Y-%m-%d-%H:%M")
-        run_git(instance_dir, "commit", "-m", f"koan: {now}")
+        if not message:
+            message = f"koan: {datetime.now().strftime('%Y-%m-%d-%H:%M')}"
+        run_git(instance_dir, "commit", "-m", message)
 
         # Push to the current branch — skip if HEAD is detached
         branch = run_git(instance_dir, "rev-parse", "--abbrev-ref", "HEAD")
         if not branch or branch == "HEAD":
-            print("[mission_runner] Skipping push: detached HEAD", file=sys.stderr)
+            print("[commit_instance] Skipping push: detached HEAD", file=sys.stderr)
             return True
         run_git(instance_dir, "push", "origin", branch)
         return True
     except Exception as e:
-        print(f"[mission_runner] Instance commit failed: {e}", file=sys.stderr)
+        print(f"[commit_instance] Instance commit failed: {e}", file=sys.stderr)
         return False
 
 

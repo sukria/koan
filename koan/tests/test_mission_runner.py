@@ -1790,6 +1790,24 @@ class TestCommitInstanceEdgeCases:
         import re
         assert re.search(r"\d{4}-\d{2}-\d{2}", commit_msg)
 
+    @patch("app.git_sync.run_git")
+    def test_custom_message_used_when_provided(self, mock_git, tmp_path):
+        """Custom message overrides the default timestamp message."""
+        from app.mission_runner import commit_instance
+
+        mock_git.side_effect = [
+            "",          # git add -A
+            "changes",   # git diff --cached --name-only
+            "",          # git commit
+            "main",      # git rev-parse
+            "",          # git push
+        ]
+
+        commit_instance(str(tmp_path), "koan: quota exhausted 2026-03-07-17:00")
+        commit_call = mock_git.call_args_list[2]
+        commit_msg = commit_call[0][3]
+        assert commit_msg == "koan: quota exhausted 2026-03-07-17:00"
+
     @patch("app.git_sync.run_git", side_effect=Exception("not a git repo"))
     def test_returns_false_on_add_failure(self, mock_git, tmp_path):
         """If even git add fails, returns False."""
