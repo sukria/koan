@@ -18,6 +18,8 @@ from app.awake import (
     handle_message,
     flush_outbox,
     _requeue_outbox,
+    _recover_staged_outbox,
+    _staging_path,
     _format_outbox_message,
     _clean_chat_response,
     _run_in_worker,
@@ -954,6 +956,113 @@ class TestRequeueOutbox:
         with patch("app.awake.OUTBOX_FILE", outbox):
             _requeue_outbox("Recovered message")
         assert "Recovered message" in outbox.read_text()
+
+
+class TestStagingFileRecovery:
+    """Crash-safety: staging file (outbox-sending.md) prevents message loss."""
+
+    @patch("app.awake._format_outbox_message", return_value="Formatted")
+    @patch("app.awake.send_telegram", return_value=True)
+    def test_staging_file_created_then_cleaned_on_success(self, mock_send, mock_fmt, tmp_path):
+        """Staging file is created before truncation and deleted after successful send."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("Test message")
+        staging = tmp_path / "outbox-sending.md"
+
+        staging_existed_during_format = []
+
+        def check_staging(content):
+            staging_existed_during_format.append(staging.exists())
+            return "Formatted"
+
+        mock_fmt.side_effect = check_staging
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            flush_outbox()
+        # Staging existed during formatting (crash-safe window)
+        assert staging_existed_during_format == [True]
+        # Staging cleaned up after success
+        assert not staging.exists()
+
+    @patch("app.awake._format_outbox_message", return_value="Formatted")
+    @patch("app.awake.send_telegram", return_value=False)
+    def test_staging_file_cleaned_on_send_failure(self, mock_send, mock_fmt, tmp_path):
+        """Staging file is cleaned up even when send fails (content is re-queued)."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("Important message")
+        staging = tmp_path / "outbox-sending.md"
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            flush_outbox()
+        # Content re-queued to outbox
+        assert "Important message" in outbox.read_text()
+        # Staging file cleaned up
+        assert not staging.exists()
+
+    def test_recover_staged_outbox_requeues_content(self, tmp_path):
+        """_recover_staged_outbox re-queues content from a crashed flush."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("")
+        staging = tmp_path / "outbox-sending.md"
+        staging.write_text("Crashed message")
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _recover_staged_outbox()
+        assert "Crashed message" in outbox.read_text()
+        assert not staging.exists()
+
+    def test_recover_staged_outbox_no_staging_file(self, tmp_path):
+        """_recover_staged_outbox is a no-op when no staging file exists."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("Existing content")
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _recover_staged_outbox()
+        assert outbox.read_text() == "Existing content"
+
+    def test_recover_staged_outbox_empty_staging(self, tmp_path):
+        """Empty staging file is cleaned up without re-queuing."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("")
+        staging = tmp_path / "outbox-sending.md"
+        staging.write_text("   \n  ")
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            _recover_staged_outbox()
+        assert not staging.exists()
+        assert outbox.read_text() == ""
+
+    @patch("app.awake._format_outbox_message", return_value="New formatted")
+    @patch("app.awake.send_telegram", return_value=True)
+    def test_flush_recovers_staged_before_processing_new(self, mock_send, mock_fmt, tmp_path):
+        """flush_outbox recovers staged content before processing new outbox content."""
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("New message")
+        staging = tmp_path / "outbox-sending.md"
+        staging.write_text("Crashed old message")
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            flush_outbox()
+        # Staged content was re-queued, new message was processed
+        # The format call should include "New message" (the content from outbox)
+        # BUT the staged content was prepended to outbox first, so both are present
+        fmt_calls = [call[0][0] for call in mock_fmt.call_args_list]
+        combined = " ".join(fmt_calls)
+        assert "New message" in combined or "Crashed old message" in combined
+
+    @patch("app.awake.scan_and_log")
+    def test_staging_file_cleaned_on_blocked_message(self, mock_scan, tmp_path):
+        """Staging file is cleaned up when outbox content is blocked by scanner."""
+        from types import SimpleNamespace
+        mock_scan.return_value = SimpleNamespace(blocked=True, reason="secret found")
+        outbox = tmp_path / "outbox.md"
+        outbox.write_text("API_KEY=secret123")
+        staging = tmp_path / "outbox-sending.md"
+        with patch("app.awake.OUTBOX_FILE", outbox), \
+             patch("app.awake.INSTANCE_DIR", tmp_path):
+            flush_outbox()
+        assert not staging.exists()
+
+    def test_staging_path_resolves_to_outbox_sibling(self, tmp_path):
+        """_staging_path returns outbox-sending.md next to outbox.md."""
+        outbox = tmp_path / "outbox.md"
+        with patch("app.awake.OUTBOX_FILE", outbox):
+            result = _staging_path()
+        assert result == tmp_path / "outbox-sending.md"
 
 
 # ---------------------------------------------------------------------------

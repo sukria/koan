@@ -380,6 +380,31 @@ def handle_chat(text: str):
 # Outbox
 # ---------------------------------------------------------------------------
 
+def _staging_path():
+    """Return path of the outbox staging file (crash-recovery backup)."""
+    return OUTBOX_FILE.parent / "outbox-sending.md"
+
+
+def _recover_staged_outbox():
+    """Recover content from a staging file left by a previous crash.
+
+    If outbox-sending.md exists, a previous flush_outbox() was interrupted
+    between truncation and send completion. Re-queue the content so it gets
+    retried on the next cycle.
+    """
+    staging = _staging_path()
+    if not staging.exists():
+        return
+    try:
+        content = staging.read_text().strip()
+        if content:
+            log("outbox", "Recovering staged outbox content from interrupted flush")
+            _requeue_outbox(content)
+        staging.unlink(missing_ok=True)
+    except Exception as e:
+        log("error", f"Staged outbox recovery failed: {e}")
+
+
 def flush_outbox():
     """Relay messages from the run loop outbox. Uses file locking for concurrency.
 
@@ -391,18 +416,28 @@ def flush_outbox():
     Claude formatting call. This prevents blocking writers (run.py, retrospective)
     and eliminates the race where content appended during formatting was lost on
     truncate.
+
+    Crash safety: content is written to a staging file (outbox-sending.md) before
+    truncation. If the process crashes between truncation and send, the next cycle
+    recovers the content from the staging file.
     """
+    # Recover from any previous interrupted flush
+    _recover_staged_outbox()
+
     if not OUTBOX_FILE.exists():
         return
 
-    # Phase 1: Read and clear under lock (fast — microseconds)
+    # Phase 1: Read, stage, and clear under lock (fast — microseconds)
     content = None
+    staging = _staging_path()
     try:
         with open(OUTBOX_FILE, "r+") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
             try:
                 content = f.read().strip()
                 if content:
+                    # Write staging file before truncation for crash recovery
+                    staging.write_text(content)
                     f.seek(0)
                     f.truncate()
                     f.flush()
@@ -428,6 +463,7 @@ def flush_outbox():
         except OSError as e:
             log("error", f"Quarantine write error: {e}")
         log("outbox", f"Outbox BLOCKED by scanner: {scan_result.reason}")
+        staging.unlink(missing_ok=True)
         return
 
     formatted = _format_outbox_message(content)
@@ -437,9 +473,11 @@ def flush_outbox():
         if len(formatted) > 150:
             preview += "..."
         log("outbox", f"Outbox flushed: {preview}")
+        staging.unlink(missing_ok=True)
     else:
         log("error", "Outbox send failed — re-queuing for retry")
         _requeue_outbox(content)
+        staging.unlink(missing_ok=True)
 
 
 def _requeue_outbox(content: str):
