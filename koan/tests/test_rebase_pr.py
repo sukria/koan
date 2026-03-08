@@ -328,7 +328,44 @@ class TestBuildRebaseComment:
             "1", "br", "main", [],
             {"title": "PR"},
         )
-        assert "No changes" in result
+        assert "no additional changes needed" in result
+
+    def test_diffstat_included(self):
+        result = _build_rebase_comment(
+            "42", "koan/fix", "main",
+            ["Rebased onto origin/main"],
+            {"title": "Fix bug"},
+            diffstat="3 files changed, 15 insertions(+), 5 deletions(-)",
+        )
+        assert "3 files changed" in result
+        assert "**Diff**" in result
+
+    def test_no_diffstat_when_empty(self):
+        result = _build_rebase_comment(
+            "42", "koan/fix", "main",
+            ["Rebased onto origin/main"],
+            {"title": "Fix bug"},
+            diffstat="",
+        )
+        assert "**Diff**" not in result
+
+    def test_review_feedback_noted(self):
+        result = _build_rebase_comment(
+            "42", "koan/fix", "main",
+            ["Rebased onto origin/main", "Applied review feedback"],
+            {"title": "Fix bug", "review_comments": "please fix the typo"},
+        )
+        assert "Review feedback was analyzed and applied" in result
+
+    def test_mechanical_actions_filtered(self):
+        result = _build_rebase_comment(
+            "42", "koan/fix", "main",
+            ["Read PR comments and review feedback", "Rebased", "Commented on PR"],
+            {"title": "Fix bug"},
+        )
+        assert "Read PR comments" not in result
+        assert "Commented on PR" not in result
+        assert "Rebased" in result
 
 
 # ---------------------------------------------------------------------------

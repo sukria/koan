@@ -169,7 +169,44 @@ class TestBuildRecreateComment:
 
     def test_empty_actions(self, pr_context):
         comment = _build_recreate_comment("71", "br", "main", [], pr_context)
-        assert "No changes needed" in comment
+        assert "Reimplemented from scratch" in comment
+
+    def test_diffstat_included(self, pr_context):
+        comment = _build_recreate_comment(
+            "71", "koan/feat", "main",
+            ["Created fresh branch", "Reimplemented feature"],
+            pr_context,
+            diffstat="4 files changed, 80 insertions(+), 12 deletions(-)",
+        )
+        assert "4 files changed" in comment
+        assert "**Diff**" in comment
+
+    def test_test_result_highlighted(self, pr_context):
+        comment = _build_recreate_comment(
+            "71", "koan/feat", "main",
+            ["Created fresh branch", "Reimplemented feature", "Tests pass (47 passed)"],
+            pr_context,
+        )
+        assert "**Tests pass (47 passed)**" in comment
+        # Test result should not be duplicated in actions
+        actions_section = comment.split("### Actions")[1]
+        assert "Tests pass" not in actions_section
+
+    def test_mechanical_actions_filtered(self, pr_context):
+        comment = _build_recreate_comment(
+            "71", "koan/feat", "main",
+            [
+                "Read PR #71: \"feat: add outbox scanner\"",
+                "Read PR comments and review feedback",
+                "Reimplemented feature",
+                "Commented on original PR",
+            ],
+            pr_context,
+        )
+        assert "Read PR #71" not in comment
+        assert "Read PR comments" not in comment
+        assert "Commented on" not in comment
+        assert "Reimplemented feature" in comment
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 from app.claude_step import (
     _build_pr_prompt,
     _get_current_branch,
+    _get_diffstat,
     _rebase_onto_target,
     _run_git,
     _safe_checkout,
@@ -218,7 +219,10 @@ def run_rebase(
             )
             _safe_checkout(branch, project_path)
 
-    # ── Step 5: Push the result ───────────────────────────────────────
+    # ── Step 5: Collect diffstat before push ──────────────────────────
+    diffstat = _get_diffstat(f"{rebase_remote}/{base}", project_path)
+
+    # ── Step 6: Push the result ───────────────────────────────────────
     notify_fn(f"Pushing `{branch}`...")
     push_result = _push_with_fallback(
         branch, base, full_repo, pr_number, context, project_path
@@ -233,9 +237,10 @@ def run_rebase(
             "\n".join(f"- {a}" for a in actions_log)
         )
 
-    # ── Step 6: Comment on the PR ─────────────────────────────────────
+    # ── Step 7: Comment on the PR ─────────────────────────────────────
     comment_body = _build_rebase_comment(
-        pr_number, branch, base, actions_log, context
+        pr_number, branch, base, actions_log, context,
+        diffstat=diffstat,
     )
 
     try:
@@ -377,22 +382,42 @@ def _build_rebase_comment(
     base: str,
     actions_log: List[str],
     context: dict,
+    diffstat: str = "",
 ) -> str:
     """Build a markdown comment summarizing the rebase."""
     title = context.get("title", f"PR #{pr_number}")
 
+    # Filter out mechanical pipeline steps for a cleaner actions list
+    meaningful_actions = [
+        a for a in actions_log
+        if not a.startswith("Read PR comments")
+        and not a.startswith("Commented on PR")
+    ]
     actions_md = "\n".join(
-        f"- {a}" for a in actions_log
-    ) if actions_log else "- No changes needed"
+        f"- {a}" for a in meaningful_actions
+    ) if meaningful_actions else "- Rebased (no additional changes needed)"
 
-    return (
-        f"## Rebase: {title}\n\n"
-        f"Branch `{branch}` has been rebased onto `{base}` and force-pushed.\n\n"
-        f"### Actions\n\n"
-        f"{actions_md}\n\n"
-        f"---\n"
-        f"_Automated by Kōan_"
+    parts = [f"## Rebase: {title}\n"]
+    parts.append(
+        f"Branch `{branch}` rebased onto `{base}` and force-pushed.\n"
     )
+
+    if diffstat:
+        parts.append(f"**Diff**: {diffstat}\n")
+
+    # Show what review feedback was addressed
+    has_feedback = bool(
+        context.get("review_comments", "").strip()
+        or context.get("reviews", "").strip()
+        or context.get("issue_comments", "").strip()
+    )
+    if has_feedback and any("feedback" in a.lower() for a in actions_log):
+        parts.append("Review feedback was analyzed and applied.\n")
+
+    parts.append(f"### Actions\n\n{actions_md}\n")
+    parts.append("---\n_Automated by Kōan_")
+
+    return "\n".join(parts)
 
 
 def _is_conflict_failure(summary: str) -> bool:

@@ -230,6 +230,27 @@ def _get_current_branch(project_path: str) -> str:
         return "main"
 
 
+def _get_diffstat(base_ref: str, project_path: str) -> str:
+    """Get a compact diffstat between base_ref and HEAD.
+
+    Returns a summary like "5 files changed, 42 insertions(+), 10 deletions(-)"
+    or empty string on failure.
+    """
+    try:
+        stat = _run_git(
+            ["git", "diff", "--stat", f"{base_ref}..HEAD"],
+            cwd=project_path,
+            timeout=30,
+        )
+        # The last line of --stat output is the summary
+        lines = stat.strip().splitlines()
+        if lines:
+            return lines[-1].strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _safe_checkout(branch: str, project_path: str) -> None:
     """Checkout a branch without raising on failure."""
     try:
