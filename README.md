@@ -72,6 +72,28 @@ What this means in practice:
 
 *The agent proposes. The human decides.*
 
+### How Koan Compares
+
+The autonomous coding agent space is evolving fast. [OpenClaw](https://alexissukrieh.com/blog/du-vibe-coding-a-l-agentic-coding/en/) was the original inspiration — it proved that Claude Code could serve as a universal "brain" for local, autonomous task execution. [ZeroClaw](https://zeroclaw.net/) rewrote the concept from scratch in Rust, delivering a super generic, ultra-secure agent runtime that supports 40+ LLM providers and 15+ messaging channels. It's an impressive piece of infrastructure — [a notable player in autonomous agentic coding](https://www.linkedin.com/feed/update/urn:li:activity:7436096761732956160/).
+
+But Koan takes a different path entirely.
+
+| | **OpenClaw** | **ZeroClaw** | **Koan** |
+|---|---|---|---|
+| **What it is** | Node.js autonomous AI super-agent (278k+ stars) | Rust agent runtime (~3 MB binary) | Python AI collaborator for GitHub projects |
+| **Philosophy** | General-purpose personal assistant — can do anything on your behalf | Generic, secure, vendor-agnostic infrastructure | Purpose-built GitHub collaborator — the agent proposes, the human decides |
+| **GitHub integration** | Generic (shell/browser tools) | Generic (tool-based) | Native and deep — draft PRs, issue triage, @mention triggers, rebase, code review, branch isolation |
+| **Multi-project** | Single workspace with multi-agent routing | Single workspace | Up to 50 projects with per-project memory, config, and smart rotation |
+| **Getting started** | `npm install -g openclaw` + onboarding wizard | TOML config, pairing codes, allowlists | `make install` — interactive web wizard, ready in minutes |
+| **Safety model** | Pairing codes, sandbox optional — but has shell access, browser control, and can send emails autonomously | Mandatory sandboxing, command allowlists, encrypted keys | Branch isolation, draft PRs only, never touches `main`, human review required |
+| **Memory** | Local Markdown files, session persistence | Hybrid BM25/vector search, multiple backends | Markdown-based — per-project learnings, session journals, personality evolution. No database needed |
+| **Communication** | 21+ channels (WhatsApp, Telegram, Slack, Discord, iMessage, Signal…) | 15+ channels (Telegram, Discord, Slack, iMessage…) | Telegram/Slack with personality-aware formatting, spontaneous messages, and verbose mode |
+| **Quota awareness** | No | No | Adapts work depth to remaining API quota (DEEP → IMPLEMENT → REVIEW → WAIT) |
+| **Extensibility** | 100+ AgentSkills, skill marketplace, 50+ integrations | Trait-based plugin system | 31 built-in skills + pluggable skill system (install from Git repos) |
+| **Scope** | Everything — emails, web browsing, car negotiations, legal filings | Everything — any LLM task in any context | One thing, done right — autonomous GitHub collaboration |
+
+OpenClaw and ZeroClaw are general-purpose autonomous agents that can do *anything* — browse the web, send emails, control your phone. Koan does one thing: **it's the best AI collaborator for your GitHub projects.** It understands your codebase, creates clean PRs, reviews code, plans features, and never oversteps its scope. No pairing codes, no allowlists, no TOML to hand-edit. Just `make install`, point it at your repos, and go live your life.
+
 ## How It Works
 
 ```
