@@ -435,53 +435,13 @@ def _read_current_project(koan_root: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _commit_instance(instance: str, message: str = ""):
-    """Commit instance changes and push."""
-    if not message:
-        message = f"koan: {time.strftime('%Y-%m-%d-%H:%M')}"
-    try:
-        add_result = subprocess.run(
-            ["git", "add", "-A"], cwd=instance, capture_output=True, timeout=10,
-        )
-        if add_result.returncode != 0:
-            log("error", f"git add failed (rc={add_result.returncode}): "
-                f"{add_result.stderr.decode(errors='replace')[:200]}")
-            return
+    """Commit instance changes and push.
 
-        diff = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"],
-            cwd=instance, capture_output=True, timeout=10,
-        )
-        if diff.returncode == 0:
-            return  # Nothing staged
-
-        commit_result = subprocess.run(
-            ["git", "commit", "-m", message],
-            cwd=instance, capture_output=True, timeout=30,
-        )
-        if commit_result.returncode != 0:
-            log("error", f"git commit failed (rc={commit_result.returncode}): "
-                f"{commit_result.stderr.decode(errors='replace')[:200]}")
-            return
-
-        # Detect the current branch instead of assuming "main"
-        branch_result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=instance, capture_output=True, timeout=5,
-        )
-        branch = branch_result.stdout.decode().strip() if branch_result.returncode == 0 else ""
-        if not branch or branch == "HEAD":
-            log("error", "Skipping push: detached HEAD or unknown branch")
-            return
-
-        push_result = subprocess.run(
-            ["git", "push", "origin", branch],
-            cwd=instance, capture_output=True, timeout=30,
-        )
-        if push_result.returncode != 0:
-            log("error", f"git push failed (rc={push_result.returncode}): "
-                f"{push_result.stderr.decode(errors='replace')[:200]}")
-    except Exception as e:
-        log("error", f"Instance commit/push failed: {e}")
+    Delegates to :func:`app.mission_runner.commit_instance` which is the
+    single implementation of the git add / commit / push sequence.
+    """
+    from app.mission_runner import commit_instance
+    commit_instance(instance, message)
 
 
 # ---------------------------------------------------------------------------
