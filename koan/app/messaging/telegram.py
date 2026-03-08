@@ -148,10 +148,15 @@ class TelegramProvider(MessagingProvider):
 
     def _send_raw(self, text: str) -> bool:
         """Send text to the Telegram API (no flood check).
-        
+
+        Retries each chunk up to 3 times with exponential backoff (1s/2s/4s)
+        on transient network failures (connection errors, timeouts).
+
         Internal method exposed for notify.py's test-only _send_raw_bypass_flood().
         Normal callers should use send_message() which includes flood protection.
         """
+        from app.retry import retry_with_backoff
+
         if not self._bot_token or not self._chat_id:
             print("[telegram] Not configured — cannot send.", file=sys.stderr)
             return False
@@ -159,22 +164,32 @@ class TelegramProvider(MessagingProvider):
         ok = True
         for chunk in self.chunk_message(text, max_size=MAX_MESSAGE_SIZE):
             try:
-                resp = requests.post(
-                    f"{self._api_base}/sendMessage",
-                    json={"chat_id": self._chat_id, "text": chunk},
-                    timeout=10,
+                ok = ok and retry_with_backoff(
+                    lambda c=chunk: self._send_chunk(c),
+                    retryable=(requests.RequestException, ValueError),
+                    label="telegram send",
                 )
-                data = resp.json()
-                if not data.get("ok"):
-                    print(
-                        f"[telegram] API error: {resp.text[:200]}",
-                        file=sys.stderr,
-                    )
-                    ok = False
             except (requests.RequestException, ValueError) as e:
-                print(f"[telegram] Send error: {e}", file=sys.stderr)
+                print(f"[telegram] Send error after retries: {e}",
+                      file=sys.stderr)
                 ok = False
         return ok
+
+    def _send_chunk(self, chunk: str) -> bool:
+        """Send a single chunk via Telegram API. Raises on network error."""
+        resp = requests.post(
+            f"{self._api_base}/sendMessage",
+            json={"chat_id": self._chat_id, "text": chunk},
+            timeout=10,
+        )
+        data = resp.json()
+        if not data.get("ok"):
+            print(
+                f"[telegram] API error: {resp.text[:200]}",
+                file=sys.stderr,
+            )
+            return False
+        return True
 
     def send_typing(self) -> bool:
         """Send 'typing...' indicator to the Telegram chat."""

@@ -101,8 +101,13 @@ def _send_raw_bypass_flood(text: str) -> bool:
 
 
 def _direct_send(text: str) -> bool:
-    """Direct Telegram API send (standalone fallback when provider unavailable)."""
+    """Direct Telegram API send (standalone fallback when provider unavailable).
+
+    Retries each chunk up to 3 times with exponential backoff (1s/2s/4s)
+    on transient network failures.
+    """
     import requests
+    from app.retry import retry_with_backoff
 
     load_dotenv()
     bot_token = os.environ.get("KOAN_TELEGRAM_TOKEN", "")
@@ -114,35 +119,50 @@ def _direct_send(text: str) -> bool:
         return False
 
     api_base = f"https://api.telegram.org/bot{bot_token}"
-    
+
     # Use same chunking algorithm as MessagingProvider.chunk_message()
     # to ensure consistent behavior between provider and fallback path
     from app.messaging.base import DEFAULT_MAX_MESSAGE_SIZE
     chunks = [text[i:i + DEFAULT_MAX_MESSAGE_SIZE] for i in range(0, len(text), DEFAULT_MAX_MESSAGE_SIZE)] if text else [text]
-    
+
     ok = True
     for chunk in chunks:
         try:
-            resp = requests.post(
-                f"{api_base}/sendMessage",
-                json={"chat_id": chat_id, "text": chunk},
-                timeout=10,
+            ok = ok and retry_with_backoff(
+                lambda c=chunk: _direct_send_chunk(api_base, chat_id, c),
+                retryable=(requests.RequestException, ValueError),
+                label="telegram direct send",
             )
-            data = resp.json()
-            if not data.get("ok"):
-                print(f"[notify] Telegram API error: {resp.text[:200]}",
-                      file=sys.stderr)
-                ok = False
         except (requests.RequestException, ValueError) as e:
-            print(f"[notify] Send error: {e}", file=sys.stderr)
+            print(f"[notify] Send error after retries: {e}", file=sys.stderr)
             ok = False
     return ok
+
+
+def _direct_send_chunk(api_base: str, chat_id: str, chunk: str) -> bool:
+    """Send a single message chunk via Telegram API. Raises on network error."""
+    import requests
+
+    resp = requests.post(
+        f"{api_base}/sendMessage",
+        json={"chat_id": chat_id, "text": chunk},
+        timeout=10,
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        print(f"[notify] Telegram API error: {resp.text[:200]}",
+              file=sys.stderr)
+        return False
+    return True
 
 
 def send_telegram(text: str) -> bool:
     """Send a message via the active messaging provider (with flood protection).
 
-    Backward-compatible facade — existing call sites continue to work unchanged.
+    Retry logic is handled at the HTTP request level inside the provider's
+    _send_raw() and notify's _direct_send(), so transient network failures
+    are retried transparently (up to 3 attempts with 1s/2s/4s backoff).
+
     Returns True on success (suppression counts as success).
     """
     try:

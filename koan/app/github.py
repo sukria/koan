@@ -10,6 +10,8 @@ import subprocess
 import time
 from typing import Dict, Optional
 
+from app.retry import retry_with_backoff, is_gh_transient
+
 # Cached GitHub username (from gh api user fallback).
 # None = not yet queried, "" = query failed.
 _cached_gh_username = None
@@ -32,15 +34,24 @@ def run_gh(*args, cwd=None, timeout=30, stdin_data=None):
     """
     cmd = ["gh", *args]
     stdin_kwarg = {"input": stdin_data} if stdin_data is not None else {"stdin": subprocess.DEVNULL}
-    result = subprocess.run(
-        cmd, **stdin_kwarg,
-        capture_output=True, text=True, timeout=timeout, cwd=cwd,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"gh failed: {' '.join(cmd[:4])}... — {result.stderr[:300]}"
+
+    def _invoke():
+        result = subprocess.run(
+            cmd, **stdin_kwarg,
+            capture_output=True, text=True, timeout=timeout, cwd=cwd,
         )
-    return result.stdout.strip()
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"gh failed: {' '.join(cmd[:4])}... — {result.stderr[:300]}"
+            )
+        return result.stdout.strip()
+
+    return retry_with_backoff(
+        _invoke,
+        retryable=(RuntimeError, OSError, subprocess.TimeoutExpired),
+        is_transient=is_gh_transient,
+        label=f"gh {' '.join(args[:2])}",
+    )
 
 
 def pr_create(title, body, draft=True, base=None, repo=None, head=None, cwd=None):
