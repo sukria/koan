@@ -10,13 +10,13 @@
 </p>
 
 <p align="center">
-  <a href="docs/user-manual.md">User Manual</a> &bull;
+  <a href="INSTALL.md"><strong>Install Guide</strong></a> &bull;
+  <a href="docs/user-manual.md"><strong>User Manual</strong></a> &bull;
+  <a href="docs/skills.md"><strong>Skills Reference</strong></a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#how-it-works">How It Works</a> &bull;
   <a href="#features">Features</a> &bull;
-  <a href="#skills">Skills</a> &bull;
-  <a href="#configuration">Configuration</a> &bull;
-  <a href="INSTALL.md">Full Install Guide</a>
+  <a href="#configuration">Configuration</a>
 </p>
 
 <p align="center">
@@ -25,6 +25,10 @@
   <img src="https://img.shields.io/badge/skills-31-blueviolet.svg" alt="Skills" />
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License" />
 </p>
+
+---
+
+> **New here?** Start with the [Install Guide](INSTALL.md) to get running in minutes, then read the [User Manual](docs/user-manual.md) for the full walkthrough. All 31 commands are documented in the [Skills Reference](docs/skills.md).
 
 ---
 
