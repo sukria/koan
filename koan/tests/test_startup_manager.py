@@ -183,13 +183,32 @@ class TestRunSanityChecks:
 # ---------------------------------------------------------------------------
 
 class TestCleanupMemory:
-    @patch("app.memory_manager.run_cleanup")
-    def test_calls_run_cleanup(self, mock_cleanup, capsys):
+    @patch("app.memory_manager.MemoryManager")
+    def test_calls_run_cleanup(self, mock_mgr_cls, capsys):
         from app.startup_manager import cleanup_memory
+        mock_mgr = mock_mgr_cls.return_value
+        mock_mgr.summary_path.exists.return_value = True
         cleanup_memory("/tmp/instance")
-        mock_cleanup.assert_called_once_with("/tmp/instance")
+        mock_mgr_cls.assert_called_once_with("/tmp/instance")
+        mock_mgr.run_cleanup.assert_called_once()
         out = capsys.readouterr().out
         assert "Running memory cleanup" in out
+
+    @patch("app.memory_manager.MemoryManager")
+    def test_hydrates_on_cold_boot(self, mock_mgr_cls, capsys):
+        """When summary.md is missing but SNAPSHOT.md exists, hydrate first."""
+        from app.startup_manager import cleanup_memory
+        mock_mgr = mock_mgr_cls.return_value
+        mock_mgr.summary_path.exists.return_value = False
+        snapshot_mock = type("P", (), {"exists": lambda s: True})()
+        mock_mgr.memory_dir.__truediv__ = lambda s, x: snapshot_mock
+        mock_mgr.instance_dir.__truediv__ = lambda s, x: type("P", (), {"exists": lambda s: False})()
+        mock_mgr.hydrate_from_snapshot.return_value = {"memory/summary.md": True}
+        cleanup_memory("/tmp/instance")
+        mock_mgr.hydrate_from_snapshot.assert_called_once()
+        mock_mgr.run_cleanup.assert_called_once()
+        out = capsys.readouterr().out
+        assert "Cold boot detected" in out
 
 
 # ---------------------------------------------------------------------------
