@@ -113,6 +113,18 @@ def _handle_status(ctx) -> str:
         if loop_status:
             parts.append(f"  Loop: {loop_status}")
 
+    # Show cache stats if cache has been used
+    try:
+        from app.response_cache import get_format_cache
+        cache_stats = get_format_cache().stats()
+        total = cache_stats["hits"] + cache_stats["misses"]
+        if total > 0:
+            parts.append(
+                f"  Cache: {cache_stats['hits']} hits / {cache_stats['misses']} misses"
+            )
+    except Exception:
+        pass
+
     if missions_file.exists():
         content = missions_file.read_text()
         missions_by_project = group_by_project(content)

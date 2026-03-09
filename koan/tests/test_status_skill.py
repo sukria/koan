@@ -2,7 +2,18 @@
 
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from app.skills import SkillContext
+from app.response_cache import _format_cache
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache_for_status():
+    """Reset format cache between tests."""
+    _format_cache.clear()
+    yield
+    _format_cache.clear()
 
 
 def _make_ctx(command_name, instance_dir, koan_root=None):
@@ -683,3 +694,37 @@ class TestHandleStatusOllama:
             result = _handle_status(ctx)
 
         assert "Ollama: running (PID 7777)" in result
+
+
+# ---------------------------------------------------------------------------
+# Cache stats in /status
+# ---------------------------------------------------------------------------
+
+class TestHandleStatusCache:
+    """Test cache stats display in /status output."""
+
+    def test_cache_stats_shown_when_used(self, tmp_path):
+        """When cache has hits/misses, /status shows the stats."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        from skills.core.status.handler import _handle_status
+
+        # Simulate some cache activity
+        _format_cache.put("k1", "v1")
+        _format_cache.get("k1")  # hit
+        _format_cache.get("k1")  # hit
+        _format_cache.get("miss")  # miss
+
+        ctx = _make_ctx("status", instance, tmp_path)
+        result = _handle_status(ctx)
+        assert "Cache: 2 hits / 1 misses" in result
+
+    def test_cache_stats_hidden_when_unused(self, tmp_path):
+        """When cache is empty (no activity), no cache line shown."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        from skills.core.status.handler import _handle_status
+
+        ctx = _make_ctx("status", instance, tmp_path)
+        result = _handle_status(ctx)
+        assert "Cache" not in result
