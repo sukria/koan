@@ -834,6 +834,21 @@ See [docs/auto-update.md](auto-update.md) for details.
 - `/profile https://github.com/org/repo/pull/42` — Profile changes in a PR
 </details>
 
+### Tech Debt Scan
+
+**`/tech-debt`** — Scan a project for duplicated code, complex functions, testing gaps, and infrastructure issues. Produces a prioritized debt register saved to project learnings, and optionally queues the top improvement missions.
+
+- **Usage:** `/tech-debt [project-name] [--no-queue]`
+- **Aliases:** `/td`, `/debt`
+
+<details>
+<summary>Use cases</summary>
+
+- `/tech-debt koan` — Scan the koan project for tech debt
+- `/td webapp --no-queue` — Scan without queuing follow-up missions
+- `/debt` — Scan the default project
+</details>
+
 ### Incident Triage
 
 **`/incident`** — Triage a production error from a stack trace or log snippet. Kōan will parse the error, identify the root cause, propose a fix with tests, and submit a draft PR.
@@ -925,6 +940,7 @@ All commands at a glance. **Tier:** B = Beginner, I = Intermediate, P = Power Us
 | `/snapshot` | — | P | Export memory state |
 | `/add_project <url>` | `/add-project` | P | Add a project from GitHub |
 | `/profile <project>` | `/perf`, `/benchmark` | P | Performance profiling mission |
+| `/tech-debt [project]` | `/td`, `/debt` | P | Scan project for tech debt |
 | `/incident <error>` | — | P | Triage a production error |
 
 Skills marked with GitHub @mention support: `/plan`, `/implement`, `/fix`, `/review`, `/rebase`, `/recreate`, `/refactor`, `/profile`. See [GitHub Commands](github-commands.md) for details.
