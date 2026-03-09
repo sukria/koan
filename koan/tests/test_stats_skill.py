@@ -527,8 +527,10 @@ class TestTimeBreakdowns:
 
     def test_overview_shows_this_week(self, tmp_path):
         ctx = _make_ctx(tmp_path)
+        # Use hours_ago=0 to guarantee "this week" regardless of time of day
+        # (hours_ago=1 fails on Mondays shortly after midnight UTC)
         outcomes = [
-            _make_outcome(outcome="productive", hours_ago=1),
+            _make_outcome(outcome="productive", hours_ago=0),
         ]
         _write_outcomes(ctx.instance_dir, outcomes)
         from skills.core.stats.handler import handle
