@@ -26,17 +26,30 @@ def _handle_add(ctx, frequency):
     """Add a recurring mission with the given frequency."""
     body = ctx.args.strip()
     if not body:
-        return f"Usage: /{frequency} <description>\nEx: /{frequency} check open pull requests"
+        return (
+            f"Usage: /{frequency} [HH:MM] <description>\n"
+            f"Ex: /{frequency} check open pull requests\n"
+            f"Ex: /{frequency} 20:00 run nightly audit [project:myapp]"
+        )
 
     from app.utils import parse_project
-    from app.recurring import add_recurring
+    from app.recurring import add_recurring, parse_at_time
 
     project, text = parse_project(body)
+
+    try:
+        at_time, text = parse_at_time(text)
+    except ValueError as e:
+        return str(e)
+
     recurring_path = ctx.instance_dir / "recurring.json"
 
     try:
-        add_recurring(recurring_path, frequency, text, project)
-        ack = f"Recurring mission added ({frequency})"
+        add_recurring(recurring_path, frequency, text, project, at=at_time)
+        ack = f"Recurring mission added ({frequency}"
+        if at_time:
+            ack += f" at {at_time}"
+        ack += ")"
         if project:
             ack += f" [project:{project}]"
         ack += f":\n\n{text}"

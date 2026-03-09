@@ -7,13 +7,13 @@ audience: bridge
 commands:
   - name: daily
     description: Add a daily recurring mission
-    usage: /daily <text> [project:<name>]
+    usage: /daily [HH:MM] <text> [project:<name>]
   - name: hourly
     description: Add an hourly recurring mission
     usage: /hourly <text> [project:<name>]
   - name: weekly
     description: Add a weekly recurring mission
-    usage: /weekly <text> [project:<name>]
+    usage: /weekly [HH:MM] <text> [project:<name>]
   - name: recurring
     description: List all recurring missions
     usage: /recurring

@@ -15,10 +15,16 @@ Storage format (recurring.json):
         "project": null,
         "created": "2026-02-03T22:00:00",
         "last_run": null,
-        "enabled": true
+        "enabled": true,
+        "at": null
     },
     ...
 ]
+
+The optional "at" field (e.g. "20:00") restricts when the mission fires:
+  - daily: fires once per day, but only at or after the specified time
+  - weekly: fires once per week, but only at or after the specified time
+  - hourly: "at" is ignored (hourly already fires every hour)
 """
 
 import fcntl
@@ -35,6 +41,10 @@ T = TypeVar("T")
 
 
 FREQUENCIES = ("hourly", "daily", "weekly")
+
+# Regex for parsing "HH:MM" at the start of mission text
+import re
+_AT_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})\s+")
 
 
 def load_recurring(recurring_path: Path) -> List[Dict]:
@@ -76,11 +86,33 @@ def _locked_modify(recurring_path: Path, fn: Callable[[List[Dict]], T]) -> T:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
 
+def parse_at_time(text: str) -> tuple:
+    """Extract an optional HH:MM prefix from mission text.
+
+    Returns (at_time_str_or_None, remaining_text).
+    E.g. "20:00 check emails" -> ("20:00", "check emails")
+         "check emails"       -> (None, "check emails")
+
+    Raises:
+        ValueError: If time format is present but invalid (e.g. 25:00).
+    """
+    match = _AT_TIME_RE.match(text.strip())
+    if not match:
+        return None, text.strip()
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if hour > 23 or minute > 59:
+        raise ValueError(f"Invalid time: {match.group(1)}:{match.group(2)}. Use HH:MM (00:00–23:59).")
+    at_str = f"{hour:02d}:{minute:02d}"
+    remaining = text.strip()[match.end():]
+    return at_str, remaining.strip()
+
+
 def add_recurring(
     recurring_path: Path,
     frequency: str,
     text: str,
     project: Optional[str] = None,
+    at: Optional[str] = None,
 ) -> Dict:
     """Add a new recurring mission.
 
@@ -89,6 +121,7 @@ def add_recurring(
         frequency: One of "hourly", "daily", "weekly"
         text: Mission description
         project: Optional project name
+        at: Optional time of day "HH:MM" (for daily/weekly)
 
     Returns:
         The created mission dict
@@ -110,6 +143,7 @@ def add_recurring(
             "created": datetime.now().isoformat(timespec="seconds"),
             "last_run": None,
             "enabled": True,
+            "at": at,
         }
         missions.append(mission)
         created_mission.update(mission)
@@ -195,7 +229,11 @@ def format_recurring_list(missions: List[Dict]) -> str:
         project = m.get("project")
         last_run = m.get("last_run")
 
-        entry = f"  {i}. [{freq}] {text}"
+        at = m.get("at")
+        if at:
+            entry = f"  {i}. [{freq} at {at}] {text}"
+        else:
+            entry = f"  {i}. [{freq}] {text}"
         if project:
             entry += f" (project: {project})"
         if last_run:
@@ -219,6 +257,21 @@ def format_recurring_list(missions: List[Dict]) -> str:
     return "\n".join(lines)
 
 
+def _past_at_time(at: Optional[str], now: datetime) -> bool:
+    """Check if current time is at or past the scheduled "HH:MM".
+
+    Returns True if no ``at`` is set (always eligible).
+    """
+    if not at:
+        return True
+    try:
+        parts = at.split(":")
+        target_hour, target_minute = int(parts[0]), int(parts[1])
+        return (now.hour, now.minute) >= (target_hour, target_minute)
+    except (ValueError, IndexError):
+        return True  # Malformed at = ignore constraint
+
+
 def is_due(mission: Dict, now: Optional[datetime] = None) -> bool:
     """Check if a recurring mission is due for execution.
 
@@ -226,14 +279,23 @@ def is_due(mission: Dict, now: Optional[datetime] = None) -> bool:
         - hourly: last_run is None or > 1 hour ago
         - daily: last_run is None or last_run date != today
         - weekly: last_run is None or > 7 days ago
+
+    When ``at`` is set (e.g. "20:00"), daily/weekly missions additionally
+    require the current time to be at or past that hour. This allows
+    scheduling a daily task to run in the evening without restricting the
+    whole agent schedule.
     """
     if not mission.get("enabled", True):
         return False
 
     now = now or datetime.now()
     last_run = mission.get("last_run")
+    at = mission.get("at")
 
     if last_run is None:
+        # Never run — still respect the "at" constraint for daily/weekly
+        if at and mission["frequency"] in ("daily", "weekly"):
+            return _past_at_time(at, now)
         return True
 
     try:
@@ -246,9 +308,13 @@ def is_due(mission: Dict, now: Optional[datetime] = None) -> bool:
     if frequency == "hourly":
         return (now - last_dt) >= timedelta(hours=1)
     elif frequency == "daily":
-        return last_dt.date() < now.date()
+        if last_dt.date() >= now.date():
+            return False  # Already ran today
+        return _past_at_time(at, now)
     elif frequency == "weekly":
-        return (now - last_dt) >= timedelta(weeks=1)
+        if (now - last_dt) < timedelta(weeks=1):
+            return False  # Not yet a week
+        return _past_at_time(at, now)
 
     return False
 
