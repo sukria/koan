@@ -14,6 +14,7 @@ from app.recurring import (
     format_recurring_list,
     is_due,
     check_and_inject,
+    parse_at_time,
     FREQUENCIES,
 )
 
@@ -348,6 +349,189 @@ class TestCheckAndInject:
         result = check_and_inject(recurring_path, missions_path, now)
         assert len(result) == 1
         assert "due task" in result[0]
+
+
+# --- parse_at_time ---
+
+
+class TestParseAtTime:
+    def test_no_time(self):
+        at, text = parse_at_time("check emails")
+        assert at is None
+        assert text == "check emails"
+
+    def test_valid_time(self):
+        at, text = parse_at_time("20:00 check emails")
+        assert at == "20:00"
+        assert text == "check emails"
+
+    def test_morning_time(self):
+        at, text = parse_at_time("8:30 morning task")
+        assert at == "08:30"
+        assert text == "morning task"
+
+    def test_midnight(self):
+        at, text = parse_at_time("0:00 midnight task")
+        assert at == "00:00"
+        assert text == "midnight task"
+
+    def test_invalid_hour(self):
+        with pytest.raises(ValueError, match="Invalid time"):
+            parse_at_time("25:00 bad time")
+
+    def test_invalid_minute(self):
+        with pytest.raises(ValueError, match="Invalid time"):
+            parse_at_time("20:60 bad time")
+
+    def test_strips_whitespace(self):
+        at, text = parse_at_time("  14:00   do stuff  ")
+        assert at == "14:00"
+        assert text == "do stuff"
+
+    def test_bare_number_not_time(self):
+        """A number without colon is not parsed as time."""
+        at, text = parse_at_time("42 things to do")
+        assert at is None
+        assert text == "42 things to do"
+
+
+# --- add_recurring with at ---
+
+
+class TestAddRecurringWithAt:
+    def test_add_with_at(self, tmp_path):
+        f = tmp_path / "recurring.json"
+        m = add_recurring(f, "daily", "check emails", at="20:00")
+        assert m["at"] == "20:00"
+
+    def test_add_without_at(self, tmp_path):
+        f = tmp_path / "recurring.json"
+        m = add_recurring(f, "daily", "check emails")
+        assert m["at"] is None
+
+
+# --- is_due with at ---
+
+
+class TestIsDueWithAt:
+    def test_daily_at_before_time_not_due(self):
+        now = datetime(2026, 2, 4, 18, 0)  # 6pm
+        m = {"frequency": "daily", "last_run": datetime(2026, 2, 3, 20, 0).isoformat(),
+             "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is False  # It's 18:00, not yet 20:00
+
+    def test_daily_at_past_time_due(self):
+        now = datetime(2026, 2, 4, 20, 30)  # 8:30pm
+        m = {"frequency": "daily", "last_run": datetime(2026, 2, 3, 20, 0).isoformat(),
+             "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is True  # It's 20:30, past 20:00
+
+    def test_daily_at_exact_time_due(self):
+        now = datetime(2026, 2, 4, 20, 0)  # exactly 8pm
+        m = {"frequency": "daily", "last_run": datetime(2026, 2, 3, 20, 0).isoformat(),
+             "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is True
+
+    def test_daily_no_at_still_works(self):
+        now = datetime(2026, 2, 4, 8, 0)
+        m = {"frequency": "daily", "last_run": datetime(2026, 2, 3, 22, 0).isoformat(),
+             "enabled": True}
+        assert is_due(m, now) is True  # No at = fires after midnight
+
+    def test_daily_at_already_ran_today(self):
+        now = datetime(2026, 2, 4, 21, 0)
+        m = {"frequency": "daily", "last_run": datetime(2026, 2, 4, 20, 0).isoformat(),
+             "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is False  # Already ran today at 20:00
+
+    def test_weekly_at_before_time_not_due(self):
+        now = datetime(2026, 2, 10, 18, 0)
+        m = {"frequency": "weekly", "last_run": datetime(2026, 2, 3, 20, 0).isoformat(),
+             "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is False
+
+    def test_weekly_at_past_time_due(self):
+        now = datetime(2026, 2, 10, 21, 0)
+        m = {"frequency": "weekly", "last_run": datetime(2026, 2, 3, 20, 0).isoformat(),
+             "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is True
+
+    def test_hourly_ignores_at(self):
+        now = datetime(2026, 2, 3, 14, 0)
+        m = {"frequency": "hourly",
+             "last_run": (now - timedelta(hours=1, minutes=1)).isoformat(),
+             "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is True  # hourly ignores at
+
+    def test_never_run_with_at_before_time(self):
+        now = datetime(2026, 2, 4, 18, 0)
+        m = {"frequency": "daily", "last_run": None, "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is False  # Never run, but not yet 20:00
+
+    def test_never_run_with_at_past_time(self):
+        now = datetime(2026, 2, 4, 21, 0)
+        m = {"frequency": "daily", "last_run": None, "enabled": True, "at": "20:00"}
+        assert is_due(m, now) is True
+
+    def test_malformed_at_ignored(self):
+        now = datetime(2026, 2, 4, 8, 0)
+        m = {"frequency": "daily", "last_run": datetime(2026, 2, 3, 22, 0).isoformat(),
+             "enabled": True, "at": "bad"}
+        assert is_due(m, now) is True  # Malformed at = ignore constraint
+
+
+# --- format_recurring_list with at ---
+
+
+class TestFormatWithAt:
+    def test_shows_at_time(self):
+        missions = [
+            {"frequency": "daily", "text": "nightly audit", "project": None,
+             "last_run": None, "at": "20:00"},
+        ]
+        result = format_recurring_list(missions)
+        assert "[daily at 20:00]" in result
+        assert "nightly audit" in result
+
+    def test_no_at_unchanged(self):
+        missions = [
+            {"frequency": "daily", "text": "check emails", "project": None,
+             "last_run": None, "at": None},
+        ]
+        result = format_recurring_list(missions)
+        assert "[daily]" in result
+        assert "at" not in result.split("]")[0].split("[daily")[1]
+
+
+# --- check_and_inject with at ---
+
+
+class TestCheckAndInjectWithAt:
+    def _setup_missions(self, tmp_path):
+        missions_path = tmp_path / "missions.md"
+        missions_path.write_text(
+            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n"
+        )
+        return missions_path
+
+    def test_skips_at_before_time(self, tmp_path):
+        missions_path = self._setup_missions(tmp_path)
+        recurring_path = tmp_path / "recurring.json"
+        add_recurring(recurring_path, "daily", "nightly audit", at="20:00")
+
+        now = datetime(2026, 2, 3, 18, 0)  # 6pm, before 8pm
+        result = check_and_inject(recurring_path, missions_path, now)
+        assert result == []
+
+    def test_injects_at_past_time(self, tmp_path):
+        missions_path = self._setup_missions(tmp_path)
+        recurring_path = tmp_path / "recurring.json"
+        add_recurring(recurring_path, "daily", "nightly audit", at="20:00")
+
+        now = datetime(2026, 2, 3, 21, 0)  # 9pm, past 8pm
+        result = check_and_inject(recurring_path, missions_path, now)
+        assert len(result) == 1
+        assert "nightly audit" in result[0]
 
 
 # --- CLI recurring_scheduler.py ---

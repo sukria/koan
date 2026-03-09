@@ -73,6 +73,35 @@ class TestAddCommands:
         data = json.loads(recurring_path.read_text())
         assert data[0]["project"] == "koan"
 
+    def test_add_with_at_time(self, tmp_path):
+        mod = _load_handler()
+        ctx = _ctx(tmp_path, "daily", "20:00 nightly audit [project:koan]")
+        result = mod.handle(ctx)
+        assert "at 20:00" in result
+        assert "nightly audit" in result
+
+        recurring_path = tmp_path / "instance" / "recurring.json"
+        data = json.loads(recurring_path.read_text())
+        assert data[0]["at"] == "20:00"
+        assert data[0]["project"] == "koan"
+        assert data[0]["text"] == "nightly audit"
+
+    def test_add_without_at_time(self, tmp_path):
+        mod = _load_handler()
+        ctx = _ctx(tmp_path, "daily", "check emails")
+        result = mod.handle(ctx)
+        assert "at" not in result.split(")")[0]  # no "at" in the "(daily)" part
+
+        recurring_path = tmp_path / "instance" / "recurring.json"
+        data = json.loads(recurring_path.read_text())
+        assert data[0]["at"] is None
+
+    def test_add_invalid_time(self, tmp_path):
+        mod = _load_handler()
+        ctx = _ctx(tmp_path, "daily", "25:00 bad time")
+        result = mod.handle(ctx)
+        assert "Invalid time" in result
+
     def test_add_empty_shows_usage(self, tmp_path):
         mod = _load_handler()
         ctx = _ctx(tmp_path, "daily", "")
