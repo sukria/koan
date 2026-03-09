@@ -91,10 +91,28 @@ def run_sanity_checks(instance: str):
 
 
 def cleanup_memory(instance: str):
-    """Run memory compaction and cleanup."""
+    """Run memory compaction and cleanup.
+
+    On cold boot (summary.md missing but SNAPSHOT.md exists), hydrates
+    memory from snapshot before running cleanup.
+    """
     log("health", "Running memory cleanup...")
-    from app.memory_manager import run_cleanup
-    run_cleanup(instance)
+    from app.memory_manager import MemoryManager
+    mgr = MemoryManager(instance)
+
+    # Cold-boot hydration: restore memory from snapshot if needed
+    summary_missing = not mgr.summary_path.exists()
+    snapshot_exists = (
+        (mgr.memory_dir / "SNAPSHOT.md").exists()
+        or (mgr.instance_dir / "SNAPSHOT.md").exists()
+    )
+    if summary_missing and snapshot_exists:
+        log("health", "Cold boot detected — hydrating from SNAPSHOT.md...")
+        restored = mgr.hydrate_from_snapshot()
+        if restored:
+            log("health", f"Hydrated {len(restored)} file(s) from snapshot")
+
+    mgr.run_cleanup()
 
 
 def cleanup_mission_history(instance: str):
