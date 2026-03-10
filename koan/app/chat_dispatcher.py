@@ -171,7 +171,7 @@ def parse_command(event) -> ChatCommand:
     text = event.argument_text.strip() if event.argument_text else event.text.strip()
 
     parts = text.split(None, 1)
-    skill_name = parts[0].lower() if parts else "help"
+    skill_name = parts[0].lower().lstrip("/") if parts else "help"
     args = parts[1] if len(parts) > 1 else ""
 
     return ChatCommand(
