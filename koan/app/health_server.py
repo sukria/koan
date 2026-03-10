@@ -10,6 +10,8 @@ Serves on PORT (default 8080).
 
 import logging
 import os
+import threading
+import time
 from datetime import date, datetime, timezone
 
 from flask import Flask, jsonify, request, render_template
@@ -20,7 +22,7 @@ logging.basicConfig(
 )
 
 from app.health import health_bp
-from app.utils import KOAN_ROOT, INSTANCE_DIR
+from app.utils import KOAN_ROOT, INSTANCE_DIR, load_config
 from app.watcher.webhook_handler import register_webhooks
 
 logger = logging.getLogger("governor.health_server")
@@ -30,6 +32,36 @@ app = Flask(__name__, template_folder=template_dir)
 app.register_blueprint(health_bp)
 
 register_webhooks(app, INSTANCE_DIR)
+
+
+# ── Periodic GitLab scanner ─────────────────────────────────────────
+
+def _gitlab_scan_loop():
+    """Background thread: run GitLab scan at configured interval."""
+    time.sleep(30)  # wait for startup to settle
+    config = load_config().get("watcher", {})
+    interval = config.get("gitlab", {}).get("scan_interval_minutes", 15) * 60
+
+    while True:
+        try:
+            from app.watcher.scanner import run_gitlab_scan
+            from app.watcher.helpers import get_watcher_config
+            watcher_config = get_watcher_config()
+            result = run_gitlab_scan(watcher_config, INSTANCE_DIR)
+            logger.info(
+                "GitLab scan: %d projects, %d commits, %d MRs in %.1fs",
+                result.get("projects_scanned", 0),
+                result.get("new_commits", 0),
+                result.get("new_mrs", 0),
+                result.get("duration_seconds", 0),
+            )
+        except Exception as e:
+            logger.error("GitLab scan failed: %s", e, exc_info=True)
+        time.sleep(interval)
+
+
+_gitlab_thread = threading.Thread(target=_gitlab_scan_loop, daemon=True)
+_gitlab_thread.start()
 
 
 @app.route("/api/trigger-report", methods=["POST"])
@@ -102,6 +134,25 @@ def advisor_scan_status():
     if not progress:
         return jsonify({"status": "idle"})
     return jsonify(progress)
+
+
+@app.route("/api/watcher-scan", methods=["POST"])
+def watcher_scan():
+    """POST /api/watcher-scan — trigger GitLab scan immediately."""
+    import threading as _t
+    from app.watcher.scanner import run_gitlab_scan
+    from app.watcher.helpers import get_watcher_config
+
+    def _run():
+        try:
+            config = get_watcher_config()
+            result = run_gitlab_scan(config, INSTANCE_DIR)
+            logger.info("Manual GitLab scan: %s", result)
+        except Exception as e:
+            logger.error("Manual GitLab scan failed: %s", e, exc_info=True)
+
+    _t.Thread(target=_run, daemon=True).start()
+    return jsonify({"status": "started"})
 
 
 @app.route("/governor/help")
