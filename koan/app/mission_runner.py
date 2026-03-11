@@ -422,6 +422,7 @@ def check_auto_merge(
     project_path: str,
     quality_report: Optional[dict] = None,
     lint_blocked: bool = False,
+    verify_blocked: bool = False,
 ) -> Optional[str]:
     """Check if current branch should be auto-merged.
 
@@ -431,6 +432,7 @@ def check_auto_merge(
         project_path: Path to project directory.
         quality_report: Optional quality pipeline results for gating.
         lint_blocked: Whether lint gate is blocking auto-merge.
+        verify_blocked: Whether verification failure is blocking auto-merge.
 
     Returns:
         Branch name if auto-merge was attempted, None otherwise.
@@ -447,6 +449,11 @@ def check_auto_merge(
         # Lint gate block
         if lint_blocked:
             print("[mission_runner] Auto-merge blocked by lint gate")
+            return None
+
+        # Verification block
+        if verify_blocked:
+            print("[mission_runner] Auto-merge blocked by verification failure")
             return None
 
         # Quality gate check
@@ -631,7 +638,8 @@ def run_post_mission(
         result["auto_merge_branch"] = check_auto_merge(
             instance_dir, project_name, project_path,
             quality_report=quality_report,
-            lint_blocked=lint_blocking or verify_blocking,
+            lint_blocked=lint_blocking,
+            verify_blocked=verify_blocking,
         )
 
     # 7. Record session outcome for staleness tracking
