@@ -1094,6 +1094,63 @@ class TestRunPostMissionDuration:
         assert call_args[4] == "pending content here"  # journal_content is 5th positional arg
 
 
+class TestCheckAutoMergeVerifyBlocked:
+    """Test check_auto_merge with verify_blocked parameter."""
+
+    @patch("app.git_sync.run_git", return_value="koan/feature")
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    def test_verify_blocked_prevents_merge(self, mock_prefix, mock_git, tmp_path, capsys):
+        from app.mission_runner import check_auto_merge
+
+        result = check_auto_merge(
+            str(tmp_path), "project", str(tmp_path), verify_blocked=True
+        )
+        assert result is None
+        captured = capsys.readouterr()
+        assert "blocked by verification failure" in captured.out
+
+    @patch("app.git_auto_merge.auto_merge_branch")
+    @patch("app.git_sync.run_git", return_value="koan/feature")
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    def test_verify_not_blocked_allows_merge(self, mock_prefix, mock_git, mock_merge, tmp_path):
+        from app.mission_runner import check_auto_merge
+
+        result = check_auto_merge(
+            str(tmp_path), "project", str(tmp_path), verify_blocked=False
+        )
+        assert result == "koan/feature"
+        mock_merge.assert_called_once()
+
+    @patch("app.git_sync.run_git", return_value="koan/feature")
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    def test_verify_blocked_independent_of_lint(self, mock_prefix, mock_git, tmp_path, capsys):
+        """Verify failure blocks auto-merge even when lint is not blocking."""
+        from app.mission_runner import check_auto_merge
+
+        result = check_auto_merge(
+            str(tmp_path), "project", str(tmp_path),
+            lint_blocked=False, verify_blocked=True,
+        )
+        assert result is None
+        captured = capsys.readouterr()
+        assert "blocked by verification failure" in captured.out
+        assert "lint gate" not in captured.out
+
+    @patch("app.git_sync.run_git", return_value="koan/feature")
+    @patch("app.config.get_branch_prefix", return_value="koan/")
+    def test_lint_blocked_checked_before_verify(self, mock_prefix, mock_git, tmp_path, capsys):
+        """When both lint and verify block, lint message appears (checked first)."""
+        from app.mission_runner import check_auto_merge
+
+        result = check_auto_merge(
+            str(tmp_path), "project", str(tmp_path),
+            lint_blocked=True, verify_blocked=True,
+        )
+        assert result is None
+        captured = capsys.readouterr()
+        assert "blocked by lint gate" in captured.out
+
+
 class TestCheckAutoMergeErrors:
     """Test check_auto_merge error handling."""
 
