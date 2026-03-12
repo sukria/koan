@@ -71,6 +71,21 @@ from app.utils import (
 )
 
 
+def _get_last_message_id() -> int:
+    """Get the message_id from the last send_telegram() call.
+
+    Returns 0 if the provider doesn't support message ID tracking
+    or if no message was sent.
+    """
+    try:
+        from app.messaging import get_messaging_provider
+        provider = get_messaging_provider()
+        ids = provider.get_last_message_ids()
+        return ids[-1] if ids else 0
+    except (SystemExit, Exception):
+        return 0
+
+
 def check_config():
     if not BOT_TOKEN or not CHAT_ID:
         log("error", "Set KOAN_TELEGRAM_TOKEN and KOAN_TELEGRAM_CHAT_ID env vars.")
@@ -323,8 +338,11 @@ def handle_chat(text: str):
             response = _clean_chat_response(result.stdout.strip())
             if response:
                 send_telegram(response)
-                # Save assistant response to history
-                save_conversation_message(CONVERSATION_HISTORY_FILE, "assistant", response)
+                msg_id = _get_last_message_id()
+                save_conversation_message(
+                    CONVERSATION_HISTORY_FILE, "assistant", response,
+                    message_id=msg_id, message_type="chat",
+                )
                 log("chat", f"Chat reply: {response[:80]}...")
             elif result.returncode != 0:
                 log("error", f"Claude error: {result.stderr[:200]}")
@@ -353,7 +371,11 @@ def handle_chat(text: str):
                 response = _clean_chat_response(result.stdout.strip())
                 if response:
                     send_telegram(response)
-                    save_conversation_message(CONVERSATION_HISTORY_FILE, "assistant", response)
+                    msg_id = _get_last_message_id()
+                    save_conversation_message(
+                        CONVERSATION_HISTORY_FILE, "assistant", response,
+                        message_id=msg_id, message_type="chat",
+                    )
                     log("chat", f"Chat reply (lite retry): {response[:80]}...")
                 else:
                     if result.stderr:
@@ -470,6 +492,11 @@ def flush_outbox():
     formatted = _format_outbox_message(content)
     formatted = _expand_outbox_github_refs(formatted, content)
     if send_telegram(formatted):
+        msg_id = _get_last_message_id()
+        save_conversation_message(
+            CONVERSATION_HISTORY_FILE, "assistant", formatted,
+            message_id=msg_id, message_type="notification",
+        )
         preview = formatted[:150].replace("\n", " ")
         if len(formatted) > 150:
             preview += "..."

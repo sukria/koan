@@ -40,6 +40,9 @@ class TelegramProvider(MessagingProvider):
         self._flood_last_sent_at: float = 0.0
         self._flood_warning_sent: bool = False
 
+        # Message ID tracking — populated by _send_chunk(), cleared by _send_raw()
+        self._last_message_ids: List[int] = []
+
     # -- MessagingProvider interface ------------------------------------------
 
     def configure(self) -> bool:
@@ -107,6 +110,10 @@ class TelegramProvider(MessagingProvider):
             return True
 
         return self._send_raw(text)
+
+    def get_last_message_ids(self) -> List[int]:
+        """Return message IDs from the last send_message() call."""
+        return list(self._last_message_ids)
 
     def poll_updates(self, offset: Optional[int] = None) -> List[Update]:
         """Long-poll the Telegram Bot API for new updates."""
@@ -208,6 +215,7 @@ class TelegramProvider(MessagingProvider):
             print("[telegram] Not configured — cannot send.", file=sys.stderr)
             return False
 
+        self._last_message_ids = []
         ok = True
         for chunk in self.chunk_message(text, max_size=MAX_MESSAGE_SIZE):
             try:
@@ -236,6 +244,11 @@ class TelegramProvider(MessagingProvider):
                 file=sys.stderr,
             )
             return False
+        # Capture message_id for reaction correlation
+        result = data.get("result", {})
+        msg_id = result.get("message_id", 0)
+        if msg_id:
+            self._last_message_ids.append(msg_id)
         return True
 
     def send_typing(self) -> bool:
