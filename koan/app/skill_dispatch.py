@@ -48,6 +48,7 @@ _SKILL_RUNNERS = {
     "ai": "app.ai_runner",
     "check": "app.check_runner",
     "tech-debt": "skills.core.tech_debt.tech_debt_runner",
+    "dead-code": "skills.core.dead_code.dead_code_runner",
     "profile": "skills.core.profile.profile_runner",
     "claudemd": "app.claudemd_refresh",
     "claude": "app.claudemd_refresh",
@@ -204,6 +205,9 @@ def build_skill_command(
         "tech-debt": lambda: _build_tech_debt_cmd(
             base_cmd, project_name, project_path, instance_dir,
         ),
+        "dead-code": lambda: _build_dead_code_cmd(
+            base_cmd, project_name, project_path, instance_dir,
+        ),
         "profile": lambda: _build_profile_cmd(base_cmd, args, project_path, instance_dir),
         "claudemd": lambda: _build_claudemd_cmd(base_cmd, project_name, project_path),
         "claude": lambda: _build_claudemd_cmd(base_cmd, project_name, project_path),
@@ -340,6 +344,20 @@ def _build_tech_debt_cmd(
     instance_dir: str,
 ) -> List[str]:
     """Build tech_debt_runner command."""
+    return base_cmd + [
+        "--project-path", project_path,
+        "--project-name", project_name,
+        "--instance-dir", instance_dir,
+    ]
+
+
+def _build_dead_code_cmd(
+    base_cmd: List[str],
+    project_name: str,
+    project_path: str,
+    instance_dir: str,
+) -> List[str]:
+    """Build dead_code_runner command."""
     return base_cmd + [
         "--project-path", project_path,
         "--project-name", project_name,

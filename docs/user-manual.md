@@ -862,6 +862,21 @@ See [docs/auto-update.md](auto-update.md) for details.
 - `/debt` — Scan the default project
 </details>
 
+### Dead Code Scan
+
+**`/dead-code`** — Scan a project for unused imports, functions, classes, variables, and dead branches. Produces a certainty-classified report saved to project memory, and optionally queues the top removal missions.
+
+- **Usage:** `/dead-code [project-name] [--no-queue]`
+- **Aliases:** `/dc`
+
+<details>
+<summary>Use cases</summary>
+
+- `/dead-code koan` — Scan the koan project for unused code
+- `/dc webapp --no-queue` — Scan without queuing follow-up missions
+- `/dead-code` — Scan the default project
+</details>
+
 ### Incident Triage
 
 **`/incident`** — Triage a production error from a stack trace or log snippet. Kōan will parse the error, identify the root cause, propose a fix with tests, and submit a draft PR.
@@ -954,6 +969,7 @@ All commands at a glance. **Tier:** B = Beginner, I = Intermediate, P = Power Us
 | `/add_project <url>` | `/add-project` | P | Add a project from GitHub |
 | `/profile <project>` | `/perf`, `/benchmark` | P | Performance profiling mission |
 | `/tech-debt [project]` | `/td`, `/debt` | P | Scan project for tech debt |
+| `/dead-code [project]` | `/dc` | P | Scan for unused code |
 | `/incident <error>` | — | P | Triage a production error |
 | `/scaffold-skill <scope> <name> <desc>` | `/scaffold`, `/new-skill` | P | Generate SKILL.md + handler.py for a new custom skill |
 
