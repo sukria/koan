@@ -21,14 +21,14 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" />
-  <img src="https://img.shields.io/badge/tests-4500+-green.svg" alt="Tests" />
-  <img src="https://img.shields.io/badge/skills-31-blueviolet.svg" alt="Skills" />
+  <img src="https://img.shields.io/badge/tests-9000+-green.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/skills-44-blueviolet.svg" alt="Skills" />
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License" />
 </p>
 
 ---
 
-> **New here?** Start with the [Install Guide](INSTALL.md) to get running in minutes, then read the [User Manual](docs/user-manual.md) for the full walkthrough. All 31 commands are documented in the [Skills Reference](docs/skills.md).
+> **New here?** Start with the [Install Guide](INSTALL.md) to get running in minutes, then read the [User Manual](docs/user-manual.md) for the full walkthrough. All 44 commands are documented in the [Skills Reference](docs/skills.md).
 
 ---
 
@@ -94,7 +94,7 @@ But Koan takes a different path entirely.
 | **Memory** | Local Markdown files, session persistence | Hybrid BM25/vector search, multiple backends | Markdown-based — per-project learnings, session journals, personality evolution. No database needed |
 | **Communication** | 21+ channels (WhatsApp, Telegram, Slack, Discord, iMessage, Signal…) | 15+ channels (Telegram, Discord, Slack, iMessage…) | Telegram/Slack with personality-aware formatting, spontaneous messages, and verbose mode |
 | **Quota awareness** | No | No | Adapts work depth to remaining API quota (DEEP → IMPLEMENT → REVIEW → WAIT) |
-| **Extensibility** | 100+ AgentSkills, skill marketplace, 50+ integrations | Trait-based plugin system | 31 built-in skills + pluggable skill system (install from Git repos) |
+| **Extensibility** | 100+ AgentSkills, skill marketplace, 50+ integrations | Trait-based plugin system | 44 built-in skills + pluggable skill system (install from Git repos) |
 | **Scope** | Everything — emails, web browsing, car negotiations, legal filings | Everything — any LLM task in any context | One thing, done right — autonomous GitHub collaboration |
 
 OpenClaw and ZeroClaw are general-purpose autonomous agents that can do *anything* — browse the web, send emails, control your phone. Koan does one thing: **it's the best AI collaborator for your GitHub projects.** It understands your codebase, creates clean PRs, reviews code, plans features, and never oversteps its scope. No pairing codes, no allowlists, no TOML to hand-edit. Just `make install`, point it at your repos, and go live your life.
@@ -168,38 +168,76 @@ Communication happens through shared markdown files in `instance/` — atomic wr
 
 ### Developer Experience
 
-- **31 slash commands** — From `/plan` to `/review` to `/sparring` — see [Skills](#skills)
+- **44 slash commands** — From `/plan` to `/review` to `/sparring` — see [Skills](#skills)
 - **Web dashboard** — Local Flask UI for status, missions, chat, and journal browsing
 - **Setup wizard** — Web-based guided setup (`make install`)
 - **4500+ tests** — Comprehensive test suite with `make test`
 
 ## Skills
 
-Skills are pluggable commands — some are instant, others spawn Claude work sessions. A few highlights:
+Skills are pluggable commands — some are instant, others spawn Claude work sessions. They're organized into groups, mirroring the `/help` output in Telegram:
 
-| Command | What it does |
-|---------|-------------|
-| `/mission <text>` | Queue a new mission |
-| `/plan <desc>` | Create an implementation plan |
-| `/implement <desc>` | Write code for a feature or fix |
-| `/review <PR>` | Review a pull request |
-| `/rebase <PR>` | Rebase a PR onto its base branch |
-| `/recreate <PR>` | Re-implement a PR from scratch on a fresh branch |
-| `/check <project>` | Run project health checks |
+**📋 missions** — Create, list, cancel missions
+| `/mission` | Queue a new mission (`--now` to jump the queue) |
+| `/list` | View current queue (alias: `/queue`, `/ls`) |
+| `/cancel` | Remove a pending mission (alias: `/remove`) |
+| `/priority` | Reorder a pending mission |
+| `/live` | Watch real-time progress of the current mission |
+| `/recurring` | Set hourly/daily/weekly repeating missions |
+| `/chat` | Force chat mode for a message that looks like a mission |
+
+**🔧 code** — Review, refactor, PR, fix, implement
+| `/implement` | Write code for a feature or fix |
+| `/plan` | Create an implementation plan |
+| `/review` | Audit a pull request |
+| `/fix` | Targeted bug fix |
+| `/refactor` | Code cleanup and simplification |
+| `/check` | Project health checks |
 | `/claudemd` | Refresh a project's CLAUDE.md |
-| `/refactor <desc>` | Targeted refactoring mission |
-| `/gha-audit` | Scan GitHub Actions workflows for security vulnerabilities |
-| `/sparring` | Strategic challenge — not code, thinking |
-| `/reflect <msg>` | Write to the shared journal |
-| `/status` | Quick status overview |
-| `/focus <project>` | Lock agent to one project |
-| `/quota` | Check API usage and budget |
+| `/dead-code` | Find unused code |
+| `/tech-debt` | Technical debt report |
+| `/profile` | Queue a performance profiling mission |
+| `/scaffold-skill` | Generate a new skill from a description |
+
+**🔀 pr** — Pull request management
+| `/pr` | Create a pull request |
+| `/rebase` | Rebase a PR onto its base branch |
+| `/recreate` | Re-implement a PR from scratch on a fresh branch |
+
+**📊 status** — System state, quota, logs
+| `/status` | Quick system overview |
+| `/quota` | API usage and budget breakdown |
 | `/journal` | Read today's journal entries |
-| `/verbose` / `/silent` | Toggle real-time updates |
+| `/stats` | Activity summary |
+| `/snapshot` | Memory snapshot |
+| `/doctor` | Run diagnostics |
+| `/changelog` | Recent completed missions |
+
+**⚙️ config** — Projects, language, focus, verbose
+| `/projects` | List configured projects |
+| `/focus` | Lock agent to one project |
+| `/language` | Set output language |
+| `/verbose` / `/silent` | Toggle real-time progress updates |
+| `/explore` | Toggle per-project exploration mode |
+| `/add_project` | Add a project to the registry |
+| `/email` | Configure email digest notifications |
+
+**💡 ideas** — Ideas, reflection, sparring
+| `/idea` | Save an idea to the backlog |
+| `/reflect` | Write a journal entry |
+| `/sparring` | Strategic challenge — thinking, not code |
+| `/ai` | Creative exploration prompt |
+| `/magic` | Quick creative deep-dive on a project |
+
+**🔄 system** — Pause, stop, update, restart
+| `/shutdown` | Stop the agent |
+| `/update` | Self-update Kōan from upstream |
+| `/gha-audit` | Scan GitHub Actions for security vulnerabilities |
+| `/incident` | Log an incident |
 
 **[User Manual →](docs/user-manual.md)** — From beginner to power user, everything Kōan can do.
 
-**[Full skills reference →](docs/skills.md)** — all commands with aliases, descriptions, and usage details.
+**[Full skills reference →](docs/skills.md)** — all 44 commands with aliases, descriptions, and usage details.
 
 Skills are extensible — drop a `SKILL.md` in `instance/skills/` or install from a Git repo with `/skill install <url>`. See [koan/skills/README.md](koan/skills/README.md) for the authoring guide.
 
@@ -270,8 +308,8 @@ koan/
     provider/             #   CLI provider abstraction
       claude.py           #     Claude Code CLI
       copilot.py          #     GitHub Copilot CLI
-  skills/                 # Pluggable command system (31 core skills)
-  system-prompts/         # All LLM prompts (14 files, no inline prompts)
+  skills/                 # Pluggable command system (44 core skills)
+  system-prompts/         # All LLM prompts (20 files, no inline prompts)
   templates/              # Dashboard Jinja2 templates
   tests/                  # 4500+ tests (pytest)
 instance/                 # Your private data (gitignored)
@@ -325,7 +363,7 @@ Koan is open source under GPL-3.0. Contributions welcome.
 
 ```bash
 make setup
-KOAN_ROOT=/tmp/test-koan make test   # Run the test suite
+make test   # Run the test suite
 ```
 
 Check [CLAUDE.md](CLAUDE.md) for coding conventions and architecture details.
