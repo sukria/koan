@@ -2,7 +2,7 @@
 name: recurring
 scope: core
 description: Manage recurring missions (hourly, daily, weekly, custom interval)
-version: 1.1.0
+version: 1.2.0
 audience: bridge
 commands:
   - name: daily
