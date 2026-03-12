@@ -1,0 +1,59 @@
+"""Prompt audit signal collection hook.
+
+Logs post-mission metadata to JSONL files for use by the prompt-audit
+module. Each mission completion appends a JSON line with key metrics
+to instance/journal/YYYY-MM-DD/prompt-audit-signals.jsonl.
+
+To enable: copy this file to instance/hooks/prompt_audit_signals.py
+(remove the .example extension).
+"""
+
+import fcntl
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+
+
+def on_post_mission(ctx):
+    """Collect mission signal data for prompt audit analysis."""
+    instance_dir = Path(str(ctx.get("instance_dir", "")))
+    if not instance_dir.is_dir():
+        return
+
+    # Build signal record
+    signal = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "project_name": ctx.get("project_name", "unknown"),
+        "mission_title": ctx.get("mission_title", ""),
+        "exit_code": ctx.get("exit_code", -1),
+        "duration_minutes": ctx.get("duration_minutes", 0),
+        "autonomous_mode": ctx.get("autonomous_mode", ""),
+    }
+
+    # Detect active signal files (.koan-* files indicate agent state)
+    koan_root = Path(os.environ.get("KOAN_ROOT", ""))
+    if koan_root.is_dir():
+        active_signals = []
+        for signal_file in koan_root.glob(".koan-*"):
+            name = signal_file.name.replace(".koan-", "")
+            if name not in ("status", "stop", "project"):
+                active_signals.append(name)
+        signal["active_signals"] = active_signals
+
+    # Write to daily JSONL file
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    journal_dir = instance_dir / "journal" / date_str
+    journal_dir.mkdir(parents=True, exist_ok=True)
+    signal_file = journal_dir / "prompt-audit-signals.jsonl"
+
+    line = json.dumps(signal, ensure_ascii=False) + "\n"
+    with open(signal_file, "a", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(line)
+        fcntl.flock(f, fcntl.LOCK_UN)
+
+
+HOOKS = {
+    "post_mission": on_post_mission,
+}
