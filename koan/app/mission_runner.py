@@ -483,6 +483,32 @@ def check_auto_merge(
         return None
 
 
+def _fire_post_mission_hook(
+    instance_dir: str,
+    project_name: str,
+    project_path: str,
+    exit_code: int,
+    mission_title: str,
+    duration_minutes: int,
+    result: dict,
+) -> None:
+    """Fire post_mission hooks with full context (fire-and-forget)."""
+    try:
+        from app.hooks import fire_hook
+        fire_hook(
+            "post_mission",
+            instance_dir=instance_dir,
+            project_name=project_name,
+            project_path=project_path,
+            exit_code=exit_code,
+            mission_title=mission_title,
+            duration_minutes=duration_minutes,
+            result=dict(result),
+        )
+    except Exception as e:
+        print(f"[hooks] post_mission hook error: {e}", file=sys.stderr)
+
+
 def run_post_mission(
     instance_dir: str,
     project_name: str,
@@ -583,6 +609,11 @@ def run_post_mission(
             duration_minutes, pending_content,
             mission_title=mission_title,
         )
+        # Fire post_mission hooks before early return so hooks see quota events
+        _fire_post_mission_hook(
+            instance_dir, project_name, project_path,
+            exit_code, mission_title, duration_minutes, result,
+        )
         return result  # Early return — no further processing on quota exhaustion
 
     # 4. Archive pending.md if agent didn't clean up
@@ -652,20 +683,10 @@ def run_post_mission(
 
     # 8. Fire post-mission hooks
     _report("running hooks")
-    try:
-        from app.hooks import fire_hook
-        fire_hook(
-            "post_mission",
-            instance_dir=instance_dir,
-            project_name=project_name,
-            project_path=project_path,
-            exit_code=exit_code,
-            mission_title=mission_title,
-            duration_minutes=duration_minutes,
-            result=dict(result),
-        )
-    except Exception as e:
-        print(f"[hooks] post_mission hook error: {e}", file=sys.stderr)
+    _fire_post_mission_hook(
+        instance_dir, project_name, project_path,
+        exit_code, mission_title, duration_minutes, result,
+    )
 
     return result
 
