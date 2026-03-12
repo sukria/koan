@@ -126,6 +126,32 @@ class TestExtractReviewBody:
         assert result.startswith("## PR Review")
         assert not result.endswith(" ")
 
+    def test_captures_checklist_section(self):
+        """Extracts review body including ### Checklist section."""
+        raw = (
+            "Some preamble\n\n"
+            "## PR Review — Add validation\n\n"
+            "One issue found.\n\n"
+            "### 🔴 Blocking\n\n"
+            "**1. Missing input validation** (`api.py`, `handle_request`)\n"
+            "No validation on user input.\n\n"
+            "---\n\n"
+            "### Checklist\n\n"
+            "- [x] No hardcoded secrets\n"
+            "- [x] Error paths handle cleanup\n"
+            "- [ ] Missing input validation at API boundary (see 🔴 #1)\n"
+            "- [x] Tests cover new branches\n\n"
+            "---\n\n"
+            "### Summary\n\n"
+            "Needs input validation before merge."
+        )
+        result = _extract_review_body(raw)
+        assert result.startswith("## PR Review")
+        assert "### Checklist" in result
+        assert "- [ ] Missing input validation" in result
+        assert "### Summary" in result
+        assert "preamble" not in result
+
 
 # ---------------------------------------------------------------------------
 # _post_review_comment

@@ -43,6 +43,41 @@ Analyze the code changes and produce a structured review. Focus on:
 3. **Architecture** — Design issues, coupling, abstraction level, naming
 4. **Maintainability** — Readability, complexity, test coverage gaps
 
+### Review Checklist
+
+Use the following checklist to guide your review. Check each item *if applicable* to the
+files in the diff — skip items that don't apply to the changes under review.
+
+**Security**
+- Check for SQL/command injection, shell interpolation of user input
+- Check for hardcoded secrets, API keys, or credentials
+- Check for unsafe deserialization (`pickle.loads`, `yaml.load` without `SafeLoader`)
+- Check for path traversal (unsanitized user input in file paths)
+- Check for missing input validation at system boundaries (API endpoints, CLI args)
+
+**Error Handling**
+- Check for bare `except:` or `except Exception` that swallows errors silently
+- Check for missing cleanup in error paths (unclosed files, unreleased locks)
+- Check for resource leaks (sockets, file handles, database connections)
+- Check for error messages that expose internal details to end users
+
+**Performance**
+- Check for N+1 queries or repeated I/O in loops
+- Check for unbounded collections that grow without limit
+- Check for missing pagination on list endpoints or queries
+- Check for unnecessary copies of large data structures
+
+**Testing**
+- Check for untested code branches introduced by the changes
+- Check for missing edge case coverage (empty input, boundary values, None)
+- Check for test isolation issues (shared state, order-dependent tests)
+
+**Python-specific** (apply only when Python files are in the diff)
+- Check for mutable default arguments (`def f(x=[])`)
+- Check for `is` vs `==` misuse with literals
+- Check for unsafe `eval()`/`exec()` usage
+- Check for missing `with` statement for resource management
+
 ### Rules
 
 - Be specific: reference file names and line ranges from the diff.
@@ -79,6 +114,13 @@ Description of the suggestion.
 
 ---
 
+### Checklist
+
+- [x] Item that passed (e.g., "No hardcoded secrets")
+- [ ] Item that failed — cross-reference the finding (e.g., "see 🔴 #2")
+
+---
+
 ### Summary
 
 Final assessment paragraph — what's good, what needs fixing, and whether
@@ -91,3 +133,6 @@ Rules for sections:
 - Use bold numbered titles: `**1. Title** (\`file\`, \`context\`)`
 - Include code snippets in fenced blocks when they clarify the issue.
 - The Summary section is always present.
+- The Checklist section is optional: include it when the PR touches areas covered by
+  the review checklist above. For trivial changes (1-3 lines, typos, config), omit it.
+  Cross-reference failed checklist items to the relevant severity finding.
