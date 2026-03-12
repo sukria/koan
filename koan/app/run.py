@@ -1290,7 +1290,7 @@ def _run_iteration(
         print(f"  Mission: {mission_title}")
         print(f"  Project: {project_name}")
         print()
-        _notify(instance, f"🚀 [{project_name}] Run {run_num}/{max_runs} — Mission taken: {mission_title}")
+        _notify(instance, f"🚀 [{project_name}] Run {run_num}/{max_runs} — Starting: {mission_title}")
     else:
         mode_upper = autonomous_mode.upper()
         log("mission", f"Decision: {mode_upper} mode (estimated cost: 5.0% session)")
