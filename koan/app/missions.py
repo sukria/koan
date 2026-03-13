@@ -1305,3 +1305,225 @@ def prune_done_section(content: str, keep: int = 50) -> Tuple[str, int]:
     new_lines.extend(lines[end:])  # everything after Done section
 
     return normalize_content("\n".join(new_lines)), pruned_count
+
+
+# ---------------------------------------------------------------------------
+# Parallel session support
+# ---------------------------------------------------------------------------
+
+# Session tag pattern: [session:abc123] embedded in in-progress mission lines
+_SESSION_TAG_PATTERN = re.compile(r'\[session:([a-zA-Z0-9_-]+)\]')
+
+
+def _stamp_session(entry: str, session_id: str) -> str:
+    """Add a session tag to a mission entry."""
+    return f"[session:{session_id}] {entry}" if session_id else entry
+
+
+def _extract_session_id(text: str) -> str:
+    """Extract session ID from a mission line, or empty string."""
+    match = _SESSION_TAG_PATTERN.search(text)
+    return match.group(1) if match else ""
+
+
+def _strip_session_tag(text: str) -> str:
+    """Remove [session:X] tag from a mission line."""
+    return _SESSION_TAG_PATTERN.sub("", text).strip()
+
+
+def pick_missions(
+    content: str,
+    n: int = 1,
+    exclude_projects: Optional[List[str]] = None,
+) -> List[str]:
+    """Extract up to N pending missions, preferring project diversity.
+
+    When multiple missions are available, prefers picking from different
+    projects before taking multiple missions from the same project.
+    This maximizes parallelism across the project portfolio.
+
+    Args:
+        content: missions.md content.
+        n: Maximum number of missions to pick.
+        exclude_projects: Project names to skip (e.g., already have active sessions).
+
+    Returns:
+        List of mission text strings (without leading "- ").
+    """
+    if n <= 0:
+        return []
+
+    if exclude_projects is None:
+        exclude_projects = []
+    exclude_set = {p.lower() for p in exclude_projects}
+
+    sections = parse_sections(content)
+    pending = sections.get("pending", [])
+    if not pending:
+        return []
+
+    # Build (project, mission_text) pairs
+    candidates: List[Tuple[str, str]] = []
+    for item in pending:
+        first_line = item.split("\n")[0].strip()
+        if first_line.startswith("- "):
+            first_line = first_line[2:]
+        if re.match(r"^~~.+~~", first_line):
+            continue  # Skip strikethrough
+        project = extract_project_tag(item)
+        if project.lower() in exclude_set:
+            continue
+        candidates.append((project, first_line))
+
+    if not candidates:
+        return []
+
+    # Pick with project diversity: round-robin across projects
+    picked: List[str] = []
+    picked_projects: Dict[str, int] = defaultdict(int)
+    remaining = list(candidates)
+
+    while len(picked) < n and remaining:
+        # Find the project with the fewest picks so far
+        best_idx = 0
+        best_count = picked_projects.get(remaining[0][0], 0)
+        for idx, (proj, _) in enumerate(remaining):
+            count = picked_projects.get(proj, 0)
+            if count < best_count:
+                best_count = count
+                best_idx = idx
+
+        proj, text = remaining.pop(best_idx)
+        picked.append(text)
+        picked_projects[proj] += 1
+
+    return picked
+
+
+def start_mission_parallel(
+    content: str,
+    mission_text: str,
+    session_id: str,
+) -> str:
+    """Move a mission from Pending to In Progress for parallel execution.
+
+    Unlike start_mission(), this does NOT flush existing In Progress
+    missions — multiple missions can be in progress simultaneously.
+    Each in-progress entry is tagged with [session:ID] for tracking.
+
+    Args:
+        content: missions.md content.
+        mission_text: The mission text to start.
+        session_id: Unique session identifier for tracking.
+
+    Returns:
+        Updated content string. Unchanged if mission not found in Pending.
+    """
+    needle = mission_text.strip()
+    result = _remove_pending_by_text(content, needle)
+    if result is None:
+        return content
+
+    from app.security_audit import MISSION_START, log_event
+    log_event(MISSION_START, details={
+        "mission": mission_text,
+        "project": extract_project_tag(mission_text),
+        "session_id": session_id,
+    })
+
+    updated = result[0]
+    removed = result[1].strip()
+    entry = removed if removed.startswith("- ") else f"- {removed}"
+
+    # Add session tag and started timestamp
+    # Insert session tag after "- " prefix
+    if entry.startswith("- "):
+        entry = f"- [session:{session_id}] {entry[2:]}"
+    entry = stamp_started(entry)
+
+    # Do NOT flush existing In Progress — parallel mode allows multiple
+    lines = updated.splitlines()
+    boundaries = find_section_boundaries(lines)
+    if "in_progress" in boundaries:
+        start, end = boundaries["in_progress"]
+        insert_at = start + 1
+        while insert_at < end and lines[insert_at].strip() == "":
+            insert_at += 1
+        lines.insert(insert_at, entry)
+        return normalize_content("\n".join(lines))
+
+    return normalize_content(updated + f"\n## In Progress\n\n{entry}\n")
+
+
+def complete_mission_by_session(content: str, session_id: str) -> str:
+    """Move an in-progress mission to Done, matching by session ID.
+
+    Used in parallel mode where multiple missions are in progress.
+    Finds the mission tagged with [session:ID] and completes it.
+
+    Returns content unchanged if no mission matches the session ID.
+    """
+    return _move_by_session(content, session_id, "done", "\u2705", "Done")
+
+
+def fail_mission_by_session(content: str, session_id: str) -> str:
+    """Move an in-progress mission to Failed, matching by session ID.
+
+    Returns content unchanged if no mission matches the session ID.
+    """
+    return _move_by_session(content, session_id, "failed", "\u274c", "Failed")
+
+
+def _move_by_session(
+    content: str,
+    session_id: str,
+    target_section: str,
+    marker: str,
+    header: str,
+) -> str:
+    """Move an in-progress mission to a target section, matching by session ID."""
+    tag = f"[session:{session_id}]"
+    lines = content.splitlines()
+    boundaries = find_section_boundaries(lines)
+
+    if "in_progress" not in boundaries:
+        return content
+
+    start, end = boundaries["in_progress"]
+
+    # Find the line with the matching session tag
+    for i in range(start + 1, end):
+        stripped = lines[i].strip()
+        if stripped.startswith("- ") and tag in stripped:
+            item_end = _find_item_extent(lines, i, end)
+            result = _splice_pending_item(lines, i, item_end)
+            if result is None:
+                return content
+            updated, removed = result
+            removed = removed.strip()
+            # Strip session tag and "- " prefix for display
+            display = removed.removeprefix("- ") if removed.startswith("- ") else removed
+            display = _SESSION_TAG_PATTERN.sub("", display).strip()
+
+            timestamp = time.strftime("%Y-%m-%d %H:%M")
+            entry = f"- {display} {marker} ({timestamp})"
+
+            lines2 = updated.splitlines()
+            boundaries2 = find_section_boundaries(lines2)
+            if target_section in boundaries2:
+                s2, e2 = boundaries2[target_section]
+                insert_at = s2 + 1
+                while insert_at < e2 and lines2[insert_at].strip() == "":
+                    insert_at += 1
+                lines2.insert(insert_at, entry)
+                return normalize_content("\n".join(lines2))
+
+            return normalize_content(updated + f"\n## {header}\n\n{entry}\n")
+
+    return content
+
+
+def count_in_progress(content: str) -> int:
+    """Count the number of missions currently in progress."""
+    sections = parse_sections(content)
+    return len(sections.get("in_progress", []))
