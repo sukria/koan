@@ -1311,8 +1311,9 @@ def _run_iteration(
                 _notify(instance, f"⚠️ Mission failed 3+ times, moved to Failed: {mission_title[:60]}")
                 _commit_instance(instance)
                 return False  # dedup skip — not productive
-        except (OSError, ValueError) as e:
+        except Exception as e:
             log("error", f"Dedup guard error: {e}")
+            return False  # dedup error — not productive, don't proceed
 
     # Set project state
     atomic_write(Path(koan_root, PROJECT_FILE), project_name)
