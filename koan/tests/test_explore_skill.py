@@ -220,6 +220,53 @@ class TestSetExploration:
         assert "enabled" in result
         assert "Koan" in result  # uses canonical name
 
+    def test_workspace_project_auto_creates_yaml_entry(self, handler, tmp_path):
+        """Workspace project not in yaml should be auto-added."""
+        config = _make_config("koan")
+        projects = config["projects"]
+
+        # Create workspace/myapp directory
+        ws_dir = tmp_path / "workspace" / "myapp"
+        ws_dir.mkdir(parents=True)
+
+        with patch.object(handler, "_get_exploration_status", return_value=True), \
+             patch.object(handler, "_save_config") as mock_save:
+            result = handler._set_exploration(str(tmp_path), config, projects, "myapp", False)
+
+        assert "disabled" in result
+        assert "myapp" in result
+        # Entry was created in config
+        assert "myapp" in projects
+        assert projects["myapp"]["path"] == str(ws_dir.resolve())
+        assert projects["myapp"]["exploration"] is False
+        mock_save.assert_called_once()
+
+    def test_workspace_project_case_insensitive(self, handler, tmp_path):
+        """Workspace project lookup should be case-insensitive."""
+        config = _make_config("koan")
+        projects = config["projects"]
+
+        ws_dir = tmp_path / "workspace" / "MyApp"
+        ws_dir.mkdir(parents=True)
+
+        with patch.object(handler, "_get_exploration_status", return_value=True), \
+             patch.object(handler, "_save_config"):
+            result = handler._set_exploration(str(tmp_path), config, projects, "myapp", False)
+
+        assert "disabled" in result
+        assert "MyApp" in result  # canonical name from workspace
+
+    def test_unknown_project_not_in_workspace_either(self, handler, tmp_path):
+        """Project not in yaml AND not in workspace should still fail."""
+        config = _make_config("koan")
+        projects = config["projects"]
+
+        # Create workspace dir but no matching project
+        (tmp_path / "workspace").mkdir()
+
+        result = handler._set_exploration(str(tmp_path), config, projects, "ghost", True)
+        assert "Unknown project" in result
+
 
 # ===========================================================================
 # _set_all
@@ -365,3 +412,17 @@ class TestHandle:
              patch.object(handler, "_get_exploration_status", return_value=True):
             result = handler.handle(ctx)
         assert "Exploration status" in result
+
+    def test_workspace_project_with_empty_yaml(self, handler, ctx):
+        """Workspace project should be auto-added even when projects.yaml has no projects."""
+        ws_dir = ctx.koan_root / "workspace" / "myapp"
+        ws_dir.mkdir(parents=True)
+
+        config = {"projects": {}}
+        ctx.args = "myapp"
+        with patch.object(handler, "_load_config", return_value=config), \
+             patch.object(handler, "_get_exploration_status", return_value=True), \
+             patch.object(handler, "_save_config"):
+            result = handler.handle(ctx)
+        assert "enabled" in result or "disabled" in result
+        assert "myapp" in result
