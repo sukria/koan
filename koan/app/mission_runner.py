@@ -34,6 +34,37 @@ from typing import Callable, List, Optional
 POST_MISSION_TIMEOUT = 300
 
 
+def _get_mcp_config_paths(project_name: str) -> Optional[List[str]]:
+    """Resolve MCP config file paths for a project.
+
+    Reads MCP entries from projects.yaml, generates a JSON config file,
+    and returns a list with the config path (or None if no MCP config).
+    """
+    try:
+        from app.projects_config import load_projects_config, get_project_mcp
+        from app.mcp_config import generate_mcp_config
+
+        koan_root = os.environ.get("KOAN_ROOT", "")
+        if not koan_root:
+            return None
+
+        config = load_projects_config(koan_root)
+        if not config:
+            return None
+
+        mcp_entries = get_project_mcp(config, project_name)
+        if not mcp_entries:
+            return None
+
+        instance_dir = os.path.join(koan_root, "instance")
+        config_path = generate_mcp_config(mcp_entries, instance_dir, project_name)
+        if config_path:
+            return [config_path]
+    except Exception as e:
+        print(f"[mission_runner] MCP config resolution failed: {e}", file=sys.stderr)
+    return None
+
+
 def build_mission_command(
     prompt: str,
     autonomous_mode: str = "implement",
@@ -71,6 +102,9 @@ def build_mission_command(
         model = models["review_mode"]
     fallback = models["fallback"]
 
+    # Get MCP config for this project (if any)
+    mcp_config_paths = _get_mcp_config_paths(project_name)
+
     # Build provider-specific command
     cmd = build_full_command(
         prompt=prompt,
@@ -79,6 +113,7 @@ def build_mission_command(
         fallback=fallback,
         output_format="json",
         plugin_dirs=plugin_dirs,
+        mcp_configs=mcp_config_paths,
     )
 
     # Append any extra flags from config
