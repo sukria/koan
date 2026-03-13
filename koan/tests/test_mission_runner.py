@@ -2166,3 +2166,215 @@ class TestUpdateUsageArgs:
         assert str(args[2]) == "/tmp/usage.md"
 
 
+class TestPipelineTracker:
+    """Test _PipelineTracker step outcome tracking."""
+
+    def test_record_and_to_dict(self):
+        from app.mission_runner import _PipelineTracker
+
+        tracker = _PipelineTracker()
+        tracker.record("step_a", "success", "0.5s")
+        tracker.record("step_b", "fail", "import error")
+
+        d = tracker.to_dict()
+        assert d["step_a"]["status"] == "success"
+        assert d["step_b"]["status"] == "fail"
+        assert d["step_b"]["detail"] == "import error"
+
+    def test_invalid_status_raises(self):
+        from app.mission_runner import _PipelineTracker
+
+        tracker = _PipelineTracker()
+        with pytest.raises(ValueError, match="Invalid status"):
+            tracker.record("x", "unknown")
+
+    def test_has_failures(self):
+        from app.mission_runner import _PipelineTracker
+
+        tracker = _PipelineTracker()
+        tracker.record("a", "success")
+        assert not tracker.has_failures()
+        tracker.record("b", "fail", "boom")
+        assert tracker.has_failures()
+
+    def test_summary_lines_format(self):
+        from app.mission_runner import _PipelineTracker
+
+        tracker = _PipelineTracker()
+        tracker.record("usage", "success", "0.1s")
+        tracker.record("lint", "fail", "flake8 error")
+        tracker.record("merge", "skipped", "non-zero exit")
+        tracker.record("quality", "timeout", "pipeline deadline exceeded")
+
+        lines = tracker.summary_lines()
+        assert len(lines) == 4
+        assert "✓ usage: success (0.1s)" in lines[0]
+        assert "✗ lint: fail (flake8 error)" in lines[1]
+        assert "– merge: skipped" in lines[2]
+        assert "⏱ quality: timeout" in lines[3]
+
+    def test_run_step_success(self):
+        from app.mission_runner import _PipelineTracker
+        import threading
+
+        tracker = _PipelineTracker()
+        result = tracker.run_step("test_step", lambda: 42)
+        assert result == 42
+        assert tracker.steps["test_step"]["status"] == "success"
+
+    def test_run_step_failure(self):
+        from app.mission_runner import _PipelineTracker
+
+        tracker = _PipelineTracker()
+
+        def failing():
+            raise RuntimeError("boom")
+
+        result = tracker.run_step("bad_step", failing)
+        assert result is None
+        assert tracker.steps["bad_step"]["status"] == "fail"
+        assert "boom" in tracker.steps["bad_step"]["detail"]
+
+    def test_run_step_timeout(self):
+        from app.mission_runner import _PipelineTracker
+        import threading
+
+        tracker = _PipelineTracker()
+        expired = threading.Event()
+        expired.set()
+
+        result = tracker.run_step("timed_out", lambda: 1, pipeline_expired=expired)
+        assert result is None
+        assert tracker.steps["timed_out"]["status"] == "timeout"
+
+
+class TestPipelineStepsInResult:
+    """Test that run_post_mission includes pipeline_steps in result."""
+
+    @patch("app.mission_runner._write_pipeline_summary")
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_pipeline_steps_present_on_success(
+        self, mock_usage, mock_quota, mock_archive,
+        mock_reflect, mock_merge, mock_record, mock_summary, tmp_path
+    ):
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        result = run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        assert "pipeline_steps" in result
+        steps = result["pipeline_steps"]
+        assert steps["usage_update"]["status"] == "success"
+        assert steps["quota_check"]["status"] == "success"
+        # Summary was written
+        mock_summary.assert_called_once()
+
+    @patch("app.mission_runner._write_pipeline_summary")
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_failed_exit_skips_success_steps(
+        self, mock_usage, mock_quota, mock_archive,
+        mock_reflect, mock_merge, mock_record, mock_summary, tmp_path
+    ):
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        result = run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=1,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        steps = result["pipeline_steps"]
+        for step in ("verification", "quality_pipeline", "lint_gate", "reflection", "auto_merge"):
+            assert steps[step]["status"] == "skipped"
+
+    @patch("app.mission_runner._write_pipeline_summary")
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner._fire_post_mission_hook")
+    @patch("app.quota_handler.handle_quota_exhaustion",
+           return_value=("resets 10am", "Auto-resume in 5h"))
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_quota_early_return_has_pipeline_steps(
+        self, mock_usage, mock_quota, mock_hook, mock_record, mock_summary,
+        tmp_path
+    ):
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        result = run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        assert result["quota_exhausted"] is True
+        assert "pipeline_steps" in result
+        assert result["pipeline_steps"]["quota_check"]["status"] == "success"
+        mock_summary.assert_called_once()
+
+    @patch("app.mission_runner._write_pipeline_summary")
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    @patch("app.mission_runner._run_mission_verification", side_effect=RuntimeError("verify crash"))
+    def test_step_failure_recorded_not_swallowed(
+        self, mock_verify, mock_usage, mock_quota, mock_archive,
+        mock_reflect, mock_merge, mock_record, mock_summary, tmp_path
+    ):
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        result = run_post_mission(
+            instance_dir=instance_dir,
+            project_name="koan",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/tmp/out.json",
+            stderr_file="/tmp/err.txt",
+        )
+
+        # Verification failed but pipeline continued
+        assert result["pipeline_steps"]["verification"]["status"] == "fail"
+        assert "verify crash" in result["pipeline_steps"]["verification"]["detail"]
+        # Other steps still ran
+        assert result["pipeline_steps"]["session_outcome"]["status"] == "success"
+
+
