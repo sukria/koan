@@ -88,51 +88,65 @@ files in the diff — skip items that don't apply to the changes under review.
 
 ### Output Format
 
-Structure your review as markdown with this exact format:
+Your ENTIRE response must be a single valid JSON object (no markdown, no code fences, no text before or after). The JSON must conform to this schema:
 
-```
-## PR Review — {title}
-
-{one-sentence assessment of the PR and what needs to happen before merge}
-
----
-
-### 🔴 Blocking
-
-**1. Issue title** (`file_path`, `function_or_class`)
-Description of the issue. Include code snippets when relevant.
-
-### 🟡 Important
-
-**1. Issue title** (`file_path`, `function_or_class`)
-Description of the issue with suggested fix.
-
-### 🟢 Suggestions
-
-**1. Issue title** (`file_path`)
-Description of the suggestion.
-
----
-
-### Checklist
-
-- [x] Item that passed (e.g., "No hardcoded secrets")
-- [ ] Item that failed — cross-reference the finding (e.g., "see 🔴 #2")
-
----
-
-### Summary
-
-Final assessment paragraph — what's good, what needs fixing, and whether
-it's merge-ready after addressing the blocking items.
+```json
+{
+  "file_comments": [
+    {
+      "file": "path/to/file.py",
+      "line_start": 42,
+      "line_end": 42,
+      "severity": "critical",
+      "title": "Short issue title",
+      "comment": "Detailed explanation of the issue and suggested fix.",
+      "code_snippet": "relevant code or empty string"
+    }
+  ],
+  "review_summary": {
+    "lgtm": false,
+    "summary": "Final assessment paragraph.",
+    "checklist": [
+      {
+        "item": "No hardcoded secrets",
+        "passed": true,
+        "finding_ref": ""
+      },
+      {
+        "item": "Input validation at boundaries",
+        "passed": false,
+        "finding_ref": "critical #1"
+      }
+    ]
+  }
+}
 ```
 
-Rules for sections:
-- Omit any severity section that has no items (don't include empty sections).
-- Number items sequentially within each section.
-- Use bold numbered titles: `**1. Title** (\`file\`, \`context\`)`
-- Include code snippets in fenced blocks when they clarify the issue.
-- The Summary section is always present.
-- The Checklist section is optional: include it when the PR touches areas covered by
-  the review checklist above. For trivial changes (1-3 lines, typos, config), omit it.
-  Cross-reference failed checklist items to the relevant severity finding.
+Field rules:
+- **file_comments**: Array of per-file inline comments. Empty array `[]` if no issues found.
+- **file**: File path as shown in the diff (e.g. `src/auth.py`).
+- **line_start** / **line_end**: Line numbers from the diff. Same value for single-line issues. Use `0` for whole-file comments.
+- **severity**: Must be exactly one of: `"critical"` (blocking, must fix), `"warning"` (important, should fix), `"suggestion"` (nice to have).
+- **title**: Short title for the issue.
+- **comment**: Detailed explanation with suggested fix.
+- **code_snippet**: Relevant code illustrating the issue. Empty string `""` if not needed.
+- **lgtm**: `true` if the PR is merge-ready with no blocking issues, `false` otherwise.
+- **summary**: Final assessment — what's good, what needs fixing, merge readiness.
+- **checklist**: Review checklist results. Empty array `[]` for trivial changes. Each item has `passed` (bool) and `finding_ref` (cross-reference like `"critical #1"`, or empty string `""` if passed).
+
+All fields are required. Use empty strings `""`, empty arrays `[]`, or `false` as sentinel values — never omit a field.
+
+Example of an LGTM review (no issues):
+
+```json
+{
+  "file_comments": [],
+  "review_summary": {
+    "lgtm": true,
+    "summary": "Clean implementation. No issues found. Merge-ready.",
+    "checklist": []
+  }
+}
+```
+
+IMPORTANT: Output ONLY the JSON object. No markdown formatting, no explanatory text, no code fences around the JSON.
