@@ -41,6 +41,9 @@ projects.docker.yaml
 .github/agents/wp.*
 .github/prompts/wp.*
 
+# MCP config (generated)
+.mcp-configs/
+
 # Process log files
 logs/
 .aider*
