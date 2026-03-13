@@ -45,6 +45,46 @@ class TestRedactSecrets:
     def test_slack_token(self):
         assert "<REDACTED>" in _redact_secrets("xoxb-123-456-abc")
 
+    def test_aws_access_key(self):
+        assert "<REDACTED>" in _redact_secrets("key=AKIAIOSFODNN7EXAMPLE")
+
+    def test_postgres_connection_string(self):
+        result = _redact_secrets("db=postgres://user:pass@host:5432/mydb")
+        assert "postgres://" not in result
+        assert "<REDACTED>" in result
+
+    def test_mysql_connection_string(self):
+        result = _redact_secrets("db=mysql://root:secret@localhost/app")
+        assert "mysql://" not in result
+        assert "<REDACTED>" in result
+
+    def test_ssh_private_key_header(self):
+        result = _redact_secrets("found -----BEGIN RSA PRIVATE KEY----- in file")
+        assert "BEGIN RSA PRIVATE KEY" not in result
+        assert "<REDACTED>" in result
+
+    def test_ssh_openssh_key_header(self):
+        result = _redact_secrets("-----BEGIN OPENSSH PRIVATE KEY-----")
+        assert "<REDACTED>" in result
+
+    def test_bearer_auth_header(self):
+        result = _redact_secrets("Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5c")
+        assert "eyJhbG" not in result
+        assert "<REDACTED>" in result
+
+    def test_basic_auth_header(self):
+        result = _redact_secrets("Authorization: Basic dXNlcjpwYXNzd29yZA==")
+        assert "dXNlcjpwYXNz" not in result
+        assert "<REDACTED>" in result
+
+    def test_aws_secret_env_var(self, monkeypatch):
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCY")
+        assert "<REDACTED>" in _redact_secrets("key=wJalrXUtnFEMI/K7MDENG/bPxRfiCY")
+
+    def test_slack_token_env_var(self, monkeypatch):
+        monkeypatch.setenv("SLACK_TOKEN", "xoxp-my-slack-token")
+        assert "<REDACTED>" in _redact_secrets("token=xoxp-my-slack-token")
+
     def test_no_secret(self):
         assert _redact_secrets("hello world") == "hello world"
 

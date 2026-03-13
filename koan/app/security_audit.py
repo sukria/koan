@@ -42,6 +42,10 @@ _SECRET_PATTERNS = [
     re.compile(r"gho_[a-zA-Z0-9]{36,}"),          # GitHub OAuth token
     re.compile(r"github_pat_[a-zA-Z0-9_]{22,}"),  # GitHub fine-grained PAT
     re.compile(r"xoxb-[a-zA-Z0-9-]+"),            # Slack bot token
+    re.compile(r"AKIA[0-9A-Z]{16}"),              # AWS access key ID
+    re.compile(r"(?:postgres(?:ql)?|mysql)://[^\s'\"]+"),  # DB connection strings
+    re.compile(r"-----BEGIN (?:RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----"),  # SSH private key headers
+    re.compile(r"(?:Bearer|Basic)\s+[A-Za-z0-9+/=_-]{20,}", re.IGNORECASE),  # Auth headers
 ]
 
 # Env var names whose values should always be redacted
@@ -51,6 +55,8 @@ _SECRET_ENV_VARS = frozenset({
     "OPENAI_API_KEY",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    "AWS_SECRET_ACCESS_KEY",
+    "SLACK_TOKEN",
 })
 
 _MAX_DETAIL_LEN = 2000
