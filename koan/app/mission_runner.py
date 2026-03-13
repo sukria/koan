@@ -21,9 +21,17 @@ CLI interface:
 import json
 import os
 import sys
+import threading
 from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, List, Optional
+
+# Maximum wall-clock time for the entire post-mission pipeline (seconds).
+# Individual steps have their own timeouts (tests: 120s, reflection: 60s,
+# verification: 10s), but without an overall ceiling, accumulated steps
+# can block the agent loop for too long.  5 minutes is generous — typical
+# runs finish in 30-60s.
+POST_MISSION_TIMEOUT = 300
 
 
 def build_mission_command(
@@ -562,6 +570,23 @@ def run_post_mission(
         "quota_info": None,
     }
 
+    # Overall pipeline deadline — prevents accumulated steps from blocking
+    # the agent loop indefinitely.
+    _pipeline_expired = threading.Event()
+    _deadline_timer = threading.Timer(
+        POST_MISSION_TIMEOUT,
+        lambda: (
+            _pipeline_expired.set(),
+            print(
+                f"[mission_runner] Post-mission pipeline exceeded {POST_MISSION_TIMEOUT}s — "
+                "skipping remaining steps",
+                file=sys.stderr,
+            ),
+        ),
+    )
+    _deadline_timer.daemon = True
+    _deadline_timer.start()
+
     def _report(step: str) -> None:
         if status_callback:
             status_callback(step)
@@ -616,6 +641,7 @@ def run_post_mission(
             instance_dir, project_name, project_path,
             exit_code, mission_title, duration_minutes, result,
         )
+        _deadline_timer.cancel()
         return result  # Early return — no further processing on quota exhaustion
 
     # 4. Archive pending.md if agent didn't clean up
@@ -630,52 +656,62 @@ def run_post_mission(
 
     # 5. Post-mission processing (only on success)
     if exit_code == 0:
+        verify_result = None
+        quality_report = {}
+        lint_result = None
+
         # Mission verification (RARV Verify phase — semantic checks)
-        _report("verifying mission output")
-        verify_result = _run_mission_verification(
-            project_path, mission_title, exit_code, instance_dir,
-        )
-        if verify_result is not None:
-            result["verification"] = {
-                "passed": verify_result.passed,
-                "summary": verify_result.summary,
-                "warnings": len(verify_result.warnings),
-                "failures": len(verify_result.failures),
-            }
+        if not _pipeline_expired.is_set():
+            _report("verifying mission output")
+            verify_result = _run_mission_verification(
+                project_path, mission_title, exit_code, instance_dir,
+            )
+            if verify_result is not None:
+                result["verification"] = {
+                    "passed": verify_result.passed,
+                    "summary": verify_result.summary,
+                    "warnings": len(verify_result.warnings),
+                    "failures": len(verify_result.failures),
+                }
 
         # Quality pipeline (scan, tests, branch hygiene, PR enrichment)
-        _report("running quality pipeline")
-        quality_report = _run_quality_pipeline(
-            instance_dir, project_name, project_path, _report,
-        )
-        result["quality"] = quality_report
+        if not _pipeline_expired.is_set():
+            _report("running quality pipeline")
+            quality_report = _run_quality_pipeline(
+                instance_dir, project_name, project_path, _report,
+            )
+            result["quality"] = quality_report
 
         # Lint gate
-        _report("running lint gate")
-        lint_result = _run_lint_gate(instance_dir, project_name, project_path)
-        if lint_result is not None:
-            result["lint_passed"] = lint_result.passed
+        if not _pipeline_expired.is_set():
+            _report("running lint gate")
+            lint_result = _run_lint_gate(instance_dir, project_name, project_path)
+            if lint_result is not None:
+                result["lint_passed"] = lint_result.passed
 
         # Reflection
-        _report("running reflection")
-        mission_text = mission_title if mission_title else f"Autonomous {autonomous_mode} on {project_name}"
-        result["reflection_written"] = trigger_reflection(
-            instance_dir, mission_text, duration_minutes,
-            project_name=project_name,
-        )
+        if not _pipeline_expired.is_set():
+            _report("running reflection")
+            mission_text = mission_title if mission_title else f"Autonomous {autonomous_mode} on {project_name}"
+            result["reflection_written"] = trigger_reflection(
+                instance_dir, mission_text, duration_minutes,
+                project_name=project_name,
+            )
 
         # Auto-merge check (respects quality gate + lint gate + verification)
-        _report("checking auto-merge")
-        lint_blocking = lint_result is not None and not lint_result.passed and _is_lint_blocking(instance_dir, project_name)
-        verify_blocking = verify_result is not None and not verify_result.passed
-        result["auto_merge_branch"] = check_auto_merge(
-            instance_dir, project_name, project_path,
-            quality_report=quality_report,
-            lint_blocked=lint_blocking,
-            verify_blocked=verify_blocking,
-        )
+        if not _pipeline_expired.is_set():
+            _report("checking auto-merge")
+            lint_blocking = lint_result is not None and not lint_result.passed and _is_lint_blocking(instance_dir, project_name)
+            verify_blocking = verify_result is not None and not verify_result.passed
+            result["auto_merge_branch"] = check_auto_merge(
+                instance_dir, project_name, project_path,
+                quality_report=quality_report,
+                lint_blocked=lint_blocking,
+                verify_blocked=verify_blocking,
+            )
 
     # 7. Record session outcome for staleness tracking
+    # Always runs — even after deadline — since it's a fast local write.
     _report("recording session outcome")
     _record_session_outcome(
         instance_dir, project_name, autonomous_mode,
@@ -684,12 +720,14 @@ def run_post_mission(
     )
 
     # 8. Fire post-mission hooks
-    _report("running hooks")
-    _fire_post_mission_hook(
-        instance_dir, project_name, project_path,
-        exit_code, mission_title, duration_minutes, result,
-    )
+    if not _pipeline_expired.is_set():
+        _report("running hooks")
+        _fire_post_mission_hook(
+            instance_dir, project_name, project_path,
+            exit_code, mission_title, duration_minutes, result,
+        )
 
+    _deadline_timer.cancel()
     return result
 
 

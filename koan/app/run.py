@@ -260,6 +260,9 @@ def run_claude_task(
 
     Returns the child exit code.
     """
+    global _last_mission_timed_out
+    _last_mission_timed_out = False
+
     _sig.task_running = True
     _sig.first_ctrl_c = 0
 
@@ -305,11 +308,24 @@ def run_claude_task(
                 timer.start()
 
             try:
-                # Wait for child, handling SIGINT interruptions gracefully
+                # Wait for child, handling SIGINT interruptions gracefully.
+                # Uses periodic timeout to detect watchdog kills — if
+                # _kill_process_group fails silently, proc.wait() would
+                # otherwise block forever.
                 while True:
                     try:
-                        proc.wait()
+                        proc.wait(timeout=30)
                         break
+                    except subprocess.TimeoutExpired:
+                        if timed_out:
+                            # Watchdog already fired but process survived —
+                            # make one last kill attempt from the main thread.
+                            _kill_process_group(proc)
+                            try:
+                                proc.wait(timeout=10)
+                            except subprocess.TimeoutExpired:
+                                log("error", f"Process {proc.pid} unkillable — abandoning")
+                            break
                     except (KeyboardInterrupt, InterruptedError):
                         # If task_running was cleared by on_sigint (double-tap),
                         # the child was terminated — wait for it to finish
@@ -329,6 +345,7 @@ def run_claude_task(
         exit_code = proc.returncode
         if timed_out:
             exit_code = 1
+            _last_mission_timed_out = True
     finally:
         # Always stop journal streaming, even on exception
         if journal_stream:
@@ -1027,6 +1044,12 @@ def _handle_skill_dispatch(
 _MISSION_MAX_RETRIES = 1
 _MISSION_RETRY_DELAY = 10  # seconds
 
+# Set by run_claude_task when the watchdog timer kills a runaway session.
+# Checked by _maybe_retry_mission to avoid retrying a timeout as if it
+# were a transient network error (the retryable-pattern list matches
+# "timeout" which would otherwise trigger a second full-length run).
+_last_mission_timed_out = False
+
 
 def _get_git_head(project_path: str) -> str:
     """Get current git HEAD SHA for retry safety check."""
@@ -1065,6 +1088,14 @@ def _maybe_retry_mission(
     - This is a mission (not autonomous), since missions are higher-value
     """
     from app.cli_errors import ErrorCategory, classify_cli_error
+
+    # Watchdog timeouts are NOT transient — don't retry a session that ran
+    # for the full timeout duration.  Without this guard, "timeout" in the
+    # agent's output text (test logs, error messages) would match the
+    # RETRYABLE pattern and start another full-length session.
+    if _last_mission_timed_out:
+        log("koan", "Skipping retry — mission was killed by watchdog timeout")
+        return claude_exit, stdout_file, stderr_file
 
     # Read output for classification
     try:

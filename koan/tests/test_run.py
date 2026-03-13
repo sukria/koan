@@ -1026,6 +1026,289 @@ class TestRunClaudeTask:
 
 
 # ---------------------------------------------------------------------------
+# Test: watchdog timeout and retry guard
+# ---------------------------------------------------------------------------
+
+class TestWatchdogTimeoutGuard:
+    """Verify that watchdog-killed sessions don't trigger mission retry."""
+
+    def test_timed_out_flag_set_on_watchdog_kill(self, tmp_path, monkeypatch):
+        """run_claude_task sets _last_mission_timed_out when watchdog fires."""
+        import app.run as run_mod
+
+        # Use a long-sleeping process that the watchdog will kill
+        monkeypatch.setattr("app.config.get_mission_timeout", lambda: 1)
+        stdout_f = str(tmp_path / "out.txt")
+        stderr_f = str(tmp_path / "err.txt")
+
+        run_mod._last_mission_timed_out = False
+        exit_code = run_mod.run_claude_task(
+            cmd=["sleep", "30"],
+            stdout_file=stdout_f,
+            stderr_file=stderr_f,
+            cwd=str(tmp_path),
+        )
+
+        assert exit_code == 1
+        assert run_mod._last_mission_timed_out is True
+
+    def test_timed_out_flag_reset_on_next_run(self, tmp_path, monkeypatch):
+        """_last_mission_timed_out resets at the start of each run."""
+        import app.run as run_mod
+
+        monkeypatch.setattr("app.config.get_mission_timeout", lambda: 0)
+        run_mod._last_mission_timed_out = True
+
+        stdout_f = str(tmp_path / "out.txt")
+        stderr_f = str(tmp_path / "err.txt")
+
+        run_mod.run_claude_task(
+            cmd=["true"],
+            stdout_file=stdout_f,
+            stderr_file=stderr_f,
+            cwd=str(tmp_path),
+        )
+
+        assert run_mod._last_mission_timed_out is False
+
+    def test_retry_skipped_on_watchdog_timeout(self, tmp_path, monkeypatch):
+        """_maybe_retry_mission returns immediately when watchdog timed out."""
+        import app.run as run_mod
+
+        run_mod._last_mission_timed_out = True
+
+        stdout_f = str(tmp_path / "out.txt")
+        stderr_f = str(tmp_path / "err.txt")
+        Path(stdout_f).write_text("timeout in test output")
+        Path(stderr_f).write_text("")
+
+        result = run_mod._maybe_retry_mission(
+            claude_exit=1,
+            stdout_file=stdout_f,
+            stderr_file=stderr_f,
+            cmd=["echo", "test"],
+            project_path=str(tmp_path),
+            pre_head="abc123",
+            instance=str(tmp_path),
+            project_name="test",
+            run_num=1,
+            has_mission=True,
+        )
+
+        # Should return the same exit code — no retry
+        assert result[0] == 1
+
+    def test_normal_failure_can_still_retry(self, tmp_path, monkeypatch):
+        """Non-timeout failures with RETRYABLE pattern still get retried."""
+        import app.run as run_mod
+
+        run_mod._last_mission_timed_out = False  # NOT a watchdog timeout
+
+        stdout_f = str(tmp_path / "out.txt")
+        stderr_f = str(tmp_path / "err.txt")
+        Path(stdout_f).write_text("")
+        Path(stderr_f).write_text("500 Internal Server Error")
+
+        # Mock run_claude_task for the retry attempt
+        with patch.object(run_mod, "run_claude_task", return_value=0) as mock_task, \
+             patch.object(run_mod, "protected_phase"), \
+             patch.object(run_mod.time, "sleep"), \
+             patch.object(run_mod, "_get_git_head", return_value="abc123"):
+            result = run_mod._maybe_retry_mission(
+                claude_exit=1,
+                stdout_file=stdout_f,
+                stderr_file=stderr_f,
+                cmd=["echo", "test"],
+                project_path=str(tmp_path),
+                pre_head="abc123",
+                instance=str(tmp_path),
+                project_name="test",
+                run_num=1,
+                has_mission=True,
+            )
+
+            assert mock_task.called
+
+
+class TestProcWaitPolling:
+    """Verify that proc.wait uses periodic timeout instead of blocking forever."""
+
+    def test_proc_wait_detects_timed_out_flag(self, tmp_path, monkeypatch):
+        """Main thread breaks out of proc.wait loop when timed_out is set."""
+        import app.run as run_mod
+
+        # Set a very short timeout so the watchdog fires quickly
+        monkeypatch.setattr("app.config.get_mission_timeout", lambda: 1)
+
+        stdout_f = str(tmp_path / "out.txt")
+        stderr_f = str(tmp_path / "err.txt")
+
+        # Use a process that sleeps longer than the timeout
+        exit_code = run_mod.run_claude_task(
+            cmd=["sleep", "60"],
+            stdout_file=stdout_f,
+            stderr_file=stderr_f,
+            cwd=str(tmp_path),
+        )
+
+        # Should have been killed by watchdog — exit code = 1
+        assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: post-mission pipeline deadline
+# ---------------------------------------------------------------------------
+
+class TestPostMissionDeadline:
+    """Verify the overall timeout on run_post_mission."""
+
+    def test_deadline_skips_slow_steps(self, tmp_path, monkeypatch):
+        """Steps are skipped when the pipeline deadline expires."""
+        from app.mission_runner import run_post_mission, POST_MISSION_TIMEOUT
+
+        # Create required files
+        stdout_f = str(tmp_path / "stdout.txt")
+        Path(stdout_f).write_text('{"result":"ok"}')
+        stderr_f = str(tmp_path / "stderr.txt")
+        Path(stderr_f).write_text("")
+
+        steps_called = []
+
+        def slow_verification(*args, **kwargs):
+            steps_called.append("verification")
+            import time
+            time.sleep(0.5)  # Will exceed our 0.2s deadline
+            return None
+
+        monkeypatch.setattr(
+            "app.mission_runner.POST_MISSION_TIMEOUT", 0.2
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._run_mission_verification", slow_verification
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._run_quality_pipeline",
+            lambda *a, **kw: (steps_called.append("quality"), {})[1],
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._run_lint_gate",
+            lambda *a, **kw: (steps_called.append("lint"), None)[1],
+        )
+        monkeypatch.setattr(
+            "app.mission_runner.trigger_reflection",
+            lambda *a, **kw: (steps_called.append("reflection"), False)[1],
+        )
+        monkeypatch.setattr(
+            "app.mission_runner.check_auto_merge",
+            lambda *a, **kw: (steps_called.append("auto_merge"), None)[1],
+        )
+        monkeypatch.setattr(
+            "app.mission_runner.update_usage", lambda *a: True,
+        )
+        monkeypatch.setattr(
+            "app.quota_handler.handle_quota_exhaustion",
+            lambda **kw: None,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._record_session_outcome",
+            lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._fire_post_mission_hook",
+            lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._record_cost_event",
+            lambda *a, **kw: None,
+        )
+
+        result = run_post_mission(
+            instance_dir=str(tmp_path),
+            project_name="test",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file=stdout_f,
+            stderr_file=stderr_f,
+            autonomous_mode="implement",
+        )
+
+        # Verification was called (it's the first step), but the slow execution
+        # should have caused later steps to be skipped.
+        assert "verification" in steps_called
+        # Quality pipeline should be skipped since verification took too long
+        assert "quality" not in steps_called or "reflection" not in steps_called
+
+    def test_session_outcome_always_recorded(self, tmp_path, monkeypatch):
+        """Session outcome recording runs even after deadline expires."""
+        from app.mission_runner import run_post_mission
+
+        stdout_f = str(tmp_path / "stdout.txt")
+        Path(stdout_f).write_text('{"result":"ok"}')
+        stderr_f = str(tmp_path / "stderr.txt")
+        Path(stderr_f).write_text("")
+
+        outcome_recorded = []
+
+        monkeypatch.setattr("app.mission_runner.POST_MISSION_TIMEOUT", 0.01)
+        monkeypatch.setattr(
+            "app.mission_runner.update_usage", lambda *a: True,
+        )
+        monkeypatch.setattr(
+            "app.quota_handler.handle_quota_exhaustion",
+            lambda **kw: None,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._record_session_outcome",
+            lambda *a, **kw: outcome_recorded.append(True),
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._fire_post_mission_hook",
+            lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._record_cost_event",
+            lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._run_mission_verification",
+            lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._run_quality_pipeline",
+            lambda *a, **kw: {},
+        )
+        monkeypatch.setattr(
+            "app.mission_runner._run_lint_gate",
+            lambda *a, **kw: None,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner.trigger_reflection",
+            lambda *a, **kw: False,
+        )
+        monkeypatch.setattr(
+            "app.mission_runner.check_auto_merge",
+            lambda *a, **kw: None,
+        )
+
+        import time
+        time.sleep(0.02)  # Let deadline expire
+
+        run_post_mission(
+            instance_dir=str(tmp_path),
+            project_name="test",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file=stdout_f,
+            stderr_file=stderr_f,
+            autonomous_mode="implement",
+        )
+
+        assert len(outcome_recorded) > 0
+
+
+# ---------------------------------------------------------------------------
 # Test: main (restart wrapper)
 # ---------------------------------------------------------------------------
 
