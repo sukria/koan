@@ -867,6 +867,43 @@ def api_missions_edit():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+@app.route("/prs")
+def prs_page():
+    """PR tracking page — open PRs across all projects."""
+    return render_template("prs.html")
+
+
+@app.route("/api/prs")
+def api_prs():
+    """JSON endpoint for open PRs across projects."""
+    from app.pr_tracker import fetch_all_prs
+
+    project = request.args.get("project", "")
+    author_only = request.args.get("author_only", "true").lower() != "false"
+    data = fetch_all_prs(str(KOAN_ROOT), project_filter=project,
+                         author_only=author_only)
+    return jsonify(data)
+
+
+@app.route("/api/prs/<project>/<int:number>/checks")
+def api_pr_checks(project, number):
+    """Fetch CI checks for a specific PR."""
+    from app.pr_tracker import fetch_pr_checks
+
+    checks = fetch_pr_checks(project, number, str(KOAN_ROOT))
+    return jsonify({"checks": checks})
+
+
+@app.route("/api/prs/<project>/<int:number>/merge", methods=["POST"])
+def api_pr_merge(project, number):
+    """Merge a PR (requires auto-merge enabled for the project)."""
+    from app.pr_tracker import merge_pr
+
+    result = merge_pr(project, number, str(KOAN_ROOT))
+    status_code = 200 if result["ok"] else 400
+    return jsonify(result), status_code
+
+
 @app.route("/api/status")
 def api_status():
     """JSON status endpoint."""
