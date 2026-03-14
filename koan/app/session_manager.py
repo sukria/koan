@@ -17,6 +17,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -186,7 +187,8 @@ def get_max_parallel_sessions() -> int:
         config = load_config()
         n = int(config.get("max_parallel_sessions", DEFAULT_MAX_PARALLEL))
         return max(1, min(n, MAX_PARALLEL_CAP))
-    except Exception:
+    except Exception as e:
+        print(f"[session_manager] config read error: {e}", file=sys.stderr)
         return DEFAULT_MAX_PARALLEL
 
 
@@ -311,8 +313,8 @@ def poll_sessions(
         if cleanup:
             try:
                 cleanup()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[session_manager] cleanup error for session {session.id}: {e}", file=sys.stderr)
 
         # Collect output
         stdout = ""
@@ -379,8 +381,8 @@ def kill_session(
     if cleanup:
         try:
             cleanup()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[session_manager] cleanup error for session {session.id}: {e}", file=sys.stderr)
 
     # Update session state
     session.status = "failed"
@@ -395,8 +397,8 @@ def kill_session(
             session_id=session.id,
             force=True,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[session_manager] worktree removal error for session {session.id}: {e}", file=sys.stderr)
 
     # Clean up temp files
     for path in (session.stdout_file, session.stderr_file):
@@ -438,7 +440,7 @@ def recover_stale_sessions(registry: SessionRegistry):
                     session_id=session.id,
                     force=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[session_manager] stale worktree cleanup error for session {session.id}: {e}", file=sys.stderr)
         except PermissionError:
             pass  # Process exists but we can't signal it — leave it

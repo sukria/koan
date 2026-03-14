@@ -16,6 +16,7 @@ import os
 import random
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -52,7 +53,8 @@ def _get_branch_prefix() -> str:
         from app.config import get_branch_prefix
         prefix = get_branch_prefix()
         return prefix.rstrip("/")
-    except Exception:
+    except Exception as e:
+        print(f"[worktree_manager] branch prefix config error: {e}", file=sys.stderr)
         return "koan"
 
 
@@ -331,9 +333,8 @@ def cleanup_stale_worktrees(project_path: str, active_session_ids: Optional[List
                     session_id=session_id,
                     force=True,
                 )
-            except Exception:
-                # Best-effort cleanup
-                pass
+            except Exception as e:
+                print(f"[worktree_manager] stale worktree cleanup error for {session_id}: {e}", file=sys.stderr)
 
     # Final prune
     try:
