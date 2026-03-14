@@ -231,6 +231,95 @@ class TestExtractResetInfoCopilot:
         assert "resets in 45s" == result
 
 
+class TestExtractResetInfoBoundsChecking:
+    """Test bounds checking in extract_reset_info — zero/negative/huge values."""
+
+    def test_retry_after_zero_defaults_to_1h(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Retry-After: 0"
+        result = extract_reset_info(text)
+        assert result == "resets in 1h"
+
+    def test_retry_after_huge_value_capped_to_24h(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Retry-After: 999999"
+        result = extract_reset_info(text)
+        assert result == "resets in 24h"
+
+    def test_retry_after_exactly_86400_not_capped(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Retry-After: 86400"
+        result = extract_reset_info(text)
+        assert result == "resets in 24h"
+
+    def test_retry_after_86401_capped(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "Retry-After: 86401"
+        result = extract_reset_info(text)
+        assert result == "resets in 24h"
+
+    def test_try_again_in_0_minutes_defaults_to_1h(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "try again in 0 minutes"
+        result = extract_reset_info(text)
+        assert result == "resets in 1h"
+
+    def test_try_again_in_huge_hours_capped(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "try again in 100 hours"
+        result = extract_reset_info(text)
+        assert result == "resets in 24h"
+
+    def test_try_again_in_0_seconds_defaults_to_1h(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "try again in 0 seconds"
+        result = extract_reset_info(text)
+        assert result == "resets in 1h"
+
+    def test_try_again_in_2000_minutes_capped(self):
+        from app.quota_handler import extract_reset_info
+
+        text = "try again in 2000 minutes"
+        result = extract_reset_info(text)
+        assert result == "resets in 24h"
+
+
+class TestClampRetrySeconds:
+    """Test _clamp_retry_seconds helper directly."""
+
+    def test_zero_returns_default(self):
+        from app.quota_handler import _clamp_retry_seconds
+
+        assert _clamp_retry_seconds(0) == 3600
+
+    def test_negative_returns_default(self):
+        from app.quota_handler import _clamp_retry_seconds
+
+        assert _clamp_retry_seconds(-10) == 3600
+
+    def test_normal_value_unchanged(self):
+        from app.quota_handler import _clamp_retry_seconds
+
+        assert _clamp_retry_seconds(300) == 300
+
+    def test_max_boundary(self):
+        from app.quota_handler import _clamp_retry_seconds
+
+        assert _clamp_retry_seconds(86400) == 86400
+
+    def test_above_max_capped(self):
+        from app.quota_handler import _clamp_retry_seconds
+
+        assert _clamp_retry_seconds(100000) == 86400
+
+
 class TestSecondsToHuman:
     """Test _seconds_to_human helper."""
 

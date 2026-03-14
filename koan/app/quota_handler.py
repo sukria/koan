@@ -55,6 +55,21 @@ _RETRY_AFTER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Bounds for Retry-After values to prevent indefinite pauses from malformed API responses.
+_MAX_RETRY_SECONDS = 86400  # 24 hours
+_DEFAULT_RETRY_SECONDS = 3600  # 1 hour fallback for zero/negative values
+
+
+def _clamp_retry_seconds(seconds: int) -> int:
+    """Clamp retry seconds to sane bounds.
+
+    Zero or negative values are treated as unknown and default to 1 hour.
+    Values above 24 hours are capped to 24 hours.
+    """
+    if seconds <= 0:
+        return _DEFAULT_RETRY_SECONDS
+    return min(seconds, _MAX_RETRY_SECONDS)
+
 
 def detect_quota_exhaustion(text: str) -> bool:
     """Check if text contains quota exhaustion signals.
@@ -93,18 +108,19 @@ def extract_reset_info(text: str) -> str:
     if retry_match:
         # "Retry-After: N" (seconds)
         if retry_match.group(1):
-            seconds = int(retry_match.group(1))
+            seconds = _clamp_retry_seconds(int(retry_match.group(1)))
             return f"resets in {_seconds_to_human(seconds)}"
         # "try again in N unit"
         if retry_match.group(2) and retry_match.group(3):
             value = int(retry_match.group(2))
             unit = retry_match.group(3).lower()
             if unit.startswith("minute"):
-                return f"resets in {_seconds_to_human(value * 60)}"
+                seconds = _clamp_retry_seconds(value * 60)
             elif unit.startswith("hour"):
-                return f"resets in {value}h"
+                seconds = _clamp_retry_seconds(value * 3600)
             else:
-                return f"resets in {_seconds_to_human(value)}"
+                seconds = _clamp_retry_seconds(value)
+            return f"resets in {_seconds_to_human(seconds)}"
     return ""
 
 
