@@ -18,6 +18,8 @@ from app.rebase_pr import (
     _build_rebase_comment,
     _build_rebase_prompt,
     _checkout_pr_branch,
+    _fetch_ci_failures,
+    _fetch_last_push_timestamp,
     _get_current_branch,
     _is_conflict_failure,
     _push_with_fallback,
@@ -386,9 +388,11 @@ class TestFetchPrContext:
                 "url": "https://github.com/sukria/koan/pull/42",
             })),
             MagicMock(returncode=0, stdout="+added line"),
+            MagicMock(returncode=0, stdout=""),  # timeline (no force-push)
             MagicMock(returncode=0, stdout="[auth.py:10] @reviewer: Fix this"),
             MagicMock(returncode=0, stdout="@reviewer (CHANGES_REQUESTED): Please fix"),
             MagicMock(returncode=0, stdout="@sukria: Will do"),
+            MagicMock(returncode=0, stdout=""),  # CI checks (all pass)
         ]
 
         context = fetch_pr_context("sukria", "koan", "42")
@@ -401,15 +405,18 @@ class TestFetchPrContext:
         assert "Fix this" in context["review_comments"]
         assert "Please fix" in context["reviews"]
         assert "Will do" in context["issue_comments"]
+        assert context["ci_failures"] == ""
 
     @patch("app.github.subprocess.run")
     def test_handles_empty_responses(self, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=json.dumps({"title": "T", "headRefName": "br"})),
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # timeline
             MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # CI checks
         ]
         context = fetch_pr_context("o", "r", "1")
         assert context["branch"] == "br"
@@ -421,9 +428,11 @@ class TestFetchPrContext:
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="not json"),
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # timeline
             MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # CI checks
         ]
         context = fetch_pr_context("o", "r", "1")
         assert context["title"] == ""
@@ -444,10 +453,12 @@ class TestFetchPrContext:
             })),
             # Diff fails (HTTP 406 — too large)
             MagicMock(returncode=1, stderr="HTTP 406: diff exceeded maximum"),
+            MagicMock(returncode=0, stdout=""),  # timeline
             # Comments succeed
             MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # CI checks
         ]
         context = fetch_pr_context("o", "r", "1")
         assert context["title"] == "Big PR"
@@ -464,10 +475,12 @@ class TestFetchPrContext:
                 "url": "https://github.com/o/r/pull/1",
             })),
             MagicMock(returncode=0, stdout="+diff"),
+            MagicMock(returncode=0, stdout=""),  # timeline
             # All comment APIs fail
             MagicMock(returncode=1, stderr="rate limited"),
             MagicMock(returncode=1, stderr="rate limited"),
             MagicMock(returncode=1, stderr="rate limited"),
+            MagicMock(returncode=0, stdout=""),  # CI checks
         ]
         context = fetch_pr_context("o", "r", "1")
         assert context["branch"] == "br"
@@ -475,6 +488,55 @@ class TestFetchPrContext:
         assert context["review_comments"] == ""
         assert context["reviews"] == ""
         assert context["issue_comments"] == ""
+
+    @patch("app.github.subprocess.run")
+    def test_ci_failures_included(self, mock_run):
+        """CI failures are detected and included in context."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps({
+                "title": "PR", "headRefName": "br", "baseRefName": "main",
+                "state": "OPEN", "author": {"login": "dev"},
+                "url": "https://github.com/o/r/pull/1",
+            })),
+            MagicMock(returncode=0, stdout="+diff"),
+            MagicMock(returncode=0, stdout=""),  # timeline
+            MagicMock(returncode=0, stdout=""),  # review comments
+            MagicMock(returncode=0, stdout=""),  # reviews
+            MagicMock(returncode=0, stdout=""),  # issue comments
+            # CI checks with failures
+            MagicMock(returncode=0, stdout="lint\tfail\t2m\thttps://ci/1\ntests\tpass\t5m\thttps://ci/2"),
+        ]
+        context = fetch_pr_context("o", "r", "1")
+        assert "lint" in context["ci_failures"]
+        assert "tests" not in context["ci_failures"]
+
+    @patch("app.github.subprocess.run")
+    def test_comments_filtered_since_last_push(self, mock_run):
+        """Comments are filtered to only those after the last force-push."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps({
+                "title": "PR", "headRefName": "br", "baseRefName": "main",
+                "state": "OPEN", "author": {"login": "dev"},
+                "url": "https://github.com/o/r/pull/1",
+            })),
+            MagicMock(returncode=0, stdout="+diff"),
+            # Timeline returns a force-push timestamp
+            MagicMock(returncode=0, stdout='"2025-01-15T10:00:00Z"'),
+            # Comments (the jq filter will include the timestamp check)
+            MagicMock(returncode=0, stdout="@reviewer: new comment"),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # CI checks
+        ]
+        context = fetch_pr_context("o", "r", "1")
+        # Verify the jq filters include the timestamp
+        calls = mock_run.call_args_list
+        # The review comments call (index 3) should contain the timestamp filter
+        review_comments_call = calls[3]
+        cmd = review_comments_call[0][0]
+        jq_arg = [a for a in cmd if "select" in a and "created_at" in a]
+        assert len(jq_arg) == 1
+        assert "2025-01-15T10:00:00Z" in jq_arg[0]
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +649,7 @@ class TestRunRebase:
             "review_comments": "",
             "reviews": "",
             "issue_comments": "",
+            "ci_failures": "",
         }
         mock_git.return_value = "ok"
         notify = MagicMock()
@@ -615,7 +678,8 @@ class TestRunRebase:
     def test_missing_branch(self, mock_ctx):
         mock_ctx.return_value = {"branch": "", "base": "main", "title": "T",
                                   "body": "", "state": "", "author": "", "url": "",
-                                  "diff": "", "review_comments": "", "reviews": "", "issue_comments": ""}
+                                  "diff": "", "review_comments": "", "reviews": "", "issue_comments": "",
+            "ci_failures": ""}
         notify = MagicMock()
         success, summary = run_rebase("o", "r", "1", "/p", notify_fn=notify)
         assert success is False
@@ -627,6 +691,7 @@ class TestRunRebase:
             "title": "T", "body": "", "branch": "feat",
             "base": "main", "state": "", "author": "", "url": "",
             "diff": "", "review_comments": "", "reviews": "", "issue_comments": "",
+            "ci_failures": "",
         }
         notify = MagicMock()
         with patch("app.rebase_pr._get_current_branch", return_value="main"), \
@@ -642,6 +707,7 @@ class TestRunRebase:
             "title": "T", "body": "", "branch": "feat",
             "base": "main", "state": "", "author": "", "url": "",
             "diff": "", "review_comments": "", "reviews": "", "issue_comments": "",
+            "ci_failures": "",
         }
         notify = MagicMock()
         with patch("app.rebase_pr._get_current_branch", return_value="original"), \
@@ -660,6 +726,7 @@ class TestRunRebase:
             "title": "T", "body": "", "branch": "feat",
             "base": "main", "state": "", "author": "", "url": "",
             "diff": "", "review_comments": "", "reviews": "", "issue_comments": "",
+            "ci_failures": "",
         }
         mock_gh.side_effect = RuntimeError("no perms to comment")
         notify = MagicMock()
@@ -684,6 +751,7 @@ class TestRunRebase:
             "diff": "+code", "review_comments": "@reviewer: fix this",
             "reviews": "@reviewer (CHANGES_REQUESTED): please fix",
             "issue_comments": "",
+            "ci_failures": "",
         }
         notify = MagicMock()
         with patch("app.rebase_pr._get_current_branch", return_value="main"), \
@@ -706,6 +774,7 @@ class TestRunRebase:
             "title": "T", "body": "", "branch": "feat",
             "base": "main", "state": "", "author": "", "url": "",
             "diff": "", "review_comments": "", "reviews": "", "issue_comments": "",
+            "ci_failures": "",
         }
         notify = MagicMock()
         with patch("app.rebase_pr._get_current_branch", return_value="original"), \
@@ -722,7 +791,8 @@ class TestRunRebase:
         """When no notify_fn provided, defaults to send_telegram."""
         mock_ctx.return_value = {"branch": "", "base": "main", "title": "",
                                   "body": "", "state": "", "author": "", "url": "",
-                                  "diff": "", "review_comments": "", "reviews": "", "issue_comments": ""}
+                                  "diff": "", "review_comments": "", "reviews": "", "issue_comments": "",
+                                  "ci_failures": ""}
         with patch("app.notify.send_telegram") as mock_tg:
             success, _ = run_rebase("o", "r", "1", "/p")
             mock_tg.assert_called()
