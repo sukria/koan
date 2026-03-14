@@ -64,8 +64,6 @@ def _list_open_issues(owner: str, repo: str, limit: Optional[int] = None) -> lis
         "--state", "open",
         "--limit", gh_limit,
         "--json", "number,title,url",
-        "--order", "desc",
-        "--sort", "created",
     )
     if not output.strip():
         return []

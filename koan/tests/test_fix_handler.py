@@ -89,6 +89,47 @@ class TestParseLimit:
 # _handle_batch
 # ---------------------------------------------------------------------------
 
+class TestListOpenIssues:
+    """Tests for _list_open_issues — validates the gh CLI call."""
+
+    @patch("app.github.run_gh")
+    def test_does_not_use_order_flag(self, mock_gh):
+        """Regression: --order is not a valid gh issue list flag."""
+        from skills.core.fix.handler import _list_open_issues
+        mock_gh.return_value = "[]"
+        _list_open_issues("owner", "repo")
+        args = mock_gh.call_args[0]
+        assert "--order" not in args, "--order is not a valid gh issue list flag"
+
+    @patch("app.github.run_gh")
+    def test_does_not_use_sort_flag(self, mock_gh):
+        """Regression: --sort is not a valid gh issue list flag."""
+        from skills.core.fix.handler import _list_open_issues
+        mock_gh.return_value = "[]"
+        _list_open_issues("owner", "repo")
+        args = mock_gh.call_args[0]
+        assert "--sort" not in args, "--sort is not a valid gh issue list flag"
+
+    @patch("app.github.run_gh")
+    def test_passes_limit(self, mock_gh):
+        from skills.core.fix.handler import _list_open_issues
+        mock_gh.return_value = "[]"
+        _list_open_issues("owner", "repo", limit=5)
+        args = mock_gh.call_args[0]
+        assert "--limit" in args
+        limit_idx = args.index("--limit")
+        assert args[limit_idx + 1] == "5"
+
+    @patch("app.github.run_gh")
+    def test_default_limit_is_100(self, mock_gh):
+        from skills.core.fix.handler import _list_open_issues
+        mock_gh.return_value = "[]"
+        _list_open_issues("owner", "repo")
+        args = mock_gh.call_args[0]
+        limit_idx = args.index("--limit")
+        assert args[limit_idx + 1] == "100"
+
+
 class TestHandleBatch:
     def _make_ctx(self, args=""):
         return SkillContext(
