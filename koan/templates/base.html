@@ -274,6 +274,13 @@
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.4; transform: scale(0.8); }
         }
+        .project-card:hover {
+            border-color: var(--accent);
+        }
+        #project-filter:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
         .loading { opacity: 0.5; }
         .spinner {
             display: inline-block;
@@ -296,9 +303,63 @@
         <a href="/usage" {% if request.path == '/usage' %}class="active"{% endif %}>Usage</a>
         <a href="/progress" {% if request.path == '/progress' %}class="active"{% endif %}>Progress</a>
         <a href="/journal" {% if request.path == '/journal' %}class="active"{% endif %}>Journal</a>
+        <select id="project-filter" style="margin-left:auto;padding:0.35rem 0.5rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:0.8rem;cursor:pointer;display:none;">
+            <option value="">All projects</option>
+        </select>
     </nav>
     <main>
         {% block content %}{% endblock %}
     </main>
+    <script>
+    (function() {
+        var sel = document.getElementById('project-filter');
+        if (!sel) return;
+        var KEY = 'koan_project';
+        fetch('/api/projects')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var projects = data.projects || [];
+                if (projects.length < 2) return;
+                sel.style.display = '';
+                projects.forEach(function(p) {
+                    var opt = document.createElement('option');
+                    opt.value = p;
+                    opt.textContent = p;
+                    sel.appendChild(opt);
+                });
+                var saved = localStorage.getItem(KEY) || '';
+                var params = new URLSearchParams(window.location.search);
+                var current = params.get('project') || '';
+                if (current) {
+                    sel.value = current;
+                    localStorage.setItem(KEY, current);
+                } else if (saved) {
+                    sel.value = saved;
+                    if (saved) {
+                        params.set('project', saved);
+                        window.location.search = params.toString();
+                        return;
+                    }
+                }
+            })
+            .catch(function() {});
+        sel.addEventListener('change', function() {
+            var val = sel.value;
+            if (val) {
+                localStorage.setItem(KEY, val);
+            } else {
+                localStorage.removeItem(KEY);
+            }
+            var params = new URLSearchParams(window.location.search);
+            if (val) {
+                params.set('project', val);
+            } else {
+                params.delete('project');
+            }
+            var qs = params.toString();
+            window.location.href = window.location.pathname + (qs ? '?' + qs : '');
+        });
+    })();
+    </script>
 </body>
 </html>
