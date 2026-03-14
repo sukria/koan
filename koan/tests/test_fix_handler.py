@@ -7,6 +7,7 @@ from skills.core.fix.handler import (
     handle,
     _parse_repo_url,
     _parse_limit,
+    _list_open_issues,
     _handle_batch,
 )
 from app.skills import SkillContext
@@ -83,6 +84,41 @@ class TestParseLimit:
 
     def test_case_insensitive(self):
         assert _parse_limit("--LIMIT=3") == 3
+
+
+# ---------------------------------------------------------------------------
+# _list_open_issues
+# ---------------------------------------------------------------------------
+
+class TestListOpenIssues:
+    @patch("app.github.run_gh")
+    def test_uses_valid_gh_flags_only(self, mock_gh):
+        """Regression: gh issue list does not support --order or --sort flags."""
+        mock_gh.return_value = "[]"
+        _list_open_issues("owner", "repo")
+
+        args = mock_gh.call_args[0]
+        assert "--order" not in args, "--order is not a valid gh issue list flag"
+        assert "--sort" not in args, "--sort is not a valid gh issue list flag"
+
+    @patch("app.github.run_gh")
+    def test_passes_limit(self, mock_gh):
+        mock_gh.return_value = "[]"
+        _list_open_issues("owner", "repo", limit=5)
+
+        args = mock_gh.call_args[0]
+        assert "--limit" in args
+        limit_idx = args.index("--limit")
+        assert args[limit_idx + 1] == "5"
+
+    @patch("app.github.run_gh")
+    def test_default_limit_100(self, mock_gh):
+        mock_gh.return_value = "[]"
+        _list_open_issues("owner", "repo")
+
+        args = mock_gh.call_args[0]
+        limit_idx = args.index("--limit")
+        assert args[limit_idx + 1] == "100"
 
 
 # ---------------------------------------------------------------------------
