@@ -1512,3 +1512,60 @@ class TestChatSkillHandler:
         )
         result = mod.handle(ctx)
         assert "not available" in result
+
+
+# ---------------------------------------------------------------------------
+# Enforcement: every core skill must declare a help group
+# ---------------------------------------------------------------------------
+
+class TestCoreSkillGroupEnforcement:
+    """Ensure all core skills have a 'group:' field so they appear in /help."""
+
+    def test_all_core_skills_have_group(self):
+        """Every SKILL.md under koan/skills/core/ must declare a non-empty group."""
+        skills_dir = get_default_skills_dir()
+        core_dir = skills_dir / "core"
+        assert core_dir.is_dir(), f"Core skills dir not found: {core_dir}"
+
+        missing = []
+        for skill_md in sorted(core_dir.rglob("SKILL.md")):
+            skill = parse_skill_md(skill_md)
+            if skill is None:
+                continue
+            if not skill.group:
+                missing.append(str(skill_md.relative_to(core_dir)))
+
+        assert not missing, (
+            f"Core skills missing 'group:' field (they won't appear in /help): "
+            f"{', '.join(missing)}"
+        )
+
+    def test_core_skill_groups_are_known(self):
+        """Every group used by core skills must exist in _GROUP_META."""
+        from app.command_handlers import _GROUP_META
+
+        skills_dir = get_default_skills_dir()
+        core_dir = skills_dir / "core"
+        unknown = []
+        for skill_md in sorted(core_dir.rglob("SKILL.md")):
+            skill = parse_skill_md(skill_md)
+            if skill is None or not skill.group:
+                continue
+            if skill.group not in _GROUP_META:
+                unknown.append(f"{skill.name} → {skill.group}")
+
+        assert not unknown, (
+            f"Core skills use unknown help groups (add to _GROUP_META): "
+            f"{', '.join(unknown)}"
+        )
+
+    def test_registry_warns_on_missing_group(self, caplog):
+        """Registry logs a warning when registering a core skill without group."""
+        skill = Skill(name="orphan", scope="core", group="")
+        registry = SkillRegistry()
+
+        with caplog.at_level("WARNING", logger="app.skills"):
+            registry._register(skill)
+
+        assert registry.get("core", "orphan") is not None
+        assert "no 'group:'" in caplog.text
