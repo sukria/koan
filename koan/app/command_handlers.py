@@ -392,6 +392,16 @@ _GROUP_META = {
     "system":   ("🔄", "Pause, stop, update, restart"),
 }
 
+# Core commands that are hardcoded (not skill-based) but should appear in /help.
+# Each entry: (command_name, description, aliases, group)
+_CORE_COMMAND_HELP = [
+    ("help",   "Show help overview or details",   ["h"],                    "system"),
+    ("stop",   "Stop the run loop",               [],                      "system"),
+    ("pause",  "Pause mission processing",         ["sleep"],              "system"),
+    ("resume", "Resume mission processing",        ["work", "awake", "run", "start"], "system"),
+    ("skill",  "Manage skill packages",            [],                     "system"),
+]
+
 # Ordered group list (controls display order in /help)
 _GROUP_ORDER = [
     "missions", "code", "pr", "status",
@@ -410,11 +420,20 @@ def _handle_help_detail(arg: str):
         _handle_help_group(arg, registry)
         return
 
-    # L3: check if arg is a command name
+    # L3: check if arg is a skill-based command
     skill = registry.find_by_command(arg)
     if skill is not None:
         _handle_help_command(arg, skill)
         return
+
+    # L3: check if arg is a hardcoded core command (or alias)
+    for cmd_name, desc, aliases, _group in _CORE_COMMAND_HELP:
+        if arg == cmd_name or arg in aliases:
+            parts = [f"/{cmd_name}", desc]
+            if aliases:
+                parts.append(f"Aliases: /{', /'.join(aliases)}")
+            send_telegram("\n".join(parts))
+            return
 
     # Unknown — suggest closest match from commands AND groups
     suggestion = registry.suggest_command(arg, extra_commands=list(CORE_COMMANDS) + list(_GROUP_META.keys()))
@@ -433,6 +452,12 @@ def _handle_help_group(group: str, registry):
             desc = cmd.description or skill.description
             aliases = f" (alias: /{', /'.join(cmd.aliases)})" if cmd.aliases else ""
             parts.append(f"/{cmd.name} — {desc}{aliases}")
+
+    # Append hardcoded core commands belonging to this group
+    for cmd_name, desc, aliases, cmd_group in _CORE_COMMAND_HELP:
+        if cmd_group == group:
+            alias_str = f" (alias: /{', /'.join(aliases)})" if aliases else ""
+            parts.append(f"/{cmd_name} — {desc}{alias_str}")
 
     parts.append(f"\n/help <command> — detailed usage")
     send_telegram("\n".join(parts))

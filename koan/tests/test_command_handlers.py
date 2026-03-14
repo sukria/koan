@@ -798,6 +798,39 @@ class TestHandleHelp:
         assert "/skill" in msg
         assert "1 extra skill" in msg
 
+    def test_help_system_shows_core_commands(self, patch_bridge_state, mock_send, mock_registry):
+        """L2: /help system must include hardcoded core commands (stop, pause, resume, help, skill)."""
+        from app.command_handlers import _handle_help_group
+        mock_registry.list_by_group.return_value = []
+
+        _handle_help_group("system", mock_registry)
+        msg = mock_send.call_args[0][0]
+        assert "/stop" in msg
+        assert "/pause" in msg
+        assert "/resume" in msg
+        assert "/help" in msg
+        assert "/skill" in msg
+
+    def test_help_core_command_detail(self, patch_bridge_state, mock_send, mock_registry):
+        """L3: /help stop should show details for the hardcoded stop command."""
+        from app.command_handlers import _handle_help_detail
+        mock_registry.find_by_command.return_value = None
+
+        _handle_help_detail("stop")
+        msg = mock_send.call_args[0][0]
+        assert "/stop" in msg
+        assert "Stop" in msg
+
+    def test_help_core_command_alias(self, patch_bridge_state, mock_send, mock_registry):
+        """L3: /help sleep should resolve to the pause core command."""
+        from app.command_handlers import _handle_help_detail
+        mock_registry.find_by_command.return_value = None
+
+        _handle_help_detail("sleep")
+        msg = mock_send.call_args[0][0]
+        assert "/pause" in msg
+        assert "sleep" in msg.lower()
+
 
 # ---------------------------------------------------------------------------
 # Test: _handle_skill_command

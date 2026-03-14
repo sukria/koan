@@ -773,3 +773,80 @@ class TestApiStatusStructure:
         resp = app_client.get("/api/status")
         data = resp.get_json()
         assert data["missions"]["done"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Project filtering
+# ---------------------------------------------------------------------------
+
+class TestProjectFiltering:
+    """Test ?project= filtering on routes and /api/projects."""
+
+    def test_api_projects(self, app_client):
+        with patch("app.dashboard.get_known_projects", return_value=[("koan", "/p/koan")]):
+            resp = app_client.get("/api/projects")
+        data = resp.get_json()
+        assert "projects" in data
+        assert "koan" in data["projects"]
+
+    def test_api_projects_includes_mission_tags(self, app_client, instance_dir):
+        """Projects from mission tags are included even if not in config."""
+        with patch("app.dashboard.get_known_projects", return_value=[]):
+            resp = app_client.get("/api/projects")
+        data = resp.get_json()
+        # missions.md has [project:koan] tag
+        assert "koan" in data["projects"]
+
+    def test_missions_filtered_by_project(self, app_client):
+        resp = app_client.get("/missions?project=koan")
+        assert resp.status_code == 200
+        assert b"Build dashboard" in resp.data
+        assert b"Fix something" not in resp.data
+
+    def test_missions_unfiltered(self, app_client):
+        resp = app_client.get("/missions")
+        assert resp.status_code == 200
+        assert b"Build dashboard" in resp.data
+        assert b"Fix something" in resp.data
+
+    def test_index_filtered_by_project(self, app_client):
+        resp = app_client.get("/?project=koan")
+        assert resp.status_code == 200
+        assert b"Build dashboard" in resp.data
+
+    def test_journal_filtered_by_project(self, app_client):
+        resp = app_client.get("/journal?project=koan")
+        assert resp.status_code == 200
+        assert b"Built the dashboard" in resp.data
+
+    def test_journal_filtered_no_match(self, app_client):
+        resp = app_client.get("/journal?project=nonexistent")
+        assert resp.status_code == 200
+        assert b"Built the dashboard" not in resp.data
+
+    def test_filter_missions_helper(self):
+        missions = {
+            "pending": [
+                "- [project:koan] Task A",
+                "- [project:other] Task B",
+                "- Task C",
+            ],
+            "in_progress": [],
+            "done": [],
+        }
+        filtered = dashboard._filter_missions_by_project(missions, "koan")
+        assert len(filtered["pending"]) == 1
+        assert "Task A" in filtered["pending"][0]
+
+    def test_filter_missions_empty_project(self):
+        missions = {"pending": ["- Task A", "- Task B"], "in_progress": [], "done": []}
+        filtered = dashboard._filter_missions_by_project(missions, "")
+        assert filtered == missions
+
+    def test_project_badge_filter(self):
+        assert "koan" in dashboard.project_badge_filter("- [project:koan] Fix bug")
+        assert dashboard.project_badge_filter("- Fix bug") == ""
+
+    def test_strip_project_tag_filter(self):
+        assert dashboard.strip_project_tag_filter("- [project:koan] Fix bug") == "- Fix bug"
+        assert dashboard.strip_project_tag_filter("- Fix bug") == "- Fix bug"

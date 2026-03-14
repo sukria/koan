@@ -66,11 +66,26 @@
     </div>
 </div>
 
+{% if project_stats %}
+<h2>Projects</h2>
+<div class="grid">
+{% for pname, pdata in project_stats.items() %}
+    <a href="/?project={{ pname }}" class="card project-card" style="text-decoration:none;color:var(--text);">
+        <div style="font-weight:600;margin-bottom:0.5rem;">{{ "untagged" if pname == "default" else pname }}</div>
+        <div style="font-size:0.85rem;color:var(--text-muted);">
+            <span>{{ pdata.pending }} pending</span>
+            {% if pdata.in_progress %}<span style="margin-left:0.75rem;">{{ pdata.in_progress }} in progress</span>{% endif %}
+        </div>
+    </a>
+{% endfor %}
+</div>
+{% endif %}
+
 {% if missions.in_progress %}
 <h2>In Progress</h2>
 {% for m in missions.in_progress %}
 <div class="card">
-    <div class="mission-item">{{ m }}</div>
+    <div class="mission-item">{% if not selected_project %}{{ m|project_badge|safe }}{% endif %}{{ m|strip_project_tag }}</div>
 </div>
 {% endfor %}
 {% endif %}
@@ -79,7 +94,7 @@
 <h2>Pending</h2>
 {% for m in missions.pending %}
 <div class="card">
-    <div class="mission-item">{{ m }}</div>
+    <div class="mission-item">{% if not selected_project %}{{ m|project_badge|safe }}{% endif %}{{ m|strip_project_tag }}</div>
 </div>
 {% endfor %}
 {% endif %}

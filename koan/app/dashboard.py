@@ -45,9 +45,11 @@ from app.signals import (
     STATUS_FILE,
     STOP_FILE,
 )
+from app.missions import extract_project_tag, group_by_project
 from app.utils import (
     parse_project,
     insert_pending_mission,
+    get_known_projects,
 )
 
 # ---------------------------------------------------------------------------
@@ -66,6 +68,25 @@ CONVERSATION_HISTORY_FILE = INSTANCE_DIR / "conversation-history.jsonl"
 CHAT_TIMEOUT = int(os.environ.get("KOAN_CHAT_TIMEOUT", "180"))
 
 app = Flask(__name__, template_folder=str(KOAN_ROOT / "koan" / "templates"))
+
+
+_PROJECT_TAG_RE = re.compile(r'\s*\[(?:project|projet):([a-zA-Z0-9_-]+)\]\s*')
+
+
+@app.template_filter('strip_project_tag')
+def strip_project_tag_filter(text: str) -> str:
+    """Remove [project:name] tag from mission text for display."""
+    return _PROJECT_TAG_RE.sub(' ', text).strip()
+
+
+@app.template_filter('project_badge')
+def project_badge_filter(text: str) -> str:
+    """Extract project tag and return badge HTML, or empty string."""
+    m = _PROJECT_TAG_RE.search(text)
+    if m:
+        name = m.group(1)
+        return f'<span class="badge badge-blue">{name}</span> '
+    return ''
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +294,30 @@ def parse_missions() -> dict:
     return parse_sections(content)
 
 
+def _filter_missions_by_project(missions: dict, project: str) -> dict:
+    """Filter parsed mission sections to only items matching project tag."""
+    if not project:
+        return missions
+    return {
+        key: [m for m in items if extract_project_tag(m) == project]
+        for key, items in missions.items()
+    }
+
+
+def _get_all_project_names() -> list:
+    """Return sorted list of project names from config and mission tags."""
+    # Names from projects.yaml / env
+    names = {name for name, _path in get_known_projects()}
+    # Names from mission tags
+    missions = parse_missions()
+    for section in missions.values():
+        for item in section:
+            tag = extract_project_tag(item)
+            if tag != "default":
+                names.add(tag)
+    return sorted(names, key=str.lower)
+
+
 def get_journal_entries(limit: int = 7) -> list:
     """Get recent journal entries."""
     entries = []
@@ -359,7 +404,20 @@ def _build_dashboard_prompt(text: str, *, lite: bool = False) -> str:
 def index():
     """Main dashboard page."""
     agent_state = get_agent_state()
+    selected_project = request.args.get("project", "")
     missions = parse_missions()
+    filtered = _filter_missions_by_project(missions, selected_project)
+
+    # Per-project stats for multi-project summary
+    project_stats = {}
+    projects_list = _get_all_project_names()
+    if len(projects_list) > 1:
+        by_project = group_by_project(read_file(MISSIONS_FILE))
+        for pname, pdata in by_project.items():
+            project_stats[pname] = {
+                "pending": len(pdata["pending"]),
+                "in_progress": len(pdata["in_progress"]),
+            }
 
     # Map structured state to the template's existing state vocabulary
     tpl_state = agent_state["state"]
@@ -373,18 +431,22 @@ def index():
         state_label=agent_state["label"],
         agent_state=agent_state,
         signals=get_signal_status(),
-        missions=missions,
-        pending_count=len(missions["pending"]),
-        in_progress_count=len(missions["in_progress"]),
-        done_count=len(missions["done"]),
+        missions=filtered,
+        pending_count=len(filtered["pending"]),
+        in_progress_count=len(filtered["in_progress"]),
+        done_count=len(filtered["done"]),
+        selected_project=selected_project,
+        project_stats=project_stats,
     )
 
 
 @app.route("/missions")
 def missions_page():
     """Missions management page."""
+    selected_project = request.args.get("project", "")
     missions = parse_missions()
-    return render_template("missions.html", missions=missions)
+    filtered = _filter_missions_by_project(missions, selected_project)
+    return render_template("missions.html", missions=filtered, selected_project=selected_project)
 
 
 @app.route("/missions/add", methods=["POST"])
@@ -631,6 +693,7 @@ def api_usage():
     from app.cost_tracker import summarize_range, get_pricing_config
 
     days = request.args.get("days", "7", type=str)
+    selected_project = request.args.get("project", "")
     try:
         days = int(days)
         days = max(1, min(days, 90))
@@ -641,6 +704,10 @@ def api_usage():
     start = end - timedelta(days=days - 1)
     summary = summarize_range(INSTANCE_DIR, start, end)
 
+    by_project = summary["by_project"]
+    if selected_project and by_project:
+        by_project = {k: v for k, v in by_project.items() if k == selected_project}
+
     pricing = get_pricing_config()
     return jsonify({
         "days": days,
@@ -649,7 +716,7 @@ def api_usage():
         "total_input": summary["total_input"],
         "total_output": summary["total_output"],
         "count": summary["count"],
-        "by_project": summary["by_project"],
+        "by_project": by_project,
         "by_model": summary["by_model"],
         "has_pricing": pricing is not None,
     })
@@ -658,8 +725,22 @@ def api_usage():
 @app.route("/journal")
 def journal_page():
     """Journal viewer."""
+    selected_project = request.args.get("project", "")
     entries = get_journal_entries(limit=14)
-    return render_template("journal.html", entries=entries)
+    if selected_project:
+        filtered = []
+        for day in entries:
+            day_filtered = [e for e in day["entries"] if e["project"] == selected_project]
+            if day_filtered:
+                filtered.append({"date": day["date"], "entries": day_filtered})
+        entries = filtered
+    return render_template("journal.html", entries=entries, selected_project=selected_project)
+
+
+@app.route("/api/projects")
+def api_projects():
+    """Return list of known project names."""
+    return jsonify({"projects": _get_all_project_names()})
 
 
 @app.route("/api/status")
