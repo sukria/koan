@@ -285,6 +285,15 @@ class SkillRegistry:
         key = skill.qualified_name
         self._skills[key] = skill
 
+        # Warn if a core skill has no help group — every command must be
+        # discoverable via /help.  See CLAUDE.md "User manual maintenance".
+        if skill.scope == "core" and not skill.group:
+            _log.warning(
+                "Core skill %s has no 'group:' in SKILL.md — "
+                "it won't appear in /help. Add a group field.",
+                key,
+            )
+
         # Map each command name and alias to this skill
         for cmd in skill.commands:
             self._command_map[cmd.name] = skill
