@@ -565,6 +565,35 @@ def check_auto_merge(
         return None
 
 
+def _notify_pipeline_failures(
+    tracker: _PipelineTracker,
+    mission_title: str = "",
+) -> None:
+    """Send a Telegram warning if the post-mission pipeline had failures.
+
+    Only notifies on 'fail' status — timeouts and skipped steps are expected
+    operational states that don't need a push notification.
+    """
+    if not tracker.has_failures():
+        return
+    try:
+        from app.notify import send_telegram
+
+        failed = [
+            f"{name} ({info['detail']})" if info["detail"] else name
+            for name, info in tracker.steps.items()
+            if info["status"] == "fail"
+        ]
+        if not failed:
+            return
+
+        prefix = f"[{mission_title}] " if mission_title else ""
+        msg = f"⚠️ {prefix}Pipeline issues: {', '.join(failed)}"
+        send_telegram(msg)
+    except Exception as e:
+        print(f"[mission_runner] Pipeline failure notification failed: {e}", file=sys.stderr)
+
+
 def _fire_post_mission_hook(
     instance_dir: str,
     project_name: str,
@@ -848,6 +877,9 @@ def run_post_mission(
         # Write pipeline summary to journal and include in result
         result["pipeline_steps"] = tracker.to_dict()
         _write_pipeline_summary(instance_dir, project_name, tracker, mission_title)
+
+        # Notify user of pipeline failures via Telegram
+        _notify_pipeline_failures(tracker, mission_title)
 
         return result
     finally:

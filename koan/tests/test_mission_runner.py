@@ -2415,3 +2415,101 @@ class TestPipelineStepsInResult:
         assert result["verification"]["passed"] is False
 
 
+class TestNotifyPipelineFailures:
+    """Test _notify_pipeline_failures sends Telegram warnings on step failures."""
+
+    def test_no_notification_when_no_failures(self):
+        from app.mission_runner import _notify_pipeline_failures, _PipelineTracker
+
+        tracker = _PipelineTracker()
+        tracker.record("usage_update", "success")
+        tracker.record("reflection", "skipped", "not significant")
+
+        with patch("app.notify.send_telegram") as mock_send:
+            _notify_pipeline_failures(tracker, "test mission")
+            mock_send.assert_not_called()
+
+    def test_sends_notification_on_failure(self):
+        from app.mission_runner import _notify_pipeline_failures, _PipelineTracker
+
+        tracker = _PipelineTracker()
+        tracker.record("usage_update", "success")
+        tracker.record("reflection", "fail", "timeout after 60s")
+        tracker.record("hooks", "fail", "failed: my_hook")
+
+        with patch("app.notify.send_telegram") as mock_send:
+            _notify_pipeline_failures(tracker, "audit security")
+            mock_send.assert_called_once()
+            msg = mock_send.call_args[0][0]
+            assert "⚠️" in msg
+            assert "audit security" in msg
+            assert "reflection (timeout after 60s)" in msg
+            assert "hooks (failed: my_hook)" in msg
+
+    def test_no_mission_title_omits_prefix(self):
+        from app.mission_runner import _notify_pipeline_failures, _PipelineTracker
+
+        tracker = _PipelineTracker()
+        tracker.record("verification", "fail", "verify crash")
+
+        with patch("app.notify.send_telegram") as mock_send:
+            _notify_pipeline_failures(tracker, "")
+            mock_send.assert_called_once()
+            msg = mock_send.call_args[0][0]
+            assert msg.startswith("⚠️ Pipeline issues:")
+
+    def test_notification_failure_does_not_raise(self):
+        from app.mission_runner import _notify_pipeline_failures, _PipelineTracker
+
+        tracker = _PipelineTracker()
+        tracker.record("reflection", "fail", "boom")
+
+        with patch("app.notify.send_telegram", side_effect=RuntimeError("network")):
+            # Should not raise — fire-and-forget
+            _notify_pipeline_failures(tracker, "test")
+
+    def test_ignores_timeout_and_skipped_statuses(self):
+        from app.mission_runner import _notify_pipeline_failures, _PipelineTracker
+
+        tracker = _PipelineTracker()
+        tracker.record("reflection", "timeout", "pipeline deadline exceeded")
+        tracker.record("hooks", "skipped", "non-zero exit code")
+
+        with patch("app.notify.send_telegram") as mock_send:
+            _notify_pipeline_failures(tracker, "test")
+            mock_send.assert_not_called()
+
+    @patch("app.mission_runner._write_pipeline_summary")
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner.trigger_reflection", side_effect=RuntimeError("reflection boom"))
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.update_usage", return_value=True)
+    def test_integration_notification_on_step_failure(
+        self, mock_usage, mock_quota, mock_archive,
+        mock_reflect, mock_merge, mock_record, mock_summary, tmp_path
+    ):
+        """End-to-end: a step failure in run_post_mission triggers notification."""
+        from app.mission_runner import run_post_mission
+
+        instance_dir = str(tmp_path / "instance")
+        os.makedirs(instance_dir, exist_ok=True)
+
+        with patch("app.notify.send_telegram") as mock_send:
+            result = run_post_mission(
+                instance_dir=instance_dir,
+                project_name="koan",
+                project_path=str(tmp_path),
+                run_num=1,
+                exit_code=0,
+                stdout_file="/tmp/out.json",
+                stderr_file="/tmp/err.txt",
+                mission_title="test pipeline notify",
+            )
+
+            assert result["pipeline_steps"]["reflection"]["status"] == "fail"
+            mock_send.assert_called_once()
+            msg = mock_send.call_args[0][0]
+            assert "reflection" in msg
+            assert "test pipeline notify" in msg
