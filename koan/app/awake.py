@@ -295,14 +295,16 @@ def _build_chat_prompt(text: str, *, lite: bool = False) -> str:
     return prompt
 
 
-def _clean_chat_response(text: str) -> str:
+def _clean_chat_response(text: str, user_message: str = "") -> str:
     """Clean Claude CLI output for Telegram delivery.
 
-    Strips error artifacts, markdown, and truncates for smartphone reading.
+    Strips error artifacts, markdown, truncates for smartphone reading,
+    and expands bare #123 GitHub refs to clickable URLs.
     """
-    from app.text_utils import clean_cli_response
+    from app.text_utils import clean_cli_response, expand_github_refs_auto
 
-    return clean_cli_response(text)
+    cleaned = clean_cli_response(text)
+    return expand_github_refs_auto(cleaned, user_message)
 
 
 def handle_chat(text: str):
@@ -335,7 +337,7 @@ def handle_chat(text: str):
                 capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                 cwd=PROJECT_PATH or str(KOAN_ROOT),
             )
-            response = _clean_chat_response(result.stdout.strip())
+            response = _clean_chat_response(result.stdout.strip(), text)
             if response:
                 send_telegram(response)
                 msg_id = _get_last_message_id()
@@ -368,7 +370,7 @@ def handle_chat(text: str):
                     capture_output=True, text=True, timeout=CHAT_TIMEOUT,
                     cwd=PROJECT_PATH or str(KOAN_ROOT),
                 )
-                response = _clean_chat_response(result.stdout.strip())
+                response = _clean_chat_response(result.stdout.strip(), text)
                 if response:
                     send_telegram(response)
                     msg_id = _get_last_message_id()

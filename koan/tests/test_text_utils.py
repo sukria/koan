@@ -1,9 +1,11 @@
 """Tests for text_utils — shared text processing for messaging delivery."""
 
+from unittest.mock import patch
 import pytest
 from app.text_utils import (
     strip_markdown, clean_cli_response, DEFAULT_MAX_LENGTH,
     expand_github_refs, extract_project_from_message,
+    expand_github_refs_auto, _resolve_project_for_refs,
 )
 
 
@@ -264,3 +266,78 @@ class TestExtractProjectFromMessage:
         """[project:X] should be found even if [Y] also appears."""
         text = "[project:real] and [decoy]"
         assert extract_project_from_message(text) == "real"
+
+
+class TestResolveProjectForRefs:
+    """Tests for _resolve_project_for_refs()."""
+
+    def test_from_text_tag(self):
+        assert _resolve_project_for_refs("🏁 [koan] done") == "koan"
+
+    def test_from_hint_text(self):
+        assert _resolve_project_for_refs("no tag here", "[project:myapp]") == "myapp"
+
+    def test_first_text_wins(self):
+        assert _resolve_project_for_refs("[first]", "[second]") == "first"
+
+    @patch("app.text_utils._read_current_project_file", return_value="running-proj")
+    def test_falls_back_to_project_file(self, _mock):
+        assert _resolve_project_for_refs("no tag") == "running-proj"
+
+    @patch("app.text_utils._read_current_project_file", return_value="unknown")
+    def test_ignores_unknown_project_file(self, _mock, monkeypatch):
+        monkeypatch.setenv("KOAN_CURRENT_PROJECT", "envproj")
+        assert _resolve_project_for_refs("no tag") == "envproj"
+
+    @patch("app.text_utils._read_current_project_file", return_value="")
+    def test_falls_back_to_env(self, _mock, monkeypatch):
+        monkeypatch.setenv("KOAN_CURRENT_PROJECT", "envproj")
+        assert _resolve_project_for_refs("no tag") == "envproj"
+
+    @patch("app.text_utils._read_current_project_file", return_value="")
+    def test_no_project_found(self, _mock, monkeypatch):
+        monkeypatch.delenv("KOAN_CURRENT_PROJECT", raising=False)
+        assert _resolve_project_for_refs("no tag") == ""
+
+
+class TestExpandGithubRefsAuto:
+    """Tests for expand_github_refs_auto()."""
+
+    GITHUB_URL = "https://github.com/sukria/koan"
+
+    @patch("app.text_utils._resolve_project_for_refs", return_value="koan")
+    @patch("app.projects_merged.get_github_url", return_value="https://github.com/sukria/koan")
+    def test_expands_with_detected_project(self, _mock_url, _mock_proj):
+        result = expand_github_refs_auto("See #42")
+        assert "(https://github.com/sukria/koan/issues/42)" in result
+
+    @patch("app.text_utils._resolve_project_for_refs", return_value="")
+    def test_no_project_returns_unchanged(self, _mock):
+        assert expand_github_refs_auto("See #42") == "See #42"
+
+    @patch("app.text_utils._resolve_project_for_refs", return_value="koan")
+    @patch("app.projects_merged.get_github_url", return_value=None)
+    def test_no_github_url_returns_unchanged(self, _mock_url, _mock_proj):
+        assert expand_github_refs_auto("See #42") == "See #42"
+
+    def test_empty_text(self):
+        assert expand_github_refs_auto("") == ""
+
+    def test_none_text(self):
+        assert expand_github_refs_auto(None) is None
+
+    def test_no_hash_skips_lookup(self):
+        """Text without # should return immediately without project lookup."""
+        result = expand_github_refs_auto("No refs here")
+        assert result == "No refs here"
+
+    @patch("app.text_utils._resolve_project_for_refs", return_value="koan")
+    @patch("app.projects_merged.get_github_url", return_value="https://github.com/sukria/koan")
+    def test_passes_hint_texts(self, _mock_url, mock_proj):
+        expand_github_refs_auto("See #1", "hint1", "hint2")
+        mock_proj.assert_called_once_with("See #1", "hint1", "hint2")
+
+    @patch("app.text_utils._resolve_project_for_refs", return_value="koan")
+    @patch("app.projects_merged.get_github_url", side_effect=ImportError("no module"))
+    def test_import_error_returns_unchanged(self, _mock_url, _mock_proj):
+        assert expand_github_refs_auto("See #42") == "See #42"

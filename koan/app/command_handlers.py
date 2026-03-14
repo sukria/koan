@@ -166,7 +166,8 @@ def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
                 with TypingIndicator():
                     result = execute_skill(skill, ctx)
                 if result is not None:
-                    send_telegram(result)
+                    from app.text_utils import expand_github_refs_auto
+                    send_telegram(expand_github_refs_auto(result, command_args))
             except Exception as e:
                 log("error", f"Worker skill '{command_name}' failed: {e}")
                 try:
@@ -179,7 +180,8 @@ def _dispatch_skill(skill: Skill, command_name: str, command_args: str):
     # Standard skill execution
     result = execute_skill(skill, ctx)
     if result is not None:
-        send_telegram(result)
+        from app.text_utils import expand_github_refs_auto
+        send_telegram(expand_github_refs_auto(result, command_args))
 
 
 def _queue_cli_skill_mission(skill: Skill, args: str):

@@ -94,6 +94,81 @@ def extract_project_from_message(text: str) -> str:
     return ""
 
 
+def _read_current_project_file() -> str:
+    """Read the current project name from .koan-project, if available."""
+    import os
+    koan_root = os.environ.get("KOAN_ROOT", "")
+    if not koan_root:
+        return ""
+    try:
+        from pathlib import Path
+        return Path(koan_root, ".koan-project").read_text().strip()
+    except (OSError, ValueError):
+        return ""
+
+
+def _resolve_project_for_refs(*texts: str) -> str:
+    """Resolve a project name for GitHub ref expansion.
+
+    Tries each strategy in order:
+    1. extract_project_from_message on each provided text
+    2. .koan-project file (written by run.py during mission execution)
+    3. KOAN_CURRENT_PROJECT env var
+
+    Returns the project name, or empty string if none found.
+    """
+    import os
+
+    for text in texts:
+        if text:
+            name = extract_project_from_message(text)
+            if name:
+                return name
+
+    name = _read_current_project_file()
+    if name and name != "unknown":
+        return name
+
+    return os.environ.get("KOAN_CURRENT_PROJECT", "")
+
+
+def expand_github_refs_auto(text: str, *hint_texts: str) -> str:
+    """Expand bare #123 GitHub refs with auto-detected project context.
+
+    Uses :func:`_resolve_project_for_refs` to detect the project, then
+    looks up its GitHub URL and expands refs.  If the project or URL
+    cannot be determined, returns the text unchanged.
+
+    Args:
+        text: The message text to expand refs in.
+        *hint_texts: Additional texts to search for project context
+            (e.g. the user's original message).
+    """
+    if not text:
+        return text
+
+    # Quick check: no # in text means nothing to expand
+    if "#" not in text:
+        return text
+
+    project_name = _resolve_project_for_refs(text, *hint_texts)
+    if not project_name:
+        return text
+
+    try:
+        from app.projects_merged import get_github_url
+        github_url = get_github_url(project_name)
+    except Exception as e:
+        import sys
+        print(f"[text_utils] GitHub URL lookup failed: {e}", file=sys.stderr)
+        return text
+
+    if not github_url:
+        return text
+
+    return expand_github_refs(text, github_url)
+
+
 def clean_cli_response(text: str, max_length: int = DEFAULT_MAX_LENGTH) -> str:
     """Clean Claude CLI output for messaging delivery.
 
