@@ -192,10 +192,11 @@ class TestHookFire:
         ))
         registry = HookRegistry(hooks_dir)
         # Should not raise
-        registry.fire("post_mission")
+        failures = registry.fire("post_mission")
         captured = capsys.readouterr()
         assert "[hooks] Error in post_mission handler handler" in captured.err
         assert "boom" in captured.err
+        assert failures == {"handler": "boom"}
 
     def test_fire_error_doesnt_block_other_hooks(self, hooks_dir, capsys):
         _write_hook(hooks_dir, "hook_a_crash", (
@@ -210,10 +211,40 @@ class TestHookFire:
             "HOOKS = {'post_mission': handler}\n"
         ))
         registry = HookRegistry(hooks_dir)
-        registry.fire("post_mission")
+        failures = registry.fire("post_mission")
         assert sys.modules["koan_hook_hook_b_ok"].called is True
         captured = capsys.readouterr()
         assert "fail" in captured.err
+        assert failures == {"handler": "fail"}
+
+    def test_fire_returns_empty_dict_on_success(self, hooks_dir):
+        _write_hook(hooks_dir, "ok_hook", (
+            "def handler(ctx): pass\n"
+            "HOOKS = {'post_mission': handler}\n"
+        ))
+        registry = HookRegistry(hooks_dir)
+        failures = registry.fire("post_mission")
+        assert failures == {}
+
+    def test_fire_returns_empty_dict_no_handlers(self, hooks_dir):
+        registry = HookRegistry(hooks_dir)
+        failures = registry.fire("post_mission")
+        assert failures == {}
+
+    def test_fire_returns_multiple_failures(self, hooks_dir, capsys):
+        _write_hook(hooks_dir, "hook_x", (
+            "def explode(ctx): raise TypeError('type err')\n"
+            "HOOKS = {'test_event': explode}\n"
+        ))
+        _write_hook(hooks_dir, "hook_y", (
+            "def kaboom(ctx): raise KeyError('key err')\n"
+            "HOOKS = {'test_event': kaboom}\n"
+        ))
+        registry = HookRegistry(hooks_dir)
+        failures = registry.fire("test_event")
+        assert len(failures) == 2
+        assert "explode" in failures
+        assert "kaboom" in failures
 
     def test_fire_unknown_event(self, hooks_dir):
         _write_hook(hooks_dir, "hook", (
@@ -254,7 +285,8 @@ class TestHookFire:
 class TestFireHookConvenience:
     def test_fire_hook_noop_without_init(self):
         # Should not raise when registry is None
-        fire_hook("post_mission", project_name="test")
+        result = fire_hook("post_mission", project_name="test")
+        assert result == {}
 
     def test_fire_hook_after_init(self, tmp_path):
         hooks_dir = tmp_path / "hooks"
@@ -266,9 +298,10 @@ class TestFireHookConvenience:
         ))
         # init_hooks expects instance_dir, hooks_dir = instance_dir/hooks
         init_hooks(str(tmp_path))
-        fire_hook("post_mission", project_name="proj")
+        result = fire_hook("post_mission", project_name="proj")
         mod = sys.modules["koan_hook_tracker"]
         assert len(mod.calls) == 1
+        assert result == {}
 
 
 class TestInitHooks:
@@ -383,6 +416,87 @@ class TestPostMissionHookIntegration:
         assert mod is not None
         assert len(mod.calls) == 1
         assert mod.calls[0]["exit_code"] == 1
+
+    @patch("app.mission_runner.update_usage", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner._read_pending_content", return_value="")
+    @patch("app.mission_runner._read_stdout_summary", return_value="")
+    def test_pipeline_records_fail_on_hook_error(
+        self, mock_summary, mock_pending, mock_outcome,
+        mock_merge, mock_reflect, mock_archive,
+        mock_quota, mock_usage, tmp_path,
+    ):
+        """When a post_mission hook raises, pipeline tracker records 'fail'."""
+        from app.hooks import init_hooks
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        _write_hook(hooks_dir, "crasher", (
+            "def handler(ctx): raise RuntimeError('hook exploded')\n"
+            "HOOKS = {'post_mission': handler}\n"
+        ))
+        init_hooks(str(tmp_path))
+
+        from app.mission_runner import run_post_mission
+        result = run_post_mission(
+            instance_dir=str(tmp_path),
+            project_name="testproj",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/dev/null",
+            stderr_file="/dev/null",
+            mission_title="Test mission",
+            start_time=0,
+        )
+
+        steps = result.get("pipeline_steps", {})
+        assert "hooks" in steps
+        assert steps["hooks"]["status"] == "fail"
+        assert "handler" in steps["hooks"]["detail"]
+
+    @patch("app.mission_runner.update_usage", return_value=False)
+    @patch("app.quota_handler.handle_quota_exhaustion", return_value=None)
+    @patch("app.mission_runner.archive_pending", return_value=False)
+    @patch("app.mission_runner.trigger_reflection", return_value=False)
+    @patch("app.mission_runner.check_auto_merge", return_value=None)
+    @patch("app.mission_runner._record_session_outcome")
+    @patch("app.mission_runner._read_pending_content", return_value="")
+    @patch("app.mission_runner._read_stdout_summary", return_value="")
+    def test_pipeline_records_success_when_hooks_pass(
+        self, mock_summary, mock_pending, mock_outcome,
+        mock_merge, mock_reflect, mock_archive,
+        mock_quota, mock_usage, tmp_path,
+    ):
+        """When all hooks succeed, pipeline tracker records 'success'."""
+        from app.hooks import init_hooks
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        _write_hook(hooks_dir, "ok_hook", (
+            "def handler(ctx): pass\n"
+            "HOOKS = {'post_mission': handler}\n"
+        ))
+        init_hooks(str(tmp_path))
+
+        from app.mission_runner import run_post_mission
+        result = run_post_mission(
+            instance_dir=str(tmp_path),
+            project_name="testproj",
+            project_path=str(tmp_path),
+            run_num=1,
+            exit_code=0,
+            stdout_file="/dev/null",
+            stderr_file="/dev/null",
+            mission_title="Test mission",
+            start_time=0,
+        )
+
+        steps = result.get("pipeline_steps", {})
+        assert "hooks" in steps
+        assert steps["hooks"]["status"] == "success"
 
 
 # ---------------------------------------------------------------------------

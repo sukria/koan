@@ -573,11 +573,15 @@ def _fire_post_mission_hook(
     mission_title: str,
     duration_minutes: int,
     result: dict,
-) -> None:
-    """Fire post_mission hooks with full context (fire-and-forget)."""
+) -> Dict[str, str]:
+    """Fire post_mission hooks with full context.
+
+    Returns a dict mapping failed handler names to error messages.
+    Empty dict means all hooks succeeded.
+    """
     try:
         from app.hooks import fire_hook
-        fire_hook(
+        return fire_hook(
             "post_mission",
             instance_dir=instance_dir,
             project_name=project_name,
@@ -589,6 +593,7 @@ def _fire_post_mission_hook(
         )
     except Exception as e:
         print(f"[hooks] post_mission hook error: {e}", file=sys.stderr)
+        return {"_fire_post_mission_hook": str(e)}
 
 
 def run_post_mission(
@@ -825,11 +830,15 @@ def run_post_mission(
         # 8. Fire post-mission hooks
         if not _pipeline_expired.is_set():
             _report("running hooks")
-            _fire_post_mission_hook(
+            hook_failures = _fire_post_mission_hook(
                 instance_dir, project_name, project_path,
                 exit_code, mission_title, duration_minutes, result,
             )
-            tracker.record("hooks", "success")
+            if hook_failures:
+                failed_names = ", ".join(sorted(hook_failures))
+                tracker.record("hooks", "fail", f"failed: {failed_names}")
+            else:
+                tracker.record("hooks", "success")
         else:
             tracker.record("hooks", "timeout", "pipeline deadline exceeded")
 

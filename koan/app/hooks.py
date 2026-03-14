@@ -68,19 +68,27 @@ class HookRegistry:
             if callable(handler):
                 self._handlers.setdefault(event_name, []).append(handler)
 
-    def fire(self, event: str, **kwargs) -> None:
-        """Call all handlers for event, catching exceptions per-handler."""
+    def fire(self, event: str, **kwargs) -> Dict[str, str]:
+        """Call all handlers for event, catching exceptions per-handler.
+
+        Returns a dict mapping failed handler names to error messages.
+        Empty dict means all handlers succeeded.
+        """
+        failures: Dict[str, str] = {}
         handlers = self._handlers.get(event, [])
         for handler in handlers:
+            handler_name = getattr(handler, "__name__", repr(handler))
             try:
                 handler(kwargs)
-            except Exception:
+            except Exception as exc:
+                failures[handler_name] = str(exc)
                 print(
                     f"[hooks] Error in {event} handler "
-                    f"{getattr(handler, '__name__', repr(handler))}:\n"
+                    f"{handler_name}:\n"
                     f"{traceback.format_exc()}",
                     file=sys.stderr,
                 )
+        return failures
 
     def has_hooks(self, event: str) -> bool:
         """Check if any hooks are registered for event."""
@@ -106,10 +114,15 @@ def init_hooks(instance_dir: str) -> None:
     _registry = HookRegistry(hooks_dir)
 
 
-def fire_hook(event: str, **kwargs) -> None:
-    """Fire a hook event. No-op if registry not initialized."""
+def fire_hook(event: str, **kwargs) -> Dict[str, str]:
+    """Fire a hook event. No-op if registry not initialized.
+
+    Returns a dict mapping failed handler names to error messages.
+    Empty dict means all handlers succeeded (or no registry).
+    """
     if _registry is not None:
-        _registry.fire(event, **kwargs)
+        return _registry.fire(event, **kwargs)
+    return {}
 
 
 def get_registry() -> Optional[HookRegistry]:
