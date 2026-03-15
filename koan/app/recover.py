@@ -91,15 +91,22 @@ def recover_missions(instance_dir: str) -> int:
                 remaining_in_progress.append(line)
                 continue
 
-            # Everything from a ### header to the next ### header (or end of
-            # section) belongs to the complex mission — blank lines included.
+            # Blank lines end the current complex mission block.
+            # A ### header starts a complex block; a blank line closes it,
+            # so subsequent "- " items are treated as standalone missions.
+            if stripped == "":
+                if in_complex_mission:
+                    in_complex_mission = False
+                remaining_in_progress.append(line)
+                continue
+
             if in_complex_mission:
                 remaining_in_progress.append(line)
                 continue
 
             if stripped.startswith("- ") and not re.match(r"^- ~~.+~~", stripped):
                 recovered.append(line)
-            elif stripped == "" or stripped == "(aucune)" or stripped == "(none)":
+            elif stripped == "(aucune)" or stripped == "(none)":
                 remaining_in_progress.append(line)
             else:
                 remaining_in_progress.append(line)

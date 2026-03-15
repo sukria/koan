@@ -129,8 +129,12 @@ class TestRecoverMissions:
         assert "Complex Project" in in_progress_section
         assert "Step 2" in in_progress_section
 
-    def test_complex_mission_blank_lines_preserved(self, instance_dir):
-        """Sub-items after internal blank lines in a complex mission stay in-progress."""
+    def test_blank_line_ends_complex_block(self, instance_dir):
+        """A blank line after complex mission sub-items ends the complex block.
+
+        Items after the blank line are treated as standalone simple missions
+        and should be recovered.
+        """
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -145,19 +149,18 @@ class TestRecoverMissions:
         )
 
         count = recover_missions(str(instance_dir))
-        # Step 3 is part of the complex mission — should NOT be recovered
-        assert count == 0
+        # Step 3 follows a blank line — treated as a standalone mission, recovered
+        assert count == 1
 
         content = missions.read_text()
         lines = content.splitlines()
+        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
         in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        done_idx = next(i for i, l in enumerate(lines) if "done" == l.strip().lstrip("#").strip().lower())
-        in_progress_section = "\n".join(lines[in_prog_idx + 1 : done_idx])
-        assert "Complex Project" in in_progress_section
-        assert "Step 3" in in_progress_section
+        pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        assert "Step 3" in pending_section
 
-    def test_complex_then_simple_mission(self, instance_dir):
-        """A simple mission listed after a complex mission via next ### boundary."""
+    def test_two_complex_missions(self, instance_dir):
+        """Two consecutive complex missions both stay in-progress."""
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -165,7 +168,6 @@ class TestRecoverMissions:
                     "### Complex Project\n"
                     "- ~~Step 1~~ done\n"
                     "- Step 2 in progress\n"
-                    "\n"
                     "- Step 3 todo\n"
                     "### Another Complex\n"
                     "- Sub A\n"
@@ -181,12 +183,11 @@ class TestRecoverMissions:
         assert "Complex Project" in content
         assert "Another Complex" in content
 
-    def test_simple_mission_after_complex_not_recovered(self, instance_dir):
-        """A simple '- ' mission after a complex block (no ### separator) stays in-progress.
+    def test_simple_mission_after_complex_recovered(self, instance_dir):
+        """A simple '- ' mission after a complex block (separated by blank line) IS recovered.
 
-        This is an intentional trade-off of header-to-header tracking: simple
-        missions placed after a complex block without their own ### header are
-        treated as part of the complex mission and are NOT recovered.
+        Blank lines end the complex mission block, so subsequent '- ' items
+        are treated as standalone simple missions and moved back to Pending.
         """
         missions = instance_dir / "missions.md"
         missions.write_text(
@@ -202,12 +203,17 @@ class TestRecoverMissions:
         )
 
         count = recover_missions(str(instance_dir))
-        # Simple orphan is absorbed by the complex block — intentionally not recovered
-        assert count == 0
+        assert count == 1
 
         content = missions.read_text()
-        assert "Simple orphan task" in content
-        assert "Complex Project" in content
+        lines = content.splitlines()
+        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
+        pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        assert "Simple orphan task" in pending_section
+        # Complex mission stays in-progress
+        in_progress_section = "\n".join(lines[in_prog_idx + 1 :])
+        assert "Complex Project" in in_progress_section
 
     def test_removes_aucune_placeholder(self, instance_dir):
         """The (none) placeholder is removed from pending when missions are added."""
