@@ -166,7 +166,15 @@ class TestRebaseOntoTarget:
     @patch("app.cli_exec.subprocess.run")
     @patch("app.claude_step._run_git")
     def test_rebase_abort_called_on_failure(self, mock_git, mock_subprocess):
-        mock_git.side_effect = RuntimeError("conflict")
+        call_count = 0
+        def selective_fail(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Odd calls are fetch (succeed), even calls are rebase (fail)
+            if call_count % 2 == 0:
+                raise RuntimeError("conflict")
+            return ""
+        mock_git.side_effect = selective_fail
         _rebase_onto_target("main", "/project")
         # Should call rebase --abort for each failed remote
         abort_calls = [
@@ -180,7 +188,14 @@ class TestRebaseOntoTarget:
     @patch("app.claude_step._run_git")
     def test_rebase_abort_called_with_timeout(self, mock_git, mock_subprocess):
         """git rebase --abort must have a timeout to prevent hangs in cleanup."""
-        mock_git.side_effect = RuntimeError("conflict")
+        call_count = 0
+        def selective_fail(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count % 2 == 0:
+                raise RuntimeError("conflict")
+            return ""
+        mock_git.side_effect = selective_fail
         _rebase_onto_target("main", "/project")
         abort_calls = [
             c
@@ -195,7 +210,14 @@ class TestRebaseOntoTarget:
     @patch("app.claude_step._run_git")
     def test_timeout_caught_and_logged(self, mock_git, mock_subprocess, capsys):
         """TimeoutExpired should be caught (not just Exception) and logged."""
-        mock_git.side_effect = subprocess.TimeoutExpired("git", 60)
+        call_count = 0
+        def selective_fail(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count % 2 == 0:
+                raise subprocess.TimeoutExpired("git", 60)
+            return ""
+        mock_git.side_effect = selective_fail
         result = _rebase_onto_target("main", "/project")
         assert result is None
         captured = capsys.readouterr()
@@ -206,7 +228,14 @@ class TestRebaseOntoTarget:
     @patch("app.claude_step._run_git")
     def test_os_error_caught_and_logged(self, mock_git, mock_subprocess, capsys):
         """OSError (e.g. git not found) should be caught and logged."""
-        mock_git.side_effect = OSError("No such file or directory: 'git'")
+        call_count = 0
+        def selective_fail(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count % 2 == 0:
+                raise OSError("No such file or directory: 'git'")
+            return ""
+        mock_git.side_effect = selective_fail
         result = _rebase_onto_target("main", "/project")
         assert result is None
         captured = capsys.readouterr()

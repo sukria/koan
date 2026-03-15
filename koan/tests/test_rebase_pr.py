@@ -23,6 +23,7 @@ from app.rebase_pr import (
     _is_conflict_failure,
     _ordered_remotes,
     _push_with_fallback,
+    _rebase_with_conflict_resolution,
     _safe_checkout,
 )
 from app.claude_step import _is_permission_error
@@ -144,8 +145,9 @@ class TestCheckoutPrBranch:
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("app.claude_step.subprocess.run", side_effect=mock_run):
-            _checkout_pr_branch("koan/fix", "/project")
+            result = _checkout_pr_branch("koan/fix", "/project")
 
+        assert result == "origin"
         cmds = [c[:3] for c in calls]
         assert ["git", "fetch", "origin"] in cmds
         # Must use -B, not -b or plain checkout
@@ -171,7 +173,7 @@ class TestCheckoutPrBranch:
         assert "-B" in checkout_cmds[0]
 
     def test_falls_back_to_upstream(self):
-        """If origin fetch fails, tries upstream."""
+        """If origin fetch fails, tries upstream and returns 'upstream'."""
         calls = []
         def mock_run(cmd, **kwargs):
             calls.append(cmd)
@@ -182,8 +184,9 @@ class TestCheckoutPrBranch:
             return result
 
         with patch("app.claude_step.subprocess.run", side_effect=mock_run):
-            _checkout_pr_branch("feat/upstream-only", "/project")
+            result = _checkout_pr_branch("feat/upstream-only", "/project")
 
+        assert result == "upstream"
         fetch_cmds = [c for c in calls if c[:2] == ["git", "fetch"]]
         assert ["git", "fetch", "origin", "feat/upstream-only"] in fetch_cmds
         assert ["git", "fetch", "upstream", "feat/upstream-only"] in fetch_cmds
@@ -1204,3 +1207,273 @@ class TestMain:
 
     def test_rejects_empty(self):
         assert _is_conflict_failure("") is False
+
+
+# ---------------------------------------------------------------------------
+# --onto rebase (cross-fork PR support)
+# ---------------------------------------------------------------------------
+
+class TestRebaseOntoTarget_OntoMode:
+    """Tests for --onto rebase when head_remote differs from target remote."""
+
+    def test_uses_onto_when_head_remote_differs(self):
+        """--onto should be used when head_remote != target remote."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_onto_target(
+                "main", "/project",
+                preferred_remote="upstream",
+                head_remote="origin",
+            )
+
+        assert result == "upstream"
+        # Should have fetched both remotes' base branches
+        fetch_cmds = [c for c in calls if c[:2] == ["git", "fetch"]]
+        assert ["git", "fetch", "upstream", "main"] in fetch_cmds
+        assert ["git", "fetch", "origin", "main"] in fetch_cmds
+        # Should use --onto
+        rebase_cmds = [c for c in calls if "rebase" in c and "--abort" not in c]
+        assert len(rebase_cmds) == 1
+        assert "--onto" in rebase_cmds[0]
+        assert "upstream/main" in rebase_cmds[0]
+        assert "origin/main" in rebase_cmds[0]
+
+    def test_plain_rebase_when_head_remote_same_as_target(self):
+        """When head_remote == target remote, use plain rebase (same-repo PR)."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_onto_target(
+                "main", "/project",
+                preferred_remote="origin",
+                head_remote="origin",
+            )
+
+        assert result == "origin"
+        rebase_cmds = [c for c in calls if "rebase" in c and "--abort" not in c]
+        assert len(rebase_cmds) == 1
+        assert "--onto" not in rebase_cmds[0]
+
+    def test_plain_rebase_when_head_remote_is_none(self):
+        """When head_remote is None, use plain rebase."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_onto_target("main", "/project", head_remote=None)
+
+        assert result == "origin"
+        rebase_cmds = [c for c in calls if "rebase" in c and "--abort" not in c]
+        assert len(rebase_cmds) == 1
+        assert "--onto" not in rebase_cmds[0]
+
+    def test_onto_failure_falls_back_to_plain_rebase(self):
+        """If --onto rebase fails, fall back to plain rebase."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            if "rebase" in cmd and "--onto" in cmd:
+                raise RuntimeError("onto rebase conflict")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_onto_target(
+                "main", "/project",
+                preferred_remote="upstream",
+                head_remote="origin",
+            )
+
+        assert result == "upstream"
+        rebase_cmds = [c for c in calls if "rebase" in c and "--abort" not in c]
+        # Should have tried --onto first, then plain rebase
+        assert len(rebase_cmds) == 2
+        assert "--onto" in rebase_cmds[0]
+        assert "--onto" not in rebase_cmds[1]
+
+    def test_onto_head_remote_fetch_failure_falls_back(self):
+        """If fetching head_remote/base fails, fall back to plain rebase."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            # head_remote fetch fails
+            if cmd[:3] == ["git", "fetch", "origin"] and "main" in cmd:
+                raise RuntimeError("fetch failed")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_onto_target(
+                "main", "/project",
+                preferred_remote="upstream",
+                head_remote="origin",
+            )
+
+        assert result == "upstream"
+        # Should have fallen back to plain rebase
+        rebase_cmds = [c for c in calls if "rebase" in c and "--abort" not in c]
+        assert len(rebase_cmds) == 1
+        assert "--onto" not in rebase_cmds[0]
+
+
+class TestRebaseWithConflictResolution_OntoMode:
+    """Tests for --onto rebase in _rebase_with_conflict_resolution."""
+
+    def _base_context(self):
+        return {
+            "title": "Fix", "body": "", "branch": "feat",
+            "base": "main", "diff": "", "review_comments": "",
+            "reviews": "", "issue_comments": "",
+        }
+
+    def test_uses_onto_when_head_remote_differs(self):
+        """--onto should be used when head_remote != preferred_remote."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_with_conflict_resolution(
+                "main", "/project", self._base_context(), [],
+                preferred_remote="upstream",
+                head_remote="origin",
+            )
+
+        assert result == "upstream"
+        rebase_cmds = [c for c in calls if "rebase" in c and "--abort" not in c]
+        assert any("--onto" in c for c in rebase_cmds)
+
+    def test_plain_rebase_when_same_remote(self):
+        """Same-repo PR: head_remote == target, no --onto."""
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_with_conflict_resolution(
+                "main", "/project", self._base_context(), [],
+                preferred_remote="origin",
+                head_remote="origin",
+            )
+
+        assert result == "origin"
+        rebase_cmds = [c for c in calls if "rebase" in c and "--abort" not in c]
+        assert all("--onto" not in c for c in rebase_cmds)
+
+    def test_onto_failure_falls_back_to_plain_rebase(self):
+        """If --onto fails (non-conflict), should fall back to plain rebase."""
+        calls = []
+        rebase_dir = MagicMock()
+        rebase_dir.exists.return_value = False
+
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            if "rebase" in cmd and "--onto" in cmd:
+                raise RuntimeError("onto failed")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run), \
+             patch("app.rebase_pr._has_rebase_in_progress", return_value=False):
+            result = _rebase_with_conflict_resolution(
+                "main", "/project", self._base_context(), [],
+                preferred_remote="upstream",
+                head_remote="origin",
+            )
+
+        assert result == "upstream"
+        rebase_cmds = [c for c in calls if "rebase" in c and "--abort" not in c]
+        plain_rebases = [c for c in rebase_cmds if "--onto" not in c]
+        assert len(plain_rebases) >= 1
+
+
+class TestFetchPrContextHeadOwner:
+    """Tests that fetch_pr_context extracts head_owner."""
+
+    @patch("app.github.subprocess.run")
+    def test_extracts_head_owner(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps({
+                "title": "Fix",
+                "headRefName": "feat",
+                "baseRefName": "main",
+                "state": "OPEN",
+                "author": {"login": "contributor"},
+                "headRepositoryOwner": {"login": "contributor"},
+                "url": "https://github.com/upstream/repo/pull/1",
+            })),
+            MagicMock(returncode=0, stdout=""),  # diff
+            MagicMock(returncode=0, stdout=""),  # review comments
+            MagicMock(returncode=0, stdout=""),  # reviews
+            MagicMock(returncode=0, stdout=""),  # issue comments
+        ]
+
+        context = fetch_pr_context("upstream", "repo", "1")
+        assert context["head_owner"] == "contributor"
+
+    @patch("app.github.subprocess.run")
+    def test_head_owner_missing_defaults_empty(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=json.dumps({
+                "title": "Fix",
+                "headRefName": "feat",
+                "baseRefName": "main",
+            })),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+        ]
+
+        context = fetch_pr_context("o", "r", "1")
+        assert context["head_owner"] == ""
+
+
+class TestPushWithFallbackHeadRemote:
+    """Tests that _push_with_fallback tries head_remote first."""
+
+    def test_tries_head_remote_first(self):
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _push_with_fallback(
+                "feat", "main", "upstream/repo", "1",
+                {"title": "Fix"}, "/project",
+                head_remote="myfork",
+            )
+
+        assert result["success"] is True
+        # First push attempt should be to head_remote
+        push_cmds = [c for c in calls if "push" in c]
+        assert push_cmds[0][2] == "myfork"
+
+    def test_falls_back_to_origin_when_head_remote_fails(self):
+        calls = []
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            if "push" in cmd and cmd[2] == "myfork":
+                raise RuntimeError("push rejected")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _push_with_fallback(
+                "feat", "main", "upstream/repo", "1",
+                {"title": "Fix"}, "/project",
+                head_remote="myfork",
+            )
+
+        assert result["success"] is True
+        push_cmds = [c for c in calls if "push" in c]
+        # Should have tried myfork first (both lease and force), then origin
+        assert any(c[2] == "origin" for c in push_cmds)
