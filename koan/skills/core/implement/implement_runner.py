@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from app.github import fetch_issue_with_comments
-from app.github_url_parser import parse_issue_url
+from app.github_url_parser import parse_github_url, parse_issue_url
 from app.pr_submit import (
     get_current_branch,
     guess_project_name,
@@ -61,9 +61,9 @@ def run_implement(
         from app.notify import send_telegram
         notify_fn = send_telegram
 
-    # Parse issue URL
+    # Parse issue or PR URL (GitHub's issues API works for PRs too)
     try:
-        owner, repo, issue_number = parse_issue_url(issue_url)
+        owner, repo, _url_type, issue_number = parse_github_url(issue_url)
     except ValueError as e:
         return False, str(e)
 
