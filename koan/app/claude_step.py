@@ -38,13 +38,14 @@ def _rebase_onto_target(
     base: str,
     project_path: str,
     preferred_remote: Optional[str] = None,
+    head_remote: Optional[str] = None,
 ) -> Optional[str]:
     """Rebase onto target branch, trying *preferred_remote* first.
 
     When *preferred_remote* is given (e.g. the remote matching the PR's
     target repository), it is tried before the default ``origin`` /
-    ``upstream`` fallbacks.  This avoids rebasing onto a stale fork main
-    when the PR targets an upstream repo.
+    ``upstream`` fallbacks.  When *head_remote* is known and differs from
+    the target remote, uses ``--onto`` to replay only the PR's commits.
 
     Returns:
         Remote name used (e.g. "origin" or "upstream") on success, None on failure.
@@ -58,6 +59,33 @@ def _rebase_onto_target(
     for remote in remotes:
         try:
             _run_git(["git", "fetch", remote, base], cwd=project_path)
+        except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
+            print(f"[claude_step] Fetch {remote}/{base} failed: {e}", file=sys.stderr)
+            continue
+
+        # When head_remote differs from target, use --onto to limit
+        # replay to only the PR's commits.
+        if head_remote and head_remote != remote:
+            try:
+                _run_git(["git", "fetch", head_remote, base], cwd=project_path)
+                _run_git(
+                    ["git", "rebase", "--onto", f"{remote}/{base}",
+                     f"{head_remote}/{base}", "--autostash"],
+                    cwd=project_path,
+                )
+                return remote
+            except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
+                print(f"[claude_step] --onto rebase failed: {e}", file=sys.stderr)
+                subprocess.run(
+                    ["git", "rebase", "--abort"],
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True, cwd=project_path,
+                    timeout=30,
+                )
+                # Fall through to plain rebase
+
+        # Fallback: plain rebase
+        try:
             _run_git(
                 ["git", "rebase", "--autostash", f"{remote}/{base}"],
                 cwd=project_path,

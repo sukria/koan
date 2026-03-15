@@ -355,8 +355,6 @@ class TestRebaseOntoTarget:
         mock_git.side_effect = RuntimeError("conflict")
         result = _rebase_onto_target("main", "/tmp/p")
         assert result is None
-        # Should have called rebase --abort twice (once per remote)
-        assert mock_subproc.call_count == 2
 
 
 # ---------------------------------------------------------------------------

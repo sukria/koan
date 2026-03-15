@@ -43,7 +43,7 @@ def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
     # Fetch PR metadata
     pr_json = run_gh(
         "pr", "view", pr_number, "--repo", full_repo, "--json",
-        "title,body,headRefName,baseRefName,state,author,url",
+        "title,body,headRefName,baseRefName,state,author,url,headRepositoryOwner",
     )
 
     # Fetch PR diff (may fail for very large PRs — GitHub HTTP 406)
@@ -94,6 +94,7 @@ def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
         "base": metadata.get("baseRefName", "main"),
         "state": metadata.get("state", ""),
         "author": metadata.get("author", {}).get("login", ""),
+        "head_owner": metadata.get("headRepositoryOwner", {}).get("login", ""),
         "url": metadata.get("url", ""),
         "diff": truncate_text(diff, 8000),
         "review_comments": truncate_text(comments_json, 4000),
@@ -222,6 +223,10 @@ def run_rebase(
     # so we rebase against the correct upstream, not a stale fork.
     base_remote = _find_remote_for_repo(owner, repo, project_path)
 
+    # Determine which remote hosts the PR's head branch (the fork)
+    head_owner = context.get("head_owner", "")
+    head_remote = _find_remote_for_repo(head_owner, repo, project_path) if head_owner else None
+
     # Log comment summary for awareness
     comment_summary = build_comment_summary(context)
     if comment_summary and "No comments" not in comment_summary:
@@ -234,9 +239,12 @@ def run_rebase(
     original_branch = _get_current_branch(project_path)
 
     try:
-        _checkout_pr_branch(branch, project_path)
+        fetch_remote = _checkout_pr_branch(branch, project_path)
     except Exception as e:
         return False, f"Failed to checkout branch `{branch}`: {e}"
+
+    # Use API-discovered head_remote, fall back to checkout's fetch_remote
+    effective_head_remote = head_remote or fetch_remote
 
     # ── Step 3: Rebase onto target branch ─────────────────────────────
     notify_fn(f"Rebasing `{branch}` onto `{base}`...")
@@ -244,6 +252,7 @@ def run_rebase(
         base, project_path, context, actions_log,
         notify_fn=notify_fn, skill_dir=skill_dir,
         preferred_remote=base_remote,
+        head_remote=effective_head_remote,
     )
     if rebase_remote:
         actions_log.append(f"Rebased `{branch}` onto `{rebase_remote}/{base}`")
@@ -281,7 +290,8 @@ def run_rebase(
     # ── Step 6: Push the result ───────────────────────────────────────
     notify_fn(f"Pushing `{branch}`...")
     push_result = _push_with_fallback(
-        branch, base, full_repo, pr_number, context, project_path
+        branch, base, full_repo, pr_number, context, project_path,
+        head_remote=effective_head_remote,
     )
     actions_log.extend(push_result["actions"])
 
@@ -332,14 +342,19 @@ def _rebase_with_conflict_resolution(
     skill_dir: Optional[Path] = None,
     max_conflict_rounds: int = 5,
     preferred_remote: Optional[str] = None,
+    head_remote: Optional[str] = None,
 ) -> Optional[str]:
     """Rebase onto target branch, resolving conflicts via Claude if needed.
 
     Tries the *preferred_remote* first (matched from the PR's target repo),
-    then falls back to ``origin`` and ``upstream``.  When ``git rebase`` hits
-    conflicts, Claude is invoked to resolve the conflicted files, they are
-    staged, and the rebase is continued.  This loop repeats for up to
-    *max_conflict_rounds* per remote (one round per conflicting commit).
+    then falls back to ``origin`` and ``upstream``.  When *head_remote* is
+    known and differs from the target remote, uses ``--onto`` to replay only
+    the PR's commits (between ``head_remote/base`` and HEAD) onto the target.
+
+    When ``git rebase`` hits conflicts, Claude is invoked to resolve the
+    conflicted files, they are staged, and the rebase is continued.  This
+    loop repeats for up to *max_conflict_rounds* per remote (one round per
+    conflicting commit).
 
     Returns:
         Remote name used (e.g. "origin") on success, None on total failure.
@@ -351,7 +366,33 @@ def _rebase_with_conflict_resolution(
             print(f"[rebase_pr] fetch {remote}/{base} failed: {e}", file=sys.stderr)
             continue
 
-        # Attempt rebase
+        # When head_remote differs from the target remote, use --onto to
+        # limit replay to only the PR's commits (avoids replaying upstream
+        # history when the fork has diverged).
+        if head_remote and head_remote != remote:
+            try:
+                _run_git(["git", "fetch", head_remote, base], cwd=project_path)
+                _run_git(
+                    ["git", "rebase", "--onto", f"{remote}/{base}",
+                     f"{head_remote}/{base}", "--autostash"],
+                    cwd=project_path,
+                )
+                return remote  # Clean --onto rebase
+            except Exception as e:
+                print(f"[rebase_pr] --onto rebase failed: {e}", file=sys.stderr)
+                # Check if we're in a conflicted rebase state from --onto
+                if _has_rebase_in_progress(project_path):
+                    resolved = _resolve_rebase_conflicts(
+                        base, remote, project_path, context, actions_log,
+                        notify_fn=notify_fn, skill_dir=skill_dir,
+                        max_rounds=max_conflict_rounds,
+                    )
+                    if resolved:
+                        return remote
+                    _abort_rebase(project_path)
+                # Fall through to plain rebase
+
+        # Fallback: plain rebase (same repo PR, or --onto failed)
         try:
             _run_git(
                 ["git", "rebase", "--autostash", f"{remote}/{base}"],
@@ -569,12 +610,15 @@ def _apply_review_feedback(
 
 
 
-def _checkout_pr_branch(branch: str, project_path: str) -> None:
+def _checkout_pr_branch(branch: str, project_path: str) -> str:
     """Checkout the PR branch, fetching from origin or upstream.
 
     Uses ``git checkout -B`` to create or reset the local branch,
     ensuring a stale local branch with the same name never blocks
     the checkout.
+
+    Returns:
+        The remote name used for the fetch (e.g. ``"origin"`` or ``"upstream"``).
     """
     # Try origin first, then upstream (for cross-repo PRs)
     fetch_remote = "origin"
@@ -596,6 +640,7 @@ def _checkout_pr_branch(branch: str, project_path: str) -> None:
         ["git", "checkout", "-B", branch, f"{fetch_remote}/{branch}"],
         cwd=project_path,
     )
+    return fetch_remote
 
 
 def _push_with_fallback(
@@ -605,17 +650,26 @@ def _push_with_fallback(
     pr_number: str,
     context: dict,
     project_path: str,
+    head_remote: Optional[str] = None,
 ) -> dict:
     """Push rebased branch, always reusing the existing PR branch.
 
     Rebase never creates a new branch or PR — it always pushes to the
-    same branch to recycle the existing pull request.  Tries
-    ``--force-with-lease`` first, then plain ``--force`` as fallback.
+    same branch to recycle the existing pull request.  Tries *head_remote*
+    first (where the PR branch lives), then ``origin`` and ``upstream``.
+    Uses ``--force-with-lease`` first, then plain ``--force`` as fallback.
     """
     actions: List[str] = []
 
+    remotes: List[str] = []
+    if head_remote:
+        remotes.append(head_remote)
+    for r in ("origin", "upstream"):
+        if r not in remotes:
+            remotes.append(r)
+
     last_error = ""
-    for remote in ("origin", "upstream"):
+    for remote in remotes:
         # Try safe force-push first
         try:
             _run_git(

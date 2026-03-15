@@ -214,6 +214,10 @@ def run_pr_review(
     # Determine which local remote corresponds to the PR's target repo
     base_remote = _find_remote_for_repo(owner, repo, project_path)
 
+    # Determine which remote hosts the PR's head branch (the fork)
+    head_owner = context.get("head_owner", "")
+    head_remote = _find_remote_for_repo(head_owner, repo, project_path) if head_owner else None
+
     # ── Step 2: Checkout and rebase onto target branch ────────────────
     notify_fn(f"Rebasing `{branch}` onto `{base}`...")
     try:
@@ -224,7 +228,10 @@ def run_pr_review(
         return False, f"Failed to checkout branch {branch}: {e}"
 
     # Rebase onto the upstream target branch (prefers the matched remote)
-    rebase_remote = _rebase_onto_target(base, project_path, preferred_remote=base_remote)
+    rebase_remote = _rebase_onto_target(
+        base, project_path, preferred_remote=base_remote,
+        head_remote=head_remote,
+    )
     if rebase_remote:
         actions_log.append(f"Rebased `{branch}` onto `{rebase_remote}/{base}`")
     else:
