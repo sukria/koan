@@ -175,29 +175,31 @@ class TestRestartAsUpdateAlias:
 
     @patch("app.command_handlers.send_telegram")
     def test_handle_command_restart_end_to_end(self, mock_send, tmp_path):
-        """End-to-end: handle_command('/restart') → skill dispatch → handler.
+        """End-to-end: handle_command('/restart') → restart skill → handler.
 
-        This test does NOT mock _dispatch_skill — it verifies the full path
-        from command routing through skill execution.
+        /restart is now a standalone skill that requests a restart without
+        pulling code. This test verifies the full path from command routing
+        through the restart skill execution.
         """
-        from unittest.mock import MagicMock
         import app.command_handlers as ch
         from app.bridge_state import _reset_registry
-        from app.update_manager import UpdateResult
 
         _reset_registry()
-        with patch.object(ch, "KOAN_ROOT", tmp_path), \
-             patch.object(ch, "INSTANCE_DIR", tmp_path / "instance"), \
-             patch("app.update_manager.pull_upstream") as mock_pull:
-            mock_pull.return_value = UpdateResult(
-                success=True, old_commit="abc", new_commit="abc",
-                commits_pulled=0,
-            )
-            ch.handle_command("/restart")
+        # restart is a worker skill — set up a synchronous worker callback
+        old_cb = ch._run_in_worker_cb
+        ch._run_in_worker_cb = lambda fn: fn()
+        try:
+            with patch.object(ch, "KOAN_ROOT", tmp_path), \
+                 patch.object(ch, "INSTANCE_DIR", tmp_path / "instance"), \
+                 patch("app.restart_manager.request_restart") as mock_restart:
+                ch.handle_command("/restart")
 
-        assert mock_send.called
-        assert "up to date" in mock_send.call_args[0][0]
-        _reset_registry()
+            assert mock_send.called
+            assert "Restart requested" in mock_send.call_args[0][0]
+            mock_restart.assert_called_once()
+        finally:
+            ch._run_in_worker_cb = old_cb
+            _reset_registry()
 
     @patch("app.command_handlers.handle_resume")
     def test_restart_does_not_call_resume(self, mock_resume):
@@ -239,11 +241,11 @@ class TestRestartLoopPrevention:
         assert check_restart(str(tmp_path), since=startup_time) is True
 
 
-class TestHelpListsRestartAsAlias:
-    """Verify /restart appears in help as an alias of /update."""
+class TestRestartIsStandaloneSkill:
+    """Verify /restart is a standalone skill, not an alias of /update."""
 
     @patch("app.command_handlers.send_telegram")
-    def test_help_shows_restart_as_update_alias(self, mock_send):
+    def test_help_shows_restart_not_as_resume_alias(self, mock_send):
         from app.command_handlers import _handle_help
         _handle_help()
         help_text = mock_send.call_args[0][0]
@@ -252,16 +254,17 @@ class TestHelpListsRestartAsAlias:
             if "/resume" in line and "alias" in line:
                 assert "/restart" not in line
 
-    def test_restart_in_update_skill_aliases(self):
-        """The skill registry should list /restart as an alias of /update."""
+    def test_restart_is_separate_skill(self):
+        """The skill registry should list /restart as its own skill."""
         from app.skills import build_registry
         registry = build_registry()
         skill = registry.find_by_command("restart")
         assert skill is not None
-        assert skill.name == "update"
-        # restart is an alias, not a separate command
-        assert len(skill.commands) == 1
-        assert "restart" in skill.commands[0].aliases
+        assert skill.name == "restart"
+        # restart is a standalone skill, not an alias of update
+        update_skill = registry.find_by_command("update")
+        assert update_skill.name == "update"
+        assert skill.name != update_skill.name
 
 
 class TestMainLoopRestartDetection:

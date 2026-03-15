@@ -8,7 +8,7 @@ audience: bridge
 commands:
   - name: update
     description: Pull latest code from upstream and restart both processes
-    aliases: [upgrade, restart]
-    usage: "/update -- pull latest code and restart (alias: /restart, /upgrade)"
+    aliases: [upgrade]
+    usage: "/update -- pull latest code and restart (alias: /upgrade)"
 handler: handler.py
 ---

@@ -876,12 +876,21 @@ Kōan supports multiple CLI backends. Configure globally via `KOAN_CLI_PROVIDER`
 
 **`/update`** — Pull the latest Kōan code from upstream and restart.
 
-- **Aliases:** `/upgrade`, `/restart`
+- **Aliases:** `/upgrade`
+- Only restarts when new code is pulled. Use `/restart` to force a restart without pulling.
 
 <details>
 <summary>Use cases</summary>
 
 - `/update` — Get the latest features and fixes
+</details>
+
+**`/restart`** — Restart both agent and bridge processes without pulling new code.
+
+<details>
+<summary>Use cases</summary>
+
+- `/restart` — Force a restart when Kōan is already up to date but you need a fresh start
 </details>
 
 **`/snapshot`** — Export memory state to a portable snapshot file for backup or migration.
@@ -1071,7 +1080,8 @@ All commands at a glance. **Tier:** B = Beginner, I = Intermediate, P = Power Us
 | `/french` | `/fr`, `/francais`, `/français` | P | Switch to French |
 | `/english` | `/en`, `/anglais` | P | Switch to English |
 | `/shutdown` | — | P | Shutdown all processes |
-| `/update` | `/upgrade`, `/restart` | P | Update Kōan and restart |
+| `/update` | `/upgrade` | P | Update Kōan and restart |
+| `/restart` | — | P | Restart processes (no code pull) |
 | `/snapshot` | — | P | Export memory state |
 | `/add_project <url>` | `/add_project` | P | Add a project from GitHub |
 | `/profile <project>` | `/perf`, `/benchmark` | P | Performance profiling mission |
