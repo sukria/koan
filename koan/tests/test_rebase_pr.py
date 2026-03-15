@@ -170,6 +170,25 @@ class TestCheckoutPrBranch:
         assert len(checkout_cmds) == 1
         assert "-B" in checkout_cmds[0]
 
+    def test_returns_origin_when_origin_succeeds(self):
+        """Returns 'origin' when fetch from origin succeeds."""
+        mock_result = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("app.claude_step.subprocess.run", return_value=mock_result):
+            result = _checkout_pr_branch("feat/test", "/project")
+            assert result == "origin"
+
+    def test_returns_upstream_on_fallback(self):
+        """Returns 'upstream' when origin fails and upstream succeeds."""
+        def mock_run(cmd, **kwargs):
+            result = MagicMock(returncode=0, stdout="", stderr="")
+            if cmd[:3] == ["git", "fetch", "origin"]:
+                raise RuntimeError("remote ref not found")
+            return result
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _checkout_pr_branch("feat/test", "/project")
+            assert result == "upstream"
+
     def test_falls_back_to_upstream(self):
         """If origin fetch fails, tries upstream."""
         calls = []
@@ -236,6 +255,62 @@ class TestRebaseOntoTarget:
         with patch("app.claude_step.subprocess.run", side_effect=mock_run):
             result = _rebase_onto_target("main", "/project")
             assert result is None
+
+    def test_uses_onto_when_branch_remote_differs(self):
+        """When branch_remote != target remote, --onto is used."""
+        calls = []
+
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_onto_target(
+                "main", "/project", preferred_remote="upstream",
+                branch_remote="origin",
+            )
+            assert result == "upstream"
+            # Find the rebase command
+            rebase_calls = [c for c in calls if "rebase" in c and "--abort" not in c]
+            assert len(rebase_calls) == 1
+            rebase_cmd = rebase_calls[0]
+            assert "--onto" in rebase_cmd
+            assert "upstream/main" in rebase_cmd
+            assert "origin/main" in rebase_cmd
+
+    def test_no_onto_when_same_remote(self):
+        """When branch_remote == target remote, plain rebase is used."""
+        calls = []
+
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_onto_target(
+                "main", "/project", preferred_remote="origin",
+                branch_remote="origin",
+            )
+            assert result == "origin"
+            rebase_calls = [c for c in calls if "rebase" in c and "--abort" not in c]
+            assert len(rebase_calls) == 1
+            rebase_cmd = rebase_calls[0]
+            assert "--onto" not in rebase_cmd
+
+    def test_no_onto_when_branch_remote_none(self):
+        """When branch_remote is None, plain rebase is used (backward compat)."""
+        calls = []
+
+        def mock_run(cmd, **kwargs):
+            calls.append(cmd)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("app.claude_step.subprocess.run", side_effect=mock_run):
+            result = _rebase_onto_target("main", "/project")
+            assert result == "origin"
+            rebase_calls = [c for c in calls if "rebase" in c and "--abort" not in c]
+            assert len(rebase_calls) == 1
+            assert "--onto" not in rebase_calls[0]
 
 
 # ---------------------------------------------------------------------------

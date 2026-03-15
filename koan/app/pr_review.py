@@ -223,8 +223,12 @@ def run_pr_review(
     except Exception as e:
         return False, f"Failed to checkout branch {branch}: {e}"
 
-    # Rebase onto the upstream target branch (prefers the matched remote)
-    rebase_remote = _rebase_onto_target(base, project_path, preferred_remote=base_remote)
+    # Rebase onto the upstream target branch (prefers the matched remote).
+    # Branch was fetched from origin — pass as branch_remote so --onto
+    # limits the rebase to only the PR's own commits.
+    rebase_remote = _rebase_onto_target(
+        base, project_path, preferred_remote=base_remote, branch_remote="origin",
+    )
     if rebase_remote:
         actions_log.append(f"Rebased `{branch}` onto `{rebase_remote}/{base}`")
     else:

@@ -234,7 +234,7 @@ def run_rebase(
     original_branch = _get_current_branch(project_path)
 
     try:
-        _checkout_pr_branch(branch, project_path)
+        branch_remote = _checkout_pr_branch(branch, project_path)
     except Exception as e:
         return False, f"Failed to checkout branch `{branch}`: {e}"
 
@@ -244,6 +244,7 @@ def run_rebase(
         base, project_path, context, actions_log,
         notify_fn=notify_fn, skill_dir=skill_dir,
         preferred_remote=base_remote,
+        branch_remote=branch_remote,
     )
     if rebase_remote:
         actions_log.append(f"Rebased `{branch}` onto `{rebase_remote}/{base}`")
@@ -332,6 +333,7 @@ def _rebase_with_conflict_resolution(
     skill_dir: Optional[Path] = None,
     max_conflict_rounds: int = 5,
     preferred_remote: Optional[str] = None,
+    branch_remote: Optional[str] = None,
 ) -> Optional[str]:
     """Rebase onto target branch, resolving conflicts via Claude if needed.
 
@@ -340,6 +342,13 @@ def _rebase_with_conflict_resolution(
     conflicts, Claude is invoked to resolve the conflicted files, they are
     staged, and the rebase is continued.  This loop repeats for up to
     *max_conflict_rounds* per remote (one round per conflicting commit).
+
+    Uses ``--onto`` when *branch_remote* differs from the target remote to
+    avoid replaying the entire fork history.  For example, when a PR branch
+    lives on ``origin`` (a fork) but targets ``upstream/main``, plain
+    ``git rebase upstream/main`` would replay every commit since the fork
+    diverged.  With ``--onto``, only commits between ``origin/main`` and
+    HEAD (the actual PR commits) are replayed onto ``upstream/main``.
 
     Returns:
         Remote name used (e.g. "origin") on success, None on total failure.
@@ -351,12 +360,27 @@ def _rebase_with_conflict_resolution(
             print(f"[rebase_pr] fetch {remote}/{base} failed: {e}", file=sys.stderr)
             continue
 
+        # Build rebase command.  When the branch was fetched from a
+        # different remote than the rebase target, use --onto so only
+        # the PR's own commits are replayed (not the entire fork history).
+        rebase_cmd = ["git", "rebase", "--autostash"]
+        if branch_remote and branch_remote != remote:
+            # Ensure we have the fork's base ref for the --onto boundary
+            try:
+                _run_git(
+                    ["git", "fetch", branch_remote, base], cwd=project_path,
+                )
+            except Exception:
+                pass  # May already be fetched; fall through to rebase
+            rebase_cmd += [
+                "--onto", f"{remote}/{base}", f"{branch_remote}/{base}",
+            ]
+        else:
+            rebase_cmd.append(f"{remote}/{base}")
+
         # Attempt rebase
         try:
-            _run_git(
-                ["git", "rebase", "--autostash", f"{remote}/{base}"],
-                cwd=project_path,
-            )
+            _run_git(rebase_cmd, cwd=project_path)
             return remote  # Clean rebase — no conflicts
         except Exception as e:
             print(f"[rebase_pr] Rebase onto {remote}/{base} failed: {e}", file=sys.stderr)
@@ -569,12 +593,15 @@ def _apply_review_feedback(
 
 
 
-def _checkout_pr_branch(branch: str, project_path: str) -> None:
+def _checkout_pr_branch(branch: str, project_path: str) -> str:
     """Checkout the PR branch, fetching from origin or upstream.
 
     Uses ``git checkout -B`` to create or reset the local branch,
     ensuring a stale local branch with the same name never blocks
     the checkout.
+
+    Returns:
+        The remote name the branch was fetched from (e.g. ``"origin"``).
     """
     # Try origin first, then upstream (for cross-repo PRs)
     fetch_remote = "origin"
@@ -596,6 +623,7 @@ def _checkout_pr_branch(branch: str, project_path: str) -> None:
         ["git", "checkout", "-B", branch, f"{fetch_remote}/{branch}"],
         cwd=project_path,
     )
+    return fetch_remote
 
 
 def _push_with_fallback(

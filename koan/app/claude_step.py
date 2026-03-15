@@ -38,6 +38,7 @@ def _rebase_onto_target(
     base: str,
     project_path: str,
     preferred_remote: Optional[str] = None,
+    branch_remote: Optional[str] = None,
 ) -> Optional[str]:
     """Rebase onto target branch, trying *preferred_remote* first.
 
@@ -45,6 +46,9 @@ def _rebase_onto_target(
     target repository), it is tried before the default ``origin`` /
     ``upstream`` fallbacks.  This avoids rebasing onto a stale fork main
     when the PR targets an upstream repo.
+
+    When *branch_remote* differs from the target remote, uses ``--onto``
+    to replay only the PR's own commits rather than the entire fork history.
 
     Returns:
         Remote name used (e.g. "origin" or "upstream") on success, None on failure.
@@ -58,10 +62,23 @@ def _rebase_onto_target(
     for remote in remotes:
         try:
             _run_git(["git", "fetch", remote, base], cwd=project_path)
-            _run_git(
-                ["git", "rebase", "--autostash", f"{remote}/{base}"],
-                cwd=project_path,
-            )
+
+            rebase_cmd = ["git", "rebase", "--autostash"]
+            if branch_remote and branch_remote != remote:
+                try:
+                    _run_git(
+                        ["git", "fetch", branch_remote, base],
+                        cwd=project_path,
+                    )
+                except Exception:
+                    pass
+                rebase_cmd += [
+                    "--onto", f"{remote}/{base}", f"{branch_remote}/{base}",
+                ]
+            else:
+                rebase_cmd.append(f"{remote}/{base}")
+
+            _run_git(rebase_cmd, cwd=project_path)
             return remote
         except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
             print(f"[claude_step] Rebase onto {remote}/{base} failed: {e}", file=sys.stderr)
