@@ -662,6 +662,7 @@ def api_state_stream():
 
     Polls signal files every 2s, sends an event when state changes.
     Sends a heartbeat comment every 15s to keep the connection alive.
+    Includes attention_count (cached at 30s TTL) in each payload.
     """
     def generate():
         last_json = None
@@ -670,6 +671,13 @@ def api_state_stream():
         while True:
             try:
                 state = get_agent_state()
+                # Add attention count (cheap — uses 30s cache)
+                try:
+                    from app.attention import get_attention_count
+                    state["attention_count"] = get_attention_count(str(KOAN_ROOT))
+                except Exception as e:
+                    print(f"[dashboard] attention count error: {e}", file=sys.stderr)
+                    state["attention_count"] = 0
                 state_json = json.dumps(state, sort_keys=True)
                 if state_json != last_json:
                     last_json = state_json
@@ -865,6 +873,29 @@ def api_missions_edit():
         })
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/api/attention")
+def api_attention():
+    """JSON list of attention items requiring human action."""
+    from app.attention import get_attention_items
+
+    project = request.args.get("project", "")
+    items = get_attention_items(str(KOAN_ROOT), project_filter=project)
+    return jsonify({"items": items})
+
+
+@app.route("/api/attention/dismiss", methods=["POST"])
+def api_attention_dismiss():
+    """Dismiss an attention item by ID."""
+    from app.attention import dismiss_item
+
+    data = request.get_json(silent=True) or {}
+    item_id = data.get("id", "").strip()
+    if not item_id:
+        return jsonify({"ok": False, "error": "Missing id"}), 400
+    dismiss_item(str(KOAN_ROOT), item_id)
+    return jsonify({"ok": True})
 
 
 @app.route("/prs")

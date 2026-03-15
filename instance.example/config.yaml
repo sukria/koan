@@ -221,3 +221,10 @@ usage:
 #                                    # When enabled, unrecognized commands are sent to Claude
 #                                    # for intent classification before falling back to error.
 #                                    # Per-project override available in projects.yaml.
+
+# Dashboard attention zone — GitHub @mention notifications
+# When true, the dashboard attention zone also shows unread GitHub @mention
+# notifications (reason: mention or review_requested). Requires github_url
+# to be set in projects.yaml and the gh CLI to be authenticated.
+# Default: false (avoids GitHub API calls for users who haven't configured it).
+# attention_github_notifications: false
