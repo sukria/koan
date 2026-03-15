@@ -1,4 +1,4 @@
-"""Handler for /update command (aliases: /restart, /upgrade).
+"""Handler for /update command (alias: /upgrade).
 
 Pulls latest code from upstream/main, then restarts both processes.
 """
@@ -19,7 +19,7 @@ def handle(ctx: SkillContext) -> str:
         return f"❌ Update failed: {result.error}"
 
     if not result.changed:
-        return "✅ Already up to date. No restart needed."
+        return "✅ Already up to date. No restart needed. Use /restart if needed."
 
     # New code pulled -- clear pause and restart
     remove_pause(str(ctx.koan_root))

@@ -186,28 +186,30 @@ class TestSkillRegistration:
         assert handler.exists()
 
     def test_skill_discoverable(self):
-        """The skill registry should find /update, /restart, /upgrade."""
+        """The skill registry should find /update, /upgrade, and /restart (separate)."""
         from app.skills import build_registry
         registry = build_registry()
         update_skill = registry.find_by_command("update")
         assert update_skill is not None
 
-        restart_skill = registry.find_by_command("restart")
-        assert restart_skill is not None
-
         upgrade_skill = registry.find_by_command("upgrade")
         assert upgrade_skill is not None
 
-        # All should resolve to the same skill
-        assert update_skill.name == restart_skill.name == upgrade_skill.name == "update"
+        # /update and /upgrade resolve to the same skill
+        assert update_skill.name == upgrade_skill.name == "update"
 
-    def test_restart_is_alias_not_separate_command(self):
-        """/restart should be an alias of /update, not a separate command entry."""
+        # /restart is now a separate skill
+        restart_skill = registry.find_by_command("restart")
+        assert restart_skill is not None
+        assert restart_skill.name == "restart"
+
+    def test_restart_is_separate_skill(self):
+        """/restart should be a separate skill, not an alias of /update."""
         from app.skills import build_registry
         registry = build_registry()
-        skill = registry.find_by_command("restart")
-        assert skill is not None
-        # The skill should have a single command named "update"
-        assert len(skill.commands) == 1
-        assert skill.commands[0].name == "update"
-        assert "restart" in skill.commands[0].aliases
+        restart_skill = registry.find_by_command("restart")
+        assert restart_skill is not None
+        assert restart_skill.name == "restart"
+        # update should not have restart as an alias
+        update_skill = registry.find_by_command("update")
+        assert "restart" not in update_skill.commands[0].aliases
