@@ -3,6 +3,9 @@
 {% block content %}
 <h1>Dashboard</h1>
 
+{# Attention zone — rendered by JS after /api/attention fetch #}
+<div id="attention-zone" class="attention-zone" style="display:none;"></div>
+
 <div class="grid">
     <div class="card">
         <div class="stat-label">Status</div>
@@ -228,6 +231,126 @@
             })
             .catch(() => {});
     }, 10000);
+})();
+</script>
+
+<script>
+// Attention zone
+(function() {
+    const zone = document.getElementById('attention-zone');
+    if (!zone) return;
+
+    const MAX_VISIBLE = 5;
+    const SOURCE_ICONS = {
+        mission: '❌',
+        pr: '🔀',
+        quota: '⏸',
+        github: '💬',
+    };
+
+    function formatAge(seconds) {
+        if (!seconds) return '';
+        if (seconds < 60) return seconds + 's ago';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+        return Math.floor(seconds / 86400) + 'd ago';
+    }
+
+    function renderItem(item) {
+        const icon = SOURCE_ICONS[item.source] || '•';
+        const ageStr = formatAge(item.age_seconds);
+        const metaParts = [];
+        if (item.detail) metaParts.push(item.detail);
+        if (ageStr) metaParts.push(ageStr);
+
+        const titleHtml = item.url
+            ? `<a href="${item.url}" target="_blank" rel="noopener">${escHtml(item.title)}</a>`
+            : escHtml(item.title);
+
+        const div = document.createElement('div');
+        div.className = `attention-item severity-${item.severity}`;
+        div.dataset.id = item.id;
+        div.innerHTML =
+            `<span class="attention-item-icon">${icon}</span>` +
+            `<div class="attention-item-body">` +
+            `  <div class="attention-item-title">${titleHtml}</div>` +
+            (metaParts.length ? `  <div class="attention-item-meta">${escHtml(metaParts.join(' · '))}</div>` : '') +
+            `</div>` +
+            `<button class="attention-item-dismiss" title="Dismiss" data-id="${escAttr(item.id)}">×</button>`;
+        return div;
+    }
+
+    function escHtml(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function escAttr(s) {
+        return String(s).replace(/"/g,'&quot;');
+    }
+
+    function renderZone(items) {
+        zone.innerHTML = '';
+        if (!items || items.length === 0) {
+            zone.style.display = 'none';
+            return;
+        }
+        zone.style.display = '';
+
+        const visible = items.slice(0, MAX_VISIBLE);
+        const hidden = items.slice(MAX_VISIBLE);
+
+        visible.forEach(item => zone.appendChild(renderItem(item)));
+
+        if (hidden.length > 0) {
+            const moreBtn = document.createElement('button');
+            moreBtn.className = 'attention-show-more';
+            moreBtn.textContent = `Show ${hidden.length} more…`;
+            moreBtn.addEventListener('click', function() {
+                hidden.forEach(item => zone.insertBefore(renderItem(item), moreBtn));
+                moreBtn.remove();
+            });
+            zone.appendChild(moreBtn);
+        }
+    }
+
+    function dismissItem(id) {
+        fetch('/api/attention/dismiss', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: id}),
+        }).then(() => {
+            const el = zone.querySelector(`[data-id="${CSS.escape(id)}"]`);
+            if (el && el.classList.contains('attention-item')) {
+                el.style.opacity = '0';
+                setTimeout(() => {
+                    el.remove();
+                    // Hide zone if empty
+                    const remaining = zone.querySelectorAll('.attention-item');
+                    if (!remaining.length) zone.style.display = 'none';
+                }, 300);
+            }
+        }).catch(() => {});
+    }
+
+    zone.addEventListener('click', function(e) {
+        const btn = e.target.closest('.attention-item-dismiss');
+        if (btn) {
+            e.preventDefault();
+            dismissItem(btn.dataset.id);
+        }
+    });
+
+    function loadAttention() {
+        const params = new URLSearchParams(window.location.search);
+        const project = params.get('project') || '';
+        const url = project ? `/api/attention?project=${encodeURIComponent(project)}` : '/api/attention';
+        fetch(url)
+            .then(r => r.json())
+            .then(data => renderZone(data.items || []))
+            .catch(() => {});
+    }
+
+    loadAttention();
+    setInterval(loadAttention, 30000);
 })();
 </script>
 {% endblock %}

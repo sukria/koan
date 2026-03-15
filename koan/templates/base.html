@@ -292,12 +292,91 @@
             animation: spin 0.6s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        /* Attention zone */
+        .attention-zone {
+            margin-bottom: 1.5rem;
+        }
+        .attention-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.65rem 1rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            transition: opacity 0.3s ease;
+        }
+        .attention-item.severity-critical { border-left-color: var(--red); }
+        .attention-item.severity-warning { border-left-color: var(--orange); }
+        .attention-item.severity-info { border-left-color: var(--accent); }
+        .attention-item-icon {
+            font-size: 0.9rem;
+            margin-top: 0.1rem;
+            flex-shrink: 0;
+        }
+        .attention-item-body {
+            flex: 1;
+            min-width: 0;
+        }
+        .attention-item-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .attention-item-title a {
+            color: var(--text);
+            text-decoration: none;
+        }
+        .attention-item-title a:hover { text-decoration: underline; }
+        .attention-item-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.1rem;
+        }
+        .attention-item-dismiss {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 0 0.25rem;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .attention-item-dismiss:hover { color: var(--text); opacity: 1; }
+        .attention-show-more {
+            font-size: 0.8rem;
+            color: var(--accent);
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 0;
+            margin-top: 0.25rem;
+        }
+        .attention-show-more:hover { text-decoration: underline; }
+        /* Nav attention badge */
+        .nav-attention-badge {
+            display: inline-block;
+            background: var(--red);
+            color: #fff;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 0.05rem 0.35rem;
+            margin-left: 0.3rem;
+            vertical-align: middle;
+            line-height: 1.4;
+        }
     </style>
 </head>
 <body>
     <nav>
         <a href="/" class="logo">Kōan</a>
-        <a href="/" {% if request.path == '/' %}class="active"{% endif %}>Dashboard</a>
+        <a href="/" {% if request.path == '/' %}class="active"{% endif %} id="nav-dashboard">Dashboard<span id="nav-attention-badge" class="nav-attention-badge" style="display:none;"></span></a>
         <a href="/missions" {% if request.path == '/missions' %}class="active"{% endif %}>Missions</a>
         <a href="/chat" {% if request.path == '/chat' %}class="active"{% endif %}>Chat</a>
         <a href="/usage" {% if request.path == '/usage' %}class="active"{% endif %}>Usage</a>
@@ -311,6 +390,37 @@
     <main>
         {% block content %}{% endblock %}
     </main>
+    <script>
+    // Nav attention badge — update from SSE state stream
+    (function() {
+        var badge = document.getElementById('nav-attention-badge');
+        if (!badge) return;
+        function updateBadge(count) {
+            if (count > 0) {
+                badge.textContent = count;
+                badge.style.display = '';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        function connectAttentionSSE() {
+            var src = new EventSource('/api/state/stream');
+            src.onmessage = function(e) {
+                try {
+                    var data = JSON.parse(e.data);
+                    if (typeof data.attention_count === 'number') {
+                        updateBadge(data.attention_count);
+                    }
+                } catch(ex) {}
+            };
+            src.onerror = function() {
+                src.close();
+                setTimeout(connectAttentionSSE, 5000);
+            };
+        }
+        connectAttentionSSE();
+    })();
+    </script>
     <script>
     (function() {
         var sel = document.getElementById('project-filter');
