@@ -246,6 +246,86 @@ class TestSummarize:
         assert "claude-opus-4-20250514" in result
 
 
+class TestCacheTracking:
+    """Tests for prompt cache observability in cost tracking."""
+
+    def test_record_with_cache_fields(self, instance_dir):
+        """Cache fields should be recorded in JSONL when non-zero."""
+        record_usage(
+            instance_dir, "koan", "claude-opus-4-6",
+            24, 5916, "deep", "Fix bug",
+            cache_creation_input_tokens=41777,
+            cache_read_input_tokens=1036218,
+            cost_usd=0.927,
+        )
+        today = date.today().isoformat()
+        line = (instance_dir / "usage" / f"{today}.jsonl").read_text().strip()
+        entry = json.loads(line)
+        assert entry["cache_creation_input_tokens"] == 41777
+        assert entry["cache_read_input_tokens"] == 1036218
+        assert entry["cost_usd"] == 0.927
+
+    def test_record_without_cache_fields_stays_compact(self, instance_dir):
+        """Zero cache fields should NOT appear in JSONL (backward compat)."""
+        record_usage(instance_dir, "koan", "sonnet", 100, 50)
+        today = date.today().isoformat()
+        line = (instance_dir / "usage" / f"{today}.jsonl").read_text().strip()
+        entry = json.loads(line)
+        assert "cache_creation_input_tokens" not in entry
+        assert "cache_read_input_tokens" not in entry
+        assert "cost_usd" not in entry
+
+    def test_aggregate_cache_totals(self):
+        """Aggregation should sum cache tokens across entries."""
+        entries = [
+            {"input_tokens": 24, "output_tokens": 500, "project": "p", "model": "m",
+             "cache_creation_input_tokens": 40000, "cache_read_input_tokens": 100000,
+             "cost_usd": 0.5},
+            {"input_tokens": 50, "output_tokens": 300, "project": "p", "model": "m",
+             "cache_read_input_tokens": 100000, "cost_usd": 0.3},
+        ]
+        result = _aggregate(entries)
+        assert result["cache_creation_input_tokens"] == 40000
+        assert result["cache_read_input_tokens"] == 200000
+        assert result["total_cost_usd"] == pytest.approx(0.8)
+
+    def test_aggregate_cache_hit_rate(self):
+        """Cache hit rate = cache_read / total_all_input."""
+        entries = [
+            {"input_tokens": 100, "output_tokens": 50, "project": "p", "model": "m",
+             "cache_read_input_tokens": 900},
+        ]
+        result = _aggregate(entries)
+        # total_all_input = 100 + 900 = 1000, cache_read = 900
+        assert result["cache_hit_rate"] == pytest.approx(0.9)
+
+    def test_aggregate_no_cache_hit_rate_zero(self):
+        """No cache tokens should give 0% hit rate."""
+        entries = [
+            {"input_tokens": 100, "output_tokens": 50, "project": "p", "model": "m"},
+        ]
+        result = _aggregate(entries)
+        assert result["cache_hit_rate"] == 0.0
+
+    def test_aggregate_empty_has_cache_fields(self):
+        """Empty aggregation should include cache fields."""
+        result = _aggregate([])
+        assert result["cache_creation_input_tokens"] == 0
+        assert result["cache_read_input_tokens"] == 0
+        assert result["cache_hit_rate"] == 0.0
+        assert result["total_cost_usd"] == 0.0
+
+    def test_summarize_day_includes_cache(self, instance_dir):
+        """Day summary should include cache metrics."""
+        record_usage(
+            instance_dir, "koan", "opus",
+            24, 5000, cache_read_input_tokens=100000,
+        )
+        result = summarize_day(instance_dir)
+        assert result["cache_read_input_tokens"] == 100000
+        assert result["cache_hit_rate"] > 0
+
+
 class TestEstimateCost:
     def test_returns_none_without_pricing(self):
         tokens = {"input_tokens": 1000, "output_tokens": 500, "model": "sonnet"}

@@ -171,7 +171,7 @@ def _format_koan_usage(state, session_limit, weekly_limit):
 def _format_cost_breakdown(instance_dir):
     """Format per-project and per-model breakdown from JSONL cost data."""
     try:
-        from app.cost_tracker import summarize_by_project, summarize_by_model
+        from app.cost_tracker import summarize_by_project, summarize_by_model, summarize_day
     except ImportError:
         return None
 
@@ -208,6 +208,23 @@ def _format_cost_breakdown(instance_dir):
             inp = data["input_tokens"]
             out = data["output_tokens"]
             lines.append(f"    {short}: {_format_tokens(inp)} in / {_format_tokens(out)} out")
+
+    # Cache performance (today)
+    today_summary = summarize_day(instance_dir)
+    cache_read = today_summary.get("cache_read_input_tokens", 0)
+    cache_create = today_summary.get("cache_creation_input_tokens", 0)
+    cache_hit_rate = today_summary.get("cache_hit_rate", 0.0)
+    total_cost = today_summary.get("total_cost_usd", 0.0)
+
+    if cache_read or cache_create:
+        lines.append("  Cache (today):")
+        lines.append(f"    Hit rate: {cache_hit_rate:.0%}")
+        lines.append(
+            f"    Read: {_format_tokens(cache_read)} | "
+            f"Created: {_format_tokens(cache_create)}"
+        )
+    if total_cost > 0:
+        lines.append(f"  Cost (today): ${total_cost:.2f}")
 
     return "\n".join(lines)
 

@@ -132,6 +132,75 @@ class TestExtractTokensDetailed:
         detailed = extract_tokens_detailed(claude_json)
         assert total == detailed["input_tokens"] + detailed["output_tokens"]
 
+    def test_cache_fields_from_usage_object(self, tmp_path):
+        """Extract cache tokens from nested usage (Claude CLI format)."""
+        f = tmp_path / "cached.json"
+        f.write_text(json.dumps({
+            "result": "done",
+            "model": "claude-opus-4-6",
+            "total_cost_usd": 0.927,
+            "usage": {
+                "input_tokens": 24,
+                "cache_creation_input_tokens": 41777,
+                "cache_read_input_tokens": 1036218,
+                "output_tokens": 5916,
+            },
+        }))
+        result = extract_tokens_detailed(f)
+        assert result["input_tokens"] == 24
+        assert result["output_tokens"] == 5916
+        assert result["cache_creation_input_tokens"] == 41777
+        assert result["cache_read_input_tokens"] == 1036218
+        assert result["cost_usd"] == 0.927
+
+    def test_cache_fields_from_model_usage(self, tmp_path):
+        """Extract cache tokens from modelUsage (camelCase format)."""
+        f = tmp_path / "model_usage.json"
+        f.write_text(json.dumps({
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "model": "claude-sonnet-4-6",
+            "modelUsage": {
+                "claude-sonnet-4-6": {
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "cacheReadInputTokens": 5000,
+                    "cacheCreationInputTokens": 2000,
+                },
+            },
+        }))
+        result = extract_tokens_detailed(f)
+        assert result["cache_read_input_tokens"] == 5000
+        assert result["cache_creation_input_tokens"] == 2000
+
+    def test_no_cache_fields_defaults_to_zero(self, claude_json):
+        """Files without cache data should return 0 for cache fields."""
+        result = extract_tokens_detailed(claude_json)
+        assert result["cache_creation_input_tokens"] == 0
+        assert result["cache_read_input_tokens"] == 0
+        assert result["cost_usd"] == 0.0
+
+    def test_cost_usd_missing_defaults_zero(self, tmp_path):
+        """Missing total_cost_usd should default to 0.0."""
+        f = tmp_path / "no_cost.json"
+        f.write_text(json.dumps({
+            "input_tokens": 100,
+            "output_tokens": 50,
+        }))
+        result = extract_tokens_detailed(f)
+        assert result["cost_usd"] == 0.0
+
+    def test_cost_usd_non_numeric_defaults_zero(self, tmp_path):
+        """Non-numeric total_cost_usd should default to 0.0."""
+        f = tmp_path / "bad_cost.json"
+        f.write_text(json.dumps({
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "total_cost_usd": "not a number",
+        }))
+        result = extract_tokens_detailed(f)
+        assert result["cost_usd"] == 0.0
+
 
 class TestMaybeReset:
     def test_no_reset_within_session(self):

@@ -35,6 +35,9 @@ def record_usage(
     output_tokens: int,
     mode: str = "",
     mission: str = "",
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+    cost_usd: float = 0.0,
 ) -> bool:
     """Append a usage event to today's JSONL file.
 
@@ -46,6 +49,9 @@ def record_usage(
         output_tokens: Number of output tokens produced.
         mode: Autonomous mode (review/implement/deep).
         mission: Mission title or description.
+        cache_creation_input_tokens: Tokens written to prompt cache.
+        cache_read_input_tokens: Tokens read from prompt cache.
+        cost_usd: Actual cost reported by the API.
 
     Returns:
         True if the record was written successfully.
@@ -65,6 +71,14 @@ def record_usage(
         "mode": mode,
         "mission": mission,
     }
+    # Only include cache/cost fields when non-zero to keep old entries compact
+    if cache_creation_input_tokens:
+        entry["cache_creation_input_tokens"] = cache_creation_input_tokens
+    if cache_read_input_tokens:
+        entry["cache_read_input_tokens"] = cache_read_input_tokens
+    if cost_usd:
+        entry["cost_usd"] = round(cost_usd, 6)
+
     line = json.dumps(entry, separators=(",", ":")) + "\n"
 
     try:
@@ -157,12 +171,17 @@ def _aggregate(entries: list) -> dict:
 
     Returns:
         Dict with keys: total_input, total_output, count,
+        cache_creation_input_tokens, cache_read_input_tokens,
+        cache_hit_rate, total_cost_usd,
         by_project (dict), by_model (dict).
     """
     result = {
         "total_input": 0,
         "total_output": 0,
         "count": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "total_cost_usd": 0.0,
         "by_project": {},
         "by_model": {},
     }
@@ -170,11 +189,17 @@ def _aggregate(entries: list) -> dict:
     for entry in entries:
         inp = entry.get("input_tokens", 0)
         out = entry.get("output_tokens", 0)
+        cache_create = entry.get("cache_creation_input_tokens", 0)
+        cache_read = entry.get("cache_read_input_tokens", 0)
+        cost = entry.get("cost_usd", 0.0)
         project = entry.get("project", "_global")
         model = entry.get("model", "unknown")
 
         result["total_input"] += inp
         result["total_output"] += out
+        result["cache_creation_input_tokens"] += cache_create
+        result["cache_read_input_tokens"] += cache_read
+        result["total_cost_usd"] += cost
         result["count"] += 1
 
         # By project
@@ -190,6 +215,14 @@ def _aggregate(entries: list) -> dict:
         result["by_model"][model]["input_tokens"] += inp
         result["by_model"][model]["output_tokens"] += out
         result["by_model"][model]["count"] += 1
+
+    # Compute cache hit rate: cache_read / (cache_read + non-cached input)
+    total_cache_input = result["cache_read_input_tokens"] + result["cache_creation_input_tokens"]
+    total_all_input = result["total_input"] + total_cache_input
+    if total_all_input > 0 and total_cache_input > 0:
+        result["cache_hit_rate"] = result["cache_read_input_tokens"] / total_all_input
+    else:
+        result["cache_hit_rate"] = 0.0
 
     return result
 

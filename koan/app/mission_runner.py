@@ -294,6 +294,9 @@ def _record_cost_event(
             output_tokens=detailed["output_tokens"],
             mode=autonomous_mode,
             mission=mission_title,
+            cache_creation_input_tokens=detailed.get("cache_creation_input_tokens", 0),
+            cache_read_input_tokens=detailed.get("cache_read_input_tokens", 0),
+            cost_usd=detailed.get("cost_usd", 0.0),
         )
     except Exception as e:
         print(f"[mission_runner] Cost tracking failed: {e}", file=sys.stderr)
