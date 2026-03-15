@@ -414,12 +414,22 @@ class TestHandleGithubSkill:
         assert entry.startswith("- [project:myproject]")
         assert "/rebase https://github.com/o/r/pull/1" in entry
 
-    def test_url_type_filtering(self, tmp_path):
-        """PR URL rejected when url_type is 'issue'."""
-        ctx = self._make_ctx(tmp_path, args="https://github.com/o/r/pull/1")
-        result = handle_github_skill(ctx, "implement", "issue", self._parse_3tuple, "Queued")
+    def test_url_type_filtering_rejects_wrong_type(self, tmp_path):
+        """Issue URL rejected when url_type is 'pr'."""
+        ctx = self._make_ctx(tmp_path, args="https://github.com/o/r/issues/1")
+        result = handle_github_skill(ctx, "rebase", "pr", self._parse_3tuple, "Queued")
         assert "❌" in result
         assert "No valid GitHub URL" in result
+
+    @patch("app.utils.insert_pending_mission")
+    @patch("app.utils.project_name_for_path", return_value="koan")
+    @patch("app.utils.resolve_project_path", return_value="/path/to/koan")
+    def test_implement_accepts_pr_url(self, mock_path, mock_name, mock_insert, tmp_path):
+        """PR URLs are valid for implement — GitHub issues API works for PRs."""
+        ctx = self._make_ctx(tmp_path, args="https://github.com/sukria/koan/pull/61")
+        result = handle_github_skill(ctx, "implement", "pr-or-issue", self._parse_3tuple, "Implementation queued")
+        assert "Implementation queued" in result
+        mock_insert.assert_called_once()
 
     @patch("app.utils.insert_pending_mission")
     @patch("app.utils.project_name_for_path", return_value="koan")
