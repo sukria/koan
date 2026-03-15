@@ -310,10 +310,11 @@ def _build_implement_cmd(
 ) -> Optional[List[str]]:
     """Build implement_runner command.
 
-    Expects an issue URL and optional context text after it.
+    Expects an issue or PR URL and optional context text after it.
+    GitHub's issues API works for PRs too, so both URL types are valid.
     Example args: "https://github.com/o/r/issues/42 Phase 1 to 3"
     """
-    url_and_context = _extract_issue_url_and_context(args)
+    url_and_context = _extract_pr_or_issue_url_and_context(args)
     if not url_and_context:
         return None
     
@@ -505,9 +506,9 @@ def validate_skill_args(command: str, args: str) -> Optional[str]:
                 f"(e.g. https://github.com/owner/repo/pull/123)"
             )
     elif command in ("implement", "fix"):
-        if not _ISSUE_URL_RE.search(args):
+        if not (_ISSUE_URL_RE.search(args) or _PR_URL_RE.search(args)):
             return (
-                f"/{command} requires an issue URL "
+                f"/{command} requires a GitHub issue or PR URL "
                 f"(e.g. https://github.com/owner/repo/issues/42)"
             )
     elif command == "check":

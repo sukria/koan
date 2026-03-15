@@ -300,6 +300,15 @@ class TestBuildSkillCommand:
         assert "--context" in cmd
         assert "Phase 1 to 3" in cmd
 
+    def test_implement_with_pr_url(self):
+        """PR URLs accepted — GitHub issues API works for PRs."""
+        url = "https://github.com/sukria/koan/pull/61"
+        cmd = self._build("implement", url)
+        assert cmd is not None
+        assert "skills.core.implement.implement_runner" in cmd
+        assert "--issue-url" in cmd
+        assert url in cmd
+
     def test_implement_no_url(self):
         cmd = self._build("implement", "just some text")
         assert cmd is None
@@ -985,12 +994,11 @@ class TestValidateSkillArgs:
     def test_implement_no_url(self):
         err = validate_skill_args("implement", "fix the login bug")
         assert err is not None
-        assert "/implement requires an issue URL" in err
+        assert "/implement requires a GitHub issue or PR URL" in err
 
-    def test_implement_pr_url_not_issue(self):
-        err = validate_skill_args("implement", "https://github.com/sukria/koan/pull/42")
-        assert err is not None
-        assert "/implement requires an issue URL" in err
+    def test_implement_pr_url_accepted(self):
+        """PR URLs are valid for /implement — GitHub issues API works for PRs."""
+        assert validate_skill_args("implement", "https://github.com/sukria/koan/pull/42") is None
 
     def test_check_valid_pr_url(self):
         assert validate_skill_args("check", "https://github.com/sukria/koan/pull/42") is None
@@ -1040,12 +1048,11 @@ class TestValidateSkillArgs:
     def test_fix_no_url(self):
         err = validate_skill_args("fix", "fix the login bug")
         assert err is not None
-        assert "/fix requires an issue URL" in err
+        assert "/fix requires a GitHub issue or PR URL" in err
 
-    def test_fix_pr_url_not_issue(self):
-        err = validate_skill_args("fix", "https://github.com/sukria/koan/pull/42")
-        assert err is not None
-        assert "/fix requires an issue URL" in err
+    def test_fix_pr_url_accepted(self):
+        """PR URLs are valid for /fix — same as /implement."""
+        assert validate_skill_args("fix", "https://github.com/sukria/koan/pull/42") is None
 
     def test_fix_url_with_context(self):
         assert validate_skill_args(
