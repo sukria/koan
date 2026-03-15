@@ -273,6 +273,28 @@ class TestInjectWorktreeClaudeMd:
         assert "Implement feature" in claude_md.read_text()
 
 
+class TestCopyClaudeMdErrorLogging:
+    def test_logs_oserror_on_copy_failure(self, git_repo, capsys):
+        """_copy_claude_md logs OSError instead of silently swallowing it."""
+        from app.worktree_manager import _copy_claude_md
+
+        # Create CLAUDE.md in the source project
+        (Path(git_repo) / "CLAUDE.md").write_text("# Test\n")
+        # Use a non-existent destination so copy2 will fail
+        bad_dst = os.path.join(git_repo, "nonexistent", "subdir")
+        _copy_claude_md(git_repo, bad_dst)
+        stderr = capsys.readouterr().err
+        assert "[worktree_manager] CLAUDE.md copy failed" in stderr
+
+    def test_inject_logs_oserror_on_write_failure(self, tmp_path, capsys):
+        """inject_worktree_claude_md logs OSError instead of silently swallowing it."""
+        # Use a path that doesn't exist so write will fail
+        bad_path = str(tmp_path / "nonexistent" / "subdir")
+        inject_worktree_claude_md(bad_path, "test mission")
+        stderr = capsys.readouterr().err
+        assert "[worktree_manager] CLAUDE.md injection failed" in stderr
+
+
 class TestSetupSharedDeps:
     def test_symlinks_existing_deps(self, git_repo, tmp_path):
         # Create a dep in main project

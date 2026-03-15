@@ -192,8 +192,8 @@ def inject_worktree_claude_md(worktree_path: str, mission_text: str):
             claude_md.write_text(existing + section)
         else:
             claude_md.write_text(f"# CLAUDE.md\n{section}")
-    except OSError:
-        pass  # Non-fatal — agent can work without this
+    except OSError as e:
+        print(f"[worktree_manager] CLAUDE.md injection failed for {worktree_path}: {e}", file=sys.stderr)
 
 
 def remove_worktree(
@@ -400,8 +400,8 @@ def _copy_claude_md(project_path: str, worktree_path: str):
     if src.exists() and not dst.exists():
         try:
             shutil.copy2(str(src), str(dst))
-        except OSError:
-            pass
+        except OSError as e:
+            print(f"[worktree_manager] CLAUDE.md copy failed from {project_path} to {worktree_path}: {e}", file=sys.stderr)
 
 
 def _ensure_gitignored(project_path: str):
