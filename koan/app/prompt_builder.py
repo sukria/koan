@@ -3,6 +3,13 @@
 Handles agent prompt assembly (template + merge policy + deep research +
 verbose mode) and contemplative prompt assembly.
 
+Prompt caching: ``build_agent_prompt_parts()`` splits the assembled prompt
+into a stable *system prompt* (merge policy, PR guidelines, verification
+gate, etc.) and a variable *user prompt* (agent.md template, mission spec,
+drift, deep research). The system prompt is sent via ``--append-system-prompt``
+on Claude Code CLI, placing it in the prefix-cached position for better
+prompt caching across consecutive missions.
+
 Usage:
     PROMPT=$("$PYTHON" -m app.prompt_builder agent \
         --instance "$INSTANCE" \
@@ -25,6 +32,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Tuple
 
 
 def _load_config_safe() -> dict:
@@ -363,6 +371,119 @@ def build_agent_prompt(
     prompt += _get_verbose_section(instance)
 
     return prompt
+
+
+def build_agent_prompt_parts(
+    instance: str,
+    project_name: str,
+    project_path: str,
+    run_num: int,
+    max_runs: int,
+    autonomous_mode: str,
+    focus_area: str,
+    available_pct: int,
+    mission_title: str = "",
+    spec_content: str = "",
+) -> Tuple[str, str]:
+    """Build agent prompt split into system prompt and user prompt.
+
+    Returns a (system_prompt, user_prompt) tuple. The system prompt
+    contains stable content (merge policy, PR guidelines, verification
+    gate, etc.) that benefits from prompt caching. The user prompt
+    contains the per-mission variable content.
+
+    Callers should pass ``system_prompt`` to ``build_full_command()``
+    so it's sent via ``--append-system-prompt`` on supported providers.
+    """
+    from app.prompts import load_prompt
+
+    # --- User prompt: agent template + per-mission dynamic content ---
+
+    if mission_title:
+        mission_instruction = (
+            f"Your assigned mission is: **{mission_title}** "
+            "The mission is already marked In Progress. "
+            "Follow the Mission Execution Workflow below."
+        )
+    else:
+        mission_instruction = (
+            f"No specific mission assigned. Look for pending missions for "
+            f"{project_name} in missions.md (check [project:{project_name}] "
+            f"tags and ### project:{project_name} sub-headers). "
+            "If none found, proceed to autonomous mode."
+        )
+
+    branch_prefix = _get_branch_prefix()
+    user_prompt = load_prompt(
+        "agent",
+        INSTANCE=instance,
+        PROJECT_PATH=project_path,
+        PROJECT_NAME=project_name,
+        RUN_NUM=str(run_num),
+        MAX_RUNS=str(max_runs),
+        AUTONOMOUS_MODE=autonomous_mode,
+        FOCUS_AREA=focus_area,
+        AVAILABLE_PCT=str(available_pct),
+        MISSION_INSTRUCTION=mission_instruction,
+        BRANCH_PREFIX=branch_prefix,
+    )
+
+    # Append mission spec (if generated)
+    if spec_content and mission_title:
+        user_prompt += (
+            "\n\n# Mission Spec\n\n"
+            "A spec was generated before implementation. Use it to anchor your work — "
+            "follow the approach and stay within the defined scope. Reference key "
+            "decisions in the PR description.\n\n"
+            f"{spec_content}\n"
+        )
+
+    # Append mission type guidance (mission-driven runs only)
+    user_prompt += _get_mission_type_section(mission_title)
+
+    # Append staleness warning (all autonomous modes — cheap local read)
+    if not mission_title:
+        user_prompt += _get_staleness_section(instance, project_name)
+
+    # Append drift detection (autonomous only — shows what changed on main)
+    if not mission_title:
+        user_prompt += _get_drift_section(instance, project_name, project_path)
+
+    # Append PR merge feedback (autonomous only — helps topic alignment)
+    if not mission_title and autonomous_mode in ("deep", "implement"):
+        user_prompt += _get_pr_feedback_section(project_path)
+
+    # Append deep research suggestions (DEEP mode, autonomous only)
+    if autonomous_mode == "deep" and not mission_title:
+        user_prompt += _get_deep_research(instance, project_name, project_path)
+
+    # --- System prompt: stable sections (best for cache prefix matching) ---
+    # These rarely change between consecutive missions on the same project.
+
+    sys_parts = []
+
+    sys_parts.append(_get_merge_policy(project_name))
+    sys_parts.append(_get_submit_pr_section(project_path))
+
+    tdd = _get_tdd_section(mission_title)
+    if tdd:
+        sys_parts.append(tdd)
+
+    verification = _get_verification_gate_section(mission_title)
+    if verification:
+        sys_parts.append(verification)
+
+    focus = _get_focus_section(instance)
+    if focus:
+        sys_parts.append(focus)
+
+    verbose = _get_verbose_section(instance)
+    if verbose:
+        sys_parts.append(verbose)
+
+    system_prompt = "\n\n".join(part for part in sys_parts if part)
+
+    return system_prompt, user_prompt
 
 
 def build_contemplative_prompt(

@@ -57,6 +57,15 @@ class CLIProvider:
         """Build args for passing a prompt to the CLI."""
         raise NotImplementedError
 
+    def build_system_prompt_args(self, system_prompt: str) -> List[str]:
+        """Build args for passing a system prompt to the CLI.
+
+        Base implementation prepends system prompt to the user prompt by
+        returning empty — callers must handle the fallback. Providers that
+        support a dedicated system prompt flag should override this.
+        """
+        return []
+
     def build_tool_args(
         self,
         allowed_tools: Optional[List[str]] = None,
@@ -120,13 +129,27 @@ class CLIProvider:
         mcp_configs: Optional[List[str]] = None,
         plugin_dirs: Optional[List[str]] = None,
         skip_permissions: bool = False,
+        system_prompt: str = "",
     ) -> List[str]:
         """Build a complete CLI command from generic parameters.
 
+        Args:
+            prompt: User prompt text.
+            system_prompt: Optional system prompt text. When provided and the
+                provider supports it, sent via a dedicated flag (e.g.,
+                ``--append-system-prompt``). Otherwise prepended to *prompt*.
+
         Returns a list of strings suitable for subprocess.run().
         """
+        # If system_prompt is set but provider doesn't support it natively,
+        # prepend to user prompt as fallback.
+        sys_args = self.build_system_prompt_args(system_prompt) if system_prompt else []
+        if system_prompt and not sys_args:
+            prompt = system_prompt + "\n\n" + prompt
+
         cmd = [self.binary()]
         cmd.extend(self.build_permission_args(skip_permissions))
+        cmd.extend(sys_args)
         cmd.extend(self.build_prompt_args(prompt))
         cmd.extend(self.build_tool_args(allowed_tools, disallowed_tools))
         cmd.extend(self.build_model_args(model, fallback))

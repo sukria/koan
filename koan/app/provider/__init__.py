@@ -163,11 +163,18 @@ def build_full_command(
     max_turns: int = 0,
     mcp_configs: Optional[List[str]] = None,
     plugin_dirs: Optional[List[str]] = None,
+    system_prompt: str = "",
 ) -> List[str]:
     """Build a complete CLI command for the configured provider.
 
     This is the high-level API: pass generic parameters, get back a
     provider-specific command list ready for subprocess.run().
+
+    Args:
+        system_prompt: Optional system prompt text. When the provider
+            supports it (e.g., Claude ``--append-system-prompt``), sent
+            as a dedicated system prompt for better prompt caching.
+            Otherwise prepended to the user prompt transparently.
 
     Automatically reads ``skip_permissions`` from config.yaml so all
     callers get the flag without needing changes.
@@ -185,6 +192,7 @@ def build_full_command(
         mcp_configs=mcp_configs,
         plugin_dirs=plugin_dirs,
         skip_permissions=get_skip_permissions(),
+        system_prompt=system_prompt,
     )
 
 

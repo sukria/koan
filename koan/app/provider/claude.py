@@ -19,6 +19,11 @@ class ClaudeProvider(CLIProvider):
             return ["--dangerously-skip-permissions"]
         return []
 
+    def build_system_prompt_args(self, system_prompt: str) -> List[str]:
+        if system_prompt:
+            return ["--append-system-prompt", system_prompt]
+        return []
+
     def build_prompt_args(self, prompt: str) -> List[str]:
         return ["-p", prompt]
 

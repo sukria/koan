@@ -188,6 +188,83 @@ class TestClaudeProvider:
 
 
 # ---------------------------------------------------------------------------
+# System prompt support
+# ---------------------------------------------------------------------------
+
+class TestSystemPromptSupport:
+    """Tests for --append-system-prompt support across providers."""
+
+    def test_claude_build_system_prompt_args(self):
+        """ClaudeProvider returns --append-system-prompt flag."""
+        p = ClaudeProvider()
+        args = p.build_system_prompt_args("You are helpful.")
+        assert args == ["--append-system-prompt", "You are helpful."]
+
+    def test_claude_build_system_prompt_args_empty(self):
+        """Empty system prompt returns empty list."""
+        p = ClaudeProvider()
+        assert p.build_system_prompt_args("") == []
+
+    def test_copilot_build_system_prompt_args_empty(self):
+        """CopilotProvider returns empty (no native support)."""
+        with patch("shutil.which", return_value="/usr/bin/gh"):
+            p = CopilotProvider()
+        assert p.build_system_prompt_args("content") == []
+
+    def test_local_build_system_prompt_args_empty(self):
+        """LocalLLMProvider returns empty (no native support)."""
+        p = LocalLLMProvider()
+        assert p.build_system_prompt_args("content") == []
+
+    def test_claude_build_command_with_system_prompt(self):
+        """ClaudeProvider.build_command includes --append-system-prompt."""
+        p = ClaudeProvider()
+        cmd = p.build_command(
+            prompt="do something",
+            system_prompt="you are koan",
+        )
+        assert "--append-system-prompt" in cmd
+        idx = cmd.index("--append-system-prompt")
+        assert cmd[idx + 1] == "you are koan"
+        assert "-p" in cmd
+        p_idx = cmd.index("-p")
+        assert cmd[p_idx + 1] == "do something"
+
+    def test_copilot_build_command_prepends_system_prompt(self):
+        """Non-supporting providers prepend system prompt to user prompt."""
+        with patch("shutil.which", return_value="/usr/bin/gh"):
+            p = CopilotProvider()
+        cmd = p.build_command(
+            prompt="do something",
+            system_prompt="you are koan",
+        )
+        # System prompt should be prepended to user prompt
+        assert "--append-system-prompt" not in cmd
+        # Find the prompt value
+        for i, arg in enumerate(cmd):
+            if arg == "-m":  # copilot uses -m
+                assert "you are koan" in cmd[i + 1]
+                assert "do something" in cmd[i + 1]
+                break
+
+    @patch("app.config.get_skip_permissions", return_value=False)
+    @patch("app.provider.get_provider")
+    def test_build_full_command_passes_system_prompt(self, mock_get, mock_perm):
+        """build_full_command passes system_prompt to provider."""
+        mock_provider = MagicMock()
+        mock_provider.build_command.return_value = ["claude", "-p", "test"]
+        mock_get.return_value = mock_provider
+
+        build_full_command(
+            prompt="test",
+            system_prompt="stable content",
+        )
+        mock_provider.build_command.assert_called_once()
+        call_kwargs = mock_provider.build_command.call_args
+        assert call_kwargs.kwargs.get("system_prompt") == "stable content"
+
+
+# ---------------------------------------------------------------------------
 # CopilotProvider
 # ---------------------------------------------------------------------------
 
