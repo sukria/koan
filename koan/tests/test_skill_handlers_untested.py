@@ -105,7 +105,7 @@ class TestImplementHandler:
         assert result == "Implementation queued"
         kwargs = mock_skill.call_args
         assert kwargs[1]["command"] == "implement"
-        assert kwargs[1]["url_type"] == "issue"
+        assert kwargs[1]["url_type"] == "pr-or-issue"
 
     def test_passes_ctx_through(self, tmp_path):
         from skills.core.implement.handler import handle
