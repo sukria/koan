@@ -15,6 +15,7 @@ Output:
     Example: implement:45:Normal budget
 """
 
+import logging
 import os
 import re
 import sys
@@ -25,6 +26,12 @@ from typing import Tuple
 # If usage.md is older than this, widen safety margin (data may be stale)
 STALENESS_THRESHOLD_SECONDS = 6 * 3600  # 6 hours
 STALE_SAFETY_MARGIN = 15.0  # vs normal 10%
+
+# When usage.md exists but is malformed, assume this usage % to avoid
+# accidentally running in unlimited/DEEP mode on bad data.
+MALFORMED_DEFAULT_PCT = 75.0
+
+logger = logging.getLogger(__name__)
 
 
 class UsageTracker:
@@ -101,6 +108,18 @@ class UsageTracker:
         if weekly_match:
             self.weekly_pct = float(weekly_match.group(1))
             self.weekly_reset = weekly_match.group(2).strip()
+
+        # If file has content but neither regex matched, the format is
+        # malformed.  Default to conservative usage to avoid accidentally
+        # granting unlimited/DEEP mode on bad data.
+        if content.strip() and not session_match and not weekly_match:
+            logger.warning(
+                "usage.md exists but could not parse session or weekly "
+                "percentages — defaulting to %s%% used",
+                MALFORMED_DEFAULT_PCT,
+            )
+            self.session_pct = MALFORMED_DEFAULT_PCT
+            self.weekly_pct = MALFORMED_DEFAULT_PCT
 
     def remaining_budget(self) -> Tuple[float, float]:
         """Calculate remaining budget after safety margin.

@@ -1,9 +1,10 @@
 """Tests for usage_tracker.py — Usage parsing and autonomous mode decisions."""
 
+import logging
 import pytest
 from pathlib import Path
 from unittest.mock import patch
-from app.usage_tracker import UsageTracker, _get_budget_mode
+from app.usage_tracker import UsageTracker, _get_budget_mode, MALFORMED_DEFAULT_PCT
 
 
 @pytest.fixture
@@ -84,9 +85,10 @@ class TestUsageParsing:
         assert tracker.weekly_pct == 25.0
 
     def test_parse_empty_file(self, usage_file_empty):
-        """Gracefully handle empty usage.md."""
+        """Empty file has no content to parse — stays at 0.0 (no false conservative)."""
         tracker = UsageTracker(usage_file_empty)
 
+        # Empty string after strip() → not malformed, just empty
         assert tracker.session_pct == 0.0
         assert tracker.weekly_pct == 0.0
         assert tracker.session_reset == "unknown"
@@ -98,6 +100,52 @@ class TestUsageParsing:
 
         assert tracker.session_pct == 0.0
         assert tracker.weekly_pct == 0.0
+
+    def test_parse_malformed_defaults_to_conservative(self, tmp_path):
+        """Malformed usage.md defaults to conservative usage, not 0%."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("This is not valid usage data\nRandom text here")
+        tracker = UsageTracker(usage)
+
+        assert tracker.session_pct == MALFORMED_DEFAULT_PCT
+        assert tracker.weekly_pct == MALFORMED_DEFAULT_PCT
+
+    def test_parse_malformed_logs_warning(self, tmp_path, caplog):
+        """Malformed usage.md logs a warning."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("garbage data")
+        with caplog.at_level(logging.WARNING, logger="app.usage_tracker"):
+            UsageTracker(usage)
+
+        assert any("could not parse" in r.message for r in caplog.records)
+
+    def test_parse_malformed_does_not_get_deep_mode(self, tmp_path):
+        """Malformed usage.md must NOT result in deep mode (the actual bug)."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("Broken format: session 50 weekly 70")
+        tracker = UsageTracker(usage)
+        mode = tracker.decide_mode()
+
+        # 75% used → 15% remaining after safety → should be review or wait, NOT deep
+        assert mode != "deep"
+
+    def test_partial_parse_session_only(self, tmp_path):
+        """If only session line parses, weekly stays 0 — no malformed default."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("Session (5hr) : 40% (reset in 2h)\nWeekly line is broken")
+        tracker = UsageTracker(usage)
+
+        assert tracker.session_pct == 40.0
+        assert tracker.weekly_pct == 0.0  # partial parse, not malformed
+
+    def test_partial_parse_weekly_only(self, tmp_path):
+        """If only weekly line parses, session stays 0 — no malformed default."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("Session line broken\nWeekly (7 day) : 50% (Resets in 3d)")
+        tracker = UsageTracker(usage)
+
+        assert tracker.session_pct == 0.0
+        assert tracker.weekly_pct == 50.0
 
 
 class TestRemainingBudget:
