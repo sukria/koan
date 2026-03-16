@@ -161,8 +161,9 @@ def _direct_send(text: str) -> bool:
         notice = f"[⚠️ Message truncated: {sent}/{total} parts delivered, {failed} failed]"
         try:
             _direct_send_chunk(api_base, chat_id, notice, parse_mode)
-        except Exception:
-            pass  # Best-effort notice
+        except Exception as e:
+            print(f"[notify] Failed to send truncation notice: {e}",
+                  file=sys.stderr)
 
     return failed == 0
 

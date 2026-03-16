@@ -291,8 +291,9 @@ class TelegramProvider(MessagingProvider):
             notice = f"[⚠️ Message truncated: {sent}/{total} parts delivered, {failed} failed]"
             try:
                 self._send_chunk(notice, parse_mode)
-            except Exception:
-                pass  # Best-effort notice
+            except Exception as e:
+                print(f"[telegram] Failed to send truncation notice: {e}",
+                      file=sys.stderr)
 
         return failed == 0
 
