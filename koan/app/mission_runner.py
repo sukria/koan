@@ -127,15 +127,17 @@ def build_mission_command(
     extra_flags: str = "",
     project_name: str = "",
     plugin_dirs: Optional[List[str]] = None,
+    system_prompt: str = "",
 ) -> List[str]:
     """Build the CLI command for mission execution (provider-agnostic).
 
     Args:
-        prompt: The full agent prompt text.
+        prompt: The full agent prompt text (user prompt).
         autonomous_mode: Current mode (review/implement/deep).
         extra_flags: Space-separated extra CLI flags from config.
         project_name: Optional project name for per-project tool overrides.
         plugin_dirs: Optional list of plugin directory paths to load.
+        system_prompt: Optional system prompt for cache-friendly positioning.
 
     Returns:
         Complete command list ready for subprocess.
@@ -166,6 +168,7 @@ def build_mission_command(
         fallback=fallback,
         output_format="json",
         plugin_dirs=plugin_dirs,
+        system_prompt=system_prompt,
     )
 
     # Append any extra flags from config

@@ -1420,9 +1420,9 @@ def _run_iteration(
         except Exception as e:
             log("error", f"Spec generation error (non-blocking): {e}")
 
-    # Build prompt
-    from app.prompt_builder import build_agent_prompt
-    prompt = build_agent_prompt(
+    # Build prompt (split into system/user for prompt caching)
+    from app.prompt_builder import build_agent_prompt_parts
+    system_prompt, prompt = build_agent_prompt_parts(
         instance=instance,
         project_name=project_name,
         project_path=project_path,
@@ -1470,6 +1470,7 @@ def _run_iteration(
             autonomous_mode=autonomous_mode,
             extra_flags="",
             project_name=project_name,
+            system_prompt=system_prompt,
         )
 
         cmd_display = [c[:100] + '...' if len(c) > 100 else c for c in cmd[:6]]
