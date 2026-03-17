@@ -674,8 +674,8 @@ def _run_ci_check_and_fix(
                 ["git", "diff", f"{rebase_remote}/{base}..HEAD"],
                 cwd=project_path, timeout=30,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[rebase] diff fetch failed: {e}", file=sys.stderr)
         diff = truncate_text(diff, 8000)
 
         ci_fix_prompt = _build_ci_fix_prompt(
@@ -703,7 +703,8 @@ def _run_ci_check_and_fix(
                 ["git", "push", "origin", branch, "--force-with-lease"],
                 cwd=project_path,
             )
-        except Exception:
+        except Exception as e:
+            print(f"[rebase] force-with-lease push failed, retrying with --force: {e}", file=sys.stderr)
             try:
                 _run_git(
                     ["git", "push", "origin", branch, "--force"],
