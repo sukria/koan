@@ -2964,13 +2964,21 @@ class TestBridgeInfrastructureResilience:
 class TestAsyncOutboxFlush:
     """flush_outbox runs in a background thread to avoid blocking Telegram polling."""
 
+    @pytest.fixture(autouse=True)
+    def reset_outbox_thread(self):
+        import app.awake as awake_mod
+
+        awake_mod._outbox_thread = None
+        yield
+        if awake_mod._outbox_thread is not None:
+            awake_mod._outbox_thread.join(timeout=2)
+        awake_mod._outbox_thread = None
+
     def test_flush_outbox_async_runs_in_thread(self):
         """_flush_outbox_async spawns a background thread for flush_outbox."""
         import app.awake as awake_mod
 
         with patch.object(awake_mod, "flush_outbox") as mock_flush:
-            # Reset thread state
-            awake_mod._outbox_thread = None
             _flush_outbox_async()
             # Wait for the thread to complete
             awake_mod._outbox_thread.join(timeout=2)
@@ -2987,23 +2995,19 @@ class TestAsyncOutboxFlush:
         def slow_flush():
             barrier.wait(timeout=5)
 
-        with patch.object(awake_mod, "flush_outbox", side_effect=slow_flush):
-            awake_mod._outbox_thread = None
+        with patch.object(awake_mod, "flush_outbox", side_effect=slow_flush) as mock_flush:
             _flush_outbox_async()  # Starts the slow flush
             _flush_outbox_async()  # Should skip (thread still alive)
             barrier.set()
             awake_mod._outbox_thread.join(timeout=2)
 
-        # flush_outbox was only called once (second call was skipped)
-        # Verified by the barrier pattern — if called twice, slow_flush
-        # would block on the barrier twice
+        mock_flush.assert_called_once()
 
     def test_flush_outbox_async_catches_exceptions(self, capsys):
         """Exceptions in flush_outbox are caught and logged, not propagated."""
         import app.awake as awake_mod
 
         with patch.object(awake_mod, "flush_outbox", side_effect=RuntimeError("boom")):
-            awake_mod._outbox_thread = None
             _flush_outbox_async()
             awake_mod._outbox_thread.join(timeout=2)
 
@@ -3021,7 +3025,6 @@ class TestAsyncOutboxFlush:
             call_count += 1
 
         with patch.object(awake_mod, "flush_outbox", side_effect=counting_flush):
-            awake_mod._outbox_thread = None
             _flush_outbox_async()
             awake_mod._outbox_thread.join(timeout=2)
             _flush_outbox_async()
