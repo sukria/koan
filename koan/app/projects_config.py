@@ -15,6 +15,7 @@ Provides:
 File location: projects.yaml at KOAN_ROOT (next to .env).
 """
 
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -229,8 +230,8 @@ def resolve_base_branch(
             detected = detect_remote_default_branch(remote, project_path)
             if detected:
                 return detected
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[projects_config] default branch detection failed for {project_name}: {e}", file=sys.stderr)
 
     return config_branch
 
