@@ -82,6 +82,45 @@ def run_git_strict(
     return result.stdout.strip()
 
 
+def get_current_branch(cwd: str = None, default: str = "main") -> str:
+    """Return the current git branch name.
+
+    Args:
+        cwd: Working directory for the git command.
+        default: Value to return when branch detection fails.
+
+    Returns:
+        Branch name, or *default* on any error.
+    """
+    try:
+        return run_git_strict("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        return default
+
+
+def get_commit_subjects(
+    cwd: str,
+    base_branch: str = "main",
+    branch: str = "HEAD",
+) -> List[str]:
+    """Return commit subject lines between *base_branch* and *branch*.
+
+    Args:
+        cwd: Working directory for the git command.
+        base_branch: The base ref (e.g. ``"main"``).
+        branch: The tip ref (default ``"HEAD"``).
+
+    Returns:
+        List of subject strings, empty list on failure.
+    """
+    rc, stdout, _ = run_git(
+        "log", f"{base_branch}..{branch}", "--format=%s", cwd=cwd,
+    )
+    if rc != 0:
+        return []
+    return [s for s in stdout.splitlines() if s.strip()]
+
+
 def ordered_remotes(preferred: Optional[str] = None) -> List[str]:
     """Return remote names to try, with *preferred* first if given.
 

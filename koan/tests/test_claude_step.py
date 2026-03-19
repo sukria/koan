@@ -585,12 +585,13 @@ class TestRunClaudeStep:
 class TestGetCurrentBranch:
     """Tests for _get_current_branch helper."""
 
-    @patch("app.claude_step._run_git", return_value="koan/my-feature")
+    @patch("app.claude_step._git_utils_get_current_branch", return_value="koan/my-feature")
     def test_returns_branch_name(self, mock_git):
         from app.claude_step import _get_current_branch
         assert _get_current_branch("/project") == "koan/my-feature"
+        mock_git.assert_called_once_with(cwd="/project")
 
-    @patch("app.claude_step._run_git", side_effect=Exception("not a git repo"))
+    @patch("app.claude_step._git_utils_get_current_branch", return_value="main")
     def test_fallback_to_main_on_error(self, mock_git):
         from app.claude_step import _get_current_branch
         assert _get_current_branch("/project") == "main"

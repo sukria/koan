@@ -17,6 +17,7 @@ from typing import List, Optional, Tuple
 
 from app.cli_provider import build_full_command, run_command
 from app.config import get_model_config
+from app.git_utils import get_current_branch as _git_utils_get_current_branch
 from app.git_utils import ordered_remotes, run_git_strict
 from app.github import pr_create, run_gh
 from app.prompts import load_prompt_or_skill
@@ -284,15 +285,12 @@ def run_project_tests(project_path: str, test_cmd: str = "make test",
 # ---------------------------------------------------------------------------
 
 def _get_current_branch(project_path: str) -> str:
-    """Get the current branch name."""
-    try:
-        return _run_git(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=project_path,
-        )
-    except Exception as e:
-        print(f"[claude_step] Branch detection failed, defaulting to main: {e}", file=sys.stderr)
-        return "main"
+    """Get the current branch name.
+
+    Delegates to :func:`app.git_utils.get_current_branch`.
+    Kept as a re-export so ``rebase_pr`` and ``recreate_pr`` continue to work.
+    """
+    return _git_utils_get_current_branch(cwd=project_path)
 
 
 def _get_diffstat(base_ref: str, project_path: str) -> str:

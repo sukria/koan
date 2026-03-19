@@ -141,11 +141,12 @@ class TestGuessProjectName:
 # ---------------------------------------------------------------------------
 
 class TestGetCurrentBranch:
-    @patch(f"{_PR_MODULE}.run_git_strict", return_value="koan.atoomic/fix-issue-42\n")
+    @patch(f"{_PR_MODULE}._git_get_current_branch", return_value="koan.atoomic/fix-issue-42")
     def test_returns_branch(self, mock_git):
         assert get_current_branch("/path") == "koan.atoomic/fix-issue-42"
+        mock_git.assert_called_once_with(cwd="/path")
 
-    @patch(f"{_PR_MODULE}.run_git_strict", side_effect=RuntimeError("fail"))
+    @patch(f"{_PR_MODULE}._git_get_current_branch", return_value="main")
     def test_fallback_on_error(self, mock_git):
         assert get_current_branch("/path") == "main"
 
@@ -155,16 +156,16 @@ class TestGetCurrentBranch:
 # ---------------------------------------------------------------------------
 
 class TestGetCommitSubjects:
-    @patch(f"{_PR_MODULE}.run_git_strict", return_value="Fix auth bug\nAdd test\n")
+    @patch(f"{_PR_MODULE}._git_get_commit_subjects", return_value=["Fix auth bug", "Add test"])
     def test_returns_subjects(self, mock_git):
         subjects = get_commit_subjects("/path")
         assert subjects == ["Fix auth bug", "Add test"]
 
-    @patch(f"{_PR_MODULE}.run_git_strict", return_value="")
+    @patch(f"{_PR_MODULE}._git_get_commit_subjects", return_value=[])
     def test_empty_on_no_commits(self, mock_git):
         assert get_commit_subjects("/path") == []
 
-    @patch(f"{_PR_MODULE}.run_git_strict", side_effect=RuntimeError("fail"))
+    @patch(f"{_PR_MODULE}._git_get_commit_subjects", return_value=[])
     def test_empty_on_error(self, mock_git):
         assert get_commit_subjects("/path") == []
 

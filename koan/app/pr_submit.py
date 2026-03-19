@@ -11,7 +11,11 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from app.git_utils import run_git_strict
+from app.git_utils import (
+    get_commit_subjects as _git_get_commit_subjects,
+    get_current_branch as _git_get_current_branch,
+    run_git_strict,
+)
 from app.github import detect_parent_repo, run_gh, pr_create
 from app.projects_config import resolve_base_branch
 
@@ -24,28 +28,19 @@ def guess_project_name(project_path: str) -> str:
 
 
 def get_current_branch(project_path: str) -> str:
-    """Return the current git branch name, or 'main' on error."""
-    try:
-        return run_git_strict(
-            "rev-parse", "--abbrev-ref", "HEAD",
-            cwd=project_path,
-        ).strip()
-    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
-        logger.debug("Branch detection failed, defaulting to main: %s", e)
-        return "main"
+    """Return the current git branch name, or 'main' on error.
+
+    Delegates to :func:`app.git_utils.get_current_branch`.
+    """
+    return _git_get_current_branch(cwd=project_path)
 
 
 def get_commit_subjects(project_path: str, base_branch: str = "main") -> List[str]:
-    """Return commit subject lines from base_branch..HEAD."""
-    try:
-        output = run_git_strict(
-            "log", f"{base_branch}..HEAD", "--format=%s",
-            cwd=project_path,
-        )
-        return [s for s in output.strip().splitlines() if s.strip()]
-    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
-        logger.debug("Failed to get commit subjects: %s", e)
-        return []
+    """Return commit subject lines from base_branch..HEAD.
+
+    Delegates to :func:`app.git_utils.get_commit_subjects`.
+    """
+    return _git_get_commit_subjects(cwd=project_path, base_branch=base_branch)
 
 
 def get_fork_owner(project_path: str) -> str:

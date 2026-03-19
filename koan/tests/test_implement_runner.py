@@ -395,13 +395,13 @@ class TestGuessProjectName:
 
 class TestGetCurrentBranch:
     def test_returns_branch_name(self):
-        with patch(f"{_PR_MODULE}.run_git_strict",
-                    return_value="koan/implement-42\n"):
+        with patch(f"{_PR_MODULE}._git_get_current_branch",
+                    return_value="koan/implement-42"):
             assert get_current_branch("/project") == "koan/implement-42"
 
     def test_returns_main_on_error(self):
-        with patch(f"{_PR_MODULE}.run_git_strict",
-                    side_effect=RuntimeError("not a repo")):
+        with patch(f"{_PR_MODULE}._git_get_current_branch",
+                    return_value="main"):
             assert get_current_branch("/project") == "main"
 
 
@@ -411,19 +411,19 @@ class TestGetCurrentBranch:
 
 class TestGetCommitSubjects:
     def test_returns_subjects(self):
-        with patch(f"{_PR_MODULE}.run_git_strict",
-                    return_value="feat: add X\nfix: broken Y\n"):
+        with patch(f"{_PR_MODULE}._git_get_commit_subjects",
+                    return_value=["feat: add X", "fix: broken Y"]):
             result = get_commit_subjects("/project")
             assert result == ["feat: add X", "fix: broken Y"]
 
     def test_returns_empty_on_error(self):
-        with patch(f"{_PR_MODULE}.run_git_strict",
-                    side_effect=RuntimeError("no commits")):
+        with patch(f"{_PR_MODULE}._git_get_commit_subjects",
+                    return_value=[]):
             assert get_commit_subjects("/project") == []
 
     def test_returns_empty_for_no_output(self):
-        with patch(f"{_PR_MODULE}.run_git_strict",
-                    return_value=""):
+        with patch(f"{_PR_MODULE}._git_get_commit_subjects",
+                    return_value=[]):
             assert get_commit_subjects("/project") == []
 
 

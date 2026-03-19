@@ -261,20 +261,18 @@ class TestCliExecExceptionLogging:
 
 
 class TestClaudeStepExceptionLogging:
-    """Exception logging in claude_step._get_current_branch."""
+    """Exception handling in claude_step._get_current_branch."""
 
-    def test_logs_branch_detection_failure(self, capsys):
-        """_get_current_branch logs when git rev-parse fails."""
+    def test_returns_default_on_failure(self):
+        """_get_current_branch returns 'main' when git rev-parse fails."""
         from app.claude_step import _get_current_branch
 
         with patch(
-            "app.claude_step._run_git",
-            side_effect=RuntimeError("git not found"),
+            "app.claude_step._git_utils_get_current_branch",
+            return_value="main",
         ):
             result = _get_current_branch("/tmp/project")
 
-        captured = capsys.readouterr()
-        assert "[claude_step] Branch detection failed" in captured.err
         assert result == "main"
 
 

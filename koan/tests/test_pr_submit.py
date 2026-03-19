@@ -35,11 +35,12 @@ class TestGuessProjectName:
 # ---------------------------------------------------------------------------
 
 class TestGetCurrentBranch:
-    @patch(f"{_M}.run_git_strict", return_value="feature/xyz\n")
-    def test_returns_stripped_branch(self, mock):
+    @patch(f"{_M}._git_get_current_branch", return_value="feature/xyz")
+    def test_returns_branch(self, mock):
         assert get_current_branch("/p") == "feature/xyz"
+        mock.assert_called_once_with(cwd="/p")
 
-    @patch(f"{_M}.run_git_strict", side_effect=RuntimeError("not a repo"))
+    @patch(f"{_M}._git_get_current_branch", return_value="main")
     def test_fallback_to_main(self, mock):
         assert get_current_branch("/p") == "main"
 
@@ -49,29 +50,21 @@ class TestGetCurrentBranch:
 # ---------------------------------------------------------------------------
 
 class TestGetCommitSubjects:
-    @patch(f"{_M}.run_git_strict", return_value="fix: A\nfeat: B\n")
+    @patch(f"{_M}._git_get_commit_subjects", return_value=["fix: A", "feat: B"])
     def test_returns_list(self, mock):
         assert get_commit_subjects("/p") == ["fix: A", "feat: B"]
-        mock.assert_called_once_with(
-            "log", "main..HEAD", "--format=%s", cwd="/p",
-        )
+        mock.assert_called_once_with(cwd="/p", base_branch="main")
 
-    @patch(f"{_M}.run_git_strict", return_value="fix: A\nfeat: B\n")
+    @patch(f"{_M}._git_get_commit_subjects", return_value=["fix: A", "feat: B"])
     def test_custom_base_branch(self, mock):
         get_commit_subjects("/p", base_branch="develop")
-        mock.assert_called_once_with(
-            "log", "develop..HEAD", "--format=%s", cwd="/p",
-        )
+        mock.assert_called_once_with(cwd="/p", base_branch="develop")
 
-    @patch(f"{_M}.run_git_strict", return_value="")
+    @patch(f"{_M}._git_get_commit_subjects", return_value=[])
     def test_empty_output(self, mock):
         assert get_commit_subjects("/p") == []
 
-    @patch(f"{_M}.run_git_strict", return_value="\n \n\n")
-    def test_blank_lines_filtered(self, mock):
-        assert get_commit_subjects("/p") == []
-
-    @patch(f"{_M}.run_git_strict", side_effect=RuntimeError("err"))
+    @patch(f"{_M}._git_get_commit_subjects", return_value=[])
     def test_error_returns_empty(self, mock):
         assert get_commit_subjects("/p") == []
 

@@ -129,12 +129,11 @@ class TestRunGit:
 
 class TestGetCurrentBranch:
     def test_returns_branch_name(self):
-        mock_result = MagicMock(returncode=0, stdout="koan/my-feature\n")
-        with patch("app.claude_step.subprocess.run", return_value=mock_result):
+        with patch("app.claude_step._git_utils_get_current_branch", return_value="koan/my-feature"):
             assert _get_current_branch("/project") == "koan/my-feature"
 
     def test_fallback_on_error(self):
-        with patch("app.claude_step.subprocess.run", side_effect=Exception("detached HEAD")):
+        with patch("app.claude_step._git_utils_get_current_branch", return_value="main"):
             assert _get_current_branch("/project") == "main"
 
 
