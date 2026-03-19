@@ -24,7 +24,7 @@ You are implementing a plan from a GitHub issue. Your job is to read the plan ca
 4. **Implement the changes**: Follow the plan's phases in order. For each phase:
    - Make the code changes described
    - Follow existing patterns and conventions in the codebase
-   - Write tests if the plan calls for them
+   - Write tests if the plan calls for them — tests should validate behavior (inputs → outputs, observable outcomes), not assert on internal implementation details
    - Ensure the phase's acceptance criteria ("Done when") are met
 
 5. **Run existing tests**: After making changes, run the project's test suite to ensure nothing is broken. Fix any regressions.
