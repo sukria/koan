@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.github import SSOAuthRequired
 from app.github_notifications import (
     FetchResult,
     _processed_comments,
@@ -20,9 +21,11 @@ from app.github_notifications import (
     fetch_unread_notifications,
     find_mention_in_thread,
     get_comment_from_notification,
+    get_sso_failure_count,
     is_notification_stale,
     is_self_mention,
     parse_mention_command,
+    reset_sso_failure_count,
 )
 
 
@@ -901,3 +904,71 @@ class TestSearchCommentsForMention:
         ]
         result = _search_comments_for_mention(comments, "bot", "owner", "repo")
         assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# SSO failure tracking
+# ---------------------------------------------------------------------------
+
+class TestSSOFailureTracking:
+    def setup_method(self):
+        reset_sso_failure_count()
+
+    def teardown_method(self):
+        reset_sso_failure_count()
+
+    @patch("app.github_notifications.api")
+    def test_get_comment_sso_failure_records_count(self, mock_api):
+        mock_api.side_effect = SSOAuthRequired("SAML enforcement")
+        notif = {
+            "subject": {
+                "latest_comment_url": "https://api.github.com/repos/org/repo/issues/comments/1"
+            }
+        }
+        result = get_comment_from_notification(notif)
+        assert result is None
+        assert get_sso_failure_count() == 1
+
+    @patch("app.github_notifications.api")
+    def test_find_mention_sso_failure_records_count(self, mock_api):
+        mock_api.side_effect = SSOAuthRequired("SSO required")
+        notif = {
+            "subject": {
+                "url": "https://api.github.com/repos/org/repo/issues/42"
+            }
+        }
+        result = find_mention_in_thread(notif, "bot")
+        assert result is None
+        assert get_sso_failure_count() >= 1
+
+    @patch("app.github_notifications.api")
+    def test_check_already_processed_sso_failure(self, mock_api):
+        mock_api.side_effect = SSOAuthRequired("SAML enforcement")
+        result = check_already_processed("123", "bot", "org", "repo")
+        assert result is False
+        assert get_sso_failure_count() == 1
+
+    @patch("app.github_notifications.api")
+    def test_check_user_permission_sso_failure(self, mock_api):
+        mock_api.side_effect = SSOAuthRequired("SSO required")
+        result = check_user_permission("org", "repo", "alice", ["*"])
+        assert result is False
+        assert get_sso_failure_count() == 1
+
+    def test_reset_clears_count(self):
+        # Manually bump the count
+        from app.github_notifications import _record_sso_failure
+        _record_sso_failure("test")
+        assert get_sso_failure_count() > 0
+        reset_sso_failure_count()
+        assert get_sso_failure_count() == 0
+
+    @patch("app.github_notifications.api")
+    def test_multiple_sso_failures_aggregate(self, mock_api):
+        mock_api.side_effect = SSOAuthRequired("SAML enforcement")
+        # Call multiple functions that each record SSO failures
+        get_comment_from_notification({
+            "subject": {"latest_comment_url": "https://api.github.com/repos/o/r/issues/comments/1"}
+        })
+        check_already_processed("123", "bot", "org", "repo")
+        assert get_sso_failure_count() == 2

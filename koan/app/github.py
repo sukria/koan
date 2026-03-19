@@ -12,6 +12,30 @@ from typing import Dict, Optional
 
 from app.retry import retry_with_backoff, is_gh_transient
 
+
+class SSOAuthRequired(RuntimeError):
+    """Raised when a GitHub API call fails due to missing SSO authorization.
+
+    The token is valid but not authorized for the target organization's
+    SAML SSO policy.  The user must re-authorize with:
+        gh auth refresh -h github.com -s read:org
+    """
+
+    def __init__(self, stderr_text: str):
+        remediation = "gh auth refresh -h github.com -s read:org"
+        super().__init__(
+            f"GitHub API 403: SSO/SAML authorization required. "
+            f"Run: {remediation}\n"
+            f"Details: {stderr_text[:300]}"
+        )
+        self.stderr_text = stderr_text
+
+
+def _is_sso_error(stderr: str) -> bool:
+    """Check if a gh CLI stderr message indicates an SSO/SAML auth failure."""
+    upper = stderr.upper()
+    return "SSO" in upper or "SAML" in upper
+
 # Cached GitHub username (from gh api user fallback).
 # None = not yet queried, "" = query failed.
 _cached_gh_username = None
@@ -41,6 +65,8 @@ def run_gh(*args, cwd=None, timeout=30, stdin_data=None):
             capture_output=True, text=True, timeout=timeout, cwd=cwd,
         )
         if result.returncode != 0:
+            if _is_sso_error(result.stderr):
+                raise SSOAuthRequired(result.stderr)
             raise RuntimeError(
                 f"gh failed: {' '.join(cmd[:4])}... — {result.stderr[:300]}"
             )

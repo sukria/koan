@@ -18,9 +18,36 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 from app.bounded_set import BoundedSet
-from app.github import api
+from app.github import SSOAuthRequired, api
 
 log = logging.getLogger(__name__)
+
+# Count of SSO failures observed during the current processing cycle.
+# Reset at the start of each cycle by the caller (loop_manager).
+_sso_failure_count: int = 0
+
+
+def reset_sso_failure_count() -> None:
+    """Reset the per-cycle SSO failure counter."""
+    global _sso_failure_count
+    _sso_failure_count = 0
+
+
+def get_sso_failure_count() -> int:
+    """Return the number of SSO failures observed in the current cycle."""
+    return _sso_failure_count
+
+
+def _record_sso_failure(context: str) -> None:
+    """Record an SSO failure and log a warning (once per context)."""
+    global _sso_failure_count
+    _sso_failure_count += 1
+    if _sso_failure_count == 1:
+        log.warning(
+            "GitHub SSO auth failure detected (%s). "
+            "Token needs re-authorization: gh auth refresh -h github.com -s read:org",
+            context,
+        )
 
 # In-memory set of processed comment IDs (resets on restart).
 # Bounded: FIFO eviction when limit is reached (oldest entries removed first).
@@ -239,6 +266,9 @@ def get_comment_from_notification(notification: dict) -> Optional[dict]:
     try:
         raw = api(endpoint)
         return json.loads(raw) if raw else None
+    except SSOAuthRequired:
+        _record_sso_failure(f"get_comment endpoint={endpoint[:80]}")
+        return None
     except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
         return None
 
@@ -331,6 +361,9 @@ def find_mention_in_thread(
     try:
         raw = api(issue_endpoint)
         comments = json.loads(raw) if raw else []
+    except SSOAuthRequired:
+        _record_sso_failure(f"find_mention issue_comments {owner}/{repo}#{number}")
+        comments = []
     except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
         comments = []
 
@@ -348,6 +381,9 @@ def find_mention_in_thread(
         try:
             raw = api(review_endpoint)
             review_comments = json.loads(raw) if raw else []
+        except SSOAuthRequired:
+            _record_sso_failure(f"find_mention review_comments {owner}/{repo}#{number}")
+            review_comments = []
         except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired):
             review_comments = []
 
@@ -443,6 +479,8 @@ def check_already_processed(comment_id: str, bot_username: str,
                 if reaction.get("user", {}).get("login") == bot_username:
                     _processed_comments.add(comment_id)
                     return True
+    except SSOAuthRequired:
+        _record_sso_failure(f"check_already_processed comment={comment_id}")
     except (RuntimeError, json.JSONDecodeError):
         pass
 
@@ -501,6 +539,9 @@ def check_user_permission(owner: str, repo: str, username: str,
         data = json.loads(raw) if raw else {}
         permission = data.get("permission", "none")
         return permission in ("admin", "write")
+    except SSOAuthRequired:
+        _record_sso_failure(f"check_user_permission {owner}/{repo}")
+        return False
     except (RuntimeError, json.JSONDecodeError):
         return False
 

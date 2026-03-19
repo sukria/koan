@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from app.github import (
+    SSOAuthRequired, _is_sso_error,
     run_gh, pr_create, issue_create, api,
     get_gh_username, count_open_prs, cached_count_open_prs,
     batch_count_open_prs, fetch_issue_with_comments, detect_parent_repo,
@@ -93,6 +94,68 @@ class TestRunGh:
             run_gh("api", "repos/o/r")
         assert mock_run.call_count == 3
         assert mock_sleep.call_count == 2
+
+    @patch("app.github.subprocess.run")
+    def test_raises_sso_auth_required_on_sso_error(self, mock_run):
+        """SSO/SAML errors raise SSOAuthRequired instead of RuntimeError."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stderr="Resource protected by organization SAML enforcement. "
+                   "You must grant your OAuth token access to this organization.",
+        )
+        with pytest.raises(SSOAuthRequired, match="SSO/SAML authorization required"):
+            run_gh("api", "repos/enterprise-org/repo")
+
+    @patch("app.retry.time.sleep")
+    @patch("app.github.subprocess.run")
+    def test_sso_error_not_retried(self, mock_run, mock_sleep):
+        """SSO errors are not transient — should not be retried."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stderr="SSO authorization required for this resource",
+        )
+        with pytest.raises(SSOAuthRequired):
+            run_gh("api", "repos/org/repo")
+        assert mock_run.call_count == 1
+        mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _is_sso_error
+# ---------------------------------------------------------------------------
+
+class TestIsSsoError:
+    def test_detects_sso_keyword(self):
+        assert _is_sso_error("You must grant your SSO token access") is True
+
+    def test_detects_saml_keyword(self):
+        assert _is_sso_error("Resource protected by organization SAML enforcement") is True
+
+    def test_case_insensitive(self):
+        assert _is_sso_error("sso authorization required") is True
+        assert _is_sso_error("saml enforcement") is True
+
+    def test_non_sso_error(self):
+        assert _is_sso_error("not found") is False
+        assert _is_sso_error("auth required") is False
+
+
+# ---------------------------------------------------------------------------
+# SSOAuthRequired
+# ---------------------------------------------------------------------------
+
+class TestSSOAuthRequired:
+    def test_is_runtime_error_subclass(self):
+        exc = SSOAuthRequired("test stderr")
+        assert isinstance(exc, RuntimeError)
+
+    def test_includes_remediation(self):
+        exc = SSOAuthRequired("SAML enforcement error")
+        assert "gh auth refresh" in str(exc)
+
+    def test_stores_stderr(self):
+        exc = SSOAuthRequired("original stderr")
+        assert exc.stderr_text == "original stderr"
 
 
 # ---------------------------------------------------------------------------

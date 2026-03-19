@@ -2149,3 +2149,55 @@ class TestThreadSafety:
             t.join(timeout=5)
 
         assert not errors, f"Thread-safety errors: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# SSO alert detection (_check_sso_failures)
+# ---------------------------------------------------------------------------
+
+class TestCheckSSOFailures:
+    def setup_method(self):
+        from app.loop_manager import reset_github_backoff
+        from app.github_notifications import reset_sso_failure_count
+        reset_github_backoff()
+        reset_sso_failure_count()
+
+    def teardown_method(self):
+        from app.loop_manager import reset_github_backoff
+        from app.github_notifications import reset_sso_failure_count
+        reset_github_backoff()
+        reset_sso_failure_count()
+
+    @patch("app.loop_manager.log")
+    def test_no_alert_when_no_sso_failures(self, mock_log):
+        from app.loop_manager import _check_sso_failures
+        _check_sso_failures()
+        # Should not log any warning
+        mock_log.warning.assert_not_called()
+
+    def test_sends_telegram_on_sso_failure(self):
+        from app.loop_manager import _check_sso_failures
+        from app.github_notifications import _record_sso_failure
+        _record_sso_failure("test")
+
+        with patch("app.notify.send_telegram") as mock_tg:
+            _check_sso_failures()
+            mock_tg.assert_called_once()
+            msg = mock_tg.call_args[0][0]
+            assert "SSO" in msg
+            assert "gh auth refresh" in msg
+
+    def test_cooldown_prevents_repeated_alerts(self):
+        from app.loop_manager import _check_sso_failures
+        from app.github_notifications import _record_sso_failure, reset_sso_failure_count
+
+        with patch("app.notify.send_telegram") as mock_tg:
+            _record_sso_failure("test1")
+            _check_sso_failures()
+            assert mock_tg.call_count == 1
+
+            # Second call within cooldown — should not alert again
+            reset_sso_failure_count()
+            _record_sso_failure("test2")
+            _check_sso_failures()
+            assert mock_tg.call_count == 1
