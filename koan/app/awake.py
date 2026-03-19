@@ -443,9 +443,10 @@ def _parse_outbox_priority(content: str) -> tuple:
     if not matches:
         return NotificationPriority.ACTION, content
 
-    # Find the highest-priority level across all blocks
-    max_priority = NotificationPriority.ACTION
-    for name in matches:
+    # Find the highest-priority level across all blocks.
+    # Initialize with the first match (not ACTION) so info/warning are preserved.
+    max_priority = _OUTBOX_PRIORITY_MAP.get(matches[0], NotificationPriority.ACTION)
+    for name in matches[1:]:
         p = _OUTBOX_PRIORITY_MAP.get(name, NotificationPriority.ACTION)
         if p.value > max_priority.value:
             max_priority = p

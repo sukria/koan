@@ -276,6 +276,29 @@ def _direct_send_chunk(api_base: str, chat_id: str, chunk: str,
     return True
 
 
+def _apply_priority_emoji(text: str, priority: NotificationPriority) -> str:
+    """Prepend priority emoji to text for urgent and warning messages.
+
+    Idempotent: does not prepend if text already starts with the emoji.
+    action and info levels get no prefix.
+
+    Args:
+        text: Message text
+        priority: Notification priority level
+
+    Returns:
+        Text with emoji prepended if appropriate
+    """
+    _PRIORITY_EMOJIS = {
+        NotificationPriority.URGENT: "🚨",
+        NotificationPriority.WARNING: "⚠️",
+    }
+    emoji = _PRIORITY_EMOJIS.get(priority)
+    if emoji and not text.startswith(emoji):
+        return f"{emoji} {text}"
+    return text
+
+
 def send_telegram(text: str,
                   priority: NotificationPriority = NotificationPriority.ACTION) -> bool:
     """Send a message via the active messaging provider (with flood protection).
@@ -298,6 +321,9 @@ def send_telegram(text: str,
     if priority.value < min_priority.value:
         _write_suppressed_to_journal(text, priority)
         return True  # Suppression counts as success
+
+    # Prepend priority emoji for urgent and warning messages (idempotent)
+    text = _apply_priority_emoji(text, priority)
 
     try:
         from app.messaging import get_messaging_provider
