@@ -20,6 +20,12 @@ from app.pr_review_learning import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_direct_api(monkeypatch):
+    """Keep tests deterministic: default to CLI path unless explicitly mocked."""
+    monkeypatch.setenv("KOAN_DIRECT_API_LIGHTWEIGHT", "0")
+
+
 # ─── _parse_iso ──────────────────────────────────────────────────────────
 
 
@@ -231,6 +237,23 @@ class TestAppendLessonsToLearnings:
 
 
 class TestAnalyzeReviewsWithCli:
+    @patch("app.cli_exec.run_cli_with_retry")
+    @patch("app.cli_provider.build_full_command")
+    @patch("app.llm_client.try_complete_with_api")
+    @patch("app.config.get_model_config")
+    @patch("app.prompts.load_prompt")
+    def test_returns_api_output_without_cli(
+        self, mock_prompt, mock_models, mock_api, mock_build, mock_run
+    ):
+        mock_prompt.return_value = "analysis prompt"
+        mock_models.return_value = {"lightweight": "haiku", "fallback": "sonnet"}
+        mock_api.return_value = "- Direct API lesson"
+
+        result = analyze_reviews_with_cli("some review text", "/fake/path")
+        assert "Direct API lesson" in result
+        mock_build.assert_not_called()
+        mock_run.assert_not_called()
+
     @patch("app.cli_exec.run_cli_with_retry")
     @patch("app.cli_provider.build_full_command")
     @patch("app.config.get_model_config")

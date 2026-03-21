@@ -24,6 +24,12 @@ def _clear_format_cache():
     _format_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _disable_direct_api(monkeypatch):
+    """Keep tests deterministic: default to CLI path unless explicitly mocked."""
+    monkeypatch.setenv("KOAN_DIRECT_API_LIGHTWEIGHT", "0")
+
+
 class TestLoadSoul:
     def test_returns_content_when_file_exists(self, instance_dir):
         result = load_soul(instance_dir)
@@ -80,8 +86,18 @@ class TestFallbackFormat:
 
 
 class TestFormatForTelegram:
+    @patch("app.llm_client.try_complete_with_api")
     @patch("app.cli_exec.run_cli")
-    def test_returns_claude_output_on_success(self, mock_run):
+    def test_prefers_direct_api_output_when_available(self, mock_run, mock_api):
+        mock_api.return_value = "**API** result"
+        result = format_message("raw content", "soul", "prefs")
+        assert result == "API result"
+        mock_run.assert_not_called()
+
+    @patch("app.llm_client.try_complete_with_api")
+    @patch("app.cli_exec.run_cli")
+    def test_returns_claude_output_on_success(self, mock_run, mock_api):
+        mock_api.return_value = None
         mock_run.return_value = MagicMock(
             returncode=0, stdout="Voici le résumé formaté.\n", stderr=""
         )

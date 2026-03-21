@@ -176,8 +176,23 @@ def format_message(raw_content: str, soul: str, prefs: str,
 
     try:
         from app.cli_exec import run_cli
+        from app.llm_client import try_complete_with_api
+        from app.text_utils import strip_markdown
 
         models = get_model_config()
+
+        # Direct API path for lightweight formatting (with system prompt cache hint).
+        api_output = try_complete_with_api(
+            prompt,
+            model=models["lightweight"],
+            timeout=30,
+            max_tokens=1200,
+        )
+        if api_output:
+            formatted = strip_markdown(api_output)
+            cache.put(cache_key, formatted, ttl=900)
+            return formatted
+
         cmd = build_full_command(prompt=prompt, model=models["lightweight"])
         result = run_cli(
             cmd,
@@ -189,8 +204,6 @@ def format_message(raw_content: str, soul: str, prefs: str,
         )
 
         if result.returncode == 0 and result.stdout.strip():
-            from app.text_utils import strip_markdown
-
             formatted = result.stdout.strip()
 
             # Safety check: remove any remaining markdown artifacts

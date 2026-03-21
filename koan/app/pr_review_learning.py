@@ -216,7 +216,7 @@ def analyze_reviews_with_cli(
     review_text: str,
     project_path: str,
 ) -> str:
-    """Use Claude CLI (lightweight model) to extract lessons from review text.
+    """Use lightweight LLM path to extract lessons from review text.
 
     Args:
         review_text: Formatted review text from format_reviews_for_analysis().
@@ -227,10 +227,21 @@ def analyze_reviews_with_cli(
     """
     from app.cli_provider import build_full_command
     from app.config import get_model_config
+    from app.llm_client import try_complete_with_api
     from app.prompts import load_prompt
 
     prompt = load_prompt("review-learning", REVIEW_DATA=review_text)
     models = get_model_config()
+
+    # Direct API path first for lower latency/cost on pure text analysis.
+    api_output = try_complete_with_api(
+        prompt,
+        model=models.get("lightweight", "haiku"),
+        timeout=60,
+        max_tokens=1400,
+    )
+    if api_output:
+        return api_output.strip()
 
     cmd = build_full_command(
         prompt=prompt,
