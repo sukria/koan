@@ -928,7 +928,8 @@ def _checkout_pr_branch(
             # Success — use this remote
             fetch_remote = remote
             break
-        except Exception:
+        except Exception as e:
+            print(f"[rebase_pr] fetch from {remote} failed: {e}", file=sys.stderr)
             continue
     else:
         # None of the known remotes had the branch.
@@ -941,9 +942,9 @@ def _checkout_pr_branch(
                     ["git", "remote", "add", fork_remote, fork_url],
                     cwd=project_path,
                 )
-            except Exception:
+            except Exception as e:
                 # Remote may already exist from a previous run
-                pass
+                print(f"[rebase_pr] remote add {fork_remote} failed (may already exist): {e}", file=sys.stderr)
             try:
                 _run_git(["git", "fetch", fork_remote, branch], cwd=project_path)
                 fetch_remote = fork_remote
