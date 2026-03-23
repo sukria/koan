@@ -386,6 +386,18 @@ Use this before `/plan` when the idea is architecturally complex, when you want 
 - `/rebase https://github.com/org/repo/pull/42` — Resolve conflicts and update the PR
 </details>
 
+**`/squash`** — Squash all PR commits into a single clean commit.
+
+- **Usage:** `/squash <pr-url>`
+- **Aliases:** `/sq`
+- **GitHub @mention:** `@koan-bot /squash` on a PR
+
+<details>
+<summary>Use cases</summary>
+
+- `/squash https://github.com/org/repo/pull/42` — Clean up messy commit history before merge
+</details>
+
 **`/recreate`** — Re-implement a PR from scratch on a fresh branch. Useful when a PR has diverged too far.
 
 - **Usage:** `/recreate <pr-url>`
@@ -1138,6 +1150,7 @@ All commands at a glance. **Tier:** B = Beginner, I = Intermediate, P = Power Us
 | `/refactor <desc>` | `/rf` | I | Targeted refactoring mission |
 | `/ask <comment-url>` | — | I | Ask a question about a PR/issue — posts AI reply to GitHub |
 | `/rebase <PR>` | `/rb` | I | Rebase a PR onto its base branch |
+| `/squash <PR>` | `/sq` | I | Squash all PR commits into one clean commit |
 | `/recreate <PR>` | `/rc` | I | Re-implement a PR from scratch |
 | `/pr <PR>` | — | I | Review and update a GitHub PR |
 | `/check <url>` | `/inspect` | I | Run project health checks on a PR/issue |
