@@ -22,6 +22,7 @@ from app.notify import TypingIndicator, send_telegram
 from app.signals import CYCLE_FILE, PAUSE_FILE, QUOTA_RESET_FILE, STOP_FILE
 from app.skills import Skill, SkillContext, SkillError, execute_skill
 from app.utils import (
+    atomic_write,
     parse_project as _parse_project,
     detect_project_from_text,
     get_known_projects,
@@ -59,13 +60,11 @@ def handle_command(text: str):
     # --- Core hardcoded commands (safety-critical / bootstrap) ---
 
     if cmd == "/stop":
-        from app.utils import atomic_write
         atomic_write(KOAN_ROOT / STOP_FILE, "STOP")
         send_telegram("⏹️ Stop requested. Current mission will complete, then Kōan will stop.")
         return
 
     if cmd in ("/update", "/upgrade"):
-        from app.utils import atomic_write
         atomic_write(KOAN_ROOT / CYCLE_FILE, "CYCLE")
         send_telegram("🔄 Update requested. Current mission will complete, then Kōan will update and restart.")
         return
