@@ -195,8 +195,12 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> int:
     from app.utils import modify_missions_file
 
     # Check pending.md once for the partial state detection
+    # Use try/except to avoid TOCTOU race (file deleted between check and read)
     pending_path = Path(instance_dir) / "journal" / "pending.md"
-    has_pending_journal = pending_path.exists() and pending_path.read_text().strip() != ""
+    try:
+        has_pending_journal = pending_path.read_text().strip() != ""
+    except FileNotFoundError:
+        has_pending_journal = False
 
     recovered_count = 0
     escalated_missions: list = []
