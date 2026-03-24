@@ -38,12 +38,8 @@ POST_MISSION_TIMEOUT = 300  # default; overridden by config at runtime
 
 def _resolve_post_mission_timeout() -> int:
     """Read post_mission_timeout from config, falling back to module constant."""
-    try:
-        from app.config import get_post_mission_timeout
-        return get_post_mission_timeout()
-    except Exception as e:
-        print(f"[mission_runner] failed to load post_mission_timeout config: {e}", file=sys.stderr)
-        return POST_MISSION_TIMEOUT
+    from app.config import get_post_mission_timeout
+    return get_post_mission_timeout()
 
 # Status icons shared by _PipelineTracker.summary_lines() and
 # _notify_pipeline_failures() — single source of truth.
