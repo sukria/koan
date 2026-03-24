@@ -19,7 +19,11 @@ To run Koan in a Docker container (for server deployment or local isolation), se
 
 ## Prerequisites
 
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
+- At least one supported CLI provider installed and authenticated:
+  - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+  - [OpenAI Codex CLI](https://github.com/openai/codex)
+  - [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli)
+  - Local provider dependencies (see [docs/provider-local.md](docs/provider-local.md))
 - Python 3.8+
 - A Telegram account or a Slack workspace (for messaging)
 
@@ -30,12 +34,13 @@ To run Koan in a Docker container (for server deployment or local isolation), se
 ## LLM Providers
 
 Koan supports multiple LLM providers. Claude Code CLI is the default and
-most capable option. You can also use GitHub Copilot or a local LLM
-server.
+most capable option. You can also use OpenAI Codex, GitHub Copilot, or a
+local LLM server.
 
 | Provider | Setup Guide | Best For |
 |----------|------------|----------|
 | **Claude Code** (default) | [docs/provider-claude.md](docs/provider-claude.md) | Full-featured agent with best reasoning |
+| **OpenAI Codex** | [docs/provider-codex.md](docs/provider-codex.md) | ChatGPT users who want Codex models |
 | **GitHub Copilot** | [docs/provider-copilot.md](docs/provider-copilot.md) | Teams with existing Copilot subscriptions |
 | **Local LLM** | [docs/provider-local.md](docs/provider-local.md) | Offline use, privacy, zero API cost |
 
@@ -498,13 +503,25 @@ Your `missions.md` file references a project name that doesn't match your config
 2. Check that the bot is invited to the channel (`/invite @koan`)
 3. Review the logs for connection errors (`make logs`)
 
-### Claude CLI errors
+### CLI provider errors
 
-Make sure Claude Code CLI is installed and authenticated:
+Make sure your configured provider CLI is installed and authenticated.
+
+**Claude Code:**
 ```bash
 claude --version   # Should show version
 claude             # Should start interactive mode (exit with /exit)
 ```
+
+**OpenAI Codex:**
+```bash
+codex --version    # Should show version
+codex login --device-auth
+```
+
+For Copilot and local setups, see:
+- [docs/provider-copilot.md](docs/provider-copilot.md)
+- [docs/provider-local.md](docs/provider-local.md)
 
 ## Preventing macOS sleep
 

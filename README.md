@@ -34,9 +34,9 @@
 
 ## What Is This?
 
-You pay for Claude Max. You use it 8 hours a day. The other 16? Wasted quota.
+You pay for AI coding quota. You use it 8 hours a day. The other 16? Wasted quota.
 
-Koan fixes that. It's a background agent that runs on your machine, pulls tasks from a shared mission queue, executes them via [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code), and reports back through Telegram or Slack. It writes code in isolated branches, never touches `main`, and waits for your review before anything ships.
+Koan fixes that. It's a background agent that runs on your machine, pulls tasks from a shared mission queue, executes them via your configured CLI provider (Claude Code, Codex, Copilot, or local), and reports back through Telegram or Slack. It writes code in isolated branches, never touches `main`, and waits for your review before anything ships.
 
 **The agent proposes. The human decides.**
 
@@ -126,7 +126,7 @@ OpenClaw and ZeroClaw are general-purpose autonomous agents that can do *anythin
 Two processes run in parallel:
 
 - **Bridge** (`make awake`) — Polls your messaging platform. Classifies incoming messages as *chat* (instant reply) or *mission* (queued for deep work). Formats outgoing messages through Claude with personality context.
-- **Agent loop** (`make run`) — Picks the next mission, executes it via Claude Code CLI, writes journal entries, pushes branches, creates draft PRs. Adapts its work intensity based on remaining API quota.
+- **Agent loop** (`make run`) — Picks the next mission, executes it via the configured CLI provider, writes journal entries, pushes branches, creates draft PRs. Adapts its work intensity based on remaining API quota.
 
 Communication happens through shared markdown files in `instance/` — atomic writes, file locks, no database needed.
 
@@ -288,10 +288,15 @@ Koan isn't locked to Claude. Swap the backend per-project:
 | Provider | Best for |
 |----------|----------|
 | **Claude Code** (default) | Full-featured agent, best reasoning |
+| **OpenAI Codex** | ChatGPT users (Plus/Pro/Business/Edu/Enterprise) |
 | **GitHub Copilot** | Teams with existing Copilot licenses |
 | **Local LLM** | Offline, privacy, zero API cost |
 
-See provider guides in [docs/](docs/).
+See provider guides:
+- [docs/provider-claude.md](docs/provider-claude.md)
+- [docs/provider-codex.md](docs/provider-codex.md)
+- [docs/provider-copilot.md](docs/provider-copilot.md)
+- [docs/provider-local.md](docs/provider-local.md)
 
 ## Architecture
 
@@ -307,7 +312,9 @@ koan/
     usage_tracker.py      #   Budget tracking & mode selection
     provider/             #   CLI provider abstraction
       claude.py           #     Claude Code CLI
+      codex.py            #     OpenAI Codex CLI
       copilot.py          #     GitHub Copilot CLI
+      local.py            #     Local LLM backends
   skills/                 # Pluggable command system (44 core skills)
   system-prompts/         # All LLM prompts (20 files, no inline prompts)
   templates/              # Dashboard Jinja2 templates

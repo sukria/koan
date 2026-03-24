@@ -93,7 +93,7 @@ Pending  →  In Progress  →  Done ✓
 ```
 
 1. **Pending** — Queued and waiting. Kōan picks missions from the top of the queue.
-2. **In Progress** — Kōan is actively working on it via Claude Code CLI.
+2. **In Progress** — Kōan is actively working on it via the configured CLI provider.
 3. **Done** — Completed successfully. Code is in a `koan/*` branch, often with a draft PR.
 4. **Failed** — Something went wrong. Kōan logs the reason and moves on.
 
@@ -819,7 +819,7 @@ projects:
 ```
 
 Key per-project settings:
-- **`cli_provider`** — `claude`, `copilot`, or `local`
+- **`cli_provider`** — `claude`, `codex`, `copilot`, `local`, or `ollama-launch`
 - **`models`** — Override model selection per role
 - **`tools`** — Restrict available tools
 - **`git_auto_merge`** — Auto-merge completed PRs (strategy: squash/merge/rebase)
@@ -902,6 +902,7 @@ Kōan supports multiple CLI backends. Configure globally via `KOAN_CLI_PROVIDER`
 | Provider | Best for | Docs |
 |----------|----------|------|
 | **Claude Code** (default) | Full-featured agent, best reasoning | [provider-claude.md](provider-claude.md) |
+| **OpenAI Codex** | ChatGPT users who want Codex models | [provider-codex.md](provider-codex.md) |
 | **GitHub Copilot** | Teams with existing Copilot licenses | [provider-copilot.md](provider-copilot.md) |
 | **Local LLM** | Offline, privacy, zero API cost | [provider-local.md](provider-local.md) |
 
