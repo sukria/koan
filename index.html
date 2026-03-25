@@ -10,7 +10,7 @@
   <meta property="og:title" content="Koan - An autonomous AI agent that works while you sleep">
   <meta property="og:description" content="An autonomous AI coding agent. Open source, extensible, supports multiple LLMs. Works on PRs, reviews code, and runs security scans while you sleep.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://github.com/sukria/koan">
+  <meta property="og:url" content="https://github.com/Anantys-oss/koan">
   <meta property="og:image" content="avatar.png">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Koan - Autonomous AI Agent">
@@ -190,6 +190,14 @@
       transition: border-color 0.2s, background 0.2s; cursor: pointer;
     }
     .btn-ghost-cta:hover { border-color: rgba(0,229,195,0.4); background: rgba(0,229,195,0.06); color: var(--text); }
+
+    /* ──────────────── CONSULT HINT ──────────────── */
+    .consult-hint {
+      margin-top: 1.2rem; font-size: 0.85rem; color: var(--muted);
+    }
+    .consult-hint i { margin-right: 0.35rem; }
+    .consult-hint a { color: var(--accent); text-decoration: none; font-weight: 500; transition: color 0.2s; }
+    .consult-hint a:hover { color: var(--accent3); text-decoration: underline; }
 
     /* ──────────────── HOME HERO ──────────────── */
     .hero {
@@ -465,10 +473,11 @@
       <button class="nav-tab" data-page="skills" onclick="showPage('skills')"><i class="fas fa-puzzle-piece"></i> Skills</button>
       <button class="nav-tab" data-page="integrations" onclick="showPage('integrations')"><i class="fas fa-plug"></i> Integrations</button>
       <button class="nav-tab" data-page="config" onclick="showPage('config')"><i class="fas fa-book-open"></i> Docs</button>
+      <button class="nav-tab" data-page="consulting" onclick="showPage('consulting')"><i class="fas fa-handshake"></i> Consulting</button>
     </div>
     <div class="nav-right">
-      <a href="https://github.com/sukria/koan" target="_blank" class="btn-gh"><i class="fab fa-github"></i> GitHub</a>
-      <a href="https://github.com/sukria/koan/stargazers" target="_blank" class="btn-star"><i class="fas fa-star"></i> Star</a>
+      <a href="https://github.com/Anantys-oss/koan" target="_blank" class="btn-gh"><i class="fab fa-github"></i> GitHub</a>
+      <a href="https://github.com/Anantys-oss/koan/stargazers" target="_blank" class="btn-star"><i class="fas fa-star"></i> Star</a>
     </div>
     <button class="nav-burger" onclick="toggleMobile()" id="burgerBtn"><i class="fas fa-bars"></i></button>
   </div>
@@ -479,9 +488,10 @@
     <button class="nav-mobile-tab" data-page="skills" onclick="showPage('skills');closeMobile()"><i class="fas fa-puzzle-piece"></i> Skills</button>
     <button class="nav-mobile-tab" data-page="integrations" onclick="showPage('integrations');closeMobile()"><i class="fas fa-plug"></i> Integrations</button>
     <button class="nav-mobile-tab" data-page="config" onclick="showPage('config');closeMobile()"><i class="fas fa-book-open"></i> Docs</button>
+    <button class="nav-mobile-tab" data-page="consulting" onclick="showPage('consulting');closeMobile()"><i class="fas fa-handshake"></i> Consulting</button>
     <div class="d-flex gap-2 mt-3">
-      <a href="https://github.com/sukria/koan" target="_blank" class="btn-gh flex-fill justify-content-center"><i class="fab fa-github"></i> GitHub</a>
-      <a href="https://github.com/sukria/koan/stargazers" target="_blank" class="btn-star flex-fill justify-content-center"><i class="fas fa-star"></i> Star</a>
+      <a href="https://github.com/Anantys-oss/koan" target="_blank" class="btn-gh flex-fill justify-content-center"><i class="fab fa-github"></i> GitHub</a>
+      <a href="https://github.com/Anantys-oss/koan/stargazers" target="_blank" class="btn-star flex-fill justify-content-center"><i class="fas fa-star"></i> Star</a>
     </div>
   </div>
 </nav>
@@ -502,8 +512,9 @@
           <p class="hero-sub">Turns idle <strong>Claude Max quota</strong> into code reviews, bug fixes, and strategic insights — right inside your GitHub workflow. No babysitting required.</p>
           <div class="cta-row">
             <button class="btn-primary-cta" onclick="showPage('commands')"><i class="fas fa-rocket"></i> See it in action</button>
-            <a href="https://github.com/sukria/koan" target="_blank" class="btn-ghost-cta"><i class="fab fa-github"></i> View on GitHub</a>
+            <a href="https://github.com/Anantys-oss/koan" target="_blank" class="btn-ghost-cta"><i class="fab fa-github"></i> View on GitHub</a>
           </div>
+          <div class="consult-hint"><i class="fas fa-handshake"></i> Need help deploying Koan? <a href="#" onclick="showPage('consulting');return false;">Talk to our team</a></div>
           <div class="stats-row">
             <div class="stat-item"><span class="stat-num">3+</span><span class="stat-label">LLM Providers</span></div>
             <div class="stat-item"><span class="stat-num">15+</span><span class="stat-label">Built-in Skills</span></div>
@@ -588,8 +599,8 @@
         <h2>Free. Open. Forever.</h2>
         <p>MIT licensed and community-driven. Fork it, extend it, make it yours.</p>
         <div class="d-flex flex-wrap gap-3 justify-content-center">
-          <a href="https://github.com/sukria/koan" target="_blank" class="btn-primary-cta"><i class="fab fa-github"></i> View on GitHub</a>
-          <a href="https://github.com/sukria/koan/fork" target="_blank" class="btn-ghost-cta" style="color:var(--text)"><i class="fas fa-code-fork"></i> Fork & Contribute</a>
+          <a href="https://github.com/Anantys-oss/koan" target="_blank" class="btn-primary-cta"><i class="fab fa-github"></i> View on GitHub</a>
+          <a href="https://github.com/Anantys-oss/koan/fork" target="_blank" class="btn-ghost-cta" style="color:var(--text)"><i class="fas fa-code-fork"></i> Fork & Contribute</a>
         </div>
       </div>
     </div>
@@ -608,6 +619,7 @@
           <a href="#" class="footer-link" onclick="showPage('commands');return false;">Commands</a>
           <a href="#" class="footer-link" onclick="showPage('skills');return false;">Skills</a>
           <a href="#" class="footer-link" onclick="showPage('config');return false;">Docs</a>
+          <a href="#" class="footer-link" onclick="showPage('consulting');return false;">Consulting</a>
         </div>
         <div class="col-lg-2 col-6">
           <div class="footer-heading">Integrations</div>
@@ -624,9 +636,9 @@
         </div>
         <div class="col-lg-2 col-6">
           <div class="footer-heading">Resources</div>
-          <a href="https://github.com/sukria/koan#readme" target="_blank" class="footer-link">Documentation</a>
-          <a href="https://github.com/sukria/koan/releases" target="_blank" class="footer-link">Changelog</a>
-          <a href="https://github.com/sukria/koan/issues" target="_blank" class="footer-link">Issues</a>
+          <a href="https://github.com/Anantys-oss/koan#readme" target="_blank" class="footer-link">Documentation</a>
+          <a href="https://github.com/Anantys-oss/koan/releases" target="_blank" class="footer-link">Changelog</a>
+          <a href="https://github.com/Anantys-oss/koan/issues" target="_blank" class="footer-link">Issues</a>
         </div>
       </div>
       <div class="footer-bottom">
@@ -636,7 +648,7 @@
   · <a href="https://github.com/atoomic" target="_blank" style="color:var(--muted);text-decoration:none;">@atoomic</a>
 </span>
         <div class="social-links">
-          <a href="https://github.com/sukria/koan" target="_blank" class="social-link"><i class="fab fa-github"></i></a>
+          <a href="https://github.com/Anantys-oss/koan" target="_blank" class="social-link"><i class="fab fa-github"></i></a>
           <a href="#" class="social-link"><i class="fab fa-telegram"></i></a>
           <a href="#" class="social-link"><i class="fab fa-slack"></i></a>
           <a href="#" class="social-link"><i class="fab fa-twitter"></i></a>
@@ -845,11 +857,11 @@
         <div class="col-lg-6">
           <h3 style="font-size:1.18rem;font-weight:700;margin-bottom:1.2rem;" class="reveal">Quick links</h3>
           <div class="d-flex flex-column gap-3">
-            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-blue"><i class="fas fa-rocket"></i></div><div><h5>Getting Started</h5><p>Install Kōan, configure your first bot, and run your first command in 5 minutes</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
-            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-purple"><i class="fas fa-puzzle-piece"></i></div><div><h5>Writing Custom Skills</h5><p>Build skills with the Skills API and share them with the community</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
-            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-teal"><i class="fab fa-docker"></i></div><div><h5>Docker Deployment</h5><p>Production-ready Docker setup with compose examples and env vars</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
-            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-amber"><i class="fas fa-shield-halved"></i></div><div><h5>Security &amp; Secrets</h5><p>How Kōan handles API keys, webhook secrets, and least-privilege GitHub access</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
-            <a href="https://github.com/sukria/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-indigo"><i class="fas fa-code-fork"></i></div><div><h5>Contributing</h5><p>Contribution guide, code of conduct, and how to propose new core features</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/Anantys-oss/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-blue"><i class="fas fa-rocket"></i></div><div><h5>Getting Started</h5><p>Install Kōan, configure your first bot, and run your first command in 5 minutes</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/Anantys-oss/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-purple"><i class="fas fa-puzzle-piece"></i></div><div><h5>Writing Custom Skills</h5><p>Build skills with the Skills API and share them with the community</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/Anantys-oss/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-teal"><i class="fab fa-docker"></i></div><div><h5>Docker Deployment</h5><p>Production-ready Docker setup with compose examples and env vars</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/Anantys-oss/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-amber"><i class="fas fa-shield-halved"></i></div><div><h5>Security &amp; Secrets</h5><p>How Kōan handles API keys, webhook secrets, and least-privilege GitHub access</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
+            <a href="https://github.com/Anantys-oss/koan" target="_blank" class="doc-link reveal"><div class="dl-icon ic-indigo"><i class="fas fa-code-fork"></i></div><div><h5>Contributing</h5><p>Contribution guide, code of conduct, and how to propose new core features</p></div><i class="fas fa-arrow-right dl-arr"></i></a>
           </div>
         </div>
       </div>
@@ -857,9 +869,69 @@
   </section>
 </div>
 
+<!-- ══════════════════════════════════════════════════════
+     PAGE: CONSULTING
+══════════════════════════════════════════════════════ -->
+<div id="page-consulting" class="page">
+  <div class="page-header">
+    <div class="container reveal">
+      <span class="section-label">Professional Services</span>
+      <h2 class="section-title">We'll get Koan running for you</h2>
+      <p class="section-desc">Our team deploys, customizes, and supports Koan for your company — so you can focus on shipping.</p>
+    </div>
+  </div>
+  <section>
+    <div class="container">
+      <div class="row g-4">
+        <div class="col-lg-3 col-md-6 reveal">
+          <div class="feature-card">
+            <div class="f-icon ic-teal"><i class="fas fa-server"></i></div>
+            <h4>Deployment & Setup</h4>
+            <p>We deploy Koan in your infra — Docker, cloud, or on-prem. Up and running in a day.</p>
+          </div>
+        </div>
+        <div class="col-lg-3 col-md-6 reveal">
+          <div class="feature-card">
+            <div class="f-icon ic-purple"><i class="fas fa-puzzle-piece"></i></div>
+            <h4>Custom Skills</h4>
+            <p>We build custom skills tailored to your codebase, workflows, and team conventions.</p>
+          </div>
+        </div>
+        <div class="col-lg-3 col-md-6 reveal">
+          <div class="feature-card">
+            <div class="f-icon ic-blue"><i class="fas fa-graduation-cap"></i></div>
+            <h4>Team Training</h4>
+            <p>Hands-on workshops so your team can get the most out of Koan from day one.</p>
+          </div>
+        </div>
+        <div class="col-lg-3 col-md-6 reveal">
+          <div class="feature-card">
+            <div class="f-icon ic-amber"><i class="fas fa-life-ring"></i></div>
+            <h4>Ongoing Support</h4>
+            <p>Dedicated support channel, priority bug fixes, and regular check-ins.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="oss-section">
+    <div class="container">
+      <div class="cta-box reveal">
+        <span class="section-label">Let's talk</span>
+        <h2>Ready to bring Koan to your team?</h2>
+        <p>We'll pair with your engineers to get everything set up — fast.</p>
+        <div class="d-flex flex-wrap gap-3 justify-content-center">
+          <a href="https://anantys.com/en/consulting" target="_blank" class="btn-primary-cta"><i class="fas fa-arrow-right"></i> Get in touch</a>
+          <a href="https://github.com/Anantys-oss/koan" target="_blank" class="btn-ghost-cta" style="color:var(--text)"><i class="fab fa-github"></i> View on GitHub</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
 <script>
-  const VALID_PAGES = ['home','features','commands','skills','integrations','config'];
+  const VALID_PAGES = ['home','features','commands','skills','integrations','config','consulting'];
 
   function showPage(id) {
     if (!VALID_PAGES.includes(id)) return;
