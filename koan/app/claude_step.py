@@ -57,6 +57,21 @@ def _abort_rebase_safely(project_path: str) -> None:
 _ordered_remotes = ordered_remotes
 
 
+def _fetch_branch(remote: str, branch: str, project_path: str) -> None:
+    """Fetch a branch using an explicit refspec to guarantee the tracking ref is updated.
+
+    ``git fetch remote branch`` relies on git's *opportunistic update*
+    mechanism to refresh ``refs/remotes/remote/branch``.  This can silently
+    fail when the remote's configured fetch refspec doesn't cover the branch
+    (e.g. temporary ``fork-<owner>`` remotes or restrictive refspec configs).
+
+    Using an explicit refspec ensures the remote tracking ref is always
+    created/updated, so subsequent operations use the true remote state.
+    """
+    refspec = f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+    _run_git(["git", "fetch", remote, refspec], cwd=project_path)
+
+
 def _rebase_onto_target(
     base: str,
     project_path: str,
@@ -75,7 +90,7 @@ def _rebase_onto_target(
     """
     for remote in _ordered_remotes(preferred_remote):
         try:
-            _run_git(["git", "fetch", remote, base], cwd=project_path)
+            _fetch_branch(remote, base, project_path)
         except _REBASE_EXCEPTIONS as e:
             print(f"[claude_step] Fetch {remote}/{base} failed: {e}", file=sys.stderr)
             continue
@@ -84,7 +99,7 @@ def _rebase_onto_target(
         # replay to only the PR's commits.
         if head_remote and head_remote != remote:
             try:
-                _run_git(["git", "fetch", head_remote, base], cwd=project_path)
+                _fetch_branch(head_remote, base, project_path)
                 _run_git(
                     ["git", "rebase", "--onto", f"{remote}/{base}",
                      f"{head_remote}/{base}", "--autostash"],

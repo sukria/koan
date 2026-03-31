@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 
 from app.claude_step import (
+    _fetch_branch,
     _run_git,
     _rebase_onto_target,
     run_claude_step as _run_claude_step,
@@ -221,9 +222,14 @@ def run_pr_review(
     # ── Step 2: Checkout and rebase onto target branch ────────────────
     notify_fn(f"Rebasing `{branch}` onto `{base}`...")
     try:
-        _run_git(["git", "fetch", "origin", branch], cwd=project_path)
-        _run_git(["git", "checkout", branch], cwd=project_path)
-        _run_git(["git", "pull", "origin", branch, "--rebase"], cwd=project_path)
+        # Fetch with explicit refspec then hard-reset to remote state.
+        # A plain `git checkout branch` would use a potentially stale local
+        # branch; -B guarantees we start from the actual remote HEAD.
+        _fetch_branch("origin", branch, project_path)
+        _run_git(
+            ["git", "checkout", "-B", branch, f"origin/{branch}"],
+            cwd=project_path,
+        )
     except Exception as e:
         return False, f"Failed to checkout branch {branch}: {e}"
 

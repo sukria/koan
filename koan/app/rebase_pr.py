@@ -40,6 +40,22 @@ from app.prompts import load_prompt, load_prompt_or_skill, load_skill_prompt  # 
 from app.utils import _GITHUB_REMOTE_RE, truncate_text
 
 
+def _fetch_branch(remote: str, branch: str, project_path: str) -> None:
+    """Fetch a branch using an explicit refspec to guarantee the tracking ref is updated.
+
+    ``git fetch remote branch`` relies on git's *opportunistic update*
+    mechanism to refresh ``refs/remotes/remote/branch``.  This can silently
+    fail when the remote's configured fetch refspec doesn't cover the branch
+    (e.g. temporary ``fork-<owner>`` remotes or restrictive refspec configs).
+
+    Using an explicit refspec ensures the remote tracking ref is always
+    created/updated, so subsequent ``git checkout -B branch remote/branch``
+    starts from the true remote state — never a stale local ref.
+    """
+    refspec = f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+    _run_git(["git", "fetch", remote, refspec], cwd=project_path)
+
+
 def fetch_pr_context(owner: str, repo: str, pr_number: str) -> dict:
     """Fetch PR details, diff, and all comments via gh CLI.
 
@@ -431,11 +447,20 @@ def _check_if_already_solved(
 
     base = pr_context.get("base", "main")
 
+    # Fetch the base branch from origin so we compare against the latest
+    # upstream state, not a potentially stale local branch.
+    base_ref = base
+    try:
+        _fetch_branch("origin", base, project_path)
+        base_ref = f"origin/{base}"
+    except Exception as e:
+        print(f"[rebase_pr] fetch origin/{base} for already-solved check failed: {e}", file=sys.stderr)
+
     # Collect recent commits on the base branch for context
     recent_commits = ""
     try:
         recent_commits = _run_git(
-            ["git", "log", "--oneline", "-30", base],
+            ["git", "log", "--oneline", "-30", base_ref],
             cwd=project_path, timeout=15,
         )
     except Exception as e:
@@ -606,7 +631,7 @@ def _rebase_with_conflict_resolution(
     """
     for remote in _ordered_remotes(preferred_remote):
         try:
-            _run_git(["git", "fetch", remote, base], cwd=project_path)
+            _fetch_branch(remote, base, project_path)
         except Exception as e:
             print(f"[rebase_pr] fetch {remote}/{base} failed: {e}", file=sys.stderr)
             continue
@@ -616,7 +641,7 @@ def _rebase_with_conflict_resolution(
         # history when the fork has diverged).
         if head_remote and head_remote != remote:
             try:
-                _run_git(["git", "fetch", head_remote, base], cwd=project_path)
+                _fetch_branch(head_remote, base, project_path)
                 _run_git(
                     ["git", "rebase", "--onto", f"{remote}/{base}",
                      f"{head_remote}/{base}", "--autostash"],
@@ -1140,7 +1165,7 @@ def _checkout_pr_branch(
 
     for remote in remotes:
         try:
-            _run_git(["git", "fetch", remote, branch], cwd=project_path)
+            _fetch_branch(remote, branch, project_path)
             # Success — use this remote
             fetch_remote = remote
             break
@@ -1162,7 +1187,7 @@ def _checkout_pr_branch(
                 # Remote may already exist from a previous run
                 print(f"[rebase_pr] remote add {fork_remote} failed (may already exist): {e}", file=sys.stderr)
             try:
-                _run_git(["git", "fetch", fork_remote, branch], cwd=project_path)
+                _fetch_branch(fork_remote, branch, project_path)
                 fetch_remote = fork_remote
             except Exception:
                 raise RuntimeError(

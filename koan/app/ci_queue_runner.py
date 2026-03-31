@@ -165,9 +165,14 @@ def run_ci_check_and_fix(pr_url: str, project_path: str) -> Tuple[bool, str]:
     original_branch = _get_current_branch(project_path)
 
     try:
-        from app.claude_step import _run_git
-        _run_git(["git", "fetch", "origin", branch], cwd=project_path)
-        _run_git(["git", "checkout", branch], cwd=project_path)
+        from app.claude_step import _fetch_branch, _run_git
+        # Fetch with explicit refspec then hard-reset to remote state.
+        # A plain `git checkout branch` would use a stale local branch.
+        _fetch_branch("origin", branch, project_path)
+        _run_git(
+            ["git", "checkout", "-B", branch, f"origin/{branch}"],
+            cwd=project_path,
+        )
     except Exception as e:
         return False, f"Failed to checkout {branch}: {e}"
 
