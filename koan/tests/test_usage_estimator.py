@@ -21,6 +21,8 @@ from app.usage_estimator import (
     cmd_reset_session,
     cmd_reset_time,
     cmd_set_used,
+    parse_cli_usage_output,
+    fetch_cli_usage,
     SESSION_DURATION_HOURS,
 )
 
@@ -242,7 +244,47 @@ class TestWriteUsageMd:
         content = usage_md.read_text()
         assert "Session (5hr) : 25%" in content
         assert "Weekly (7 day) : 25%" in content
-        assert "reset in" in content
+        assert "resets" in content.lower()
+
+    def test_uses_cli_data_when_provided(self, tmp_path, usage_md):
+        state = {
+            "session_start": datetime.now().isoformat(),
+            "session_tokens": 125000,
+            "weekly_start": datetime.now().isoformat(),
+            "weekly_tokens": 1250000,
+            "runs": 5,
+        }
+        config = {"usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}}
+        cli_usage = {
+            "session_pct": "19",
+            "session_reset": "3am (UTC)",
+            "weekly_pct": "76",
+            "weekly_reset": "Apr 6, 1am (UTC)",
+        }
+        _write_usage_md(state, usage_md, config, cli_usage=cli_usage)
+
+        content = usage_md.read_text()
+        assert "Session (5hr) : 19%" in content
+        assert "Weekly (7 day) : 76%" in content
+        assert "3am (UTC)" in content
+        assert "Apr 6, 1am (UTC)" in content
+        assert "source: claude usage" in content
+
+    def test_falls_back_to_estimate_without_cli(self, tmp_path, usage_md):
+        state = {
+            "session_start": datetime.now().isoformat(),
+            "session_tokens": 125000,
+            "weekly_start": datetime.now().isoformat(),
+            "weekly_tokens": 1250000,
+            "runs": 5,
+        }
+        config = {"usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}}
+        _write_usage_md(state, usage_md, config, cli_usage=None)
+
+        content = usage_md.read_text()
+        assert "Session (5hr) : 25%" in content
+        assert "Weekly (7 day) : 25%" in content
+        assert "source: token estimate" in content
 
     def test_caps_at_100_percent(self, tmp_path, usage_md):
         state = {
@@ -291,10 +333,11 @@ class TestWriteUsageMd:
 
 
 class TestCmdUpdate:
+    @patch("app.usage_estimator.fetch_cli_usage", return_value=None)
     @patch("app.usage_estimator.load_config", return_value={
         "usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}
     })
-    def test_accumulates_tokens(self, mock_config, claude_json, state_file, usage_md):
+    def test_accumulates_tokens(self, mock_config, mock_cli, claude_json, state_file, usage_md):
         cmd_update(claude_json, state_file, usage_md)
 
         state = json.loads(state_file.read_text())
@@ -308,8 +351,9 @@ class TestCmdUpdate:
         assert state["session_tokens"] == 4000
         assert state["runs"] == 2
 
+    @patch("app.usage_estimator.fetch_cli_usage", return_value=None)
     @patch("app.usage_estimator.load_config", return_value={})
-    def test_handles_no_tokens_gracefully(self, mock_config, tmp_path, state_file, usage_md):
+    def test_handles_no_tokens_gracefully(self, mock_config, mock_cli, tmp_path, state_file, usage_md):
         f = tmp_path / "empty.json"
         f.write_text(json.dumps({"result": "done"}))
         cmd_update(f, state_file, usage_md)
@@ -317,12 +361,28 @@ class TestCmdUpdate:
         state = json.loads(state_file.read_text())
         assert state["session_tokens"] == 0
 
-
-class TestCmdRefresh:
+    @patch("app.usage_estimator.fetch_cli_usage", return_value={
+        "session_pct": "42", "session_reset": "5am (UTC)",
+        "weekly_pct": "71", "weekly_reset": "Apr 7, 1am (UTC)",
+    })
     @patch("app.usage_estimator.load_config", return_value={
         "usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}
     })
-    def test_creates_usage_md(self, mock_config, state_file, usage_md):
+    def test_uses_cli_usage_when_available(self, mock_config, mock_cli, claude_json, state_file, usage_md):
+        cmd_update(claude_json, state_file, usage_md)
+
+        content = usage_md.read_text()
+        assert "Session (5hr) : 42%" in content
+        assert "Weekly (7 day) : 71%" in content
+        assert "source: claude usage" in content
+
+
+class TestCmdRefresh:
+    @patch("app.usage_estimator.fetch_cli_usage", return_value=None)
+    @patch("app.usage_estimator.load_config", return_value={
+        "usage": {"session_token_limit": 500000, "weekly_token_limit": 5000000}
+    })
+    def test_creates_usage_md(self, mock_config, mock_cli, state_file, usage_md):
         # Write some state
         state = _fresh_state()
         state["session_tokens"] = 50000
@@ -335,8 +395,9 @@ class TestCmdRefresh:
         assert "Session (5hr) : 10%" in content
         assert "Weekly (7 day) : 5%" in content
 
+    @patch("app.usage_estimator.fetch_cli_usage", return_value=None)
     @patch("app.usage_estimator.load_config", return_value={})
-    def test_fresh_state_if_no_file(self, mock_config, state_file, usage_md):
+    def test_fresh_state_if_no_file(self, mock_config, mock_cli, state_file, usage_md):
         cmd_refresh(state_file, usage_md)
         assert usage_md.exists()
         content = usage_md.read_text()
@@ -453,8 +514,9 @@ class TestLoadState:
 class TestUsageEstimatorCLI:
     """CLI tests call main() directly to avoid runpy re-import issues."""
 
+    @patch("app.usage_estimator.fetch_cli_usage", return_value=None)
     @patch("app.usage_estimator.load_config", return_value={})
-    def test_main_update(self, mock_config, tmp_path):
+    def test_main_update(self, mock_config, mock_cli, tmp_path):
         import sys
         from app.usage_estimator import main
         claude_json = tmp_path / "out.json"
@@ -469,8 +531,9 @@ class TestUsageEstimatorCLI:
             main()
         assert usage_md.exists()
 
+    @patch("app.usage_estimator.fetch_cli_usage", return_value=None)
     @patch("app.usage_estimator.load_config", return_value={})
-    def test_main_refresh(self, mock_config, tmp_path):
+    def test_main_refresh(self, mock_config, mock_cli, tmp_path):
         import sys
         from app.usage_estimator import main
         state_file = tmp_path / "state.json"
@@ -862,3 +925,142 @@ class TestCmdSetUsed:
         state = json.loads(state_file.read_text())
         # 30% of 1M = 300k
         assert state["session_tokens"] == 300_000
+
+
+# ---------------------------------------------------------------------------
+# parse_cli_usage_output — parsing the real `claude usage` output
+# ---------------------------------------------------------------------------
+
+class TestParseCliUsageOutput:
+    """Test parse_cli_usage_output with various real-world CLI output formats."""
+
+    def test_parses_full_output(self):
+        """Parse a complete `claude usage` output with all three sections."""
+        text = """
+  Current session
+  █████████▌                                         19% used
+  Resets 3am (UTC)
+
+  Current week (all models)
+  ██████████████████████████████████████             76% used
+  Resets Apr 6, 1am (UTC)
+
+  Current week (Sonnet only)
+                                                      0% used
+  Resets Apr 4, 11pm (UTC)
+"""
+        result = parse_cli_usage_output(text)
+        assert result is not None
+        assert result["session_pct"] == "19"
+        assert result["session_reset"] == "3am (UTC)"
+        assert result["weekly_pct"] == "76"
+        assert result["weekly_reset"] == "Apr 6, 1am (UTC)"
+
+    def test_parses_high_usage(self):
+        text = """
+  Current session
+  █████████████████████████████████████████████▌     91% used
+  Resets 5pm (Europe/Paris)
+
+  Current week (all models)
+  ███████████████████████████████▌               71% used
+  Resets Feb 4 at 10am (Europe/Paris)
+
+  Current week (Sonnet only)
+  ███████▌                                           15% used
+  Resets Feb 4 at 11pm (Europe/Paris)
+"""
+        result = parse_cli_usage_output(text)
+        assert result is not None
+        assert result["session_pct"] == "91"
+        assert result["session_reset"] == "5pm (Europe/Paris)"
+        assert result["weekly_pct"] == "71"
+        assert result["weekly_reset"] == "Feb 4 at 10am (Europe/Paris)"
+
+    def test_parses_zero_usage(self):
+        text = """
+  Current session
+                                                      0% used
+  Resets 8am (UTC)
+
+  Current week (all models)
+                                                      0% used
+  Resets Apr 7, 1am (UTC)
+"""
+        result = parse_cli_usage_output(text)
+        assert result is not None
+        assert result["session_pct"] == "0"
+        assert result["weekly_pct"] == "0"
+
+    def test_session_only(self):
+        """Handles output with only session info."""
+        text = """
+  Current session
+  █████▌                                             10% used
+  Resets 2am (UTC)
+"""
+        result = parse_cli_usage_output(text)
+        assert result is not None
+        assert result["session_pct"] == "10"
+        assert "weekly_pct" not in result
+
+    def test_returns_none_for_empty(self):
+        assert parse_cli_usage_output("") is None
+        assert parse_cli_usage_output("   ") is None
+        assert parse_cli_usage_output(None) is None
+
+    def test_returns_none_for_unrecognized_format(self):
+        assert parse_cli_usage_output("Some random error message\n") is None
+
+    def test_handles_100_percent(self):
+        text = """
+  Current session
+  ██████████████████████████████████████████████████ 100% used
+  Resets 6am (UTC)
+
+  Current week (all models)
+  ██████████████████████████████████████████████████ 100% used
+  Resets Apr 7, 1am (UTC)
+"""
+        result = parse_cli_usage_output(text)
+        assert result is not None
+        assert result["session_pct"] == "100"
+        assert result["weekly_pct"] == "100"
+
+
+class TestFetchCliUsage:
+    """Test fetch_cli_usage with mocked subprocess."""
+
+    @patch("app.usage_estimator.subprocess.run")
+    def test_parses_successful_output(self, mock_run):
+        mock_run.return_value.stdout = """
+  Current session
+  █████████▌                                         19% used
+  Resets 3am (UTC)
+
+  Current week (all models)
+  ██████████████████████████████████████             76% used
+  Resets Apr 6, 1am (UTC)
+"""
+        mock_run.return_value.stderr = ""
+        result = fetch_cli_usage()
+        assert result is not None
+        assert result["session_pct"] == "19"
+        assert result["weekly_pct"] == "76"
+
+    @patch("app.usage_estimator.subprocess.run")
+    def test_returns_none_on_timeout(self, mock_run):
+        import subprocess as sp
+        mock_run.side_effect = sp.TimeoutExpired(cmd="claude", timeout=15)
+        assert fetch_cli_usage() is None
+
+    @patch("app.usage_estimator.subprocess.run")
+    def test_returns_none_on_oserror(self, mock_run):
+        mock_run.side_effect = OSError("command not found")
+        assert fetch_cli_usage() is None
+
+    @patch("app.usage_estimator.subprocess.run")
+    def test_returns_none_on_unparseable(self, mock_run):
+        mock_run.return_value.stdout = "Error: not authenticated"
+        mock_run.return_value.stderr = ""
+        assert fetch_cli_usage() is None

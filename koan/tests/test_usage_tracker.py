@@ -147,6 +147,32 @@ class TestUsageParsing:
         assert tracker.session_pct == 0.0
         assert tracker.weekly_pct == 50.0
 
+    def test_parse_new_cli_format(self, tmp_path):
+        """Parse usage.md written with real claude usage data (new format)."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("""# Usage (source: claude usage)
+
+Session (5hr) : 19% (resets 3am (UTC))
+Weekly (7 day) : 76% (Resets Apr 6, 1am (UTC))
+""")
+        tracker = UsageTracker(usage)
+        assert tracker.session_pct == 19.0
+        assert tracker.session_reset == "3am (UTC)"
+        assert tracker.weekly_pct == 76.0
+        assert tracker.weekly_reset == "Apr 6, 1am (UTC)"
+
+    def test_parse_new_format_token_estimate_fallback(self, tmp_path):
+        """Parse usage.md written with token estimate fallback (new format)."""
+        usage = tmp_path / "usage.md"
+        usage.write_text("""# Usage (source: token estimate)
+
+Session (5hr) : 25% (resets 3h22m)
+Weekly (7 day) : 10% (Resets 5d)
+""")
+        tracker = UsageTracker(usage)
+        assert tracker.session_pct == 25.0
+        assert tracker.weekly_pct == 10.0
+
 
 class TestRemainingBudget:
     """Test budget calculations with safety margin."""

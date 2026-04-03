@@ -14,6 +14,8 @@ Writes usage.md in the same format as manual /usage paste.
 """
 
 import json
+import re
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -197,6 +199,84 @@ def _get_limits(config: dict) -> tuple:
     return session_limit, weekly_limit
 
 
+def parse_cli_usage_output(text: str) -> Optional[dict]:
+    """Parse the output of ``claude usage`` into structured data.
+
+    Expected format (progress bars may vary in width)::
+
+        Current session
+          █████████▌                                         19% used
+          Resets 3am (UTC)
+
+        Current week (all models)
+          ██████████████████████████████████████             76% used
+          Resets Apr 6, 1am (UTC)
+
+        Current week (Sonnet only)
+                                                              0% used
+          Resets Apr 4, 11pm (UTC)
+
+    Returns:
+        dict with keys: session_pct, session_reset, weekly_pct, weekly_reset
+        (all strings), or None if the format is not recognised.
+    """
+    if not text or not text.strip():
+        return None
+
+    result = {}
+
+    # --- Session ---
+    # Match "Current session" block: look for "N% used" after it
+    session_block = re.search(
+        r'Current\s+session\b(.*?)(?=Current\s+week|$)',
+        text, re.DOTALL | re.IGNORECASE,
+    )
+    if session_block:
+        block = session_block.group(1)
+        pct_match = re.search(r'(\d+)%\s*used', block)
+        reset_match = re.search(r'Resets?\s+(.+)', block, re.IGNORECASE)
+        if pct_match:
+            result["session_pct"] = pct_match.group(1)
+        if reset_match:
+            result["session_reset"] = reset_match.group(1).strip()
+
+    # --- Weekly (all models) ---
+    weekly_block = re.search(
+        r'Current\s+week\s*\(all\s+models\)(.*?)(?=Current\s+week|$)',
+        text, re.DOTALL | re.IGNORECASE,
+    )
+    if weekly_block:
+        block = weekly_block.group(1)
+        pct_match = re.search(r'(\d+)%\s*used', block)
+        reset_match = re.search(r'Resets?\s+(.+)', block, re.IGNORECASE)
+        if pct_match:
+            result["weekly_pct"] = pct_match.group(1)
+        if reset_match:
+            result["weekly_reset"] = reset_match.group(1).strip()
+
+    if "session_pct" not in result and "weekly_pct" not in result:
+        return None
+
+    return result
+
+
+def fetch_cli_usage(timeout: int = 15) -> Optional[dict]:
+    """Run ``claude usage`` and parse the output.
+
+    Returns parsed dict (see :func:`parse_cli_usage_output`) or None on
+    any failure (timeout, command not found, unparseable output).
+    """
+    try:
+        proc = subprocess.run(
+            ["claude", "usage"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        return parse_cli_usage_output(combined)
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError):
+        return None
+
+
 def _estimate_reset_time(start_iso: str, duration_hours: float) -> str:
     """Estimate time remaining until reset."""
     try:
@@ -215,36 +295,56 @@ def _estimate_reset_time(start_iso: str, duration_hours: float) -> str:
     return f"{minutes}m"
 
 
-def _write_usage_md(state: dict, usage_md: Path, config: dict):
-    """Write usage.md in the standard format that usage_tracker.py can parse."""
+def _write_usage_md(state: dict, usage_md: Path, config: dict,
+                    cli_usage: Optional[dict] = None):
+    """Write usage.md in the standard format that usage_tracker.py can parse.
+
+    When *cli_usage* is provided (from ``claude usage``), the real
+    percentages and reset times are used instead of internal token
+    estimates.  The internal estimates are kept in HTML comments for
+    debugging.
+    """
     session_limit, weekly_limit = _get_limits(config)
 
-    session_pct = min(100, int(state["session_tokens"] / max(1, session_limit) * 100))
-    weekly_pct = min(100, int(state["weekly_tokens"] / max(1, weekly_limit) * 100))
-
-    session_reset = _estimate_reset_time(state["session_start"], SESSION_DURATION_HOURS)
-    # Weekly reset: days until next Monday
+    # Internal estimates (always computed for the comment block)
+    est_session_pct = min(100, int(state["session_tokens"] / max(1, session_limit) * 100))
+    est_weekly_pct = min(100, int(state["weekly_tokens"] / max(1, weekly_limit) * 100))
+    est_session_reset = _estimate_reset_time(state["session_start"], SESSION_DURATION_HOURS)
     now = datetime.now()
     days_to_monday = (7 - now.weekday()) % 7
     if days_to_monday == 0:
         days_to_monday = 7
-    weekly_reset = f"{days_to_monday}d"
+    est_weekly_reset = f"{days_to_monday}d"
+
+    # Prefer real CLI data when available
+    if cli_usage:
+        session_pct = int(cli_usage.get("session_pct", est_session_pct))
+        weekly_pct = int(cli_usage.get("weekly_pct", est_weekly_pct))
+        session_reset = cli_usage.get("session_reset", est_session_reset)
+        weekly_reset = cli_usage.get("weekly_reset", est_weekly_reset)
+        source = "claude usage"
+    else:
+        session_pct = est_session_pct
+        weekly_pct = est_weekly_pct
+        session_reset = est_session_reset
+        weekly_reset = est_weekly_reset
+        source = "token estimate"
 
     # Fetch today's cache performance from cost tracker (best-effort)
     cache_line = _get_today_cache_line(usage_md.parent)
 
-    content = f"""# Usage (estimated by koan)
+    content = f"""# Usage (source: {source})
 
-Session (5hr) : {session_pct}% (reset in {session_reset})
-Weekly (7 day) : {weekly_pct}% (Resets in {weekly_reset})
+Session (5hr) : {session_pct}% (resets {session_reset})
+Weekly (7 day) : {weekly_pct}% (Resets {weekly_reset})
 """
     if cache_line:
         content += f"{cache_line}\n"
 
     content += f"""
 <!-- Auto-generated by usage_estimator.py — {now.strftime('%Y-%m-%d %H:%M')} -->
-<!-- Session tokens: {state['session_tokens']:,} / {session_limit:,} -->
-<!-- Weekly tokens: {state['weekly_tokens']:,} / {weekly_limit:,} -->
+<!-- Session tokens: {state['session_tokens']:,} / {session_limit:,} (estimate: {est_session_pct}%) -->
+<!-- Weekly tokens: {state['weekly_tokens']:,} / {weekly_limit:,} (estimate: {est_weekly_pct}%) -->
 <!-- Runs this session: {state.get('runs', 0)} -->
 """
     atomic_write(usage_md, content)
@@ -276,7 +376,10 @@ def cmd_update(claude_json_path: Path, state_file: Path, usage_md: Path):
         state["runs"] = state.get("runs", 0) + 1
 
     _save_state(state_file, state)
-    _write_usage_md(state, usage_md, config)
+
+    # Fetch real usage from Claude CLI (best-effort)
+    cli_usage = fetch_cli_usage()
+    _write_usage_md(state, usage_md, config, cli_usage=cli_usage)
 
 
 def cmd_refresh(state_file: Path, usage_md: Path):
@@ -285,7 +388,10 @@ def cmd_refresh(state_file: Path, usage_md: Path):
     state = _load_state(state_file)
     state = _maybe_reset(state)
     _save_state(state_file, state)
-    _write_usage_md(state, usage_md, config)
+
+    # Fetch real usage from Claude CLI (best-effort)
+    cli_usage = fetch_cli_usage()
+    _write_usage_md(state, usage_md, config, cli_usage=cli_usage)
 
 
 def cmd_reset_session(state_file: Path, usage_md: Path):

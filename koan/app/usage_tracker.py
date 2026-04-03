@@ -83,27 +83,29 @@ class UsageTracker:
     def _parse_usage_file(self, usage_file: Path):
         """Parse usage.md to extract session and weekly percentages.
 
-        Format examples:
-            Session (5hr) : 25% (reset in 3h)
-            Weekly (7 day) : 60% (Resets in 3d)
+        Supports two format variants:
+            Old:  Session (5hr) : 25% (reset in 3h)
+            New:  Session (5hr) : 25% (resets 3am (UTC))
         """
         content = usage_file.read_text()
 
-        # Parse session line
+        # Parse session line — accepts both "reset in X" and "resets X"
+        # The reset value may contain nested parens like "3am (UTC)", so we
+        # match everything up to the last closing paren on the line.
         session_match = re.search(
-            r'Session\s*\([^)]+\)\s*:\s*(\d+)%\s*\((?:reset|resets)\s+in\s+([^)]+)\)',
+            r'Session\s*\([^)]+\)\s*:\s*(\d+)%\s*\((?:reset|resets)\s+(?:in\s+)?(.+)\)\s*$',
             content,
-            re.IGNORECASE
+            re.IGNORECASE | re.MULTILINE
         )
         if session_match:
             self.session_pct = float(session_match.group(1))
             self.session_reset = session_match.group(2).strip()
 
-        # Parse weekly line
+        # Parse weekly line — accepts both "Resets in X" and "Resets X"
         weekly_match = re.search(
-            r'Weekly\s*\([^)]+\)\s*:\s*(\d+)%\s*\((?:reset|resets)\s+in\s+([^)]+)\)',
+            r'Weekly\s*\([^)]+\)\s*:\s*(\d+)%\s*\((?:reset|resets)\s+(?:in\s+)?(.+)\)\s*$',
             content,
-            re.IGNORECASE
+            re.IGNORECASE | re.MULTILINE
         )
         if weekly_match:
             self.weekly_pct = float(weekly_match.group(1))
