@@ -279,6 +279,37 @@ Kōan can manage multiple projects simultaneously. It rotates between them based
 - `/active` — "I'm done, you can work again"
 </details>
 
+### Strict Missions Mode
+
+**Strict missions** is a config-level switch that turns Kōan into a pure mission executor. When enabled, the agent only runs missions you explicitly queue — it never picks up GitHub issues autonomously, never runs contemplative reflection, and never enters DEEP mode. The loop keeps polling Telegram, GitHub notifications, and recurring schedules, so it still wakes up the moment you queue something.
+
+- **Enable in `instance/config.yaml`:**
+  ```yaml
+  strict_missions: true
+  ```
+- **Or via environment variable:** `KOAN_STRICT_MISSIONS=1` (takes precedence over `config.yaml`).
+- **Disable:** set back to `false`, or `KOAN_STRICT_MISSIONS=0`.
+
+What continues to run under strict mode:
+
+- Missions queued via `/mission`, GitHub `@mention` commands, and recurring schedules.
+- Heartbeat, auto-update, Telegram polling, GitHub notification polling, CI queue drain.
+
+What is disabled:
+
+- DEEP mode (capped at `implement`).
+- Contemplative sessions (random reflection rolls are skipped).
+- Autonomous exploration (`strict_wait` replaces `exploration_wait` when no mission is pending).
+- The agent prompt's `GitHub Issue Selection` section is replaced with an explicit "do not pick up issues" instruction.
+
+**How it differs from `/passive`:** passive mode blocks all execution (missions sit as Pending until you `/active`). Strict missions mode keeps the executor running for any mission you queue — it only gates *autonomous work selection*.
+
+**When to use:**
+
+- You want Kōan to act strictly on demand, no surprises on the PR list.
+- You're handing off mission dispatch to another system (CI, a team workflow) and want Kōan to be a quiet executor.
+- Multi-bot setups where only one instance should pick up issues autonomously.
+
 ---
 
 ## Intermediate — Productivity Workflows

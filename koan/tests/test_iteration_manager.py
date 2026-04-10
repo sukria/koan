@@ -2696,3 +2696,239 @@ class TestPlanIterationRandomSelection:
         )
         assert result["action"] == "autonomous"
         assert result["project_name"] == "koan"
+
+
+# === Tests: strict_missions mode ===
+
+
+class TestStrictMissionsContemplate:
+    """_should_contemplate should return False under strict mode."""
+
+    @patch("random.randint", return_value=0)  # roll would otherwise succeed
+    def test_strict_skips_contemplation_with_ample_budget(self, mock_rand):
+        assert _should_contemplate(
+            "deep", False, 100, strict_missions=True,
+        ) is False
+
+    @patch("random.randint", return_value=0)
+    def test_strict_skips_contemplation_in_implement(self, mock_rand):
+        assert _should_contemplate(
+            "implement", False, 100, strict_missions=True,
+        ) is False
+
+    @patch("random.randint", return_value=0)
+    def test_non_strict_still_contemplates(self, mock_rand):
+        """Sanity check: non-strict path still rolls."""
+        assert _should_contemplate(
+            "deep", False, 100, strict_missions=False,
+        ) is True
+
+
+class TestStrictMissionsPlanIteration:
+    """plan_iteration behavior under strict_missions mode."""
+
+    @patch("app.config.is_strict_missions", return_value=True)
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("app.iteration_manager._check_schedule", return_value=None)
+    def test_no_mission_returns_strict_wait(
+        self, mock_schedule, mock_focus, mock_refresh, mock_pick, mock_strict,
+        instance_dir, koan_root, usage_state,
+    ):
+        """Strict mode + no pending mission → strict_wait action."""
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text(
+            "Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n"
+        )
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "strict_wait"
+        assert result["mission_title"] == ""
+        # DEEP is capped to implement under strict mode
+        assert result["autonomous_mode"] == "implement"
+        assert "strict" in result["decision_reason"].lower()
+
+    @patch("app.iteration_manager._filter_exploration_projects")
+    @patch("app.config.is_strict_missions", return_value=True)
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("app.iteration_manager._check_schedule", return_value=None)
+    def test_strict_mode_skips_exploration_filter(
+        self, mock_schedule, mock_focus, mock_refresh, mock_pick, mock_strict,
+        mock_filter, instance_dir, koan_root, usage_state,
+    ):
+        """Strict mode should short-circuit before calling exploration filter."""
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text(
+            "Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n"
+        )
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "strict_wait"
+        mock_filter.assert_not_called()
+
+    @patch("app.config.is_strict_missions", return_value=True)
+    @patch("app.pick_mission.pick_mission", return_value="koan:Fix auth bug")
+    @patch("app.usage_estimator.cmd_refresh")
+    def test_queued_mission_still_runs_under_strict(
+        self, mock_refresh, mock_pick, mock_strict,
+        instance_dir, koan_root, usage_state,
+    ):
+        """Strict mode never blocks an already-queued mission."""
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text(
+            "Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n"
+        )
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "mission"
+        assert result["mission_title"] == "Fix auth bug"
+        assert result["project_name"] == "koan"
+        # Mode still capped at implement (ample budget)
+        assert result["autonomous_mode"] == "implement"
+
+    @patch("app.config.is_strict_missions", return_value=True)
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("app.iteration_manager._check_schedule", return_value=None)
+    @patch("random.randint", return_value=0)  # contemplation would normally fire
+    def test_strict_mode_blocks_contemplative(
+        self, mock_rand, mock_schedule, mock_focus, mock_refresh, mock_pick,
+        mock_strict, instance_dir, koan_root, usage_state,
+    ):
+        """Strict mode prevents contemplative action even on a 0-roll."""
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text(
+            "Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n"
+        )
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        assert result["action"] == "strict_wait"
+
+    @patch("app.iteration_manager._inject_recurring")
+    @patch("app.config.is_strict_missions", return_value=True)
+    @patch("app.pick_mission.pick_mission", return_value="")
+    @patch("app.usage_estimator.cmd_refresh")
+    @patch("app.iteration_manager._check_focus", return_value=None)
+    @patch("app.iteration_manager._check_schedule", return_value=None)
+    def test_recurring_injection_still_runs(
+        self, mock_schedule, mock_focus, mock_refresh, mock_pick, mock_strict,
+        mock_recurring, instance_dir, koan_root, usage_state,
+    ):
+        """Recurring missions are still injected under strict mode."""
+        mock_recurring.return_value = ["recurring: Daily housekeeping"]
+        usage_md = instance_dir / "usage.md"
+        usage_md.write_text(
+            "Session (5hr) : 30% (reset in 3h)\nWeekly (7 day) : 20% (Resets in 5d)\n"
+        )
+
+        result = plan_iteration(
+            instance_dir=str(instance_dir),
+            koan_root=str(koan_root),
+            run_num=2,
+            count=1,
+            projects=PROJECTS_LIST,
+            last_project="koan",
+            usage_state_path=str(usage_state),
+        )
+
+        mock_recurring.assert_called_once()
+        assert result["recurring_injected"] == ["recurring: Daily housekeeping"]
+
+
+class TestStrictMissionsConfigHelper:
+    """Tests for app.config.is_strict_missions()."""
+
+    def test_env_var_true(self, monkeypatch):
+        from app.config import is_strict_missions
+        monkeypatch.setenv("KOAN_STRICT_MISSIONS", "1")
+        assert is_strict_missions() is True
+
+    def test_env_var_false_overrides_config(self, monkeypatch):
+        """Env var false should override config.yaml = true."""
+        from app.config import is_strict_missions
+        monkeypatch.setenv("KOAN_STRICT_MISSIONS", "0")
+        with patch("app.config._load_config", return_value={"strict_missions": True}):
+            assert is_strict_missions() is False
+
+    def test_config_true_when_env_unset(self, monkeypatch):
+        from app.config import is_strict_missions
+        monkeypatch.delenv("KOAN_STRICT_MISSIONS", raising=False)
+        with patch("app.config._load_config", return_value={"strict_missions": True}):
+            assert is_strict_missions() is True
+
+    def test_default_false(self, monkeypatch):
+        from app.config import is_strict_missions
+        monkeypatch.delenv("KOAN_STRICT_MISSIONS", raising=False)
+        with patch("app.config._load_config", return_value={}):
+            assert is_strict_missions() is False
+
+
+class TestStrictMissionsPromptOverride:
+    """Tests for prompt_builder strict_missions override."""
+
+    def test_github_section_replaced_when_strict(self):
+        from app.prompt_builder import _apply_strict_missions_override
+        sample = (
+            "# Mission\n\n"
+            "## GitHub Issue Selection (IMPLEMENT and DEEP modes)\n\n"
+            "When you choose to work on a GitHub issue...\n"
+            "more text here\n\n"
+            "# Autonomy\n\n"
+            "some autonomy content\n"
+        )
+        with patch("app.prompt_builder._is_strict_missions", return_value=True):
+            result = _apply_strict_missions_override(sample)
+        assert "Strict Missions Mode" in result
+        assert "GitHub Issue Selection" not in result
+        assert "# Autonomy" in result  # downstream content preserved
+
+    def test_github_section_intact_when_not_strict(self):
+        from app.prompt_builder import _apply_strict_missions_override
+        sample = (
+            "## GitHub Issue Selection (IMPLEMENT and DEEP modes)\n\n"
+            "content\n\n"
+            "# Autonomy\n"
+        )
+        with patch("app.prompt_builder._is_strict_missions", return_value=False):
+            result = _apply_strict_missions_override(sample)
+        assert result == sample

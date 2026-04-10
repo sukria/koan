@@ -307,6 +307,50 @@ def _warn_unresolved_placeholders(text: str, template_name: str) -> None:
         )
 
 
+def _is_strict_missions() -> bool:
+    """Return True if strict_missions mode is enabled.
+
+    Strict mode disables autonomous GitHub issue pickup — the agent prompt
+    replaces the ``GitHub Issue Selection`` section with an explicit
+    instruction to only act on explicitly-queued missions.
+    """
+    try:
+        from app.config import is_strict_missions
+        return is_strict_missions()
+    except (ImportError, OSError, ValueError):
+        return False
+
+
+_GITHUB_ISSUE_SECTION_RE = re.compile(
+    r"## GitHub Issue Selection.*?(?=\n# Autonomy\b|\n## |\Z)",
+    re.DOTALL,
+)
+
+
+_STRICT_MISSIONS_REPLACEMENT = (
+    "## Strict Missions Mode (autonomous GitHub pickup disabled)\n\n"
+    "Kōan is running in **strict missions** mode. You MUST NOT pick up "
+    "GitHub issues on your own.\n\n"
+    "- Only work on the explicit mission assigned above (if any).\n"
+    "- If no mission is assigned, do nothing autonomously — exit gracefully.\n"
+    "- Do not browse open issues, do not create branches for unassigned work,\n"
+    "  do not open speculative PRs.\n"
+    "- If the assigned mission references a specific GitHub issue, you may\n"
+    "  work on that issue only.\n\n"
+)
+
+
+def _apply_strict_missions_override(prompt: str) -> str:
+    """Replace the GitHub Issue Selection section when strict mode is active."""
+    if not _is_strict_missions():
+        return prompt
+    return _GITHUB_ISSUE_SECTION_RE.sub(
+        _STRICT_MISSIONS_REPLACEMENT.rstrip(),
+        prompt,
+        count=1,
+    )
+
+
 def _load_agent_template(
     instance: str,
     project_name: str,
@@ -336,6 +380,7 @@ def _load_agent_template(
         MISSION_INSTRUCTION=mission_instruction,
         BRANCH_PREFIX=branch_prefix,
     )
+    result = _apply_strict_missions_override(result)
     _warn_unresolved_placeholders(result, "agent")
     return result
 

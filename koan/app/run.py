@@ -1489,6 +1489,10 @@ def _run_iteration(
             "PR limit reached for all projects — waiting for reviews",
             f"PR limit reached — waiting for reviews ({time.strftime('%H:%M')})",
         ),
+        "strict_wait": lambda _: (
+            "Strict missions mode — waiting for queued missions (no autonomous work)",
+            f"Strict missions — waiting for /mission ({time.strftime('%H:%M')})",
+        ),
     }
     if action in _IDLE_WAIT_CONFIG:
         log_msg, status_msg = _IDLE_WAIT_CONFIG[action](plan)

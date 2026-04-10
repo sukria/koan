@@ -223,6 +223,31 @@ def get_start_on_pause() -> bool:
     return bool(config.get("start_on_pause", False))
 
 
+def is_strict_missions() -> bool:
+    """Check if strict_missions mode is enabled.
+
+    Strict missions mode disables all autonomous work so Kōan only runs
+    missions that were explicitly queued (via Telegram, recurring, or
+    GitHub @mention). No contemplative sessions, no DEEP mode, no
+    exploration fallback.
+
+    Resolution order:
+    1. ``KOAN_STRICT_MISSIONS`` env var (truthy: ``1``, ``true``, ``yes``, ``on``)
+    2. ``strict_missions`` key in ``config.yaml``
+    3. Default: ``False``
+
+    Returns:
+        True when strict missions mode is active.
+    """
+    env_value = os.environ.get("KOAN_STRICT_MISSIONS", "").strip().lower()
+    if env_value in ("1", "true", "yes", "on"):
+        return True
+    if env_value in ("0", "false", "no", "off"):
+        return False
+    config = _load_config()
+    return bool(config.get("strict_missions", False))
+
+
 def get_start_passive() -> bool:
     """Check if start_passive is enabled in config.yaml.
 

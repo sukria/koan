@@ -25,6 +25,19 @@
 # autonomous work. Use /active to resume normal execution.
 # start_passive: false
 
+# Strict missions mode — only run explicitly queued missions
+# When true, Kōan becomes a pure "mission executor": no DEEP mode, no
+# contemplative sessions, no autonomous exploration. Only missions queued
+# via /mission (Telegram), recurring missions, and GitHub @mention commands
+# are executed. The loop idles (wake-on-mission) whenever the queue is empty.
+#
+# Differs from passive mode:
+#   - passive        = no execution at all (missions stay Pending)
+#   - strict_missions = autonomous work disabled, but missions still run
+#
+# Env override: KOAN_STRICT_MISSIONS=1 (truthy values)
+# strict_missions: false
+
 # Startup reflection — run self-reflection check on startup
 # When true, Kōan checks whether periodic self-reflection is due (every N
 # sessions) and, if so, invokes Claude to generate observations. Disabled by

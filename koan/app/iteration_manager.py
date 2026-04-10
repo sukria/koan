@@ -301,10 +301,12 @@ def _get_known_project_names(projects: List[Tuple[str, str]]) -> list:
 
 def _should_contemplate(autonomous_mode: str, focus_active: bool,
                         contemplative_chance: int,
-                        schedule_state=None) -> bool:
+                        schedule_state=None,
+                        strict_missions: bool = False) -> bool:
     """Check if this iteration should be a contemplative session.
 
     Contemplative sessions only trigger when:
+    - Strict missions mode is NOT active
     - Mode is deep or implement (need budget for Claude call)
     - Focus mode is NOT active
     - Schedule is not in work_hours
@@ -313,6 +315,9 @@ def _should_contemplate(autonomous_mode: str, focus_active: bool,
     Returns:
         True if should run a contemplative session
     """
+    if strict_missions:
+        return False
+
     if autonomous_mode not in ("deep", "implement"):
         return False
 
@@ -710,6 +715,7 @@ def _decide_autonomous_action(
     koan_root: str,
     schedule_state,
     contemplative_chance: int = 10,
+    strict_missions: bool = False,
 ) -> "AutonomousDecision":
     """Decide autonomous action via a linear priority chain.
 
@@ -722,6 +728,9 @@ def _decide_autonomous_action(
     3. Schedule wait — work_hours active, skip exploration
     4. Autonomous exploration — default fallback
 
+    When ``strict_missions`` is True, contemplation and exploration are
+    disabled — the loop idles via ``strict_wait``.
+
     Returns:
         AutonomousDecision(action, focus_remaining)
     """
@@ -729,11 +738,13 @@ def _decide_autonomous_action(
     focus_active = focus_state is not None
     _log_iteration("koan",
         f"Evaluating autonomous action "
-        f"(mode={autonomous_mode}, focus_active={focus_active})")
+        f"(mode={autonomous_mode}, focus_active={focus_active}, "
+        f"strict_missions={strict_missions})")
 
     # 1. Contemplative session (random reflection)
     if _should_contemplate(autonomous_mode, focus_active,
-                           contemplative_chance, schedule_state):
+                           contemplative_chance, schedule_state,
+                           strict_missions=strict_missions):
         return AutonomousDecision(action="contemplative", focus_remaining=None)
 
     # 2. Focus mode active → wait for missions
@@ -780,7 +791,7 @@ def plan_iteration(
     Returns:
         dict with iteration plan:
         {
-            "action": "mission" | "autonomous" | "contemplative" | "passive_wait" | "focus_wait" | "schedule_wait" | "exploration_wait" | "pr_limit_wait" | "wait_pause" | "error",
+            "action": "mission" | "autonomous" | "contemplative" | "passive_wait" | "focus_wait" | "schedule_wait" | "exploration_wait" | "pr_limit_wait" | "wait_pause" | "strict_wait" | "error",
             "project_name": str,
             "project_path": str,
             "mission_title": str (empty for autonomous/contemplative),
@@ -805,6 +816,14 @@ def plan_iteration(
     # Convert projects to string format for downstream functions
     projects_str = _projects_to_str(projects)
 
+    # Step 0: Detect strict_missions mode (disables autonomous work)
+    try:
+        from app.config import is_strict_missions
+        strict_missions = is_strict_missions()
+    except (ImportError, OSError, ValueError) as e:
+        _log_iteration("error", f"Strict missions config lookup failed: {e}")
+        strict_missions = False
+
     # Step 1: Refresh usage
     _refresh_usage(usage_state, usage_md, count)
 
@@ -817,6 +836,17 @@ def plan_iteration(
     tracker_error = decision.get("tracker_error")
     cost_today = decision.get("cost_today", 0.0)
     _log_iteration("koan", f"Usage decision: mode={autonomous_mode}, available={available_pct}%")
+
+    # Step 2a: Cap mode at implement when strict_missions is active.
+    # DEEP mode encourages autonomous GitHub issue pickup, which strict
+    # missions explicitly forbids — missions only, no autonomous work.
+    if strict_missions and autonomous_mode == "deep":
+        decision_reason = (
+            f"{decision_reason} (capped from deep: strict_missions active)"
+        )
+        autonomous_mode = "implement"
+        _log_iteration("koan",
+            "Strict missions: capped mode deep → implement")
 
     # Step 2b: Check schedule and cap mode based on deep_hours config.
     # This runs early (before mission pick) so the capped mode affects
@@ -977,6 +1007,30 @@ def plan_iteration(
                 tracker_error=tracker_error,
             )
 
+        # Short-circuit: strict_missions mode means no autonomous work.
+        # Skip exploration filtering, contemplative rolls, and any gh calls —
+        # idle with wake-on-mission like exploration_wait.
+        if strict_missions:
+            _log_iteration("koan",
+                "Strict missions: no pending mission — entering strict_wait")
+            focus_area = resolve_focus_area(autonomous_mode, has_mission=False)
+            return _make_result(
+                action="strict_wait",
+                project_name=projects[0][0] if projects else "default",
+                project_path=projects[0][1] if projects else "",
+                autonomous_mode=autonomous_mode,
+                focus_area=focus_area,
+                available_pct=available_pct,
+                decision_reason=(
+                    "Strict missions mode — no autonomous work, "
+                    "waiting for queued missions"
+                ),
+                display_lines=display_lines,
+                recurring_injected=recurring_injected,
+                schedule_mode=schedule_state.mode if schedule_state else "normal",
+                tracker_error=tracker_error,
+            )
+
         # Filter to exploration-enabled projects only
         filter_result = _filter_exploration_projects(projects, koan_root,
                                                      schedule_state=schedule_state)
@@ -1040,6 +1094,7 @@ def plan_iteration(
 
         autonomous_decision = _decide_autonomous_action(
             autonomous_mode, koan_root, schedule_state, contemplative_chance,
+            strict_missions=strict_missions,
         )
         action = autonomous_decision.action
 
