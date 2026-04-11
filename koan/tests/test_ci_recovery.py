@@ -1,7 +1,7 @@
 """Tests for app.ci_recovery — CI failure recovery state machine."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -42,7 +42,6 @@ class TestHandleCIFailure:
             pr_url=PR_URL,
             pr_number="42",
             project_name="myapp",
-            repo="owner/repo",
             config=config,
         )
         assert result == "skipped_disabled"
@@ -51,14 +50,12 @@ class TestHandleCIFailure:
         from app.ci_recovery import handle_ci_failure
 
         config = _make_config()
-        with patch("app.ci_recovery._fetch_logs", return_value="error: test failed"), \
-             patch("app.ci_recovery._dispatch_mission") as mock_dispatch:
+        with patch("app.ci_recovery._dispatch_mission") as mock_dispatch:
             result = handle_ci_failure(
                 instance_dir=instance_dir,
                 pr_url=PR_URL,
                 pr_number="42",
                 project_name="myapp",
-                repo="owner/repo",
                 config=config,
             )
         assert result == "dispatched"
@@ -78,7 +75,6 @@ class TestHandleCIFailure:
                 pr_url=PR_URL,
                 pr_number="42",
                 project_name="myapp",
-                repo="owner/repo",
                 config=config,
             )
         assert result == "escalated"
@@ -98,7 +94,6 @@ class TestHandleCIFailure:
             pr_url=PR_URL,
             pr_number="42",
             project_name="myapp",
-            repo="owner/repo",
             config=config,
         )
         assert result == "skipped_cooldown"
@@ -120,7 +115,6 @@ class TestHandleCIFailure:
             pr_url=PR_URL,
             pr_number="42",
             project_name="myapp",
-            repo="owner/repo",
             config=config,
         )
         assert result == "skipped_cooldown"
@@ -130,14 +124,12 @@ class TestHandleCIFailure:
         from app.check_tracker import get_ci_attempt_count
 
         config = _make_config()
-        with patch("app.ci_recovery._fetch_logs", return_value="error"), \
-             patch("app.ci_recovery._dispatch_mission"):
+        with patch("app.ci_recovery._dispatch_mission"):
             handle_ci_failure(
                 instance_dir=instance_dir,
                 pr_url=PR_URL,
                 pr_number="42",
                 project_name="myapp",
-                repo="owner/repo",
                 config=config,
             )
         assert get_ci_attempt_count(instance_dir, PR_URL) == 1

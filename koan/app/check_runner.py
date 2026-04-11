@@ -371,7 +371,6 @@ def _check_ci_recovery(owner, repo, pr_number, pr_url, instance_dir, koan_root):
         pr_url=pr_url,
         pr_number=pr_number,
         project_name=project_name,
-        repo=repo_full,
         config=config,
     )
 

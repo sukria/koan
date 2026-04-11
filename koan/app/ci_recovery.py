@@ -2,10 +2,9 @@
 
 When a Kōan PR fails CI, this module orchestrates the recovery:
 1. Check if auto-recovery is enabled and retries remain.
-2. Fetch CI failure logs from GitHub.
-3. Dispatch a fix mission to missions.md.
-4. Track attempt count and cooldown in check_tracker.
-5. Escalate to human via outbox.md after max retries.
+2. Dispatch a fix mission to missions.md (the agent fetches CI logs itself).
+3. Track attempt count and cooldown in check_tracker.
+4. Escalate to human via outbox.md after max retries.
 """
 
 from datetime import datetime, timezone
@@ -17,7 +16,6 @@ def handle_ci_failure(
     pr_url,
     pr_number,
     project_name,
-    repo,
     config,
 ):
     """Respond to a CI failure on a Kōan-created PR.
@@ -27,7 +25,6 @@ def handle_ci_failure(
         pr_url: Canonical GitHub PR URL.
         pr_number: PR number (string or int).
         project_name: Resolved project name.
-        repo: Repository in "owner/repo" format.
         config: Loaded projects config dict (from load_projects_config).
 
     Returns:
@@ -68,13 +65,8 @@ def handle_ci_failure(
     if _mission_already_queued(instance_dir, pr_number):
         return "skipped_cooldown"
 
-    # Fetch CI logs
-    error_summary = _fetch_logs(pr_number, repo)
-
     # Dispatch fix mission
-    _dispatch_mission(
-        instance_dir, pr_url, pr_number, project_name, error_summary
-    )
+    _dispatch_mission(instance_dir, pr_url, pr_number, project_name)
 
     # Record attempt
     set_ci_status(instance_dir, pr_url, "fix_dispatched", attempt_count + 1)
@@ -95,42 +87,17 @@ def format_escalation_message(pr_url, attempt_count, max_retries):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_logs(pr_number, repo):
-    """Fetch and aggregate CI failure logs."""
-    from app.github import get_failed_check_runs, fetch_ci_failure_logs
-
-    failed_runs = get_failed_check_runs(pr_number, repo)
-    if not failed_runs:
-        return "(no CI log available)"
-
-    parts = []
-    for run in failed_runs:
-        run_id = run.get("databaseId")
-        name = run.get("name", "unknown")
-        if run_id:
-            log = fetch_ci_failure_logs(repo, run_id)
-            if log:
-                parts.append(f"### {name}\n{log}")
-
-    return "\n\n".join(parts) if parts else "(no CI log available)"
-
-
-def _dispatch_mission(instance_dir, pr_url, pr_number, project_name, error_summary):
+def _dispatch_mission(instance_dir, pr_url, pr_number, project_name):
     """Append a CI fix mission to missions.md."""
-    from app.prompts import load_prompt
     from app.utils import insert_pending_mission
 
-    prompt = load_prompt(
-        "ci-fix-mission",
-        pr_url=pr_url,
-        pr_number=str(pr_number),
-        project_name=project_name,
-        error_summary=error_summary,
-    )
-    # Build a single-line mission entry pointing to the full prompt
+    # Keep mission entry concise — the agent fetches CI logs itself via gh.
+    # Embedding the full prompt + logs would create an enormous single-line
+    # entry that degrades missions.md readability.
     entry = (
         f"- [project:{project_name}] Fix CI failure on PR #{pr_number} "
-        f"({pr_url}) \u2014 {prompt}"
+        f"({pr_url}) \u2014 check the failed CI logs, identify the root cause, "
+        f"and push a fix to the existing branch"
     )
     missions_path = Path(instance_dir) / "missions.md"
     insert_pending_mission(missions_path, entry)
