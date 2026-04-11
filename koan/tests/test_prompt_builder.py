@@ -1770,3 +1770,47 @@ class TestWarnUnresolvedPlaceholders:
         assert "{BOGUS_PLACEHOLDER}" in result
         assert len(caplog.records) == 1
         assert "BOGUS_PLACEHOLDER" in caplog.records[0].message
+
+
+class TestStripGithubIssueSelection:
+    """Tests for _strip_github_issue_selection used under strict_missions."""
+
+    def test_strips_github_issue_selection_section(self):
+        from app.prompt_builder import _strip_github_issue_selection
+        prompt = (
+            "Some preamble\n"
+            "\n## GitHub Issue Selection (IMPLEMENT and DEEP modes)\n"
+            "\nWhen you choose to work on a GitHub issue autonomously...\n"
+            "1. Assignment check\n2. Open PR check\n"
+            "\n# Autonomy\n\nYou are autonomous."
+        )
+        result = _strip_github_issue_selection(prompt)
+        assert "GitHub Issue Selection" not in result
+        assert "# Autonomy" in result
+        assert "Some preamble" in result
+
+    def test_noop_when_section_absent(self):
+        from app.prompt_builder import _strip_github_issue_selection
+        prompt = "Some prompt without the section\n# Autonomy\n"
+        assert _strip_github_issue_selection(prompt) == prompt
+
+    @patch("app.prompt_builder._get_merge_policy", return_value="")
+    @patch("app.prompt_builder._get_branch_prefix", return_value="koan/")
+    def test_build_agent_prompt_strips_section_when_strict(
+        self, mock_prefix, mock_merge,
+    ):
+        from app.prompt_builder import build_agent_prompt
+        result_normal = build_agent_prompt(
+            instance="/tmp/inst", project_name="test",
+            project_path="/tmp/proj", run_num=1, max_runs=10,
+            autonomous_mode="implement", focus_area="test",
+            available_pct=50, strict_missions=False,
+        )
+        result_strict = build_agent_prompt(
+            instance="/tmp/inst", project_name="test",
+            project_path="/tmp/proj", run_num=1, max_runs=10,
+            autonomous_mode="implement", focus_area="test",
+            available_pct=50, strict_missions=True,
+        )
+        assert "GitHub Issue Selection" in result_normal
+        assert "GitHub Issue Selection" not in result_strict

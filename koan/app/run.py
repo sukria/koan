@@ -1489,6 +1489,10 @@ def _run_iteration(
             "PR limit reached for all projects — waiting for reviews",
             f"PR limit reached — waiting for reviews ({time.strftime('%H:%M')})",
         ),
+        "strict_wait": lambda _: (
+            "Strict missions mode — no pending missions, waiting",
+            f"Strict missions — waiting for missions ({time.strftime('%H:%M')})",
+        ),
     }
     if action in _IDLE_WAIT_CONFIG:
         log_msg, status_msg = _IDLE_WAIT_CONFIG[action](plan)
@@ -1631,6 +1635,7 @@ def _run_iteration(
 
     # Build prompt (split into system/user for prompt caching)
     from app.prompt_builder import build_agent_prompt_parts
+    from app.config import is_strict_missions
     system_prompt, prompt = build_agent_prompt_parts(
         instance=instance,
         project_name=project_name,
@@ -1642,6 +1647,7 @@ def _run_iteration(
         available_pct=available_pct or 50,
         mission_title=mission_title,
         spec_content=spec_content,
+        strict_missions=is_strict_missions(),
     )
 
     # Create pending.md

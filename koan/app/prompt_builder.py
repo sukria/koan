@@ -295,6 +295,20 @@ def _build_mission_instruction(mission_title: str, project_name: str) -> str:
     )
 
 
+def _strip_github_issue_selection(prompt: str) -> str:
+    """Remove the GitHub Issue Selection section from the agent prompt.
+
+    Used under strict_missions mode to prevent the agent from picking
+    up GitHub issues autonomously.
+    """
+    return re.sub(
+        r"\n## GitHub Issue Selection \(IMPLEMENT and DEEP modes\)\n.*?(?=\n# )",
+        "",
+        prompt,
+        flags=re.DOTALL,
+    )
+
+
 def _warn_unresolved_placeholders(text: str, template_name: str) -> None:
     """Log a warning if any {PLACEHOLDER} tokens remain after substitution."""
     unresolved = _PLACEHOLDER_RE.findall(text)
@@ -317,6 +331,7 @@ def _load_agent_template(
     focus_area: str,
     available_pct: int,
     mission_title: str,
+    strict_missions: bool = False,
 ) -> str:
     """Load and populate the agent.md template with standard placeholders."""
     from app.prompts import load_prompt
@@ -336,6 +351,10 @@ def _load_agent_template(
         MISSION_INSTRUCTION=mission_instruction,
         BRANCH_PREFIX=branch_prefix,
     )
+
+    if strict_missions:
+        result = _strip_github_issue_selection(result)
+
     _warn_unresolved_placeholders(result, "agent")
     return result
 
@@ -364,6 +383,7 @@ def build_agent_prompt(
     available_pct: int,
     mission_title: str = "",
     spec_content: str = "",
+    strict_missions: bool = False,
 ) -> str:
     """Build the complete agent prompt from template + dynamic sections.
 
@@ -378,6 +398,7 @@ def build_agent_prompt(
         available_pct: Budget percentage available
         mission_title: Mission title (empty for autonomous mode)
         spec_content: Pre-generated mission spec (empty to skip)
+        strict_missions: When True, strip autonomous GitHub issue selection
 
     Returns:
         Complete prompt string ready for Claude CLI
@@ -385,6 +406,7 @@ def build_agent_prompt(
     prompt = _load_agent_template(
         instance, project_name, project_path, run_num, max_runs,
         autonomous_mode, focus_area, available_pct, mission_title,
+        strict_missions=strict_missions,
     )
 
     prompt = _append_spec(prompt, spec_content, mission_title)
@@ -446,6 +468,7 @@ def build_agent_prompt_parts(
     available_pct: int,
     mission_title: str = "",
     spec_content: str = "",
+    strict_missions: bool = False,
 ) -> Tuple[str, str]:
     """Build agent prompt split into system prompt and user prompt.
 
@@ -462,6 +485,7 @@ def build_agent_prompt_parts(
     user_prompt = _load_agent_template(
         instance, project_name, project_path, run_num, max_runs,
         autonomous_mode, focus_area, available_pct, mission_title,
+        strict_missions=strict_missions,
     )
 
     user_prompt = _append_spec(user_prompt, spec_content, mission_title)

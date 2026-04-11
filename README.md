@@ -268,6 +268,9 @@ models:
 budget:
   warn_at_percent: 20
   stop_at_percent: 5
+
+# Only run user-queued missions (no autonomous work)
+strict_missions: false
 ```
 
 ### Multi-Project Setup

@@ -271,6 +271,8 @@ Kōan can manage multiple projects simultaneously. It rotates between them based
 
 **`/active`** — Exit passive mode and resume normal execution. Queued missions drain naturally.
 
+> **`strict_missions` vs `/passive`** — `strict_missions` (config-only) disables autonomous work but still runs queued missions, recurring tasks, and GitHub @mention commands. `/passive` blocks *all* execution. Use `strict_missions: true` when you want a quiet bot that only does what it's told; use `/passive` when you want it to stop working entirely.
+
 <details>
 <summary>Use cases</summary>
 
@@ -854,6 +856,12 @@ tools:
 # Useful for scheduled launches (cron, launchd) where you want
 # the stack running but idle until you explicitly /resume.
 start_on_pause: false
+
+# Strict missions — only execute user-queued missions
+# No autonomous exploration, no contemplative sessions, no DEEP mode.
+# The loop idles when no missions are pending.
+# Env override: KOAN_STRICT_MISSIONS=1
+strict_missions: false
 
 # Schedule (when Kōan is allowed to work)
 schedule:

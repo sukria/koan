@@ -673,6 +673,22 @@ def get_prompt_guard_config() -> dict:
     }
 
 
+def is_strict_missions() -> bool:
+    """Check if strict_missions mode is enabled.
+
+    When True, Kōan only executes user-queued missions — no autonomous
+    exploration, no contemplative sessions, no DEEP mode. The loop idles
+    when missions.md has no Pending items.
+
+    Resolution order: KOAN_STRICT_MISSIONS env var → config.yaml strict_missions.
+    """
+    env = os.environ.get("KOAN_STRICT_MISSIONS", "").strip()
+    if env:
+        return env in ("1", "true", "yes")
+    config = _load_config()
+    return bool(config.get("strict_missions", False))
+
+
 def get_review_concurrency_config() -> dict:
     """Get review concurrency configuration from config.yaml.
 

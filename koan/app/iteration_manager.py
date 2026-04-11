@@ -301,10 +301,12 @@ def _get_known_project_names(projects: List[Tuple[str, str]]) -> list:
 
 def _should_contemplate(autonomous_mode: str, focus_active: bool,
                         contemplative_chance: int,
-                        schedule_state=None) -> bool:
+                        schedule_state=None,
+                        strict_missions: bool = False) -> bool:
     """Check if this iteration should be a contemplative session.
 
     Contemplative sessions only trigger when:
+    - strict_missions is NOT active
     - Mode is deep or implement (need budget for Claude call)
     - Focus mode is NOT active
     - Schedule is not in work_hours
@@ -313,6 +315,9 @@ def _should_contemplate(autonomous_mode: str, focus_active: bool,
     Returns:
         True if should run a contemplative session
     """
+    if strict_missions:
+        return False
+
     if autonomous_mode not in ("deep", "implement"):
         return False
 
@@ -710,6 +715,7 @@ def _decide_autonomous_action(
     koan_root: str,
     schedule_state,
     contemplative_chance: int = 10,
+    strict_missions: bool = False,
 ) -> "AutonomousDecision":
     """Decide autonomous action via a linear priority chain.
 
@@ -733,7 +739,8 @@ def _decide_autonomous_action(
 
     # 1. Contemplative session (random reflection)
     if _should_contemplate(autonomous_mode, focus_active,
-                           contemplative_chance, schedule_state):
+                           contemplative_chance, schedule_state,
+                           strict_missions=strict_missions):
         return AutonomousDecision(action="contemplative", focus_remaining=None)
 
     # 2. Focus mode active → wait for missions
@@ -780,7 +787,7 @@ def plan_iteration(
     Returns:
         dict with iteration plan:
         {
-            "action": "mission" | "autonomous" | "contemplative" | "passive_wait" | "focus_wait" | "schedule_wait" | "exploration_wait" | "pr_limit_wait" | "wait_pause" | "error",
+            "action": "mission" | "autonomous" | "contemplative" | "passive_wait" | "focus_wait" | "schedule_wait" | "exploration_wait" | "pr_limit_wait" | "strict_wait" | "wait_pause" | "error",
             "project_name": str,
             "project_path": str,
             "mission_title": str (empty for autonomous/contemplative),
@@ -839,6 +846,18 @@ def plan_iteration(
                 )
     except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Schedule mode cap check failed: {e}")
+
+    # Step 2c: Strict missions mode — cap at implement (no DEEP)
+    try:
+        from app.config import is_strict_missions
+        strict_missions = is_strict_missions()
+    except (ImportError, OSError, ValueError):
+        strict_missions = False
+
+    if strict_missions and autonomous_mode == "deep":
+        _log_iteration("koan", "Strict missions: capping deep → implement")
+        autonomous_mode = "implement"
+        decision_reason = f"{decision_reason} (strict_missions: capped from deep)"
 
     # Step 3: Inject recurring missions
     recurring_injected = _inject_recurring(instance)
@@ -977,6 +996,24 @@ def plan_iteration(
                 tracker_error=tracker_error,
             )
 
+        # Short-circuit: strict_missions mode — no autonomous work at all
+        if strict_missions:
+            _log_iteration("koan", "Strict missions: no pending missions — idling")
+            focus_area = resolve_focus_area(autonomous_mode, has_mission=False)
+            return _make_result(
+                action="strict_wait",
+                project_name=projects[0][0] if projects else "default",
+                project_path=projects[0][1] if projects else "",
+                autonomous_mode=autonomous_mode,
+                focus_area=focus_area,
+                available_pct=available_pct,
+                decision_reason="Strict missions mode — waiting for explicit missions",
+                display_lines=display_lines,
+                recurring_injected=recurring_injected,
+                schedule_mode=schedule_state.mode if schedule_state else "normal",
+                tracker_error=tracker_error,
+            )
+
         # Filter to exploration-enabled projects only
         filter_result = _filter_exploration_projects(projects, koan_root,
                                                      schedule_state=schedule_state)
@@ -1040,6 +1077,7 @@ def plan_iteration(
 
         autonomous_decision = _decide_autonomous_action(
             autonomous_mode, koan_root, schedule_state, contemplative_chance,
+            strict_missions=strict_missions,
         )
         action = autonomous_decision.action
 
