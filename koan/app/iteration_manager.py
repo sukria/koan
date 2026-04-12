@@ -302,20 +302,19 @@ def _get_known_project_names(projects: List[Tuple[str, str]]) -> list:
 def _should_contemplate(autonomous_mode: str, focus_active: bool,
                         contemplative_chance: int,
                         schedule_state=None,
-                        strict_missions: bool = False) -> bool:
+                        focus_mode: bool = False) -> bool:
     """Check if this iteration should be a contemplative session.
 
     Contemplative sessions only trigger when:
-    - Strict missions mode is NOT active
+    - Focus mode is NOT active (neither config-level nor file-based)
     - Mode is deep or implement (need budget for Claude call)
-    - Focus mode is NOT active
     - Schedule is not in work_hours
     - Random roll succeeds (chance boosted during deep_hours)
 
     Returns:
         True if should run a contemplative session
     """
-    if strict_missions:
+    if focus_mode:
         return False
 
     if autonomous_mode not in ("deep", "implement"):
@@ -715,7 +714,7 @@ def _decide_autonomous_action(
     koan_root: str,
     schedule_state,
     contemplative_chance: int = 10,
-    strict_missions: bool = False,
+    focus_mode: bool = False,
 ) -> "AutonomousDecision":
     """Decide autonomous action via a linear priority chain.
 
@@ -728,26 +727,26 @@ def _decide_autonomous_action(
     3. Schedule wait — work_hours active, skip exploration
     4. Autonomous exploration — default fallback
 
-    When ``strict_missions`` is True, contemplation and exploration are
-    disabled — the loop idles via ``strict_wait``.
+    When ``focus_mode`` is True (config-level or file-based), contemplation
+    and exploration are disabled — the loop idles via ``focus_wait``.
 
     Returns:
         AutonomousDecision(action, focus_remaining)
     """
     focus_state = _check_focus(koan_root)
-    focus_active = focus_state is not None
+    focus_active = focus_state is not None or focus_mode
     _log_iteration("koan",
         f"Evaluating autonomous action "
         f"(mode={autonomous_mode}, focus_active={focus_active}, "
-        f"strict_missions={strict_missions})")
+        f"focus_mode={focus_mode})")
 
     # 1. Contemplative session (random reflection)
     if _should_contemplate(autonomous_mode, focus_active,
                            contemplative_chance, schedule_state,
-                           strict_missions=strict_missions):
+                           focus_mode=focus_mode):
         return AutonomousDecision(action="contemplative", focus_remaining=None)
 
-    # 2. Focus mode active → wait for missions
+    # 2. Focus mode active → wait for missions (file-based or config-level)
     if focus_state is not None:
         try:
             focus_remaining = focus_state.remaining_display()
@@ -756,6 +755,11 @@ def _decide_autonomous_action(
             focus_remaining = "unknown"
         return AutonomousDecision(action="focus_wait",
                                  focus_remaining=focus_remaining)
+
+    # 2b. Config-level focus mode (permanent, no remaining time)
+    if focus_mode:
+        return AutonomousDecision(action="focus_wait",
+                                 focus_remaining="permanent")
 
     # 3. Schedule work_hours → suppress exploration
     if schedule_state is not None and schedule_state.in_work_hours:
@@ -791,7 +795,7 @@ def plan_iteration(
     Returns:
         dict with iteration plan:
         {
-            "action": "mission" | "autonomous" | "contemplative" | "passive_wait" | "focus_wait" | "schedule_wait" | "exploration_wait" | "pr_limit_wait" | "wait_pause" | "strict_wait" | "error",
+            "action": "mission" | "autonomous" | "contemplative" | "passive_wait" | "focus_wait" | "schedule_wait" | "exploration_wait" | "pr_limit_wait" | "wait_pause" | "error",
             "project_name": str,
             "project_path": str,
             "mission_title": str (empty for autonomous/contemplative),
@@ -816,13 +820,13 @@ def plan_iteration(
     # Convert projects to string format for downstream functions
     projects_str = _projects_to_str(projects)
 
-    # Step 0: Detect strict_missions mode (disables autonomous work)
+    # Step 0: Detect config-level focus mode (disables autonomous work)
     try:
-        from app.config import is_strict_missions
-        strict_missions = is_strict_missions()
+        from app.config import is_focus_mode
+        focus_mode = is_focus_mode()
     except (ImportError, OSError, ValueError) as e:
-        _log_iteration("error", f"Strict missions config lookup failed: {e}")
-        strict_missions = False
+        _log_iteration("error", f"Focus mode config lookup failed: {e}")
+        focus_mode = False
 
     # Step 1: Refresh usage
     _refresh_usage(usage_state, usage_md, count)
@@ -837,16 +841,16 @@ def plan_iteration(
     cost_today = decision.get("cost_today", 0.0)
     _log_iteration("koan", f"Usage decision: mode={autonomous_mode}, available={available_pct}%")
 
-    # Step 2a: Cap mode at implement when strict_missions is active.
-    # DEEP mode encourages autonomous GitHub issue pickup, which strict
-    # missions explicitly forbids — missions only, no autonomous work.
-    if strict_missions and autonomous_mode == "deep":
+    # Step 2a: Cap mode at implement when focus mode is active.
+    # DEEP mode encourages autonomous GitHub issue pickup, which focus
+    # mode explicitly forbids — missions only, no autonomous work.
+    if focus_mode and autonomous_mode == "deep":
         decision_reason = (
-            f"{decision_reason} (capped from deep: strict_missions active)"
+            f"{decision_reason} (capped from deep: focus mode active)"
         )
         autonomous_mode = "implement"
         _log_iteration("koan",
-            "Strict missions: capped mode deep → implement")
+            "Focus mode: capped mode deep → implement")
 
     # Step 2b: Check schedule and cap mode based on deep_hours config.
     # This runs early (before mission pick) so the capped mode affects
@@ -1007,22 +1011,22 @@ def plan_iteration(
                 tracker_error=tracker_error,
             )
 
-        # Short-circuit: strict_missions mode means no autonomous work.
+        # Short-circuit: config-level focus mode means no autonomous work.
         # Skip exploration filtering, contemplative rolls, and any gh calls —
         # idle with wake-on-mission like exploration_wait.
-        if strict_missions:
+        if focus_mode:
             _log_iteration("koan",
-                "Strict missions: no pending mission — entering strict_wait")
+                "Focus mode: no pending mission — entering focus_wait")
             focus_area = resolve_focus_area(autonomous_mode, has_mission=False)
             return _make_result(
-                action="strict_wait",
+                action="focus_wait",
                 project_name=projects[0][0] if projects else "default",
                 project_path=projects[0][1] if projects else "",
                 autonomous_mode=autonomous_mode,
                 focus_area=focus_area,
                 available_pct=available_pct,
                 decision_reason=(
-                    "Strict missions mode — no autonomous work, "
+                    "Focus mode — no autonomous work, "
                     "waiting for queued missions"
                 ),
                 display_lines=display_lines,
@@ -1094,7 +1098,7 @@ def plan_iteration(
 
         autonomous_decision = _decide_autonomous_action(
             autonomous_mode, koan_root, schedule_state, contemplative_chance,
-            strict_missions=strict_missions,
+            focus_mode=focus_mode,
         )
         action = autonomous_decision.action
 

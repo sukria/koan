@@ -307,18 +307,30 @@ def _warn_unresolved_placeholders(text: str, template_name: str) -> None:
         )
 
 
-def _is_strict_missions() -> bool:
-    """Return True if strict_missions mode is enabled.
+def _is_focus_mode() -> bool:
+    """Return True if focus mode is enabled (config-level or file-based).
 
-    Strict mode disables autonomous GitHub issue pickup — the agent prompt
+    Focus mode disables autonomous GitHub issue pickup — the agent prompt
     replaces the ``GitHub Issue Selection`` section with an explicit
     instruction to only act on explicitly-queued missions.
+
+    Checks both config.yaml/env (permanent) and .koan-focus file (temporary).
     """
     try:
-        from app.config import is_strict_missions
-        return is_strict_missions()
+        from app.config import is_focus_mode
+        if is_focus_mode():
+            return True
     except (ImportError, OSError, ValueError):
-        return False
+        pass
+    # Also check file-based focus (.koan-focus from /focus command)
+    try:
+        koan_root = os.environ.get("KOAN_ROOT", "")
+        if koan_root:
+            from app.focus_manager import check_focus
+            return check_focus(koan_root) is not None
+    except (ImportError, OSError, ValueError):
+        pass
+    return False
 
 
 _GITHUB_ISSUE_SECTION_RE = re.compile(
@@ -327,9 +339,9 @@ _GITHUB_ISSUE_SECTION_RE = re.compile(
 )
 
 
-_STRICT_MISSIONS_REPLACEMENT = (
-    "## Strict Missions Mode (autonomous GitHub pickup disabled)\n\n"
-    "Kōan is running in **strict missions** mode. You MUST NOT pick up "
+_FOCUS_MODE_REPLACEMENT = (
+    "## Focus Mode (autonomous GitHub pickup disabled)\n\n"
+    "Kōan is running in **focus mode**. You MUST NOT pick up "
     "GitHub issues on your own.\n\n"
     "- Only work on the explicit mission assigned above (if any).\n"
     "- If no mission is assigned, do nothing autonomously — exit gracefully.\n"
@@ -340,12 +352,12 @@ _STRICT_MISSIONS_REPLACEMENT = (
 )
 
 
-def _apply_strict_missions_override(prompt: str) -> str:
-    """Replace the GitHub Issue Selection section when strict mode is active."""
-    if not _is_strict_missions():
+def _apply_focus_mode_override(prompt: str) -> str:
+    """Replace the GitHub Issue Selection section when focus mode is active."""
+    if not _is_focus_mode():
         return prompt
     return _GITHUB_ISSUE_SECTION_RE.sub(
-        _STRICT_MISSIONS_REPLACEMENT.rstrip(),
+        _FOCUS_MODE_REPLACEMENT.rstrip(),
         prompt,
         count=1,
     )
@@ -380,7 +392,7 @@ def _load_agent_template(
         MISSION_INSTRUCTION=mission_instruction,
         BRANCH_PREFIX=branch_prefix,
     )
-    result = _apply_strict_missions_override(result)
+    result = _apply_focus_mode_override(result)
     _warn_unresolved_placeholders(result, "agent")
     return result
 
