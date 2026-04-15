@@ -11,6 +11,7 @@ from app.memory_manager import (
     compact_summary,
     cleanup_learnings,
     cap_learnings,
+    compact_learnings,
     archive_journals,
     run_cleanup,
     _extract_project_hint,
@@ -458,6 +459,65 @@ class TestRunCleanup:
         stats = run_cleanup(str(tmp_path))
         assert stats["summary_compacted"] == 0
 
+    def test_pipeline_runs_dedup_compact_cap_in_order(self, tmp_path):
+        """Verify the three-step learnings pipeline: dedup -> compact -> cap."""
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        (mem / "summary.md").write_text("# Summary\n")
+
+        proj = mem / "projects" / "koan"
+        proj.mkdir(parents=True)
+        lines = ["# Learnings", ""]
+        # 250 unique lines + 50 duplicates = dedup should remove 50
+        for i in range(250):
+            lines.append(f"- fact {i}")
+        for i in range(50):
+            lines.append(f"- fact {i}")  # duplicates
+        (proj / "learnings.md").write_text("\n".join(lines))
+
+        call_order = []
+        original_cleanup = MemoryManager.cleanup_learnings
+        original_compact = MemoryManager.compact_learnings
+        original_cap = MemoryManager.cap_learnings
+
+        def track_cleanup(self, name):
+            call_order.append("dedup")
+            return original_cleanup(self, name)
+
+        def track_compact(self, name, max_lines=100):
+            call_order.append("compact")
+            return {"skipped": True}
+
+        def track_cap(self, name, max_lines=200):
+            call_order.append("cap")
+            return original_cap(self, name, max_lines)
+
+        with patch.object(MemoryManager, "cleanup_learnings", track_cleanup), \
+             patch.object(MemoryManager, "compact_learnings", track_compact), \
+             patch.object(MemoryManager, "cap_learnings", track_cap):
+            run_cleanup(str(tmp_path))
+
+        assert call_order == ["dedup", "compact", "cap"]
+
+    def test_compaction_failure_does_not_break_pipeline(self, tmp_path):
+        """If compact_learnings raises, cap_learnings still runs."""
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        (mem / "summary.md").write_text("# Summary\n")
+
+        proj = mem / "projects" / "koan"
+        proj.mkdir(parents=True)
+        lines = ["# Learnings", ""]
+        for i in range(300):
+            lines.append(f"- fact {i}")
+        (proj / "learnings.md").write_text("\n".join(lines))
+
+        with patch.object(MemoryManager, "compact_learnings", side_effect=RuntimeError("boom")):
+            stats = run_cleanup(str(tmp_path), max_learnings_lines=50)
+
+        # cap_learnings should still run as safety net
+        assert stats.get("learnings_capped_koan", 0) == 250
+
 
 # ---------------------------------------------------------------------------
 # _extract_session_digest
@@ -699,6 +759,171 @@ class TestCapLearnings:
         assert len(marker_lines) == 1
         # The marker should be a clean line, not contain embedded \n
         assert marker_lines[0].strip() == f"_(oldest 15 entries archived)_"
+
+
+# ---------------------------------------------------------------------------
+# compact_learnings (semantic compaction via Claude CLI)
+# ---------------------------------------------------------------------------
+
+class TestCompactLearnings:
+
+    def _write_learnings(self, tmp_path, project, content):
+        p = tmp_path / "memory" / "projects" / project
+        p.mkdir(parents=True, exist_ok=True)
+        (p / "learnings.md").write_text(content)
+        return p / "learnings.md"
+
+    def test_happy_path_compaction(self, tmp_path):
+        """Claude CLI returns compacted content, file is rewritten."""
+        lines = ["# Learnings — koan", ""]
+        for i in range(150):
+            lines.append(f"- fact {i}")
+        path = self._write_learnings(tmp_path, "koan", "\n".join(lines))
+
+        compacted_output = "- merged fact A\n- merged fact B\n- merged fact C\n"
+
+        with patch("app.memory_manager.MemoryManager._run_compaction_cli", return_value=compacted_output):
+            stats = compact_learnings(str(tmp_path), "koan", max_lines=100)
+
+        assert stats["original_lines"] == 150
+        assert stats["compacted_lines"] == 3
+        assert not stats["skipped"]
+        content = path.read_text()
+        assert "merged fact A" in content
+        assert "compacted from 150 to 3 lines" in content
+        assert content.startswith("# Learnings")
+
+    def test_skips_when_below_threshold(self, tmp_path):
+        """No compaction needed when content is already small."""
+        self._write_learnings(tmp_path, "koan", "# Learnings\n\n- fact 1\n- fact 2\n")
+        stats = compact_learnings(str(tmp_path), "koan", max_lines=100)
+        assert stats["skipped"] is True
+
+    def test_skips_when_hash_unchanged(self, tmp_path):
+        """Second call with same content is skipped via hash check."""
+        lines = ["# Learnings", ""]
+        for i in range(150):
+            lines.append(f"- fact {i}")
+        self._write_learnings(tmp_path, "koan", "\n".join(lines))
+
+        compacted_output = "- merged fact A\n- merged fact B\n"
+        with patch("app.memory_manager.MemoryManager._run_compaction_cli", return_value=compacted_output) as mock_cli:
+            compact_learnings(str(tmp_path), "koan", max_lines=100)
+            # Second call — content changed (compacted), so hash differs
+            # But since the new content is below threshold, it should skip
+            stats2 = compact_learnings(str(tmp_path), "koan", max_lines=100)
+
+        assert stats2["skipped"] is True
+        # CLI should only have been called once
+        assert mock_cli.call_count == 1
+
+    def test_fallback_on_cli_failure(self, tmp_path):
+        """Falls back to cap_learnings when Claude CLI fails."""
+        lines = ["# Learnings", ""]
+        for i in range(300):
+            lines.append(f"- fact {i}")
+        path = self._write_learnings(tmp_path, "koan", "\n".join(lines))
+
+        with patch("app.memory_manager.MemoryManager._run_compaction_cli", side_effect=RuntimeError("CLI failed")):
+            stats = compact_learnings(str(tmp_path), "koan", max_lines=100)
+
+        assert stats.get("fallback") is True
+        content = path.read_text()
+        # cap_learnings should have truncated to 100 lines
+        content_lines = [l for l in content.splitlines() if l.strip() and not l.startswith("#") and "archived" not in l]
+        assert len(content_lines) <= 100
+
+    def test_missing_file(self, tmp_path):
+        """Returns skip stats for non-existent learnings."""
+        stats = compact_learnings(str(tmp_path), "koan")
+        assert stats["skipped"] is True
+        assert stats["original_lines"] == 0
+
+    def test_empty_cli_output_skips(self, tmp_path):
+        """Empty Claude response doesn't overwrite the file."""
+        lines = ["# Learnings", ""]
+        for i in range(150):
+            lines.append(f"- fact {i}")
+        path = self._write_learnings(tmp_path, "koan", "\n".join(lines))
+        original_content = path.read_text()
+
+        with patch("app.memory_manager.MemoryManager._run_compaction_cli", return_value=""):
+            stats = compact_learnings(str(tmp_path), "koan", max_lines=100)
+
+        assert stats["skipped"] is True
+        assert path.read_text() == original_content
+
+
+# ---------------------------------------------------------------------------
+# cap_global_memory (global memory file rotation)
+# ---------------------------------------------------------------------------
+
+class TestCapGlobalMemory:
+
+    def _write_global(self, tmp_path, filename, content):
+        p = tmp_path / "memory" / "global"
+        p.mkdir(parents=True, exist_ok=True)
+        (p / filename).write_text(content)
+        return p / filename
+
+    def test_caps_oversized_file(self, tmp_path):
+        lines = ["# Personality Evolution", ""]
+        for i in range(200):
+            lines.append(f"- reflection {i}")
+        path = self._write_global(tmp_path, "personality-evolution.md", "\n".join(lines))
+
+        mgr = MemoryManager(str(tmp_path))
+        removed = mgr.cap_global_memory("personality-evolution.md", max_lines=150)
+        assert removed == 50
+        content = path.read_text()
+        assert "reflection 199" in content
+        assert "reflection 0" not in content
+        assert "rotated" in content
+
+    def test_no_cap_when_small(self, tmp_path):
+        self._write_global(tmp_path, "emotional-memory.md", "# Emotional\n\n- happy\n- calm\n")
+        mgr = MemoryManager(str(tmp_path))
+        assert mgr.cap_global_memory("emotional-memory.md", max_lines=100) == 0
+
+    def test_missing_file(self, tmp_path):
+        mgr = MemoryManager(str(tmp_path))
+        assert mgr.cap_global_memory("nonexistent.md") == 0
+
+    def test_preserves_header(self, tmp_path):
+        lines = ["# Personality Evolution", ""]
+        for i in range(200):
+            lines.append(f"- reflection {i}")
+        path = self._write_global(tmp_path, "personality-evolution.md", "\n".join(lines))
+
+        mgr = MemoryManager(str(tmp_path))
+        mgr.cap_global_memory("personality-evolution.md", max_lines=50)
+        content = path.read_text()
+        assert content.startswith("# Personality Evolution")
+
+    def test_run_cleanup_caps_global_files(self, tmp_path):
+        """run_cleanup caps personality-evolution.md and emotional-memory.md."""
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        (mem / "summary.md").write_text("# Summary\n")
+
+        global_dir = mem / "global"
+        global_dir.mkdir()
+
+        # personality-evolution: 200 lines (threshold 150)
+        lines = ["# PE", ""]
+        for i in range(200):
+            lines.append(f"- reflection {i}")
+        (global_dir / "personality-evolution.md").write_text("\n".join(lines))
+
+        # emotional-memory: 150 lines (threshold 100)
+        lines = ["# EM", ""]
+        for i in range(150):
+            lines.append(f"- feeling {i}")
+        (global_dir / "emotional-memory.md").write_text("\n".join(lines))
+
+        stats = run_cleanup(str(tmp_path))
+        assert stats.get("global_capped_personality_evolution", 0) == 50
+        assert stats.get("global_capped_emotional_memory", 0) == 50
 
 
 # ---------------------------------------------------------------------------
@@ -967,7 +1192,9 @@ class TestMemoryManagerClass:
             lines.append(f"- fact {i}")
         (proj / "learnings.md").write_text("\n".join(lines))
 
-        stats = run_cleanup(str(tmp_path), max_learnings_lines=50)
+        # Mock compact_learnings so it doesn't interfere with cap test
+        with patch.object(MemoryManager, "compact_learnings", return_value={"skipped": True}):
+            stats = run_cleanup(str(tmp_path), max_learnings_lines=50)
         assert stats.get("learnings_capped_koan", 0) == 250
         content = (proj / "learnings.md").read_text()
         assert "fact 299" in content
