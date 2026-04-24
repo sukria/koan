@@ -166,6 +166,46 @@ def summarize_by_model(instance_dir: Path, days: int = 7) -> dict:
     return summary["by_model"]
 
 
+def summarize_by_type(instance_dir: Path, days: int = 7) -> dict:
+    """Get per-mission-type token breakdown for the last N days.
+
+    Returns:
+        Dict mapping mission type to {input_tokens, output_tokens, total_cost_usd, count}.
+        Records without a mission_type field are grouped under "unknown".
+    """
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    summary = summarize_range(instance_dir, start, end)
+    return summary["by_type"]
+
+
+def summarize_by_project_and_type(instance_dir: Path, days: int = 7) -> dict:
+    """Get nested project → mission-type token breakdown for the last N days.
+
+    Returns:
+        Dict mapping project name to {type: {input_tokens, output_tokens,
+        total_cost_usd, count}}.
+    """
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    summary = summarize_range(instance_dir, start, end)
+    return summary["by_project_and_type"]
+
+
+def summarize_week(instance_dir: Path) -> dict:
+    """Summarize usage for the last 7 days."""
+    end = date.today()
+    start = end - timedelta(days=6)
+    return summarize_range(instance_dir, start, end)
+
+
+def summarize_month(instance_dir: Path) -> dict:
+    """Summarize usage for the last 30 days."""
+    end = date.today()
+    start = end - timedelta(days=29)
+    return summarize_range(instance_dir, start, end)
+
+
 def _aggregate(entries: list) -> dict:
     """Aggregate a list of usage entries into a summary.
 
@@ -173,7 +213,8 @@ def _aggregate(entries: list) -> dict:
         Dict with keys: total_input, total_output, count,
         cache_creation_input_tokens, cache_read_input_tokens,
         cache_hit_rate, total_cost_usd,
-        by_project (dict), by_model (dict).
+        by_project (dict), by_model (dict), by_type (dict),
+        by_project_and_type (dict).
     """
     result = {
         "total_input": 0,
@@ -184,6 +225,8 @@ def _aggregate(entries: list) -> dict:
         "total_cost_usd": 0.0,
         "by_project": {},
         "by_model": {},
+        "by_type": {},
+        "by_project_and_type": {},
     }
 
     for entry in entries:
@@ -225,6 +268,35 @@ def _aggregate(entries: list) -> dict:
         result["by_model"][model]["cache_read_input_tokens"] += cache_read
         result["by_model"][model]["total_cost_usd"] += cost
         result["by_model"][model]["count"] += 1
+
+        # By mission type
+        mission_type = entry.get("mission_type", "unknown")
+        if mission_type not in result["by_type"]:
+            result["by_type"][mission_type] = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_cost_usd": 0.0,
+                "count": 0,
+            }
+        result["by_type"][mission_type]["input_tokens"] += inp
+        result["by_type"][mission_type]["output_tokens"] += out
+        result["by_type"][mission_type]["total_cost_usd"] += cost
+        result["by_type"][mission_type]["count"] += 1
+
+        # By project and type (nested)
+        if project not in result["by_project_and_type"]:
+            result["by_project_and_type"][project] = {}
+        if mission_type not in result["by_project_and_type"][project]:
+            result["by_project_and_type"][project][mission_type] = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_cost_usd": 0.0,
+                "count": 0,
+            }
+        result["by_project_and_type"][project][mission_type]["input_tokens"] += inp
+        result["by_project_and_type"][project][mission_type]["output_tokens"] += out
+        result["by_project_and_type"][project][mission_type]["total_cost_usd"] += cost
+        result["by_project_and_type"][project][mission_type]["count"] += 1
 
     # Compute cache hit rate: cache_read / (cache_read + non-cached input)
     total_cache_input = result["cache_read_input_tokens"] + result["cache_creation_input_tokens"]
