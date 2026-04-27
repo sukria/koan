@@ -1117,9 +1117,12 @@ def _handle_skill_dispatch(
             log("error", f"Failed to create pending.md for skill dispatch: {e}")
 
         exit_code = 1
-        # Snapshot core files before skill execution
-        from app.core_files import snapshot_core_files, check_core_files, log_integrity_warnings
-        skill_core_snapshot = snapshot_core_files(koan_root, project_path)
+        # Snapshot core files before skill execution (with backup for recovery)
+        from app.core_files import (
+            snapshot_with_backup, check_core_files, log_integrity_warnings,
+            restore_missing_files, log_restorations,
+        )
+        skill_core_snapshot = snapshot_with_backup(koan_root, project_path)
 
         try:
             with protected_phase(f"Skill: {mission_title[:50]}"):
@@ -1136,12 +1139,19 @@ def _handle_skill_dispatch(
             if exit_code == 0:
                 log("mission", f"Run {run_num}/{max_runs} — [{project_name}] skill completed")
 
-            # Verify core files survived skill execution
+            # Verify core files survived skill execution — restore if possible
             skill_integrity = check_core_files(koan_root, skill_core_snapshot, project_path)
             if skill_integrity:
                 log_integrity_warnings(skill_integrity)
-                log("error", f"Core file integrity check failed after skill: {len(skill_integrity)} file(s) missing")
-                exit_code = 1
+                restored, still_missing = restore_missing_files(
+                    koan_root, skill_core_snapshot, project_path,
+                )
+                log_restorations(restored)
+                if still_missing:
+                    log("error", f"Core file integrity check failed after skill: {len(still_missing)} file(s) unrecoverable")
+                    exit_code = 1
+                elif restored:
+                    log("koan", f"Core file integrity: {len(restored)} file(s) auto-restored")
         except KeyboardInterrupt:
             log("error", "Skill dispatch interrupted by user")
             _finalize_mission(instance, mission_title, project_name, 1)
@@ -1152,6 +1162,7 @@ def _handle_skill_dispatch(
             # Clean up temp files created by skill command builders
             from app.skill_dispatch import cleanup_skill_temp_files
             cleanup_skill_temp_files(skill_cmd)
+            skill_core_snapshot.cleanup()
 
         _notify_mission_end(
             instance, project_name, run_num, max_runs,
@@ -1812,9 +1823,12 @@ def _run_iteration(
         # Capture git HEAD before execution for retry safety check
         pre_head = _get_git_head(project_path)
 
-        # Snapshot core files before execution for integrity check
-        from app.core_files import snapshot_core_files, check_core_files, log_integrity_warnings
-        core_snapshot = snapshot_core_files(koan_root, project_path)
+        # Snapshot core files before execution for integrity check (with backup)
+        from app.core_files import (
+            snapshot_with_backup, check_core_files, log_integrity_warnings,
+            restore_missing_files, log_restorations,
+        )
+        core_snapshot = snapshot_with_backup(koan_root, project_path)
 
         claude_exit = run_claude_task(
             cmd, stdout_file, stderr_file, cwd=project_path,
@@ -1852,13 +1866,21 @@ def _run_iteration(
                 log("koan", f"CLI exited {claude_exit} but JSON output indicates success — overriding to 0")
                 claude_exit = 0
 
-        # Verify core files survived the mission (after retry, so result is final)
+        # Verify core files survived the mission — restore if possible
         log("koan", "Running core file integrity check...")
         integrity_warnings = check_core_files(koan_root, core_snapshot, project_path)
         if integrity_warnings:
             log_integrity_warnings(integrity_warnings)
-            log("error", f"Core file integrity check failed: {len(integrity_warnings)} file(s) missing")
-            claude_exit = 1
+            restored, still_missing = restore_missing_files(
+                koan_root, core_snapshot, project_path,
+            )
+            log_restorations(restored)
+            if still_missing:
+                log("error", f"Core file integrity check failed: {len(still_missing)} file(s) unrecoverable")
+                claude_exit = 1
+            elif restored:
+                log("koan", f"Core file integrity: {len(restored)} file(s) auto-restored")
+        core_snapshot.cleanup()
 
         # Parse and display output
         try:
