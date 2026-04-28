@@ -167,6 +167,7 @@ def build_full_command(
     mcp_configs: Optional[List[str]] = None,
     plugin_dirs: Optional[List[str]] = None,
     system_prompt: str = "",
+    effort: str = "",
 ) -> List[str]:
     """Build a complete CLI command for the configured provider.
 
@@ -178,6 +179,8 @@ def build_full_command(
             supports it (e.g., Claude ``--append-system-prompt``), sent
             as a dedicated system prompt for better prompt caching.
             Otherwise prepended to the user prompt transparently.
+        effort: Reasoning effort level (e.g. "low", "medium", "high", "max").
+            Empty string means no override.
 
     Automatically reads ``skip_permissions`` from config.yaml so all
     callers get the flag without needing changes.
@@ -196,6 +199,7 @@ def build_full_command(
         plugin_dirs=plugin_dirs,
         skip_permissions=get_skip_permissions(),
         system_prompt=system_prompt,
+        effort=effort,
     )
 
 
